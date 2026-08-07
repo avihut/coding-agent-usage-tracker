@@ -1,0 +1,15 @@
+[tasks.build]
+description = "Build all targets"
+run = "swift build"
+
+[tasks.test]
+description = "Run unit tests"
+run = "swift test"
+
+[tasks.cli]
+description = "Build, sign, and run the usage-cli debug tool"
+run = [
+    "swift build --product usage-cli",
+    "scripts/sign.sh .build/debug/usage-cli",
+    ".build/debug/usage-cli",
+]

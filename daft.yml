@@ -1,0 +1,11 @@
+layout: contained
+
+hooks:
+  worktree-post-create:
+    jobs:
+      - name: mise-trust
+        run: mise trust
+      - name: swift-build
+        run: swift build
+        needs: [mise-trust]
+        background: true
