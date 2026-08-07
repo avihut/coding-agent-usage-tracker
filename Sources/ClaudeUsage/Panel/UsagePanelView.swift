@@ -9,10 +9,13 @@ struct UsagePanelView: View {
         VStack(alignment: .leading, spacing: 12) {
             header
             content
+            Divider()
+            HeatmapView(activity: store.activity)
             footer
         }
         .padding(14)
         .frame(width: 320)
+        .onAppear { store.scanActivity() }
     }
 
     @ViewBuilder private var header: some View {
@@ -46,7 +49,10 @@ struct UsagePanelView: View {
             }
         case .live(let snapshot), .cached(let snapshot, _):
             ForEach(snapshot.meters) { meter in
-                MeterRow(meter: meter, stale: store.state.isStale)
+                MeterRow(
+                    meter: meter,
+                    stale: store.state.isStale,
+                    burn: store.burnEstimates[meter.label])
             }
             if snapshot.meters.isEmpty {
                 Text("No limits reported").font(.callout).foregroundStyle(.secondary)
@@ -140,6 +146,7 @@ struct UsagePanelView: View {
 struct MeterRow: View {
     let meter: Meter
     let stale: Bool
+    let burn: BurnEstimate?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -160,11 +167,36 @@ struct MeterRow: View {
                 }
             }
             .frame(height: 5)
-            if let resetsAt = meter.resetsAt {
-                Text(UsageFormatting.resetText(resetsAt, now: Date()))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+            if meter.resetsAt != nil || burn != nil {
+                captionLine.font(.caption2)
             }
+        }
+    }
+
+    /// "resets in 3h 20m · on track — proj. 35% at reset", burn part colored
+    /// by its verdict (green / yellow / red).
+    private var captionLine: Text {
+        var parts: [Text] = []
+        if let resetsAt = meter.resetsAt {
+            parts.append(
+                Text(UsageFormatting.resetText(resetsAt, now: Date()))
+                    .foregroundStyle(.secondary))
+        }
+        if let burn {
+            parts.append(Text(burn.text).foregroundStyle(burnColor(burn.verdict)))
+        }
+        guard var line = parts.first else { return Text("") }
+        for part in parts.dropFirst() {
+            line = line + Text(" · ").foregroundStyle(.secondary) + part
+        }
+        return line
+    }
+
+    private func burnColor(_ verdict: BurnEstimate.Verdict) -> Color {
+        switch verdict {
+        case .green: .green
+        case .yellow: .yellow
+        case .red: .red
         }
     }
 

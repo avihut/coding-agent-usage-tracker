@@ -44,6 +44,15 @@ the README rather than silently deviating.
   `severity != "normal"` forces at least warning regardless of percent.
 - Endpoint knowledge stays in `UsageClient` + `UsageModels` so migrating to
   a supported endpoint, if one ships, is a one-file change.
+- The activity heatmap reads Claude Code's local transcripts
+  (`~/.claude/projects/**/*.jsonl`) via `TranscriptScanner` — strictly
+  read-only, dedup by requestId, mtime/size cache in this app's own App
+  Support dir. Never write inside `~/.claude`, never go near
+  `.credentials.json` from the scanner, nothing leaves the machine.
+- Burn estimates come from persisted percent samples (`UsageHistory` in App
+  Support) using the monotonic tail after the last drop, so limit resets
+  never produce bogus negative rates. Verdicts: red = exhausts before
+  reset at current rate, yellow = projected ≥85% at reset, green otherwise.
 
 ## Swift practices
 

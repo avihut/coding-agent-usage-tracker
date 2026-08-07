@@ -16,10 +16,16 @@ final class UsageStore {
     private(set) var isRefreshing = false
     private(set) var refreshInterval: TimeInterval
     private(set) var nextRefreshAt: Date?
+    private(set) var samples: [UsageSample] = []
+    private(set) var burnEstimates: [String: BurnEstimate] = [:]
+    private(set) var activity: [DailyActivity] = []
 
     private let service: UsageService
+    private let history: UsageHistory
+    private let scanner: TranscriptScanner
     private var gate = TriggerGate()
     private let scheduler = Scheduler()
+    private var lastActivityScan: Date?
 
     static let defaultInterval: TimeInterval = 300
     private static let intervalKey = "refreshIntervalSeconds"
@@ -27,8 +33,11 @@ final class UsageStore {
     init(service: UsageService? = nil) {
         let bundleID = Bundle.main.bundleIdentifier ?? "com.avihu.ClaudeUsage"
         self.service = service ?? .standard(bundleID: bundleID)
+        self.history = .standard(bundleID: bundleID)
+        self.scanner = .standard(bundleID: bundleID)
         let stored = UserDefaults.standard.double(forKey: Self.intervalKey)
         self.refreshInterval = stored >= 60 ? stored : Self.defaultInterval
+        self.samples = history.load()
 
         scheduler.onTrigger = { [weak self] reason in
             self?.refresh(reason)
@@ -36,16 +45,49 @@ final class UsageStore {
         scheduler.start(interval: refreshInterval)
         nextRefreshAt = scheduler.nextFireDate
         refresh(.launch)
+        scanActivity()
     }
 
     func refresh(_ reason: RefreshReason) {
         guard !isRefreshing, gate.shouldAllow(at: Date()) else { return }
         isRefreshing = true
         Task {
-            state = await service.refresh()
+            let newState = await service.refresh()
+            state = newState
             isRefreshing = false
             nextRefreshAt = scheduler.nextFireDate
+            if case .live(let snapshot) = newState {
+                samples = history.append(snapshot, existing: samples)
+                recomputeBurnEstimates(for: snapshot)
+            }
         }
+    }
+
+    /// Re-scans local transcripts for the heatmap, at most once a minute.
+    func scanActivity(force: Bool = false) {
+        if !force, let last = lastActivityScan, Date().timeIntervalSince(last) < 60 { return }
+        lastActivityScan = Date()
+        let scanner = scanner
+        Task.detached(priority: .utility) { [weak self] in
+            let activity = scanner.scan()
+            await MainActor.run { self?.activity = activity }
+        }
+    }
+
+    private func recomputeBurnEstimates(for snapshot: Snapshot) {
+        let now = Date()
+        var estimates: [String: BurnEstimate] = [:]
+        for meter in snapshot.meters {
+            guard let percent = meter.percent else { continue }
+            let rate = BurnRate.ratePerHour(
+                samples: samples, label: meter.label,
+                window: BurnRate.window(forRank: meter.rank), now: now)
+            if let estimate = BurnRate.estimate(
+                percent: percent, resetsAt: meter.resetsAt, ratePerHour: rate, now: now) {
+                estimates[meter.label] = estimate
+            }
+        }
+        burnEstimates = estimates
     }
 
     func setRefreshInterval(_ interval: TimeInterval) {
