@@ -1,11 +1,14 @@
 import Foundation
 
 /// One of the three menu bar positions: session, weekly-all, worst-scoped.
+/// `tag` is the single-letter stat identifier shown before the number.
 public struct MenuBarSegment: Sendable, Equatable {
+    public let tag: String
     public let percent: Int?
     public let level: DisplayLevel
 
-    public init(percent: Int?, level: DisplayLevel) {
+    public init(tag: String, percent: Int?, level: DisplayLevel) {
+        self.tag = tag
         self.percent = percent
         self.level = level
     }
@@ -13,19 +16,29 @@ public struct MenuBarSegment: Sendable, Equatable {
 
 public enum UsageFormatting {
     /// The menu bar triple (spec §8): rank-0, rank-1, then the maximum of the
-    /// scoped percentages carrying the worst scoped level.
+    /// scoped percentages carrying the worst scoped level. Tags: S(ession),
+    /// W(eekly), and the scoped model's initial (e.g. F for Fable).
     public static func menuBarSegments(from meters: [Meter]) -> [MenuBarSegment] {
         let session = meters.first { $0.rank == 0 }
         let weekly = meters.first { $0.rank == 1 }
         let scoped = meters.filter { $0.rank == 2 }
+        let topScoped = scoped.max { ($0.percent ?? -1) < ($1.percent ?? -1) }
         return [
-            MenuBarSegment(percent: session?.percent, level: session?.level ?? .normal),
-            MenuBarSegment(percent: weekly?.percent, level: weekly?.level ?? .normal),
+            MenuBarSegment(tag: "S", percent: session?.percent, level: session?.level ?? .normal),
+            MenuBarSegment(tag: "W", percent: weekly?.percent, level: weekly?.level ?? .normal),
             MenuBarSegment(
+                tag: scopedTag(for: topScoped?.label),
                 percent: scoped.compactMap(\.percent).max(),
                 level: scoped.map(\.level).max() ?? .normal
             ),
         ]
+    }
+
+    /// "Weekly · Fable" → "F"; any other label → its first letter.
+    static func scopedTag(for label: String?) -> String {
+        guard let label else { return "M" }
+        let name = label.hasPrefix("Weekly · ") ? String(label.dropFirst("Weekly · ".count)) : label
+        return name.first.map { String($0).uppercased() } ?? "M"
     }
 
     /// "resets in 3h 20m" under 24 hours, "resets Sat 14:00" beyond (spec §8).

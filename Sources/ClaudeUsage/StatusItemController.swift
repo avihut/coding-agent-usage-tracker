@@ -16,7 +16,6 @@ final class StatusItemController: NSResponder {
     private let statusItem: NSStatusItem
     private let popover = NSPopover()
     private let hoverPopover = NSPopover()
-    private var appearanceObservation: NSKeyValueObservation?
     private var hoverTask: Task<Void, Never>?
 
     init(store: UsageStore) {
@@ -39,10 +38,6 @@ final class StatusItemController: NSResponder {
                 rect: .zero,
                 options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
                 owner: self, userInfo: nil))
-            // Theme flips and wallpaper-tint changes re-resolve the colors.
-            appearanceObservation = button.observe(\.effectiveAppearance) { [weak self] _, _ in
-                Task { @MainActor in self?.render() }
-            }
         }
 
         observeState()

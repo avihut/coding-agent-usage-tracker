@@ -127,6 +127,7 @@ struct FormattingTests {
         let meters = MeterBuilder.meters(from: try UsageResponse.decode(from: loadFixture("real-2026-08-07")))
         let segments = UsageFormatting.menuBarSegments(from: meters)
         #expect(segments.map(\.percent) == [6, 17, 22])
+        #expect(segments.map(\.tag) == ["S", "W", "F"])
         #expect(segments.allSatisfy { $0.level == .normal })
     }
 
@@ -135,6 +136,7 @@ struct FormattingTests {
         let meters = MeterBuilder.meters(from: try UsageResponse.decode(from: loadFixture("unknown-kind")))
         let segments = UsageFormatting.menuBarSegments(from: meters)
         #expect(segments.map(\.percent) == [nil, nil, 63])
+        #expect(segments.map(\.tag) == ["S", "W", "L"])
     }
 
     @Test("reset text under 24h is relative")

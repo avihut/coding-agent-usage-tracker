@@ -127,11 +127,13 @@ struct HeatmapView: View {
         }
     }
 
+    private static let claudeOrange = Color(nsColor: StatusItemRenderer.claudeOrange)
+
     private func color(tokens: Int) -> Color {
         guard tokens > 0 else { return Color.gray.opacity(0.18) }
         let fraction = Double(tokens) / Double(maxTokens)
         let level = min(4, max(1, Int((fraction * 4).rounded(.up))))
-        return Color.green.opacity(Self.levelOpacities[level - 1])
+        return Self.claudeOrange.opacity(Self.levelOpacities[level - 1])
     }
 
     private func tooltip(day: Date, entry: DailyActivity?) -> String {
@@ -149,7 +151,7 @@ struct HeatmapView: View {
                 RoundedRectangle(cornerRadius: 1)
                     .fill(level == 0
                         ? Color.gray.opacity(0.18)
-                        : Color.green.opacity(Self.levelOpacities[level - 1]))
+                        : Self.claudeOrange.opacity(Self.levelOpacities[level - 1]))
                     .frame(width: 7, height: 7)
             }
             Text("more").font(.caption2).foregroundStyle(.tertiary)

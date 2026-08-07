@@ -1,3 +1,4 @@
+import Charts
 import SwiftUI
 import ServiceManagement
 import UsageCore
@@ -52,7 +53,8 @@ struct UsagePanelView: View {
                 MeterRow(
                     meter: meter,
                     stale: store.state.isStale,
-                    burn: store.burnEstimates[meter.label])
+                    burn: store.burnEstimates[meter.label],
+                    samples: store.samples)
             }
             if snapshot.meters.isEmpty {
                 Text("No limits reported").font(.callout).foregroundStyle(.secondary)
@@ -147,6 +149,10 @@ struct MeterRow: View {
     let meter: Meter
     let stale: Bool
     let burn: BurnEstimate?
+    let samples: [UsageSample]
+
+    @State private var hovering = false
+    @State private var showHistory = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -167,14 +173,28 @@ struct MeterRow: View {
                 }
             }
             .frame(height: 5)
-            if meter.resetsAt != nil || burn != nil {
-                captionLine.font(.caption2)
+            captionLine.font(.caption2)
+        }
+        .contentShape(Rectangle())
+        .onHover { inside in
+            hovering = inside
+            if inside {
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(300))
+                    if hovering { showHistory = true }
+                }
+            } else {
+                showHistory = false
             }
+        }
+        .popover(isPresented: $showHistory, arrowEdge: .trailing) {
+            MeterHistoryView(meter: meter, samples: samples)
         }
     }
 
     /// "resets in 3h 20m · on track — proj. 35% at reset", burn part colored
-    /// by its verdict (green / yellow / red).
+    /// by its verdict (green / yellow / red). Before enough samples exist
+    /// (two readings ≥5 min apart) the burn slot says it's measuring.
     private var captionLine: Text {
         var parts: [Text] = []
         if let resetsAt = meter.resetsAt {
@@ -184,6 +204,8 @@ struct MeterRow: View {
         }
         if let burn {
             parts.append(Text(burn.text).foregroundStyle(burnColor(burn.verdict)))
+        } else if meter.percent != nil && !stale {
+            parts.append(Text("measuring rate…").foregroundStyle(.tertiary))
         }
         guard var line = parts.first else { return Text("") }
         for part in parts.dropFirst() {
@@ -207,5 +229,67 @@ struct MeterRow: View {
         case .warning: return .orange
         case .critical: return .red
         }
+    }
+}
+
+/// iStat-style per-limit history: this meter's sampled percent across its own
+/// limit window (5h for the session meter, 7 days for weeklies).
+struct MeterHistoryView: View {
+    let meter: Meter
+    let samples: [UsageSample]
+
+    private var window: TimeInterval { meter.rank == 0 ? 5 * 3600 : 7 * 86400 }
+    private var windowLabel: String { meter.rank == 0 ? "last 5h" : "last 7 days" }
+
+    private struct Point: Identifiable {
+        let id: TimeInterval
+        let t: Date
+        let percent: Int
+    }
+
+    private var points: [Point] {
+        let cutoff = Date().addingTimeInterval(-window)
+        return samples
+            .filter { $0.t >= cutoff }
+            .compactMap { sample in
+                sample.percents[meter.label].map {
+                    Point(id: sample.t.timeIntervalSince1970, t: sample.t, percent: $0)
+                }
+            }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(meter.label).font(.caption.bold())
+                Spacer()
+                Text(windowLabel).font(.caption2).foregroundStyle(.secondary)
+            }
+            if points.count < 2 {
+                Text("Collecting samples — this fills in as refreshes accumulate.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 240, height: 70)
+            } else {
+                Chart(points) { point in
+                    AreaMark(
+                        x: .value("Time", point.t),
+                        y: .value("Percent", point.percent)
+                    )
+                    .foregroundStyle(Color(nsColor: StatusItemRenderer.claudeOrange).opacity(0.18))
+                    LineMark(
+                        x: .value("Time", point.t),
+                        y: .value("Percent", point.percent)
+                    )
+                    .foregroundStyle(Color(nsColor: StatusItemRenderer.claudeOrange))
+                    .interpolationMethod(.monotone)
+                }
+                .chartYScale(domain: 0...100)
+                .chartYAxis { AxisMarks(values: [0, 50, 100]) }
+                .chartXScale(domain: Date().addingTimeInterval(-window)...Date())
+                .frame(width: 260, height: 110)
+            }
+        }
+        .padding(10)
     }
 }

@@ -55,6 +55,9 @@ final class UsageStore {
             let newState = await service.refresh()
             state = newState
             isRefreshing = false
+            // Any completed refresh restarts the cadence, so a manual refresh
+            // pushes the next automatic one a full interval out.
+            scheduler.restart(interval: refreshInterval)
             nextRefreshAt = scheduler.nextFireDate
             if case .live(let snapshot) = newState {
                 samples = history.append(snapshot, existing: samples)
