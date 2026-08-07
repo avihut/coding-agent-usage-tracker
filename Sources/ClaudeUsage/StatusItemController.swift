@@ -51,7 +51,7 @@ final class StatusItemController: NSObject {
     }
 
     private func render() {
-        statusItem.button?.image = StatusItemRenderer.image(
+        statusItem.button?.attributedTitle = StatusItemRenderer.attributedText(
             for: StatusItemRenderer.model(for: store.state))
     }
 

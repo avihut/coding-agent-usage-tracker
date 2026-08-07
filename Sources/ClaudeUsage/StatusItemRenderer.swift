@@ -1,10 +1,13 @@
 import AppKit
 import UsageCore
 
-/// Pure state → NSImage. No networking, no store access — independently
-/// verifiable. The image uses dynamic system colors in a drawing-handler
-/// image, so it must be drawn inside the status button's appearance context
-/// (see StatusItemController) for them to resolve against the menu bar.
+/// Pure state → NSAttributedString for the status button's attributedTitle.
+/// The button draws the title itself inside its own appearance and vibrancy
+/// context — the same pipeline system menu bar items use — so the dynamic
+/// colors resolve against the actual menu bar (wallpaper tinting included)
+/// at every draw. A custom NSImage lost that: status buttons rasterize
+/// non-template images outside the appearance pass, which produced
+/// dark-on-dark text, and non-template images get no vibrancy treatment.
 enum StatusItemRenderer {
     struct Model: Equatable {
         let segments: [MenuBarSegment]?
@@ -21,19 +24,6 @@ enum StatusItemRenderer {
             worstLevel: snapshot.summary.worstLevel,
             stale: state.isStale
         )
-    }
-
-    static func image(for model: Model) -> NSImage {
-        let text = attributedText(for: model)
-        let textSize = text.size()
-        // Height from the actual status bar, never hardcoded (spec §8).
-        let size = NSSize(width: ceil(textSize.width), height: NSStatusBar.system.thickness)
-        // Drawing-handler images re-execute per draw, so the dynamic system
-        // colors below resolve against the menu bar's current appearance.
-        return NSImage(size: size, flipped: false) { rect in
-            text.draw(at: NSPoint(x: 0, y: (rect.height - textSize.height) / 2))
-            return true
-        }
     }
 
     static func attributedText(for model: Model) -> NSAttributedString {
