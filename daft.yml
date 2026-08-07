@@ -1,5 +1,3 @@
-layout: contained
-
 hooks:
   worktree-post-create:
     jobs:
