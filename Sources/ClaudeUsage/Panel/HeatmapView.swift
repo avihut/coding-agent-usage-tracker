@@ -22,9 +22,23 @@ struct HeatmapView: View {
     }
 
     @State private var period: Period = .month
+    @State private var hoveredDay: Date?
 
     private static let levelOpacities: [Double] = [0.3, 0.55, 0.78, 1.0]
     private var calendar: Calendar { .current }
+
+    /// Anchor of the hovered cell, so the tooltip can follow it.
+    private struct TipValue {
+        let anchor: Anchor<CGRect>
+        let day: Date
+    }
+
+    private struct TipKey: PreferenceKey {
+        static var defaultValue: TipValue? { nil }
+        static func reduce(value: inout TipValue?, nextValue: () -> TipValue?) {
+            value = nextValue() ?? value
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -112,19 +126,57 @@ struct HeatmapView: View {
                 }
             }
         }
+        .overlayPreferenceValue(TipKey.self) { tip in
+            GeometryReader { geo in
+                if let tip {
+                    let rect = geo[tip.anchor]
+                    tooltip(for: tip.day)
+                        .position(
+                            x: min(max(60, rect.midX), geo.size.width - 60),
+                            y: rect.minY - 16)
+                }
+            }
+            .allowsHitTesting(false)
+        }
     }
 
     @ViewBuilder
     private func cell(for day: Date?) -> some View {
         if let day {
-            let entry = byDay[day]
             RoundedRectangle(cornerRadius: 2)
-                .fill(color(tokens: entry?.tokens ?? 0))
+                .fill(color(tokens: byDay[day]?.tokens ?? 0))
                 .frame(width: cellSize, height: cellSize)
-                .help(tooltip(day: day, entry: entry))
+                .onHover { inside in
+                    if inside {
+                        hoveredDay = day
+                    } else if hoveredDay == day {
+                        hoveredDay = nil
+                    }
+                }
+                .anchorPreference(key: TipKey.self, value: .bounds) { anchor in
+                    hoveredDay == day ? TipValue(anchor: anchor, day: day) : nil
+                }
         } else {
             Color.clear.frame(width: cellSize, height: cellSize)
         }
+    }
+
+    /// Instant tooltip bubble — native `.help()` tags are too slow and
+    /// unreliable inside popovers.
+    private func tooltip(for day: Date) -> some View {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEE, MMM d"
+        let date = formatter.string(from: day)
+        let text = byDay[day].map {
+            "\(date) · \(TokenFormat.compact($0.tokens)) tokens · \($0.messages) msgs"
+        } ?? "\(date) · no activity"
+        return Text(text)
+            .font(.caption2)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.quaternary))
+            .fixedSize()
     }
 
     private static let claudeOrange = Color(nsColor: StatusItemRenderer.claudeOrange)
@@ -134,14 +186,6 @@ struct HeatmapView: View {
         let fraction = Double(tokens) / Double(maxTokens)
         let level = min(4, max(1, Int((fraction * 4).rounded(.up))))
         return Self.claudeOrange.opacity(Self.levelOpacities[level - 1])
-    }
-
-    private func tooltip(day: Date, entry: DailyActivity?) -> String {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        let date = formatter.string(from: day)
-        guard let entry else { return "\(date) — no activity" }
-        return "\(date) — \(TokenFormat.compact(entry.tokens)) tokens · \(entry.messages) messages"
     }
 
     private var legend: some View {
