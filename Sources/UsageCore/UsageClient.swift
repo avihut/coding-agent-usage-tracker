@@ -32,16 +32,6 @@ public struct UsageClient: Sendable {
         }
     }
 
-    /// Fetches and decodes one usage snapshot.
-    public func fetchUsage(accessToken: String) async throws -> UsageResponse {
-        let data = try await fetchRawUsage(accessToken: accessToken)
-        do {
-            return try UsageResponse.decode(from: data)
-        } catch {
-            throw UsageClientError.schema
-        }
-    }
-
     /// Fetches the raw response body. The token lives in the request header for
     /// the duration of this one call and is never stored on this type.
     public func fetchRawUsage(accessToken: String) async throws -> Data {
