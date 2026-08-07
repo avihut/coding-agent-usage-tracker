@@ -163,4 +163,13 @@ struct FormattingTests {
         let date = Date(timeIntervalSince1970: 14 * 3600 + 5 * 60)
         #expect(UsageFormatting.clockTime(date, timeZone: TimeZone(secondsFromGMT: 0)!) == "14:05")
     }
+
+    @Test("next-update countdown")
+    func countdown() {
+        let now = Date(timeIntervalSince1970: 0)
+        #expect(UsageFormatting.countdownText(to: now.addingTimeInterval(272), now: now) == "next in 4m 32s")
+        #expect(UsageFormatting.countdownText(to: now.addingTimeInterval(45), now: now) == "next in 45s")
+        #expect(UsageFormatting.countdownText(to: now.addingTimeInterval(3900), now: now) == "next in 1h 5m")
+        #expect(UsageFormatting.countdownText(to: now.addingTimeInterval(-3), now: now) == "next any moment")
+    }
 }

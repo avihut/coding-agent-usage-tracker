@@ -1,16 +1,21 @@
+import AppKit
 import SwiftUI
-import UsageCore
 
 @main
 struct ClaudeUsageApp: App {
-    @State private var store = UsageStore()
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
     var body: some Scene {
-        MenuBarExtra {
-            UsagePanelView(store: store)
-        } label: {
-            StatusItemLabel(store: store)
-        }
-        .menuBarExtraStyle(.window)
+        // No windows — StatusItemController owns all UI.
+        Settings { EmptyView() }
+    }
+}
+
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var controller: StatusItemController?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        controller = StatusItemController(store: UsageStore())
     }
 }

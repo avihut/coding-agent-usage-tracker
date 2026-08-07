@@ -67,8 +67,8 @@ struct UsagePanelView: View {
     @ViewBuilder private var footer: some View {
         Divider()
         HStack(spacing: 12) {
-            if let fetchedAt = store.state.snapshot?.fetchedAt {
-                Text("Updated \(UsageFormatting.clockTime(fetchedAt))")
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                Text(statusLine(now: context.date))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -102,6 +102,17 @@ struct UsagePanelView: View {
             .menuIndicator(.hidden)
             .fixedSize()
         }
+    }
+
+    private func statusLine(now: Date) -> String {
+        var parts: [String] = []
+        if let fetchedAt = store.state.snapshot?.fetchedAt {
+            parts.append("Updated \(UsageFormatting.clockTime(fetchedAt))")
+        }
+        if let next = store.nextRefreshAt {
+            parts.append(UsageFormatting.countdownText(to: next, now: now))
+        }
+        return parts.joined(separator: " · ")
     }
 
     private var intervalBinding: Binding<Double> {

@@ -68,9 +68,13 @@ the README rather than silently deviating.
 - Menu bar rendering: height from `NSStatusBar.system.thickness` (never
   hardcoded), `monospacedDigitSystemFont` so width doesn't jitter,
   `isTemplate = false` (we color by severity).
-- `MenuBarExtra(.window)` is the current approach; if its label misbehaves,
-  the fallback (`NSStatusItem` + `NSPopover`) is contained to
-  `StatusItemRenderer` + the panel host — don't let AppKit leak elsewhere.
+- The status item is a raw `NSStatusItem` owned by `StatusItemController` —
+  NOT `MenuBarExtra`. The menu bar's appearance follows wallpaper tinting,
+  not the app's appearance; MenuBarExtra rasterizes its label in the app's
+  appearance and produced dark-on-dark text. Setting `button.image` lets
+  AppKit draw inside the button's appearance context, where dynamic colors
+  resolve correctly; KVO on `button.effectiveAppearance` re-renders on
+  theme/tint changes. The panel is SwiftUI in an `NSPopover`.
 - Timers get generous `tolerance`; refresh on `didWakeNotification` and
   network-path restore. Never poll faster than 60s.
 

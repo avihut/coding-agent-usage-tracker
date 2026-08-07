@@ -1,10 +1,10 @@
 import AppKit
-import SwiftUI
 import UsageCore
 
 /// Pure state → NSImage. No networking, no store access — independently
-/// verifiable, and the contained swap point if MenuBarExtra's label ever
-/// misbehaves.
+/// verifiable. The image uses dynamic system colors in a drawing-handler
+/// image, so it must be drawn inside the status button's appearance context
+/// (see StatusItemController) for them to resolve against the menu bar.
 enum StatusItemRenderer {
     struct Model: Equatable {
         let segments: [MenuBarSegment]?
@@ -38,7 +38,7 @@ enum StatusItemRenderer {
 
     static func attributedText(for model: Model) -> NSAttributedString {
         // Monospaced digits so the width doesn't jitter every refresh (§8).
-        let font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+        let font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)
         let result = NSMutableAttributedString()
 
         func append(_ string: String, _ color: NSColor) {
@@ -71,15 +71,5 @@ enum StatusItemRenderer {
         case .warning: .systemOrange
         case .critical: .systemRed
         }
-    }
-}
-
-struct StatusItemLabel: View {
-    var store: UsageStore
-    @Environment(\.colorScheme) private var colorScheme
-
-    var body: some View {
-        Image(nsImage: StatusItemRenderer.image(for: StatusItemRenderer.model(for: store.state)))
-            .id(colorScheme) // re-render when the menu bar appearance flips
     }
 }

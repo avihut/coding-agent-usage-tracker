@@ -51,6 +51,16 @@ public enum UsageFormatting {
         return "resets \(formatter.string(from: resetsAt))"
     }
 
+    /// "next in 4m 32s" — live countdown to the scheduled refresh.
+    public static func countdownText(to date: Date, now: Date) -> String {
+        let remaining = Int(date.timeIntervalSince(now).rounded())
+        guard remaining > 0 else { return "next any moment" }
+        let (minutes, seconds) = (remaining / 60, remaining % 60)
+        if minutes >= 60 { return "next in \(minutes / 60)h \(minutes % 60)m" }
+        if minutes == 0 { return "next in \(seconds)s" }
+        return "next in \(minutes)m \(seconds)s"
+    }
+
     /// "09:45" — for "Updated …" and "cached …" annotations.
     public static func clockTime(_ date: Date, timeZone: TimeZone = .current) -> String {
         let formatter = DateFormatter()

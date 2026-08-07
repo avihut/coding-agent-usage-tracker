@@ -15,6 +15,7 @@ final class UsageStore {
     private(set) var state: DisplayState = .loading
     private(set) var isRefreshing = false
     private(set) var refreshInterval: TimeInterval
+    private(set) var nextRefreshAt: Date?
 
     private let service: UsageService
     private var gate = TriggerGate()
@@ -33,6 +34,7 @@ final class UsageStore {
             self?.refresh(reason)
         }
         scheduler.start(interval: refreshInterval)
+        nextRefreshAt = scheduler.nextFireDate
         refresh(.launch)
     }
 
@@ -42,6 +44,7 @@ final class UsageStore {
         Task {
             state = await service.refresh()
             isRefreshing = false
+            nextRefreshAt = scheduler.nextFireDate
         }
     }
 
@@ -50,5 +53,6 @@ final class UsageStore {
         refreshInterval = clamped
         UserDefaults.standard.set(clamped, forKey: Self.intervalKey)
         scheduler.restart(interval: clamped)
+        nextRefreshAt = scheduler.nextFireDate
     }
 }

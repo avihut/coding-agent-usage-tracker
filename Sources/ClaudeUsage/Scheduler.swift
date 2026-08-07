@@ -12,6 +12,9 @@ final class Scheduler {
     private var pathMonitor: NWPathMonitor?
     private var networkWasSatisfied = true
 
+    /// When the repeating timer will next fire (tolerance may shift it a bit).
+    var nextFireDate: Date? { timer?.fireDate }
+
     func start(interval: TimeInterval) {
         startTimer(interval: interval)
 
