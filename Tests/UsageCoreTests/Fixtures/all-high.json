@@ -1,0 +1,8 @@
+{
+  "limits": [
+    {"kind": "session", "percent": 75, "severity": "normal", "resets_at": "2030-01-01T12:00:00Z", "scope": null},
+    {"kind": "weekly_all", "percent": 92, "severity": "normal", "resets_at": "2030-01-04T12:00:00Z", "scope": null},
+    {"kind": "weekly_scoped", "percent": 95, "severity": "normal", "resets_at": "2030-01-04T12:00:00Z",
+     "scope": {"model": {"id": null, "display_name": "Fable"}, "surface": null}}
+  ]
+}

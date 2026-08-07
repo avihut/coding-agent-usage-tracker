@@ -1,0 +1,6 @@
+{
+  "limits": [
+    {"kind": "session", "percent": 10, "severity": "approaching_limit", "resets_at": "2030-01-01T12:00:00Z", "scope": null},
+    {"kind": "weekly_all", "percent": 95, "severity": "exceeded", "resets_at": "2030-01-04T12:00:00Z", "scope": null}
+  ]
+}

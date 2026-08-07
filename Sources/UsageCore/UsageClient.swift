@@ -8,6 +8,8 @@ public enum UsageClientError: Error, Sendable {
     /// Transport-level failure (offline, DNS, timeout). The caller may retry
     /// once; this client never retries on its own.
     case network(URLError)
+    /// 2xx but the body doesn't decode — the undocumented schema moved.
+    case schema
 }
 
 /// One call against the usage endpoint. No retry policy, no UI, no state.
@@ -27,6 +29,16 @@ public struct UsageClient: Sendable {
             let config = URLSessionConfiguration.ephemeral
             config.timeoutIntervalForRequest = 15
             self.session = URLSession(configuration: config)
+        }
+    }
+
+    /// Fetches and decodes one usage snapshot.
+    public func fetchUsage(accessToken: String) async throws -> UsageResponse {
+        let data = try await fetchRawUsage(accessToken: accessToken)
+        do {
+            return try UsageResponse.decode(from: data)
+        } catch {
+            throw UsageClientError.schema
         }
     }
 

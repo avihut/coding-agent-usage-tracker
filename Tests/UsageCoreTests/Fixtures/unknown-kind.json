@@ -1,0 +1,9 @@
+{
+  "limits": [
+    {"kind": "weekly_scoped", "percent": 41, "severity": "normal", "resets_at": "2030-01-04T12:00:00Z",
+     "scope": {"model": {"id": null, "display_name": "Fable"}, "surface": null}},
+    {"kind": "lunar_lease", "percent": 63, "severity": "normal", "resets_at": "2030-01-04T12:00:00Z", "scope": null},
+    {"kind": null, "percent": 30, "severity": "normal", "resets_at": null, "scope": null},
+    {"kind": "session", "severity": "normal", "resets_at": "2030-01-01T12:00:00Z", "scope": null}
+  ]
+}

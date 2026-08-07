@@ -1,0 +1,15 @@
+{
+  "limits": [
+    {"kind": "session", "group": "session", "percent": 12, "severity": "normal",
+     "resets_at": "2030-01-01T12:00:00Z", "scope": null, "is_active": false},
+    {"kind": "weekly_all", "group": "weekly", "percent": 34, "severity": "normal",
+     "resets_at": "2030-01-04T12:00:00Z", "scope": null, "is_active": false},
+    {"kind": "weekly_scoped", "group": "weekly", "percent": 56, "severity": "normal",
+     "resets_at": "2030-01-04T12:00:00Z",
+     "scope": {"model": {"id": null, "display_name": "Fable"}, "surface": null},
+     "is_active": true}
+  ],
+  "spend": {"used": {"amount_minor": 0, "currency": "USD", "exponent": 2},
+            "limit": {"amount_minor": 5000, "currency": "USD", "exponent": 2},
+            "enabled": true}
+}

@@ -49,6 +49,8 @@ struct UsageCLI {
             die("unexpected HTTP \(code) from usage endpoint", code: 5)
         case .network(let urlError):
             die("network failure: \(urlError.code)", code: 6)
+        case .schema:
+            die("unexpected API response — the undocumented schema may have changed", code: 8)
         }
     }
 
