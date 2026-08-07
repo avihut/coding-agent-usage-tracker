@@ -23,6 +23,7 @@ struct HeatmapView: View {
 
     @State private var period: Period = .month
     @State private var hoveredDay: Date?
+    @State private var tipSize: CGSize = .zero
 
     private static let levelOpacities: [Double] = [0.3, 0.55, 0.78, 1.0]
     private var calendar: Calendar { .current }
@@ -129,10 +130,14 @@ struct HeatmapView: View {
         .overlayPreferenceValue(TipKey.self) { tip in
             GeometryReader { geo in
                 if let tip {
+                    // Clamp with the measured bubble size so it never slides
+                    // under the popover's edges.
                     let rect = geo[tip.anchor]
+                    let half = max(30, tipSize.width / 2) + 2
                     tooltip(for: tip.day)
+                        .onGeometryChange(for: CGSize.self, of: \.size) { tipSize = $0 }
                         .position(
-                            x: min(max(60, rect.midX), geo.size.width - 60),
+                            x: min(max(half, rect.midX), geo.size.width - half),
                             y: rect.minY - 16)
                 }
             }
