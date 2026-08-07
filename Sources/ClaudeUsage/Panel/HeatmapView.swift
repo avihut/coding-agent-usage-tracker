@@ -138,6 +138,11 @@ struct HeatmapView: View {
             }
             .allowsHitTesting(false)
         }
+        // Text views in the popover leak I-beam cursor rects over the grid;
+        // keep the arrow cursor while the pointer is anywhere on it.
+        .onContinuousHover { phase in
+            if case .active = phase { NSCursor.arrow.set() }
+        }
     }
 
     @ViewBuilder
@@ -146,6 +151,12 @@ struct HeatmapView: View {
             RoundedRectangle(cornerRadius: 2)
                 .fill(color(tokens: byDay[day]?.tokens ?? 0))
                 .frame(width: cellSize, height: cellSize)
+                .overlay {
+                    if hoveredDay == day {
+                        RoundedRectangle(cornerRadius: 2)
+                            .strokeBorder(.primary.opacity(0.9), lineWidth: 1)
+                    }
+                }
                 .onHover { inside in
                     if inside {
                         hoveredDay = day
