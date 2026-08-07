@@ -10,6 +10,10 @@ let package = Package(
             name: "usage-cli",
             dependencies: ["UsageCore"]
         ),
+        .executableTarget(
+            name: "ClaudeUsage",
+            dependencies: ["UsageCore"]
+        ),
         .testTarget(
             name: "UsageCoreTests",
             dependencies: ["UsageCore"],

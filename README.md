@@ -6,7 +6,12 @@ for distribution.
 
 ## Status
 
-Milestone 1: credential chain + raw fetch via `usage-cli`.
+Fully built: menu bar item (`✳︎ 6·17·22%`, per-segment severity colors),
+panel with per-limit meters and reset times, live client with cached
+fallback and readable error states, 5-minute refresh (configurable) plus
+wake/network-restore triggers, launch-at-login toggle (off by default),
+stable signing verified across rebuilds. Remaining: the §13 acceptance
+checklist items that need real-world time (sleep/wake, token expiry).
 
 ## Why this is OK (policy note)
 
@@ -45,8 +50,9 @@ change.
 ## Build / run
 
 ```sh
+mise run app    # build + bundle + sign + launch the menu bar app
 mise run test   # unit tests
-mise run cli    # build + sign + run the CLI debug tool
+mise run cli    # build + sign + run the CLI debug tool (prints raw JSON)
 ```
 
 Signing uses the local `Apple Development` identity so the Keychain ACL from

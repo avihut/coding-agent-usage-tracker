@@ -13,3 +13,10 @@ run = [
     "scripts/sign.sh .build/debug/usage-cli",
     ".build/debug/usage-cli",
 ]
+
+[tasks.app]
+description = "Build, bundle, sign, and launch the menu bar app"
+run = [
+    "scripts/bundle.sh",
+    "open ClaudeUsage.app",
+]
