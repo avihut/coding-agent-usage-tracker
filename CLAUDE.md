@@ -47,8 +47,12 @@ the README rather than silently deviating.
 - The activity heatmap reads Claude Code's local transcripts
   (`~/.claude/projects/**/*.jsonl`) via `TranscriptScanner` — strictly
   read-only, dedup by requestId, mtime/size cache in this app's own App
-  Support dir. Never write inside `~/.claude`, never go near
-  `.credentials.json` from the scanner, nothing leaves the machine.
+  Support dir — merged (`ActivityMerge`) with prompt timestamps from
+  `~/.claude/history.jsonl` via `PromptHistoryScanner` (epoch-ms, no token
+  counts, survives Claude Code's `cleanupPeriodDays` sweep): days with
+  prompts but no surviving transcripts render faint as "no token data".
+  Never write inside `~/.claude`, never go near `.credentials.json` from
+  the scanners, nothing leaves the machine.
 - Burn estimates come from persisted percent samples (`UsageHistory` in App
   Support) using the monotonic tail after the last drop, so limit resets
   never produce bogus negative rates. Verdicts: red = exhausts before

@@ -86,6 +86,66 @@ struct TranscriptScannerTests {
     }
 }
 
+@Suite("PromptHistory")
+struct PromptHistoryTests {
+    static func utcCalendar() -> Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        return calendar
+    }
+
+    static func day(_ year: Int, _ month: Int, _ day: Int) -> Date {
+        utcCalendar().date(from: DateComponents(year: year, month: month, day: day))!
+    }
+
+    // Epoch ms except where noted: two prompts on 2026-08-01 (10:00Z and
+    // 10:43Z), two on 2026-08-02 — one in plain seconds, which real files
+    // don't use but the parser tolerates.
+    static let history = """
+        {"display":"a","project":"/tmp/p","timestamp":1785578400000}
+        {"display":"b","project":"/tmp/p","timestamp":1785581000000}
+        {"display":"c","project":"/tmp/p","timestamp":1785661200000}
+        {"display":"d","project":"/tmp/p","timestamp":1785661300}
+        {"display":"missing timestamp","project":"/tmp/p"}
+        not json at all
+        """
+
+    func makeScanner(contents: String?) throws -> PromptHistoryScanner {
+        let file = FileManager.default.temporaryDirectory
+            .appending(path: "history-tests-\(UUID().uuidString).jsonl")
+        if let contents {
+            try contents.write(to: file, atomically: true, encoding: .utf8)
+        }
+        return PromptHistoryScanner(fileURL: file, calendar: Self.utcCalendar())
+    }
+
+    @Test("counts prompts per day; tolerates seconds, missing fields, garbage")
+    func counts() throws {
+        let scanner = try makeScanner(contents: Self.history)
+        #expect(scanner.scan() == [Self.day(2026, 8, 1): 2, Self.day(2026, 8, 2): 2])
+    }
+
+    @Test("missing file yields empty counts, not an error")
+    func missingFile() throws {
+        let scanner = try makeScanner(contents: nil)
+        #expect(scanner.scan().isEmpty)
+    }
+
+    @Test("merge keeps token days and adds prompt-only days, sorted")
+    func merge() {
+        let aug1 = Self.day(2026, 8, 1)
+        let jul30 = Self.day(2026, 7, 30)
+        let merged = ActivityMerge.merge(
+            transcripts: [DailyActivity(day: aug1, tokens: 600, messages: 2)],
+            prompts: [aug1: 5, jul30: 3])
+
+        #expect(merged == [
+            DailyActivity(day: jul30, tokens: 0, messages: 0, prompts: 3),
+            DailyActivity(day: aug1, tokens: 600, messages: 2, prompts: 5),
+        ])
+    }
+}
+
 @Suite("TokenFormat")
 struct TokenFormatTests {
     @Test("compact formatting")

@@ -23,6 +23,7 @@ final class UsageStore {
     private let service: UsageService
     private let history: UsageHistory
     private let scanner: TranscriptScanner
+    private let promptScanner: PromptHistoryScanner
     private var gate = TriggerGate()
     private let scheduler = Scheduler()
     private var lastActivityScan: Date?
@@ -35,6 +36,7 @@ final class UsageStore {
         self.service = service ?? .standard(bundleID: bundleID)
         self.history = .standard(bundleID: bundleID)
         self.scanner = .standard(bundleID: bundleID)
+        self.promptScanner = .standard()
         let stored = UserDefaults.standard.double(forKey: Self.intervalKey)
         self.refreshInterval = stored >= 60 ? stored : Self.defaultInterval
         self.samples = history.load()
@@ -66,13 +68,16 @@ final class UsageStore {
         }
     }
 
-    /// Re-scans local transcripts for the heatmap, at most once a minute.
+    /// Re-scans local transcripts + prompt history for the heatmap, at most
+    /// once a minute.
     func scanActivity(force: Bool = false) {
         if !force, let last = lastActivityScan, Date().timeIntervalSince(last) < 60 { return }
         lastActivityScan = Date()
         let scanner = scanner
+        let promptScanner = promptScanner
         Task.detached(priority: .utility) { [weak self] in
-            let activity = scanner.scan()
+            let activity = ActivityMerge.merge(
+                transcripts: scanner.scan(), prompts: promptScanner.scan())
             await MainActor.run { self?.activity = activity }
         }
     }

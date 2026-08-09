@@ -83,7 +83,7 @@ struct HeatmapView: View {
     }
 
     private var visible: [DailyActivity] {
-        activity.filter { $0.day >= rangeStart && $0.day <= today && $0.tokens > 0 }
+        activity.filter { $0.day >= rangeStart && $0.day <= today && ($0.tokens > 0 || $0.prompts > 0) }
     }
 
     private var totalTokens: Int { visible.reduce(0) { $0 + $1.tokens } }
@@ -127,6 +127,9 @@ struct HeatmapView: View {
                 }
             }
         }
+        // "All" now reaches back months; open it showing the recent end.
+        .defaultScrollAnchor(period == .all ? .trailing : .topLeading)
+        .id(period)
         .overlayPreferenceValue(TipKey.self) { tip in
             GeometryReader { geo in
                 if let tip {
@@ -154,7 +157,7 @@ struct HeatmapView: View {
     private func cell(for day: Date?) -> some View {
         if let day {
             RoundedRectangle(cornerRadius: 2)
-                .fill(color(tokens: byDay[day]?.tokens ?? 0))
+                .fill(color(for: byDay[day]))
                 .frame(width: cellSize, height: cellSize)
                 .overlay {
                     if hoveredDay == day {
@@ -183,9 +186,14 @@ struct HeatmapView: View {
         let formatter = DateFormatter()
         formatter.dateFormat = "EEE, MMM d"
         let date = formatter.string(from: day)
-        let text = byDay[day].map {
-            "\(date) · \(TokenFormat.compact($0.tokens)) tokens · \($0.messages) msgs"
-        } ?? "\(date) · no activity"
+        let entry = byDay[day]
+        let text = if let entry, entry.tokens > 0 {
+            "\(date) · \(TokenFormat.compact(entry.tokens)) tokens · \(entry.messages) msgs"
+        } else if let entry, entry.prompts > 0 {
+            "\(date) · \(entry.prompts) prompts · no token data"
+        } else {
+            "\(date) · no activity"
+        }
         return Text(text)
             .font(.caption2)
             .padding(.horizontal, 8)
@@ -197,9 +205,15 @@ struct HeatmapView: View {
 
     private static let claudeOrange = Color(nsColor: StatusItemRenderer.claudeOrange)
 
-    private func color(tokens: Int) -> Color {
-        guard tokens > 0 else { return Color.gray.opacity(0.18) }
-        let fraction = Double(tokens) / Double(maxTokens)
+    private static let emptyColor = Color.gray.opacity(0.18)
+    /// Days known only from prompt history — Claude Code already deleted the
+    /// transcripts, so activity is certain but its magnitude isn't.
+    private static let promptOnlyColor = claudeOrange.opacity(0.15)
+
+    private func color(for entry: DailyActivity?) -> Color {
+        guard let entry, entry.tokens > 0 || entry.prompts > 0 else { return Self.emptyColor }
+        guard entry.tokens > 0 else { return Self.promptOnlyColor }
+        let fraction = Double(entry.tokens) / Double(maxTokens)
         let level = min(4, max(1, Int((fraction * 4).rounded(.up))))
         return Self.claudeOrange.opacity(Self.levelOpacities[level - 1])
     }
@@ -210,7 +224,7 @@ struct HeatmapView: View {
             ForEach(0..<5, id: \.self) { level in
                 RoundedRectangle(cornerRadius: 1)
                     .fill(level == 0
-                        ? Color.gray.opacity(0.18)
+                        ? Self.emptyColor
                         : Self.claudeOrange.opacity(Self.levelOpacities[level - 1]))
                     .frame(width: 7, height: 7)
             }

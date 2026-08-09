@@ -5,13 +5,17 @@ public struct DailyActivity: Codable, Sendable, Equatable, Identifiable {
     public let day: Date
     public var tokens: Int
     public var messages: Int
+    /// Prompt submissions from history.jsonl; can be nonzero while `tokens`
+    /// is 0 when the day's transcripts were already cleaned up.
+    public var prompts: Int
 
     public var id: Date { day }
 
-    public init(day: Date, tokens: Int, messages: Int) {
+    public init(day: Date, tokens: Int, messages: Int, prompts: Int = 0) {
         self.day = day
         self.tokens = tokens
         self.messages = messages
+        self.prompts = prompts
     }
 }
 
