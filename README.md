@@ -56,4 +56,42 @@ mise run cli    # build + sign + run the CLI debug tool (prints raw JSON)
 ```
 
 Signing uses the local `Apple Development` identity so the Keychain ACL from
-"Always Allow" survives rebuilds (override with `CODESIGN_IDENTITY=...`).
+"Always Allow" survives rebuilds (override with `CODESIGN_IDENTITY=...`). Those
+certificates last a year; when one expires, signing fails with "no identity
+found" — renew it in Xcode → Settings → Accounts → Manage Certificates. The
+name stays the same, so the ACL survives.
+
+## Install on another Mac
+
+```sh
+mise run dist   # universal (arm64 + x86_64), signed with a timestamp, zipped
+```
+
+That writes `dist/ClaudeUsage-<version>.zip` and verifies the signature survives
+the round trip. On the target Mac:
+
+```sh
+ditto -x -k ClaudeUsage-<version>.zip /Applications
+xattr -dr com.apple.quarantine /Applications/ClaudeUsage.app
+open /Applications/ClaudeUsage.app
+```
+
+The `xattr` step only matters when the transfer set the quarantine bit — AirDrop,
+browser downloads, and Messages do; `scp`, `rsync`, and USB sticks don't. Strip
+it *before* the first launch: this app is signed with an Apple Development
+certificate rather than a notarized Developer ID one, so Gatekeeper rejects it
+(`spctl -a` says so here too), and the "Open Anyway" button only appears under
+System Settings → Privacy & Security *after* a launch has already been blocked.
+
+The target Mac needs macOS 15+ and Claude Code installed **and signed in**: the
+app carries no token, it reads that machine's own login Keychain item, so nothing
+of mine travels inside the zip. On the first refresh macOS asks whether
+ClaudeUsage may read `Claude Code-credentials` — click **Always Allow** once.
+
+Keep the bundle in `/Applications`: `SMAppService` registers the launch-at-login
+item by path, so moving the app afterwards breaks that toggle.
+
+The signature is timestamped, so it stays valid after the signing certificate
+expires. Rebuilding on a Mac that has Xcode and the signing identity
+(`daft clone` + `mise run app`) is the other route, and sidesteps Gatekeeper
+entirely.

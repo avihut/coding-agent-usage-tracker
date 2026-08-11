@@ -14,6 +14,10 @@ run = [
     ".build/debug/usage-cli",
 ]
 
+[tasks.dist]
+description = "Build a universal, signed, zipped app to install on another Mac"
+run = "scripts/dist.sh"
+
 [tasks.app]
 description = "Build, bundle, sign, and launch the menu bar app"
 run = [
