@@ -1,8 +1,9 @@
 import AppKit
 import Network
 
-/// Emits refresh triggers; owns no refresh logic. The store decides whether a
-/// trigger actually runs (gate + single-flight).
+/// Emits refresh triggers; owns no refresh logic or cadence. The store decides
+/// whether a trigger actually runs (gate + single-flight + backoff) and
+/// schedules every fire one-shot, so the delay can change between polls.
 @MainActor
 final class Scheduler {
     var onTrigger: ((UsageStore.RefreshReason) -> Void)?
@@ -12,12 +13,15 @@ final class Scheduler {
     private var pathMonitor: NWPathMonitor?
     private var networkWasSatisfied = true
 
-    /// When the repeating timer will next fire (tolerance may shift it a bit).
-    var nextFireDate: Date? { timer?.fireDate }
+    /// When the pending one-shot will fire; nil once it has fired, which is
+    /// how the store tells a live timer from a spent one.
+    var nextFireDate: Date? {
+        guard let timer, timer.isValid else { return nil }
+        return timer.fireDate
+    }
 
-    func start(interval: TimeInterval) {
-        startTimer(interval: interval)
-
+    /// Starts the event sources. Polling is driven by `schedule(after:)`.
+    func start() {
         // Stale numbers after lid-open are what make these widgets feel
         // broken (spec §9) — refresh on wake.
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
@@ -43,19 +47,17 @@ final class Scheduler {
         pathMonitor = monitor
     }
 
-    func restart(interval: TimeInterval) {
-        startTimer(interval: interval)
-    }
-
-    private func startTimer(interval: TimeInterval) {
+    /// Replaces the pending fire with one `delay` seconds out.
+    func schedule(after delay: TimeInterval) {
         timer?.invalidate()
-        let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+        let clamped = max(1, delay)
+        let timer = Timer.scheduledTimer(withTimeInterval: clamped, repeats: false) { [weak self] _ in
             Task { @MainActor in
                 self?.onTrigger?(.timer)
             }
         }
         // Background poller: generous tolerance lets macOS coalesce wakeups.
-        timer.tolerance = max(30, interval * 0.1)
+        timer.tolerance = min(max(5, clamped * 0.1), clamped / 2)
         self.timer = timer
     }
 }

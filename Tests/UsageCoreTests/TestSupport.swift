@@ -30,10 +30,19 @@ final class Box<T>: @unchecked Sendable {
 /// unique token and only sees its own requests.
 final class StubURLProtocol: URLProtocol {
     typealias Handler = @Sendable (URLRequest) throws -> (Int, Data)
+    typealias FullHandler = @Sendable (URLRequest) throws -> (Int, Data, [String: String]?)
 
-    private static let registry = Box<[String: Handler]>([:])
+    private static let registry = Box<[String: FullHandler]>([:])
 
     static func register(token: String, handler: @escaping Handler) {
+        registerWithHeaders(token: token) { request in
+            let (status, data) = try handler(request)
+            return (status, data, nil)
+        }
+    }
+
+    /// Variant for tests that need response headers (e.g. Retry-After).
+    static func registerWithHeaders(token: String, handler: @escaping FullHandler) {
         registry.mutate { $0[token] = handler }
     }
 
@@ -47,9 +56,9 @@ final class StubURLProtocol: URLProtocol {
             guard let handler = Self.registry.value[token] else {
                 throw URLError(.unsupportedURL)
             }
-            let (status, data) = try handler(request)
+            let (status, data, headers) = try handler(request)
             let response = HTTPURLResponse(
-                url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!
+                url: request.url!, statusCode: status, httpVersion: nil, headerFields: headers)!
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
             client?.urlProtocol(self, didLoad: data)
             client?.urlProtocolDidFinishLoading(self)

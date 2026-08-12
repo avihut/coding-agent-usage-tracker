@@ -46,6 +46,24 @@ struct UsageClientTests {
         }
     }
 
+    @Test("429 maps to rateLimited carrying Retry-After")
+    func rateLimited() async {
+        let token = uniqueToken()
+        StubURLProtocol.registerWithHeaders(token: token) { _ in (429, Data(), ["Retry-After": "120"]) }
+        do {
+            _ = try await stubbedClient().fetchRawUsage(accessToken: token)
+            Issue.record("expected a throw")
+        } catch let error as UsageClientError {
+            guard case .rateLimited(let retryAfter) = error else {
+                Issue.record("expected rateLimited, got \(error)")
+                return
+            }
+            #expect(retryAfter == 120)
+        } catch {
+            Issue.record("unexpected error type")
+        }
+    }
+
     @Test("other HTTP statuses map to .http(code)")
     func serverError() async {
         let token = uniqueToken()

@@ -96,7 +96,7 @@ struct UsagePanelView: View {
             .help("Open claude.ai usage settings")
 
             Menu {
-                Picker("Refresh every", selection: intervalBinding) {
+                Picker("Refresh when active", selection: intervalBinding) {
                     Text("1 min").tag(60.0)
                     Text("5 min").tag(300.0)
                     Text("15 min").tag(900.0)
@@ -120,13 +120,17 @@ struct UsagePanelView: View {
         if let next = store.nextRefreshAt {
             parts.append(UsageFormatting.countdownText(to: next, now: now))
         }
+        // Why "next in 20m" instead of 5: quiet decayed the cadence. Activity
+        // (or usage moving) snaps it back — worth a word of transparency.
+        let pace = store.paceMultiplier(now: now)
+        if pace > 1 { parts.append("idle ×\(pace)") }
         return parts.joined(separator: " · ")
     }
 
     private var intervalBinding: Binding<Double> {
         Binding(
-            get: { store.refreshInterval },
-            set: { store.setRefreshInterval($0) }
+            get: { store.activeInterval },
+            set: { store.setActiveInterval($0) }
         )
     }
 

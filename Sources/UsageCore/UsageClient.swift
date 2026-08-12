@@ -3,6 +3,8 @@ import Foundation
 public enum UsageClientError: Error, Sendable {
     /// 401 or 403 — the access token is stale; opening Claude Code refreshes it.
     case signInExpired
+    /// 429 — the server asked us to slow down. Carries Retry-After when sent.
+    case rateLimited(retryAfter: TimeInterval?)
     /// Any other non-2xx status.
     case http(Int)
     /// Transport-level failure (offline, DNS, timeout). The caller may retry
@@ -58,6 +60,9 @@ public struct UsageClient: Sendable {
             return data
         case 401, 403:
             throw UsageClientError.signInExpired
+        case 429:
+            throw UsageClientError.rateLimited(
+                retryAfter: RetryAfter.seconds(from: http.value(forHTTPHeaderField: "Retry-After")))
         default:
             throw UsageClientError.http(http.statusCode)
         }

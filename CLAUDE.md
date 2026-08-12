@@ -29,8 +29,21 @@ the README rather than silently deviating.
 - `UsageCore` is a library with zero AppKit/SwiftUI imports; all logic is
   headlessly testable. The app layer is a pure function of store state.
 - One refresh pipeline, one entry point: `UsageStore.refresh(reason:)` owns
-  single-flighting and the 60-second minimum interval for every trigger
-  (timer, wake, network-restore, manual, launch).
+  single-flighting, the 60-second minimum interval, and 429-backoff
+  enforcement for every trigger (timer, wake, network-restore, manual,
+  launch, activity).
+- Polling cadence is adaptive (`AdaptiveCadence`, pure + tested): quiet time
+  decays the user-chosen active interval ×2 (15 min) / ×4 (1 h) / ×8 (4 h),
+  capped at an hour between polls. Evidence of use snaps it back: FSEvents on
+  `~/.claude/projects` (`ClaudeActivityWatcher` — observational only, never
+  reads paths) is the push signal for Claude Code; percentages rising between
+  polls (`UsageMovement` — rises and fresh-window usage count, drops are
+  resets) is the pull signal that catches Claude app/web use. HTTP 429 maps
+  to `.rateLimited(retryAfter:)` and starts exponential backoff (5 min
+  doubling to 1 h, `Retry-After` honored up to 2 h) that heals on the next
+  success; automatic triggers sit backoff out, manual refresh may punch
+  through. The scheduler timer is one-shot — every completed refresh (and
+  every denied trigger) must leave a live timer behind.
 - `UsageClient` makes exactly one attempt and maps to typed errors. The
   retry (once, transport errors only, ~2s delay) lives in the store.
 - Decode defensively: every field optional, unknown limit kinds render
@@ -89,7 +102,8 @@ the README rather than silently deviating.
   resolve correctly; KVO on `button.effectiveAppearance` re-renders on
   theme/tint changes. The panel is SwiftUI in an `NSPopover`.
 - Timers get generous `tolerance`; refresh on `didWakeNotification` and
-  network-path restore. Never poll faster than 60s.
+  network-path restore. Never poll faster than 60s — adaptive cadence may
+  only ever slow polling down from the user's chosen active interval.
 
 ## Testing
 

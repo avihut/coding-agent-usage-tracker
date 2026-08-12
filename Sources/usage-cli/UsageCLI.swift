@@ -45,6 +45,9 @@ struct UsageCLI {
         switch clientError {
         case .signInExpired:
             die("sign-in expired (401/403) — open Claude Code to refresh the token", code: 4)
+        case .rateLimited(let retryAfter):
+            let wait = retryAfter.map { " (Retry-After \(Int($0))s)" } ?? ""
+            die("rate limited (429)\(wait) — try again later", code: 9)
         case .http(let code):
             die("unexpected HTTP \(code) from usage endpoint", code: 5)
         case .network(let urlError):

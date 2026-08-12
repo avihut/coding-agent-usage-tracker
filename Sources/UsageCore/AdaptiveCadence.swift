@@ -1,0 +1,128 @@
+import Foundation
+
+/// Decides how often to poll the usage endpoint. Three forces:
+///
+/// - Evidence that Claude is in use right now (Claude Code writing transcripts
+///   locally, usage percentages rising between polls) holds sampling at the
+///   user's chosen active pace.
+/// - Sustained quiet decays the pace in steps — ×2 after 15 minutes, ×4 after
+///   an hour, ×8 after four hours — capped at an hour between polls.
+/// - HTTP 429 forces exponential backoff (honoring Retry-After) that heals on
+///   the next successful fetch.
+///
+/// Pure state + arithmetic: the store feeds it events, the scheduler asks it
+/// for the next delay. No timers, no I/O — fully testable with fixed dates.
+public struct AdaptiveCadence: Sendable, Equatable {
+    /// Poll interval while Claude is actively in use — the user-facing setting.
+    public var activeInterval: TimeInterval
+
+    /// Most recent proof that Claude is in use.
+    public private(set) var lastEvidence: Date
+    /// Consecutive 429s; any success resets it.
+    public private(set) var rateLimitStrikes = 0
+    /// Nothing polls automatically before this instant.
+    public private(set) var backoffUntil: Date?
+
+    /// Never poll faster than this, matching `TriggerGate` (spec §9).
+    public static let floor: TimeInterval = 60
+    /// Never poll slower than this — a meter an hour stale stops being a meter.
+    public static let ceiling: TimeInterval = 3600
+    /// First 429 waits this long, unless Retry-After asks for more...
+    public static let backoffBase: TimeInterval = 300
+    /// ...and however large Retry-After is, re-check within two hours.
+    public static let backoffCeiling: TimeInterval = 7200
+
+    public init(activeInterval: TimeInterval, now: Date) {
+        self.activeInterval = activeInterval
+        // Launching (or relaunching) the app is itself engagement: start
+        // attentive and let quiet decay the pace from there.
+        self.lastEvidence = now
+    }
+
+    /// Quiet-time decay ladder: time since the last evidence of use, as a
+    /// multiple of the active interval.
+    public func multiplier(now: Date) -> Int {
+        let quiet = now.timeIntervalSince(lastEvidence)
+        if quiet < 15 * 60 { return 1 }
+        if quiet < 60 * 60 { return 2 }
+        if quiet < 4 * 3600 { return 4 }
+        return 8
+    }
+
+    /// Delay until the next automatic poll.
+    public func interval(now: Date) -> TimeInterval {
+        if let backoffUntil, backoffUntil > now {
+            return max(Self.floor, backoffUntil.timeIntervalSince(now))
+        }
+        let paced = activeInterval * Double(multiplier(now: now))
+        return min(Self.ceiling, max(Self.floor, paced))
+    }
+
+    public func isBackingOff(now: Date) -> Bool {
+        guard let backoffUntil else { return false }
+        return backoffUntil > now
+    }
+
+    /// A local push signal (Claude Code wrote a transcript). Deliberately does
+    /// not touch backoff: user activity during a 429 pause must not shorten
+    /// the pause.
+    public mutating func noteActivity(at now: Date) {
+        lastEvidence = max(lastEvidence, now)
+    }
+
+    /// A successful poll heals any backoff; rising usage counts as evidence.
+    public mutating func noteSuccess(usageAdvanced: Bool, at now: Date) {
+        rateLimitStrikes = 0
+        backoffUntil = nil
+        if usageAdvanced {
+            lastEvidence = max(lastEvidence, now)
+        }
+    }
+
+    public mutating func noteRateLimited(retryAfter: TimeInterval?, at now: Date) {
+        rateLimitStrikes += 1
+        let exponential = min(
+            Self.ceiling, Self.backoffBase * pow(2, Double(rateLimitStrikes - 1)))
+        let delay = min(Self.backoffCeiling, max(retryAfter ?? 0, exponential))
+        backoffUntil = now.addingTimeInterval(delay)
+    }
+}
+
+/// Parses an HTTP `Retry-After` header value: either delta-seconds ("120") or
+/// an HTTP-date ("Wed, 21 Oct 2015 07:28:00 GMT"), normalized to seconds from
+/// `now`. Unparseable values return nil and the caller falls back to its own
+/// exponential backoff.
+public enum RetryAfter {
+    public static func seconds(from header: String?, now: Date = Date()) -> TimeInterval? {
+        guard let header = header?.trimmingCharacters(in: .whitespaces),
+              !header.isEmpty else { return nil }
+        if let delta = TimeInterval(header) {
+            return delta.isFinite ? max(0, delta) : nil
+        }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "GMT")
+        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+        guard let date = formatter.date(from: header) else { return nil }
+        return max(0, date.timeIntervalSince(now))
+    }
+}
+
+/// Detects real consumption between two snapshots: a meter's percent rose, a
+/// meter entered a fresh window (reset time moved) with usage already in it,
+/// or a new scoped meter appeared with usage. A percent drop alone is a limit
+/// reset, not activity. This is the signal that notices Claude app / web
+/// usage, which leaves no local files behind.
+public enum UsageMovement {
+    public static func advanced(from old: Snapshot?, to new: Snapshot) -> Bool {
+        guard let old else { return false }
+        let previous = Dictionary(
+            old.meters.map { ($0.label, $0) }, uniquingKeysWith: { first, _ in first })
+        return new.meters.contains { meter in
+            guard let percent = meter.percent else { return false }
+            guard let before = previous[meter.label] else { return percent > 0 }
+            if let beforePercent = before.percent, percent > beforePercent { return true }
+            return meter.resetsAt != before.resetsAt && percent > 0
+        }
+    }
+}

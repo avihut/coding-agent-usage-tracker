@@ -7,6 +7,8 @@ public enum UsageError: Error, Sendable, Equatable {
     case keychainDenied
     case credentialsUnreadable
     case signInExpired
+    /// 429. The associated Retry-After seconds feed the backoff, not the UI.
+    case rateLimited(retryAfter: TimeInterval?)
     case http(Int)
     case network
     case schema
@@ -17,6 +19,7 @@ public enum UsageError: Error, Sendable, Equatable {
         case .keychainDenied: "Keychain access denied"
         case .credentialsUnreadable: "Stored credentials unreadable"
         case .signInExpired: "Sign-in expired — open Claude Code"
+        case .rateLimited: "Rate limited — checks paused"
         case .http(let code): "Usage endpoint returned HTTP \(code)"
         case .network: "Network unavailable"
         case .schema: "Unexpected API response"
@@ -28,6 +31,7 @@ public enum UsageError: Error, Sendable, Equatable {
         case .noCredentials: "Sign in to Claude Code, then refresh."
         case .keychainDenied: "Approve the Keychain prompt on the next refresh — \"Always Allow\" stops future prompts."
         case .signInExpired: "Open Claude Code once; it refreshes the token automatically."
+        case .rateLimited: "The API asked for a pause. Checks back off and resume on their own."
         case .schema: "The undocumented API may have changed shape."
         case .http, .network, .credentialsUnreadable: nil
         }
@@ -44,6 +48,7 @@ public enum UsageError: Error, Sendable, Equatable {
     static func from(_ error: UsageClientError) -> UsageError {
         switch error {
         case .signInExpired: .signInExpired
+        case .rateLimited(let retryAfter): .rateLimited(retryAfter: retryAfter)
         case .http(let code): .http(code)
         case .network: .network
         case .schema: .schema

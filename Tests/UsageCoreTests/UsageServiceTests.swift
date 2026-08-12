@@ -95,6 +95,19 @@ struct UsageServiceTests {
         #expect(attempts.value == 1)
     }
 
+    @Test("429 is not retried and surfaces as rateLimited")
+    func rateLimitedNoRetry() async {
+        let token = uniqueToken()
+        let attempts = Box(0)
+        StubURLProtocol.registerWithHeaders(token: token) { _ in
+            attempts.mutate { $0 += 1 }
+            return (429, Data(), ["Retry-After": "120"])
+        }
+        let state = await makeService(token: token, cache: temporaryCache()).refresh()
+        #expect(state == .unavailable(.rateLimited(retryAfter: 120)))
+        #expect(attempts.value == 1)
+    }
+
     @Test("undecodable 200 body degrades to schema error")
     func schemaDrift() async {
         let token = uniqueToken()
