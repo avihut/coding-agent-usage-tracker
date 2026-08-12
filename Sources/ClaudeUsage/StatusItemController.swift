@@ -17,6 +17,8 @@ final class StatusItemController: NSResponder {
     private let popover = NSPopover()
     private let hoverPopover = NSPopover()
     private var hoverTask: Task<Void, Never>?
+    private var outsideClickMonitor: Any?
+    private var resignActiveObserver: NSObjectProtocol?
 
     init(store: UsageStore) {
         self.store = store
@@ -27,6 +29,7 @@ final class StatusItemController: NSResponder {
         host.sizingOptions = .preferredContentSize
         popover.contentViewController = host
         popover.behavior = .transient
+        popover.delegate = self
 
         hoverPopover.behavior = .applicationDefined
         hoverPopover.animates = false
@@ -100,6 +103,50 @@ final class StatusItemController: NSResponder {
             store.scanActivity()
             NSApp.activate()
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            beginDismissMonitoring()
         }
+    }
+
+    // MARK: - Outside-interaction dismissal
+
+    // .transient alone can't dismiss the panel in an LSUIElement app: it
+    // closes on app deactivation, but cooperative activation (macOS 14+)
+    // means NSApp.activate() often leaves this app inactive, so clicking
+    // another app never produces the deactivation. Global monitors only see
+    // events delivered to *other* apps — clicks and scrolls inside the
+    // panel never reach them — so any hit means "the user went elsewhere".
+
+    private func beginDismissMonitoring() {
+        endDismissMonitoring()
+        outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown, .scrollWheel]
+        ) { [weak self] _ in
+            Task { @MainActor in self?.dismissPanel() }
+        }
+        resignActiveObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didResignActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.dismissPanel() }
+        }
+    }
+
+    private func endDismissMonitoring() {
+        if let outsideClickMonitor { NSEvent.removeMonitor(outsideClickMonitor) }
+        outsideClickMonitor = nil
+        if let resignActiveObserver { NotificationCenter.default.removeObserver(resignActiveObserver) }
+        resignActiveObserver = nil
+    }
+
+    private func dismissPanel() {
+        guard popover.isShown else { return }
+        popover.performClose(nil)
+    }
+}
+
+extension StatusItemController: NSPopoverDelegate {
+    // Runs on every close path — toggle, Esc, transient, or our monitors —
+    // so the monitors never outlive the panel.
+    func popoverDidClose(_ notification: Notification) {
+        endDismissMonitoring()
     }
 }
