@@ -70,7 +70,7 @@ struct HeatmapView: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             } else {
-                grid
+                chart
                 HStack {
                     Text("\(TokenFormat.compact(layout.totalTokens)) tokens · \(layout.activeDays) active days")
                         .font(.caption2)
@@ -101,21 +101,16 @@ struct HeatmapView: View {
 
     // MARK: - Views
 
-    private var grid: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(alignment: .top, spacing: 2) {
-                ForEach(layout.weeks.indices, id: \.self) { column in
-                    VStack(spacing: 2) {
-                        ForEach(layout.weeks[column].indices, id: \.self) { row in
-                            cell(for: layout.weeks[column][row])
-                        }
-                    }
-                }
+    /// 7D reads better as day bars with labels; the longer periods keep the
+    /// GitHub grid. Both share the tooltip overlay and hover machinery.
+    private var chart: some View {
+        Group {
+            if period == .week {
+                barChart
+            } else {
+                grid
             }
         }
-        // "All" reaches back months; open it showing the recent end.
-        .defaultScrollAnchor(period == .all ? .trailing : .topLeading)
-        .id(period)
         .overlayPreferenceValue(TipKey.self) { tip in
             GeometryReader { geo in
                 if let tip {
@@ -132,12 +127,108 @@ struct HeatmapView: View {
             }
             .allowsHitTesting(false)
         }
-        // Text views in the popover leak I-beam cursor rects over the grid;
+        // Text views in the popover leak I-beam cursor rects over the chart;
         // keep the arrow cursor while the pointer is anywhere on it.
         .onContinuousHover { phase in
             if case .active = phase { NSCursor.arrow.set() }
         }
     }
+
+    private var grid: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(alignment: .top, spacing: 2) {
+                ForEach(layout.weeks.indices, id: \.self) { column in
+                    VStack(spacing: 2) {
+                        ForEach(layout.weeks[column].indices, id: \.self) { row in
+                            cell(for: layout.weeks[column][row])
+                        }
+                    }
+                }
+            }
+        }
+        // "All" reaches back months; open it showing the recent end.
+        .defaultScrollAnchor(period == .all ? .trailing : .topLeading)
+        .id(period)
+    }
+
+    // MARK: - 7D bar chart
+
+    private static let barPlotHeight: CGFloat = 64
+
+    private var barChart: some View {
+        let days = layout.weeks.flatMap { $0 }.compactMap { $0 }
+        return VStack(spacing: 3) {
+            HStack(alignment: .bottom, spacing: 4) {
+                ForEach(days, id: \.self) { day in
+                    bar(for: day)
+                }
+            }
+            .frame(height: Self.barPlotHeight)
+            Rectangle().fill(.quaternary).frame(height: 1)
+            HStack(spacing: 4) {
+                ForEach(days, id: \.self) { day in
+                    VStack(spacing: 0) {
+                        Text(Self.weekdayFormatter.string(from: day))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text(Self.dayOfMonthFormatter.string(from: day))
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+        }
+    }
+
+    private func bar(for day: Date) -> some View {
+        let entry = layout.byDay[day]
+        return ZStack(alignment: .bottom) {
+            Color.clear
+            RoundedRectangle(cornerRadius: 2)
+                .fill(color(for: entry))
+                .frame(height: barHeight(for: entry))
+                .overlay {
+                    if hoveredDay == day {
+                        RoundedRectangle(cornerRadius: 2)
+                            .strokeBorder(.primary.opacity(0.9), lineWidth: 1)
+                    }
+                }
+                .anchorPreference(key: TipKey.self, value: .bounds) { anchor in
+                    hoveredDay == day ? TipValue(anchor: anchor, day: day) : nil
+                }
+        }
+        .frame(maxWidth: .infinity)
+        .contentShape(Rectangle())
+        .onHover { inside in
+            if inside {
+                hoveredDay = day
+            } else if hoveredDay == day {
+                hoveredDay = nil
+            }
+        }
+    }
+
+    /// Height carries the magnitude; color keeps the heatmap's intensity ramp.
+    /// Stubs keep empty and prompt-only days (magnitude unknown) visible.
+    private func barHeight(for entry: DailyActivity?) -> CGFloat {
+        guard let entry, entry.tokens > 0 || entry.prompts > 0 else { return 2 }
+        guard entry.tokens > 0 else { return 5 }
+        let fraction = Double(entry.tokens) / Double(layout.maxTokens)
+        return max(4, Self.barPlotHeight * fraction)
+    }
+
+    private static let weekdayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEE"
+        return formatter
+    }()
+
+    private static let dayOfMonthFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "d"
+        return formatter
+    }()
 
     @ViewBuilder
     private func cell(for day: Date?) -> some View {
