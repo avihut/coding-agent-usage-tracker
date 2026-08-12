@@ -8,6 +8,20 @@ import Foundation
 /// own calendar arithmetic. The view builds this once per activity/period
 /// change instead, so hover redraws only read it.
 public struct HeatmapLayout: Equatable, Sendable {
+    /// A month boundary on the time axis: `index` is the week (column or row,
+    /// depending on how the view lays weeks out) where that month first
+    /// appears. The first week is always marked, so the axis states where the
+    /// window begins; years join the label only when the span crosses one.
+    public struct MonthMark: Equatable, Sendable {
+        public let index: Int
+        public let label: String
+
+        public init(index: Int, label: String) {
+            self.index = index
+            self.label = label
+        }
+    }
+
     /// Columns of seven days, GitHub-style; `nil` pads partial weeks.
     public let weeks: [[Date?]]
     /// Activity keyed by local-midnight day, for O(1) cell lookup.
@@ -16,6 +30,7 @@ public struct HeatmapLayout: Equatable, Sendable {
     public let maxTokens: Int
     public let totalTokens: Int
     public let activeDays: Int
+    public let monthMarks: [MonthMark]
 
     /// Longest span the "All" period renders. Not a retention policy: it
     /// stops one wild timestamp from expanding the grid to tens of thousands
@@ -23,17 +38,18 @@ public struct HeatmapLayout: Equatable, Sendable {
     public static let maximumSpanInDays = 5 * 366
 
     public static let empty = HeatmapLayout(
-        weeks: [], byDay: [:], maxTokens: 1, totalTokens: 0, activeDays: 0)
+        weeks: [], byDay: [:], maxTokens: 1, totalTokens: 0, activeDays: 0, monthMarks: [])
 
     public init(
         weeks: [[Date?]], byDay: [Date: DailyActivity],
-        maxTokens: Int, totalTokens: Int, activeDays: Int
+        maxTokens: Int, totalTokens: Int, activeDays: Int, monthMarks: [MonthMark]
     ) {
         self.weeks = weeks
         self.byDay = byDay
         self.maxTokens = maxTokens
         self.totalTokens = totalTokens
         self.activeDays = activeDays
+        self.monthMarks = monthMarks
     }
 
     public var isEmpty: Bool { activeDays == 0 }
@@ -43,7 +59,8 @@ public struct HeatmapLayout: Equatable, Sendable {
         activity: [DailyActivity],
         dayCount: Int?,
         calendar: Calendar = .current,
-        now: Date = Date()
+        now: Date = Date(),
+        locale: Locale = .current
     ) -> HeatmapLayout {
         let today = calendar.startOfDay(for: now)
         let active = activity.filter { $0.tokens > 0 || $0.prompts > 0 }
@@ -70,11 +87,44 @@ public struct HeatmapLayout: Equatable, Sendable {
         }
         while cells.count % 7 != 0 { cells.append(nil) }
 
+        let weeks = stride(from: 0, to: cells.count, by: 7).map { Array(cells[$0..<$0 + 7]) }
+
         return HeatmapLayout(
-            weeks: stride(from: 0, to: cells.count, by: 7).map { Array(cells[$0..<$0 + 7]) },
+            weeks: weeks,
             byDay: byDay,
             maxTokens: max(1, visible.map(\.tokens).max() ?? 1),
             totalTokens: visible.reduce(0) { $0 + $1.tokens },
-            activeDays: byDay.count)
+            activeDays: byDay.count,
+            monthMarks: monthMarks(
+                weeks: weeks, rangeStart: rangeStart, today: today,
+                calendar: calendar, locale: locale))
+    }
+
+    private static func monthMarks(
+        weeks: [[Date?]], rangeStart: Date, today: Date,
+        calendar: Calendar, locale: Locale
+    ) -> [MonthMark] {
+        let formatter = DateFormatter()
+        formatter.locale = locale
+        formatter.calendar = calendar
+        formatter.timeZone = calendar.timeZone
+        formatter.dateFormat = "MMM"
+
+        let spansYears = calendar.component(.year, from: rangeStart)
+            != calendar.component(.year, from: today)
+        var marks: [MonthMark] = []
+        var previousMonth = -1
+        for (index, week) in weeks.enumerated() {
+            guard let first = week.compactMap({ $0 }).first else { continue }
+            let month = calendar.component(.month, from: first)
+            if month == previousMonth { continue }
+            previousMonth = month
+            var label = formatter.string(from: first)
+            if spansYears, marks.isEmpty || month == 1 {
+                label += " ’\(String(format: "%02d", calendar.component(.year, from: first) % 100))"
+            }
+            marks.append(MonthMark(index: index, label: label))
+        }
+        return marks
     }
 }

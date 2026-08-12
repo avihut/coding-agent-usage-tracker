@@ -18,7 +18,8 @@ struct HeatmapLayoutTests {
 
     static func build(_ activity: [DailyActivity], dayCount: Int?) -> HeatmapLayout {
         HeatmapLayout.build(
-            activity: activity, dayCount: dayCount, calendar: utcCalendar(), now: now)
+            activity: activity, dayCount: dayCount, calendar: utcCalendar(), now: now,
+            locale: Locale(identifier: "en_US_POSIX"))
     }
 
     /// Every real day in the grid, ignoring the nils that pad partial weeks.
@@ -89,5 +90,37 @@ struct HeatmapLayoutTests {
         #expect(layout.totalTokens == 0)
         #expect(layout.maxTokens == 1) // safe intensity denominator
         #expect(Self.days(layout) == [Self.now])
+    }
+
+    @Test("month marks label the window start and each month change")
+    func monthMarks() {
+        // Jul 11 – Aug 9 2026: partial first week, then August enters at the
+        // first week that begins inside it (Aug 2; Aug 1 is a Saturday).
+        let layout = Self.build(Self.sample, dayCount: 30)
+
+        #expect(layout.monthMarks == [
+            HeatmapLayout.MonthMark(index: 0, label: "Jul"),
+            HeatmapLayout.MonthMark(index: 4, label: "Aug"),
+        ])
+        #expect(layout.weeks[4].compactMap { $0 }.first == Self.day(2026, 8, 2))
+    }
+
+    @Test("a single-month window carries exactly one mark")
+    func singleMonthMark() {
+        let layout = Self.build(Self.sample, dayCount: 7)
+
+        #expect(layout.monthMarks == [HeatmapLayout.MonthMark(index: 0, label: "Aug")])
+    }
+
+    @Test("years join the labels when the span crosses a year boundary")
+    func yearMarks() {
+        let activity = [DailyActivity(day: Self.day(2025, 11, 15), tokens: 10, messages: 1)]
+        let layout = Self.build(activity, dayCount: nil)
+        let labels = layout.monthMarks.map(\.label)
+
+        #expect(labels.first == "Nov ’25")
+        #expect(labels.contains("Jan ’26"))
+        #expect(labels.last == "Aug") // years only where they change
+        #expect(labels.count == 10) // Nov 2025 through Aug 2026
     }
 }

@@ -20,14 +20,6 @@ struct HeatmapView: View {
             case .all: nil
             }
         }
-
-        var cellSize: CGFloat {
-            switch self {
-            case .week: 16
-            case .month: 12
-            case .all: 9
-            }
-        }
     }
 
     @State private var period: Period = .month
@@ -101,14 +93,15 @@ struct HeatmapView: View {
 
     // MARK: - Views
 
-    /// 7D reads better as day bars with labels; the longer periods keep the
-    /// GitHub grid. Both share the tooltip overlay and hover machinery.
+    /// Each period gets the rendering its span reads best in: day bars for a
+    /// week, a full-width calendar for a month, the scrolling GitHub grid for
+    /// everything. All three share the tooltip overlay and hover machinery.
     private var chart: some View {
         Group {
-            if period == .week {
-                barChart
-            } else {
-                grid
+            switch period {
+            case .week: barChart
+            case .month: calendarGrid
+            case .all: grid
             }
         }
         .overlayPreferenceValue(TipKey.self) { tip in
@@ -134,21 +127,132 @@ struct HeatmapView: View {
         }
     }
 
+    private static let gridCellSize: CGFloat = 9
+    private static let monthHeaderHeight: CGFloat = 10
+
     private var grid: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(alignment: .top, spacing: 2) {
-                ForEach(layout.weeks.indices, id: \.self) { column in
-                    VStack(spacing: 2) {
-                        ForEach(layout.weeks[column].indices, id: \.self) { row in
-                            cell(for: layout.weeks[column][row])
+        HStack(alignment: .top, spacing: 4) {
+            weekdayGutter
+            ScrollView(.horizontal, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 2) {
+                    monthHeader
+                    HStack(alignment: .top, spacing: 2) {
+                        ForEach(layout.weeks.indices, id: \.self) { column in
+                            VStack(spacing: 2) {
+                                ForEach(layout.weeks[column].indices, id: \.self) { row in
+                                    cell(for: layout.weeks[column][row])
+                                }
+                            }
                         }
                     }
                 }
             }
+            // "All" reaches back months; open it showing the recent end.
+            .defaultScrollAnchor(.trailing)
         }
-        // "All" reaches back months; open it showing the recent end.
-        .defaultScrollAnchor(period == .all ? .trailing : .topLeading)
-        .id(period)
+    }
+
+    /// Month labels across the top of the grid, each at the column where the
+    /// month first appears; a label that would crowd its predecessor is
+    /// dropped rather than overlapped.
+    private var monthHeader: some View {
+        let step = Self.gridCellSize + 2
+        let minGap = Int((34 / step).rounded(.up))
+        // Seed so the first mark always qualifies; Int.min here would
+        // overflow the subtraction below.
+        var lastShown = -minGap
+        let visible = layout.monthMarks.filter { mark in
+            guard mark.index - lastShown >= minGap else { return false }
+            lastShown = mark.index
+            return true
+        }
+        return ZStack(alignment: .topLeading) {
+            Color.clear
+                .frame(width: max(1, CGFloat(layout.weeks.count) * step - 2),
+                       height: Self.monthHeaderHeight)
+            ForEach(visible, id: \.index) { mark in
+                Text(mark.label)
+                    .font(.system(size: 8))
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
+                    .offset(x: CGFloat(mark.index) * step)
+            }
+        }
+    }
+
+    /// Sun-first to match the grid rows (weeks pad by absolute weekday);
+    /// alternate rows only, GitHub-style.
+    private var weekdayGutter: some View {
+        let symbols = Calendar.current.veryShortWeekdaySymbols
+        return VStack(spacing: 2) {
+            ForEach(0..<7, id: \.self) { row in
+                Text(row % 2 == 1 ? symbols[row] : "")
+                    .font(.system(size: 8))
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 10, height: Self.gridCellSize)
+            }
+        }
+        .padding(.top, Self.monthHeaderHeight + 2)
+    }
+
+    // MARK: - 30D calendar grid
+
+    private static let calendarRowHeight: CGFloat = 16
+    private static let monthGutterWidth: CGFloat = 34
+
+    /// Weeks as full-width rows: seven weekday columns stretch across the
+    /// panel, and months are named in a side gutter where they begin.
+    private var calendarGrid: some View {
+        let labels = Dictionary(
+            layout.monthMarks.map { ($0.index, $0.label) },
+            uniquingKeysWith: { first, _ in first })
+        return VStack(spacing: 2) {
+            HStack(spacing: 2) {
+                Color.clear.frame(width: Self.monthGutterWidth, height: 12)
+                ForEach(0..<7, id: \.self) { column in
+                    Text(Calendar.current.veryShortWeekdaySymbols[column])
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            ForEach(layout.weeks.indices, id: \.self) { row in
+                HStack(spacing: 2) {
+                    monthGutterLabel(labels[row])
+                    ForEach(layout.weeks[row].indices, id: \.self) { column in
+                        calendarCell(for: layout.weeks[row][column])
+                    }
+                }
+            }
+        }
+    }
+
+    private func monthGutterLabel(_ label: String?) -> some View {
+        HStack(spacing: 3) {
+            Spacer(minLength: 0)
+            if let label {
+                Text(label)
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+                Rectangle()
+                    .fill(.tertiary)
+                    .frame(width: 4, height: 1)
+            }
+        }
+        .frame(width: Self.monthGutterWidth, height: Self.calendarRowHeight)
+    }
+
+    @ViewBuilder
+    private func calendarCell(for day: Date?) -> some View {
+        if let day {
+            heatCell(for: day)
+                .frame(maxWidth: .infinity)
+                .frame(height: Self.calendarRowHeight)
+        } else {
+            Color.clear
+                .frame(maxWidth: .infinity)
+                .frame(height: Self.calendarRowHeight)
+        }
     }
 
     // MARK: - 7D bar chart
@@ -233,28 +337,34 @@ struct HeatmapView: View {
     @ViewBuilder
     private func cell(for day: Date?) -> some View {
         if let day {
-            RoundedRectangle(cornerRadius: 2)
-                .fill(color(for: layout.byDay[day]))
-                .frame(width: period.cellSize, height: period.cellSize)
-                .overlay {
-                    if hoveredDay == day {
-                        RoundedRectangle(cornerRadius: 2)
-                            .strokeBorder(.primary.opacity(0.9), lineWidth: 1)
-                    }
-                }
-                .onHover { inside in
-                    if inside {
-                        hoveredDay = day
-                    } else if hoveredDay == day {
-                        hoveredDay = nil
-                    }
-                }
-                .anchorPreference(key: TipKey.self, value: .bounds) { anchor in
-                    hoveredDay == day ? TipValue(anchor: anchor, day: day) : nil
-                }
+            heatCell(for: day)
+                .frame(width: Self.gridCellSize, height: Self.gridCellSize)
         } else {
-            Color.clear.frame(width: period.cellSize, height: period.cellSize)
+            Color.clear.frame(width: Self.gridCellSize, height: Self.gridCellSize)
         }
+    }
+
+    /// One heat square/stripe — fill, hover ring, tooltip anchor. Callers
+    /// give it its frame.
+    private func heatCell(for day: Date) -> some View {
+        RoundedRectangle(cornerRadius: 2)
+            .fill(color(for: layout.byDay[day]))
+            .overlay {
+                if hoveredDay == day {
+                    RoundedRectangle(cornerRadius: 2)
+                        .strokeBorder(.primary.opacity(0.9), lineWidth: 1)
+                }
+            }
+            .onHover { inside in
+                if inside {
+                    hoveredDay = day
+                } else if hoveredDay == day {
+                    hoveredDay = nil
+                }
+            }
+            .anchorPreference(key: TipKey.self, value: .bounds) { anchor in
+                hoveredDay == day ? TipValue(anchor: anchor, day: day) : nil
+            }
     }
 
     /// Instant tooltip bubble — native `.help()` tags are too slow and
