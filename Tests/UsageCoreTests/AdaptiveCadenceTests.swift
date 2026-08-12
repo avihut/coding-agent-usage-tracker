@@ -105,6 +105,34 @@ struct AdaptiveCadenceTests {
         #expect(cadence.isBackingOff(now: during))
         #expect(cadence.interval(now: during) == 1740)
     }
+
+    @Test("activity polls when the data is older than the active pace")
+    func activityPollsOnStaleData() {
+        let cadence = AdaptiveCadence(activeInterval: 300, now: t0)
+        // Fresh evidence throughout (an agent session churning) must not
+        // suppress the poll — staleness alone decides.
+        #expect(cadence.shouldPollOnActivity(dataAge: 300, now: t0))
+        #expect(cadence.shouldPollOnActivity(dataAge: 1200, now: t0))
+        #expect(!cadence.shouldPollOnActivity(dataAge: 299, now: t0))
+        #expect(!cadence.shouldPollOnActivity(dataAge: 0, now: t0))
+    }
+
+    @Test("activity polls when there is no data at all")
+    func activityPollsWithNoData() {
+        let cadence = AdaptiveCadence(activeInterval: 300, now: t0)
+        #expect(cadence.shouldPollOnActivity(dataAge: nil, now: t0))
+    }
+
+    @Test("activity never polls during a backoff, however stale the data")
+    func activityPollRespectsBackoff() {
+        var cadence = AdaptiveCadence(activeInterval: 300, now: t0)
+        cadence.noteRateLimited(retryAfter: nil, at: t0)
+        let during = t0.addingTimeInterval(60)
+        #expect(!cadence.shouldPollOnActivity(dataAge: 9999, now: during))
+        #expect(!cadence.shouldPollOnActivity(dataAge: nil, now: during))
+        let after = t0.addingTimeInterval(600)
+        #expect(cadence.shouldPollOnActivity(dataAge: 9999, now: after))
+    }
 }
 
 @Suite("RetryAfter")

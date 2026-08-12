@@ -63,6 +63,19 @@ public struct AdaptiveCadence: Sendable, Equatable {
         return backoffUntil > now
     }
 
+    /// Whether an activity signal warrants polling right now. Keyed on how old
+    /// the displayed data is, not on the decay multiplier: agentic Claude Code
+    /// sessions write transcripts continuously even while the user is away,
+    /// which keeps `lastEvidence` fresh — yet the human returning still
+    /// deserves numbers no staler than the pace they chose. Also recovers
+    /// timers App Nap has let drift. Never during backoff; the trigger gate
+    /// still owns the 60-second floor.
+    public func shouldPollOnActivity(dataAge: TimeInterval?, now: Date) -> Bool {
+        if isBackingOff(now: now) { return false }
+        guard let dataAge else { return true }
+        return dataAge >= activeInterval
+    }
+
     /// A local push signal (Claude Code wrote a transcript). Deliberately does
     /// not touch backoff: user activity during a 429 pause must not shorten
     /// the pause.

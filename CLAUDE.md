@@ -38,7 +38,11 @@ the README rather than silently deviating.
   `~/.claude/projects` (`ClaudeActivityWatcher` — observational only, never
   reads paths) is the push signal for Claude Code; percentages rising between
   polls (`UsageMovement` — rises and fresh-window usage count, drops are
-  resets) is the pull signal that catches Claude app/web use. HTTP 429 maps
+  resets) is the pull signal that catches Claude app/web use. A push signal
+  also polls immediately when the shown data is older than the active
+  interval (`shouldPollOnActivity`) — keyed on data staleness, not the decay
+  multiplier, because agent sessions keep evidence warm while the user is
+  away, and stale-keyed polls also recover timers App Nap let drift. HTTP 429 maps
   to `.rateLimited(retryAfter:)` and starts exponential backoff (5 min
   doubling to 1 h, `Retry-After` honored up to 2 h) that heals on the next
   success; automatic triggers sit backoff out, manual refresh may punch
@@ -101,6 +105,13 @@ the README rather than silently deviating.
   AppKit draw inside the button's appearance context, where dynamic colors
   resolve correctly; KVO on `button.effectiveAppearance` re-renders on
   theme/tint changes. The panel is SwiftUI in an `NSPopover`.
+- `.transient` alone cannot dismiss the panel popover: in an LSUIElement app
+  under cooperative activation (macOS 14+) the app usually never becomes
+  active, so clicking elsewhere produces no deactivation to close on. While
+  the panel is shown, a global mouse-down/scroll monitor plus a
+  `didResignActiveNotification` observer close it (torn down in
+  `popoverDidClose`); global monitors never see in-panel events, so any hit
+  means the user went elsewhere.
 - Timers get generous `tolerance`; refresh on `didWakeNotification` and
   network-path restore. Never poll faster than 60s — adaptive cadence may
   only ever slow polling down from the user's chosen active interval.

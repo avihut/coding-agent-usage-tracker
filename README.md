@@ -20,9 +20,10 @@ spec §9's fixed interval). The "Refresh when active" setting (default 5 min)
 is the pace while Claude is in use; sustained quiet decays it ×2 after 15
 minutes, ×4 after an hour, ×8 after four hours, never slower than one poll
 per hour. Two signals snap it back: FSEvents on `~/.claude/projects` (Claude
-Code writing a transcript — also triggers an immediate catch-up poll after a
-quiet stretch), and usage percentages rising between polls (which is how
-Claude app/web use gets noticed). An HTTP 429 pauses polling — 5 minutes,
+Code writing a transcript — this also polls immediately whenever the shown
+data is older than the active pace, so re-engaging catches the meters up at
+once), and usage percentages rising between polls (which is how Claude
+app/web use gets noticed). An HTTP 429 pauses polling — 5 minutes,
 doubling per repeat up to an hour, honoring `Retry-After` up to two hours —
 and heals automatically on the next success; the panel says so and shows the
 retry countdown. Manual refresh still works during a pause. The panel footer

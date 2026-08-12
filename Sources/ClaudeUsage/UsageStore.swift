@@ -95,15 +95,17 @@ final class UsageStore {
     }
 
     /// The FSEvents watcher saw Claude Code write a transcript: snap the
-    /// cadence back to the active pace, and if polling had decayed, fetch now
-    /// so the meters catch up with the re-engagement immediately.
+    /// cadence back to the active pace, and fetch now whenever the displayed
+    /// data is older than that pace, so re-engaging always catches the meters
+    /// up promptly — even when a background agent session kept the evidence
+    /// warm the whole time.
     func noteLocalClaudeActivity() {
         let now = Date()
-        let wasDecayed = cadence.multiplier(now: now) > 1
         cadence.noteActivity(at: now)
         scanActivity() // transcripts changed; the heatmap follows (1/min throttle)
         guard !cadence.isBackingOff(now: now) else { return }
-        if wasDecayed {
+        let dataAge = state.snapshot.map { now.timeIntervalSince($0.fetchedAt) }
+        if cadence.shouldPollOnActivity(dataAge: dataAge, now: now) {
             refresh(.activity)
         }
         // Whether or not that ran (it may be gate-denied), align the pending
