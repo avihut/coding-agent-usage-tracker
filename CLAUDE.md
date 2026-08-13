@@ -218,3 +218,5 @@ the README rather than silently deviating.
   without their go.
 - Commit only when the user asks, or when structurally required (say so
   explicitly when it is).
+- Every commit that bumps `AppIdentity.version` gets a matching annotated
+  tag (`vX.Y.Z`) on that commit, pushed alongside it.
