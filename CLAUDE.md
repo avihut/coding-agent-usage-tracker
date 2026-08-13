@@ -137,7 +137,11 @@ the README rather than silently deviating.
   the panel is shown, a global mouse-down/scroll monitor plus a
   `didResignActiveNotification` observer close it (torn down in
   `popoverDidClose`); global monitors never see in-panel events, so any hit
-  means the user went elsewhere.
+  means the user went elsewhere. The same inactivity means the panel window
+  is never key on its own — and a non-key window consumes the first click
+  to focus itself, so SwiftUI tap targets needed two clicks (NSControl
+  pickers mask this via `acceptsFirstMouse`). `makeKey()` right after
+  `popover.show` fixes it; keep it if the show path ever moves.
 - Timers get generous `tolerance`; refresh on `didWakeNotification` and
   network-path restore. Never poll faster than 180s (`TriggerGate.floor`;
   tightened from 60s on 2026-08-13 — the endpoint rate-limits sustained

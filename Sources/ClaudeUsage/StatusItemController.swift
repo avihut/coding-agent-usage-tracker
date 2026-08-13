@@ -103,6 +103,12 @@ final class StatusItemController: NSResponder {
             store.scanActivity()
             NSApp.activate()
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            // Cooperative activation usually leaves this app inactive, and a
+            // non-key window consumes the first click just to focus itself —
+            // SwiftUI tap targets (day drill-down, meter rows) then need two
+            // clicks, while NSControl-backed pickers (acceptsFirstMouse)
+            // mask the problem. Claiming key at show makes first clicks land.
+            popover.contentViewController?.view.window?.makeKey()
             beginDismissMonitoring()
         }
     }
