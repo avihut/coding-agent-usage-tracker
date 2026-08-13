@@ -267,13 +267,17 @@ private struct CostSettingsPane: View {
     private var ratesCard: some View {
         SettingsCard(
             "List rates for your models",
-            footer: "US$ per million tokens. Subscription sessions cache with the 1-hour TTL, so their writes bill at the ×2 column. Models missing from the feed show — and sit out cost estimates."
+            footer: "Subscription sessions cache with the 1-hour TTL, so their writes bill at the ×2 column. Models missing from the feed show — and sit out cost estimates."
         ) {
             VStack(alignment: .leading, spacing: 9) {
+                HStack {
+                    Spacer()
+                    Text("US$ per 1M tokens")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
                 rateLine("model", ["input", "output", "cache read", "write 5m", "write 1h"], header: true)
-                ForEach(Array(ModelFamily.group(rateRows, usage: seenTotals).enumerated()),
-                        id: \.element.id) { index, family in
-                    if index > 0 { Divider() }
+                ForEach(ModelFamily.group(rateTableIDs)) { family in
                     ForEach(family.models, id: \.self) { model in
                         let rates = store.pricing.rates(for: model)
                         rateLine(ModelNames.display(model), [
@@ -287,6 +291,17 @@ private struct CostSettingsPane: View {
                 }
             }
         }
+    }
+
+    /// Every model the playground can price, plus anything seen locally
+    /// even when unpriced — one table, same family order as the picker.
+    private var rateTableIDs: [String] {
+        var ids = seenModels
+        let names = Set(ids.map(ModelNames.display))
+        ids += store.pricing.rates.keys
+            .filter { !Self.hasDateSuffix($0) && !names.contains(ModelNames.display($0)) }
+            .sorted()
+        return ids
     }
 
     /// One table line: the name column keeps its natural width (names never
@@ -328,17 +343,6 @@ private struct CostSettingsPane: View {
         seenTotals
             .sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }
             .map(\.key)
-    }
-
-    private var rateRows: [String] {
-        let seen = seenModels
-        if !seen.isEmpty { return seen }
-        // Nothing scanned yet: show current base ids from the table instead.
-        return store.pricing.rates.keys
-            .filter { !Self.hasDateSuffix($0) }
-            .sorted()
-            .prefix(8)
-            .map { $0 }
     }
 
     // MARK: Explainer
@@ -444,7 +448,7 @@ private struct CostSettingsPane: View {
         pricedIDs += store.pricing.rates.keys
             .filter { !Self.hasDateSuffix($0) && !seenNames.contains(ModelNames.display($0)) }
             .sorted()
-        return ModelFamily.group(pricedIDs, usage: seenTotals)
+        return ModelFamily.group(pricedIDs)
     }
 
     /// "claude-haiku-4-5-20251001" — dated release aliases of a base id.
@@ -461,13 +465,10 @@ struct ModelFamily: Identifiable, Equatable {
     let models: [String]
     var id: String { name }
 
-    /// Families you've used first (by local usage, then name); versions
-    /// newest-first inside each family, unversioned previews last.
-    static func group(_ ids: [String], usage: [String: Int]) -> [ModelFamily] {
-        var familyUsage: [String: Int] = [:]
-        for (model, total) in usage {
-            familyUsage[familyName(model), default: 0] += total
-        }
+    /// Families ordered by model size — Fable/Mythos, Opus, Sonnet, Haiku,
+    /// then everything else alphabetically; versions newest-first inside
+    /// each family, unversioned previews last.
+    static func group(_ ids: [String]) -> [ModelFamily] {
         var byFamily: [String: [String]] = [:]
         for id in ids {
             byFamily[familyName(id), default: []].append(id)
@@ -477,10 +478,21 @@ struct ModelFamily: Identifiable, Equatable {
                 ModelFamily(name: name, models: models.sorted(by: versionDescending))
             }
             .sorted { a, b in
-                let usageA = familyUsage[a.name] ?? 0
-                let usageB = familyUsage[b.name] ?? 0
-                return usageA != usageB ? usageA > usageB : a.name < b.name
+                let rankA = sizeRank(a.name)
+                let rankB = sizeRank(b.name)
+                return rankA != rankB ? rankA < rankB : a.name < b.name
             }
+    }
+
+    /// Larger models first — the tier ladder the product names imply.
+    private static func sizeRank(_ family: String) -> Int {
+        switch family.lowercased() {
+        case "fable", "mythos": 0
+        case "opus": 1
+        case "sonnet": 2
+        case "haiku": 3
+        default: 4
+        }
     }
 
     /// "claude-opus-4-8" → "Opus".
@@ -515,26 +527,28 @@ private struct RefreshIntervalSlider: View {
     /// Half the NSSlider knob: the track is inset this much per side.
     private static let thumbInset: CGFloat = 10
 
-    /// Minor tick values interleaved between the magnetic marks, spaced
-    /// about evenly on the log track.
-    private static let minorTicks: [Double] = [
-        240, 360, 480, 600, 720, 1_200, 2_700, 5_400,
-    ]
-
     var body: some View {
         VStack(spacing: 0) {
             Slider(value: positionBinding, in: 0...1)
-            // Notches: taller at the magnetic stops, shorter between them.
+            // Notches: taller at the magnetic stops; each span between stops
+            // subdivided evenly so the minor ticks keep one steady rhythm
+            // across the whole track (they're ruler marks, not values).
             Canvas { context, size in
                 let usable = size.width - 2 * Self.thumbInset
-                for tick in Self.minorTicks {
-                    let x = Self.thumbInset + RefreshIntervalScale.position(of: tick) * usable
-                    context.fill(
-                        Path(CGRect(x: x - 0.5, y: 2, width: 1, height: 4)),
-                        with: .color(.primary.opacity(0.18)))
+                let majors = RefreshIntervalScale.marks.map(RefreshIntervalScale.position(of:))
+                let targetStep = 0.0375
+                for (p0, p1) in zip(majors, majors.dropFirst()) {
+                    let count = max(1, Int(((p1 - p0) / targetStep).rounded()))
+                    for i in 1..<count {
+                        let p = p0 + (p1 - p0) * Double(i) / Double(count)
+                        let x = Self.thumbInset + p * usable
+                        context.fill(
+                            Path(CGRect(x: x - 0.5, y: 2, width: 1, height: 4)),
+                            with: .color(.primary.opacity(0.18)))
+                    }
                 }
-                for mark in RefreshIntervalScale.marks {
-                    let x = Self.thumbInset + RefreshIntervalScale.position(of: mark) * usable
+                for p in majors {
+                    let x = Self.thumbInset + p * usable
                     context.fill(
                         Path(CGRect(x: x - 0.75, y: 0, width: 1.5, height: 7)),
                         with: .color(.primary.opacity(0.38)))

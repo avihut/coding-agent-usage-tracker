@@ -95,6 +95,13 @@ struct HeatmapView: View {
             // pop back rather than point at nothing.
             if selectedDay != nil, selectedEntry == nil { selectedDay = nil }
         }
+        // Closing the panel pops any drill-down (no animation — offscreen):
+        // reopening should always land on the period totals.
+        .onDisappear {
+            selectedDay = nil
+            hoveredModel = nil
+            hoveredDay = nil
+        }
     }
 
     private var selectedEntry: DailyActivity? {
@@ -120,13 +127,7 @@ struct HeatmapView: View {
         HStack(spacing: 6) {
             Text("Activity").font(.caption.bold())
             Spacer()
-            Picker("Dimension", selection: $dimension) {
-                ForEach(Dimension.allCases) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .controlSize(.mini)
-            .labelsHidden()
-            .fixedSize()
+            dimensionPicker
             Picker("Period", selection: periodBinding) {
                 ForEach(Period.allCases) { Text($0.rawValue).tag($0) }
             }
@@ -135,6 +136,29 @@ struct HeatmapView: View {
             .labelsHidden()
             .fixedSize()
         }
+    }
+
+    /// Shared by the period header and the day drill-down, so the
+    /// tokens-or-cost lens survives the drill.
+    private var dimensionPicker: some View {
+        Picker("Dimension", selection: animatedDimension) {
+            ForEach(Dimension.allCases) { Text($0.rawValue).tag($0) }
+        }
+        .pickerStyle(.segmented)
+        .controlSize(.mini)
+        .labelsHidden()
+        .fixedSize()
+    }
+
+    /// Dimension flips animate, so the day ring's sectors sweep to their
+    /// new angles (and bars/cells re-scale) instead of jumping.
+    private var animatedDimension: Binding<Dimension> {
+        Binding(
+            get: { dimension },
+            set: { newValue in
+                withAnimation(Self.drillAnimation) { dimension = newValue }
+            }
+        )
     }
 
     private var periodContent: some View {
@@ -267,6 +291,7 @@ struct HeatmapView: View {
                 }
                 .buttonStyle(.plain)
                 Spacer()
+                dimensionPicker
             }
             if rows.isEmpty {
                 Text(entry.prompts > 0 && entry.tokens == 0
