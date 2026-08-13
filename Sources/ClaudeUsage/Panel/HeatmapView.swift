@@ -452,11 +452,10 @@ struct HeatmapView: View {
             Color.clear
             barFill(for: entry)
                 .frame(height: barHeight(for: entry))
+                // Today needs no ring here — the bold weekday label below
+                // already marks it; the grids keep their ring because their
+                // cells have no labels.
                 .overlay {
-                    if day == Self.today {
-                        RoundedRectangle(cornerRadius: 2)
-                            .strokeBorder(.secondary, lineWidth: 1)
-                    }
                     if hoveredDay == day {
                         RoundedRectangle(cornerRadius: 2)
                             .strokeBorder(.primary.opacity(0.9), lineWidth: 1)
