@@ -72,6 +72,9 @@ struct WindowTokensTests {
     func tallyMath() {
         let tally = TokenTally(input: 10, output: 5, cacheCreation: 100, cacheRead: 1000)
         #expect(tally.inputSide == 1110)
+        // Fresh processing vs cache re-reads partition the input side.
+        #expect(tally.uncachedInput == 110)
+        #expect(tally.uncachedInput + tally.cacheRead == tally.inputSide)
         #expect(tally.total == 1115)
         #expect(tally.cachedShare! > 0.90 && tally.cachedShare! < 0.91)
         // Output-only work has no input side to take a share of.

@@ -642,8 +642,8 @@ private struct ModelBreakdownGrid: View {
     let pricing: PricingTable
     @Binding var hoveredModel: String?
 
-    private static let tokenColumnWidth: CGFloat = 46
-    private static let costColumnWidth: CGFloat = 56
+    private static let tokenColumnWidth: CGFloat = 44
+    private static let costColumnWidth: CGFloat = 54
 
     var body: some View {
         let priced = rows.map { row in (row: row, rates: pricing.rates(for: row.model)) }
@@ -676,6 +676,7 @@ private struct ModelBreakdownGrid: View {
             Text("model")
             Spacer(minLength: 8)
             Text("input").frame(width: Self.tokenColumnWidth, alignment: .trailing)
+            Text("cached").frame(width: Self.tokenColumnWidth, alignment: .trailing)
             Text("output").frame(width: Self.tokenColumnWidth, alignment: .trailing)
             Text("est. cost").frame(width: Self.costColumnWidth, alignment: .trailing)
         }
@@ -695,7 +696,12 @@ private struct ModelBreakdownGrid: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 8)
-            Text(TokenFormat.compact(row.tally.inputSide))
+            // "input" is what was processed anew; the conversation history
+            // re-read from cache on every request stands apart as "cached" —
+            // lumping them reads as absurd typed-prompt volume.
+            Text(TokenFormat.compact(row.tally.uncachedInput))
+                .frame(width: Self.tokenColumnWidth, alignment: .trailing)
+            Text(TokenFormat.compact(row.tally.cacheRead))
                 .frame(width: Self.tokenColumnWidth, alignment: .trailing)
             Text(TokenFormat.compact(row.tally.output))
                 .frame(width: Self.tokenColumnWidth, alignment: .trailing)

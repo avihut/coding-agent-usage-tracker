@@ -33,6 +33,11 @@ public struct TokenTally: Codable, Sendable, Equatable {
 
     /// Everything the model read: fresh input plus both cache classes.
     public var inputSide: Int { input + cacheCreation + cacheRead }
+    /// Input the model had to process anew — fresh prompt plus cache writes.
+    /// The complement of `cacheRead` within `inputSide`: agentic harnesses
+    /// re-send the whole conversation every request, so cache reads dwarf
+    /// this, and displaying them as "input" misreads as typed prompt volume.
+    public var uncachedInput: Int { input + cacheCreation }
     public var total: Int { inputSide + output }
 
     /// Share of the input side served from cache — the discounted part.

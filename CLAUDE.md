@@ -80,7 +80,10 @@ the README rather than silently deviating.
   per-meter window breakdowns via `WindowTokens`). Day tooltips stay a
   one-liner by request; the per-model detail lives in the meter popovers
   and the period summary. That summary is a tabular grid (aligned
-  input/output/cost columns) doubling as a legend: models wear stable
+  input/cached/output/cost columns — `uncachedInput` vs `cacheRead`,
+  split because agentic harnesses re-read the whole conversation from
+  cache every request, and lumping that into "input" misreads as typed
+  prompt volume) doubling as a legend: models wear stable
   rank-assigned `ModelPalette` colors, hovering a row filters the chart to
   that model (heatmap re-ramped against `HeatmapLayout.modelMaxTokens`,
   its busiest own day, so light models keep contrast), the 7D bars are

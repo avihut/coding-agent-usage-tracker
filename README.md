@@ -16,9 +16,10 @@ calendar / all-time grid) with one-line day tooltips, and click-to-drill day
 views — a model donut plus that day's usage table, animated push/pop with a
 back button; per-meter hover popovers with percent history, per-window token
 breakdowns, and per-poll-interval readouts; a per-period model usage table
-(aligned input/output/cost columns, cost estimates at API list prices,
-pricing feed fetched daily with bundled fallback) whose rows double as a
-legend — hovering one filters the chart above to that model in its own
+(aligned input/cached/output/cost columns — cache re-reads of the
+conversation shown apart from fresh input — cost estimates at API list
+prices, pricing feed fetched daily with bundled fallback) whose rows
+double as a legend — hovering one filters the chart above to that model in its own
 color. Remaining: the §13 acceptance
 checklist items that need real-world time (sleep/wake, token expiry).
 
