@@ -89,7 +89,12 @@ the README rather than silently deviating.
   its busiest own day, so light models keep contrast), the 7D bars are
   per-model stacked with band order fixed period-wide, and clicking any
   day pushes (animated, with a back button) into a per-day drill-down —
-  model donut + the same grid scoped to that day.
+  model donut + the same grid scoped to that day. The grid is one shared
+  component (`ModelBreakdownGrid`), also the meter popovers' table:
+  hovering a row there swaps the percent chart for that model's
+  cumulative token curve. Hover-driven stats lines are fixed-height by
+  design — swapping text must never reflow the layout under the cursor —
+  and today's cell/bar carries a subtle ring.
 - Cost estimates: `PricingTable` (per-token `ModelRates`, exact-id then
   date-stripped lookup) from `PricingService` — disk-cached LiteLLM feed
   refreshed when >24h old (attempted at most hourly, piggybacked on usage

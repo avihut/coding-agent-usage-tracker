@@ -15,7 +15,8 @@ struct UsagePanelView: View {
             footer
         }
         .padding(14)
-        .frame(width: 320)
+        // Wide enough that the breakdown grid never truncates model names.
+        .frame(width: 360)
         .onAppear { store.scanActivity() }
     }
 
@@ -294,7 +295,9 @@ struct MeterRow: View {
 
 /// iStat-style per-limit history: this meter's sampled percent across its own
 /// limit window (5h for the session meter, 7 days for weeklies), plus the
-/// tokens local transcripts attribute to that window, by model.
+/// tokens local transcripts attribute to that window in the shared breakdown
+/// table. The table doubles as a legend — hovering a row swaps the chart to
+/// that model's cumulative tokens and the stats line to its share.
 struct MeterHistoryView: View {
     let meter: Meter
     let samples: [UsageSample]
@@ -302,6 +305,10 @@ struct MeterHistoryView: View {
     let pricing: PricingTable
 
     @State private var hoverDate: Date?
+    @State private var hoveredModel: String?
+
+    private static let chartWidth: CGFloat = 300
+    private static let chartHeight: CGFloat = 110
 
     private var window: TimeInterval { meter.rank == 0 ? 5 * 3600 : 7 * 86400 }
     private var windowLabel: String { meter.rank == 0 ? "last 5h" : "last 7 days" }
@@ -323,31 +330,136 @@ struct MeterHistoryView: View {
             }
     }
 
+    /// This window's per-model usage, scoped for scoped meters — the rows of
+    /// the shared table and the legend the chart follows.
+    private var windowRows: [ModelTokenUsage] {
+        let (start, _) = tokenWindow
+        let all = WindowTokens.breakdown(timeline: timeline, from: start, to: Date())
+        return scopeName.map { WindowTokens.scoped(all, name: $0) } ?? all
+    }
+
+    private var rowColors: [String: Color] {
+        ModelPalette.assignment(for: windowRows.map(\.model))
+    }
+
     var body: some View {
+        let rows = windowRows
+        let colors = rowColors
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline) {
                 Text(meter.label).font(.caption.bold())
                 Spacer()
                 Text(windowLabel).font(.caption2).foregroundStyle(.secondary)
             }
-            if points.count < 2 {
+            // Fixed-height stats line, the popover's counterpart of the main
+            // section's: window totals normally, the hovered model's share
+            // while the table filters the chart. Never reflows on hover.
+            HStack(spacing: 5) {
+                if let hoveredModel {
+                    Circle()
+                        .fill(colors[hoveredModel] ?? .gray)
+                        .frame(width: 6, height: 6)
+                }
+                Text(statsText(rows: rows))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .frame(height: 14)
+            if let hoveredModel {
+                modelChart(model: hoveredModel, color: colors[hoveredModel] ?? .gray)
+            } else if points.count < 2 {
                 Text("Collecting samples — this fills in as refreshes accumulate.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
-                    .frame(width: 260, height: 70)
+                    .frame(width: Self.chartWidth, height: Self.chartHeight)
             } else {
-                historyChart
-                Text(readout.map(readoutText) ?? "Hover the graph for point details")
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(readout == nil ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.secondary))
-                    .lineLimit(1)
+                percentChart
             }
-            tokensSection
+            Text(readout.map(readoutText) ?? hoverHint)
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(readout == nil ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.secondary))
+                .lineLimit(1)
+                .frame(height: 14, alignment: .leading)
+            Divider()
+            if rows.isEmpty {
+                Text("No local token data in this window.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            } else {
+                ModelBreakdownGrid(
+                    rows: rows, colors: colors, pricing: pricing,
+                    hoveredModel: $hoveredModel)
+            }
+            Text("Local Claude Code sessions on this Mac only.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
         }
         .padding(10)
     }
 
-    private var historyChart: some View {
+    /// "89.2M tokens this session", or the hovered model's slice of it.
+    private func statsText(rows: [ModelTokenUsage]) -> String {
+        let (_, label) = tokenWindow
+        if let hoveredModel, let row = rows.first(where: { $0.model == hoveredModel }) {
+            return "\(row.displayName) · \(TokenFormat.compact(row.tally.total)) tokens \(label)"
+        }
+        return "\(TokenFormat.compact(WindowTokens.total(rows).total)) tokens \(label)"
+    }
+
+    private var hoverHint: String {
+        hoveredModel.map { "Cumulative \(ModelNames.display($0)) tokens" }
+            ?? "Hover the graph for point details"
+    }
+
+    /// The hovered model's cumulative tokens across the window — the
+    /// popover's version of the legend filtering the chart.
+    private func modelChart(model: String, color: Color) -> some View {
+        let curve = cumulativeCurve(model: model)
+        let (start, _) = tokenWindow
+        return Chart(curve, id: \.t) { point in
+            AreaMark(x: .value("Time", point.t), y: .value("Tokens", point.total))
+                .foregroundStyle(color.opacity(0.18))
+            LineMark(x: .value("Time", point.t), y: .value("Tokens", point.total))
+                .foregroundStyle(color)
+                .interpolationMethod(.monotone)
+        }
+        .chartYAxis {
+            AxisMarks(position: .trailing, values: .automatic(desiredCount: 3)) { value in
+                AxisGridLine()
+                AxisValueLabel {
+                    if let tokens = value.as(Double.self) {
+                        Text(TokenFormat.compact(Int(tokens)))
+                    }
+                }
+            }
+        }
+        .chartXScale(domain: start...Date())
+        .frame(width: Self.chartWidth, height: Self.chartHeight)
+    }
+
+    /// Running total per ~180 buckets so a busy week doesn't hand Charts
+    /// thousands of minute slots.
+    private func cumulativeCurve(model: String) -> [(t: Date, total: Int)] {
+        let (start, _) = tokenWindow
+        let end = Date()
+        let bucket = max(60, end.timeIntervalSince(start) / 180)
+        var curve: [(t: Date, total: Int)] = [(start, 0)]
+        var total = 0
+        var nextBoundary = start.addingTimeInterval(bucket)
+        for slot in timeline where slot.model == model && slot.t >= start && slot.t <= end {
+            if slot.t > nextBoundary {
+                curve.append((nextBoundary, total))
+                while nextBoundary < slot.t { nextBoundary.addTimeInterval(bucket) }
+            }
+            total += slot.tally.total
+        }
+        curve.append((end, total))
+        return curve
+    }
+
+    private var percentChart: some View {
         Chart {
             ForEach(points) { point in
                 AreaMark(
@@ -393,7 +505,7 @@ struct MeterHistoryView: View {
                     }
             }
         }
-        .frame(width: 260, height: 110)
+        .frame(width: Self.chartWidth, height: Self.chartHeight)
     }
 
     /// A continuously-hoverable reading: percent is interpolated between the
@@ -409,7 +521,9 @@ struct MeterHistoryView: View {
     }
 
     private var readout: Readout? {
-        guard let hoverDate else { return nil }
+        // Point readouts belong to the percent chart; in model mode the
+        // stats line carries the numbers.
+        guard hoveredModel == nil, let hoverDate else { return nil }
         let all = points
         guard let first = all.first, let last = all.last else { return nil }
         let t = min(max(hoverDate, Date().addingTimeInterval(-window)), Date())
@@ -468,48 +582,4 @@ struct MeterHistoryView: View {
         return String(meter.label.dropFirst("Weekly · ".count))
     }
 
-    @ViewBuilder private var tokensSection: some View {
-        let (start, label) = tokenWindow
-        let all = WindowTokens.breakdown(timeline: timeline, from: start, to: Date())
-        let rows = scopeName.map { WindowTokens.scoped(all, name: $0) } ?? all
-        Divider()
-        HStack(alignment: .firstTextBaseline) {
-            Text("Tokens \(label)").font(.caption2.bold()).foregroundStyle(.secondary)
-            Spacer()
-            if rows.count > 1 {
-                Text(TokenFormat.compact(WindowTokens.total(rows).total))
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
-            }
-        }
-        if rows.isEmpty {
-            Text("No local token data in this window.")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-        } else {
-            ForEach(rows) { row in
-                HStack(alignment: .firstTextBaseline) {
-                    Text(row.displayName)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                    Spacer(minLength: 8)
-                    Text(UsageFormatting.tallyText(row.tally))
-                        .font(.caption2.monospacedDigit())
-                        .layoutPriority(1)
-                }
-            }
-            let dollars = rows
-                .compactMap { pricing.rates(for: $0.model)?.dollars(for: $0.tally) }
-                .reduce(0, +)
-            if dollars > 0 {
-                Text("≈ \(UsageFormatting.money(dollars)) at API list prices")
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
-            }
-        }
-        Text("Local Claude Code sessions on this Mac only.")
-            .font(.caption2)
-            .foregroundStyle(.tertiary)
-    }
 }

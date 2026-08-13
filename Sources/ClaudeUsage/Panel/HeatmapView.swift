@@ -119,14 +119,23 @@ struct HeatmapView: View {
     private var periodContent: some View {
         VStack(alignment: .leading, spacing: 8) {
             titleRow
-            chart
-            HStack {
+            // Fixed height so hover swaps can never reflow the layout —
+            // wrapping stats used to shift the legend rows mid-hover.
+            HStack(spacing: 5) {
+                if let hoveredModel {
+                    Circle()
+                        .fill(modelColors[hoveredModel] ?? Self.claudeOrange)
+                        .frame(width: 6, height: 6)
+                }
                 Text(footerStats)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-                Spacer()
+                    .lineLimit(1)
+                Spacer(minLength: 8)
                 legend
             }
+            .frame(height: 14)
+            chart
             ModelBreakdownGrid(
                 rows: summaryRows, colors: modelColors, pricing: pricing,
                 hoveredModel: $hoveredModel)
@@ -423,11 +432,13 @@ struct HeatmapView: View {
                 ForEach(days, id: \.self) { day in
                     VStack(spacing: 0) {
                         Text(Self.weekdayFormatter.string(from: day))
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+                            .font(day == Self.today ? .caption2.bold() : .caption2)
+                            .foregroundStyle(day == Self.today
+                                ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
                         Text(Self.dayOfMonthFormatter.string(from: day))
                             .font(.caption2)
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(day == Self.today
+                                ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tertiary))
                     }
                     .frame(maxWidth: .infinity)
                 }
@@ -442,6 +453,10 @@ struct HeatmapView: View {
             barFill(for: entry)
                 .frame(height: barHeight(for: entry))
                 .overlay {
+                    if day == Self.today {
+                        RoundedRectangle(cornerRadius: 2)
+                            .strokeBorder(.secondary, lineWidth: 1)
+                    }
                     if hoveredDay == day {
                         RoundedRectangle(cornerRadius: 2)
                             .strokeBorder(.primary.opacity(0.9), lineWidth: 1)
@@ -548,6 +563,10 @@ struct HeatmapView: View {
         RoundedRectangle(cornerRadius: 2)
             .fill(color(for: layout.byDay[day]))
             .overlay {
+                if day == Self.today {
+                    RoundedRectangle(cornerRadius: 2)
+                        .strokeBorder(.secondary, lineWidth: 1)
+                }
                 if hoveredDay == day {
                     RoundedRectangle(cornerRadius: 2)
                         .strokeBorder(.primary.opacity(0.9), lineWidth: 1)
@@ -590,6 +609,10 @@ struct HeatmapView: View {
 
     // MARK: - Coloring
 
+    /// Local-midnight today, matching the layout's day keys. Computed per
+    /// access so a panel left open across midnight doesn't mark yesterday.
+    private static var today: Date { Calendar.current.startOfDay(for: Date()) }
+
     private static let claudeOrange = Color(nsColor: StatusItemRenderer.claudeOrange)
     private static let emptyColor = Color.gray.opacity(0.18)
     /// Days known only from prompt history — Claude Code already deleted the
@@ -628,99 +651,6 @@ struct HeatmapView: View {
                     .frame(width: 7, height: 7)
             }
             Text("more").font(.caption2).foregroundStyle(.tertiary)
-        }
-    }
-}
-
-/// The per-model usage table shared by the period summary and the day
-/// drill-down: a headline cost total over aligned input/output/cost columns.
-/// Rows double as a legend — each carries its model's color, and hovering a
-/// row filters the chart above to that model.
-private struct ModelBreakdownGrid: View {
-    let rows: [ModelTokenUsage]
-    let colors: [String: Color]
-    let pricing: PricingTable
-    @Binding var hoveredModel: String?
-
-    private static let tokenColumnWidth: CGFloat = 44
-    private static let costColumnWidth: CGFloat = 54
-
-    var body: some View {
-        let priced = rows.map { row in (row: row, rates: pricing.rates(for: row.model)) }
-        let total = priced.compactMap { $0.rates?.dollars(for: $0.row.tally) }.reduce(0, +)
-        let unpricedCount = priced.count(where: { $0.rates == nil })
-        VStack(alignment: .leading, spacing: 2) {
-            // The headline number: what this window would have cost.
-            VStack(spacing: 0) {
-                Text("≈ \(UsageFormatting.money(total))")
-                    .font(.system(size: 18, weight: .semibold).monospacedDigit())
-                    .foregroundStyle(.primary)
-                Text(unpricedCount > 0
-                    ? "at API list prices · \(unpricedCount) unpriced"
-                    : "at API list prices")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 2)
-            columnHeader
-            ForEach(priced, id: \.row.id) { entry in
-                modelRow(entry.row, rates: entry.rates)
-            }
-        }
-        .padding(.top, 2)
-    }
-
-    private var columnHeader: some View {
-        HStack(spacing: 8) {
-            Text("model")
-            Spacer(minLength: 8)
-            Text("input").frame(width: Self.tokenColumnWidth, alignment: .trailing)
-            Text("cached").frame(width: Self.tokenColumnWidth, alignment: .trailing)
-            Text("output").frame(width: Self.tokenColumnWidth, alignment: .trailing)
-            Text("est. cost").frame(width: Self.costColumnWidth, alignment: .trailing)
-        }
-        .font(.caption2)
-        .foregroundStyle(.tertiary)
-        .padding(.horizontal, 4)
-    }
-
-    private func modelRow(_ row: ModelTokenUsage, rates: ModelRates?) -> some View {
-        HStack(spacing: 8) {
-            HStack(spacing: 5) {
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(colors[row.model] ?? Color.gray)
-                    .frame(width: 7, height: 7)
-                Text(row.displayName)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            Spacer(minLength: 8)
-            // "input" is what was processed anew; the conversation history
-            // re-read from cache on every request stands apart as "cached" —
-            // lumping them reads as absurd typed-prompt volume.
-            Text(TokenFormat.compact(row.tally.uncachedInput))
-                .frame(width: Self.tokenColumnWidth, alignment: .trailing)
-            Text(TokenFormat.compact(row.tally.cacheRead))
-                .frame(width: Self.tokenColumnWidth, alignment: .trailing)
-            Text(TokenFormat.compact(row.tally.output))
-                .frame(width: Self.tokenColumnWidth, alignment: .trailing)
-            Text(rates.map { UsageFormatting.money($0.dollars(for: row.tally)) } ?? "—")
-                .frame(width: Self.costColumnWidth, alignment: .trailing)
-        }
-        .font(.caption2.monospacedDigit())
-        .padding(.horizontal, 4)
-        .padding(.vertical, 2)
-        .background(
-            RoundedRectangle(cornerRadius: 4)
-                .fill(Color.primary.opacity(hoveredModel == row.model ? 0.07 : 0)))
-        .contentShape(Rectangle())
-        .onHover { inside in
-            if inside {
-                hoveredModel = row.model
-            } else if hoveredModel == row.model {
-                hoveredModel = nil
-            }
         }
     }
 }

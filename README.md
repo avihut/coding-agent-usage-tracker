@@ -14,8 +14,9 @@ toggle (off by default), stable signing verified across rebuilds. Local
 transcript analytics: activity heatmap (7D per-model stacked bars / 30D
 calendar / all-time grid) with one-line day tooltips, and click-to-drill day
 views — a model donut plus that day's usage table, animated push/pop with a
-back button; per-meter hover popovers with percent history, per-window token
-breakdowns, and per-poll-interval readouts; a per-period model usage table
+back button; per-meter hover popovers with percent history, per-poll-interval
+readouts, and the same breakdown table (hovering a model row swaps the
+chart to that model's cumulative token curve); a per-period model usage table
 (aligned input/cached/output/cost columns — cache re-reads of the
 conversation shown apart from fresh input — cost estimates at API list
 prices, pricing feed fetched daily with bundled fallback) whose rows
