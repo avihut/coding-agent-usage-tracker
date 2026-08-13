@@ -26,6 +26,9 @@ final class UsageStore {
     private(set) var tokenTimeline: [TokenSlot] = []
     /// Best pricing table available (live feed, disk cache, or bundled).
     private(set) var pricing: PricingTable
+    private(set) var isRefreshingPricing = false
+    /// Last manual pricing-refresh failure; cleared on the next attempt.
+    private(set) var pricingRefreshError: String?
 
     private let service: UsageService
     private let history: UsageHistory
@@ -129,6 +132,25 @@ final class UsageStore {
         }
     }
 
+    /// The settings screen's refresh button — always fetches (the automatic
+    /// path above stays daily). Single-flighted; failure text lands beside
+    /// the button instead of in a log nobody reads.
+    func refreshPricingNow() {
+        guard !isRefreshingPricing else { return }
+        isRefreshingPricing = true
+        pricingRefreshError = nil
+        Task {
+            do {
+                pricing = try await pricingService.refreshNow()
+            } catch let error as PricingFeedError {
+                pricingRefreshError = error.shortText
+            } catch {
+                pricingRefreshError = "unexpected error"
+            }
+            isRefreshingPricing = false
+        }
+    }
+
     /// The FSEvents watcher saw Claude Code write a transcript: snap the
     /// cadence back to the active pace, and fetch now whenever the displayed
     /// data is older than that pace, so re-engaging always catches the meters
@@ -218,7 +240,7 @@ final class UsageStore {
     }
 
     func setActiveInterval(_ interval: TimeInterval) {
-        let clamped = max(TriggerGate.floor, interval)
+        let clamped = min(max(TriggerGate.floor, interval), AdaptiveCadence.maxActiveInterval)
         activeInterval = clamped
         cadence.activeInterval = clamped
         UserDefaults.standard.set(clamped, forKey: Self.intervalKey)

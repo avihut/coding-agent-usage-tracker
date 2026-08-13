@@ -6,7 +6,8 @@ import Foundation
 ///   locally, usage percentages rising between polls) holds sampling at the
 ///   user's chosen active pace.
 /// - Sustained quiet decays the pace in steps — ×2 after 15 minutes, ×4 after
-///   an hour, ×8 after four hours — capped at an hour between polls.
+///   an hour, ×8 after four hours — capped at an hour between polls (or the
+///   chosen pace itself, when that's deliberately slower).
 /// - HTTP 429 forces exponential backoff (honoring Retry-After) that heals on
 ///   the next successful fetch.
 ///
@@ -26,8 +27,11 @@ public struct AdaptiveCadence: Sendable, Equatable {
     /// Never poll faster than this, matching `TriggerGate` (spec §9): the
     /// endpoint rate-limits sustained sub-3-minute polling.
     public static let floor: TimeInterval = TriggerGate.floor
-    /// Never poll slower than this — a meter an hour stale stops being a meter.
+    /// Decay never slows polling beyond this — a meter an hour stale stops
+    /// being a meter. A *chosen* pace slower than this is honored as-is.
     public static let ceiling: TimeInterval = 3600
+    /// Top of the settings slider: the slowest selectable active pace.
+    public static let maxActiveInterval: TimeInterval = 7200
     /// First 429 waits this long, unless Retry-After asks for more...
     public static let backoffBase: TimeInterval = 300
     /// ...and however large Retry-After is, re-check within two hours.
@@ -56,7 +60,9 @@ public struct AdaptiveCadence: Sendable, Equatable {
             return max(Self.floor, backoffUntil.timeIntervalSince(now))
         }
         let paced = activeInterval * Double(multiplier(now: now))
-        return min(Self.ceiling, max(Self.floor, paced))
+        // The decay cap must never *speed up* a deliberately slow user pace:
+        // cap at an hour or the chosen pace, whichever is slower.
+        return min(max(Self.ceiling, activeInterval), max(Self.floor, paced))
     }
 
     public func isBackingOff(now: Date) -> Bool {
@@ -99,6 +105,38 @@ public struct AdaptiveCadence: Sendable, Equatable {
             Self.ceiling, Self.backoffBase * pow(2, Double(rateLimitStrikes - 1)))
         let delay = min(Self.backoffCeiling, max(retryAfter ?? 0, exponential))
         backoffUntil = now.addingTimeInterval(delay)
+    }
+}
+
+/// The settings slider's logarithmic 3 min – 2 hr scale with magnetic marks
+/// at the preferred paces. Log because the useful resolution is at the fast
+/// end; marks because the presets are what you almost always want. Pure
+/// math so the snap behavior is testable.
+public enum RefreshIntervalScale {
+    public static let range: ClosedRange<Double> =
+        TriggerGate.floor...AdaptiveCadence.maxActiveInterval
+    /// The marked stops: the original 3/5/15-minute presets plus the slower
+    /// stops the extended range makes room for.
+    public static let marks: [Double] = [180, 300, 900, 1800, 3600, 7200]
+    /// Snap distance in normalized log space (~3% of the track).
+    static let snapRadius = 0.03
+
+    /// Seconds → 0...1 along the log track.
+    public static func position(of value: Double) -> Double {
+        let clamped = min(max(value, range.lowerBound), range.upperBound)
+        return log(clamped / range.lowerBound) / log(range.upperBound / range.lowerBound)
+    }
+
+    /// 0...1 → seconds: magnetic near a mark, otherwise rounded to a clean
+    /// step — whole minutes under an hour, 5-minute steps above.
+    public static func value(at position: Double) -> Double {
+        let p = min(max(position, 0), 1)
+        for mark in marks where abs(Self.position(of: mark) - p) <= snapRadius {
+            return mark
+        }
+        let raw = range.lowerBound * exp(p * log(range.upperBound / range.lowerBound))
+        let step: Double = raw < 3600 ? 60 : 300
+        return min(max((raw / step).rounded() * step, range.lowerBound), range.upperBound)
     }
 }
 

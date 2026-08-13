@@ -101,6 +101,15 @@ public enum UsageFormatting {
         return "$\(text)"
     }
 
+    /// "3 min", "45 min", "1 hr", "1 hr 30 min" — the refresh-pace dial's
+    /// vocabulary. Sub-minute precision is deliberately absent.
+    public static func duration(_ seconds: TimeInterval) -> String {
+        let minutes = max(1, Int((seconds / 60).rounded()))
+        if minutes < 60 { return "\(minutes) min" }
+        let (hours, rest) = (minutes / 60, minutes % 60)
+        return rest == 0 ? "\(hours) hr" : "\(hours) hr \(rest) min"
+    }
+
     /// "09:45" — for "Updated …" and "cached …" annotations.
     public static func clockTime(_ date: Date, timeZone: TimeZone = .current) -> String {
         let formatter = DateFormatter()

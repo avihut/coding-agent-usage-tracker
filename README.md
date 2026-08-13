@@ -22,7 +22,13 @@ chart to that model's cumulative token curve); a per-period model usage table
 conversation shown apart from fresh input — cost estimates at API list
 prices, pricing feed fetched daily with bundled fallback) whose rows
 double as a legend — hovering one filters the chart above to that model in its own
-color. Remaining: the §13 acceptance
+color. A sidebar-navigated settings window (⋯ menu → Settings…) holds the
+general knobs — including the refresh-pace slider — plus an API-cost page:
+pricing-feed status with a manual refresh, the list rates in use, a Claude
+Code-specific explainer of how transcripts turn into cost estimates (four
+token classes, the agentic loop, quadratic cache reads), and a
+session-cost playground that re-prices a simulated session live.
+Remaining: the §13 acceptance
 checklist items that need real-world time (sleep/wake, token expiry).
 
 ## Adaptive refresh
@@ -31,7 +37,7 @@ The poll rate follows actual Claude use instead of a fixed clock (supersedes
 spec §9's fixed interval). The "Refresh when active" setting (default 5 min)
 is the pace while Claude is in use; sustained quiet decays it ×2 after 15
 minutes, ×4 after an hour, ×8 after four hours, never slower than one poll
-per hour. Two signals snap it back: FSEvents on `~/.claude/projects` (Claude
+per hour (or your chosen pace, when that's slower). Two signals snap it back: FSEvents on `~/.claude/projects` (Claude
 Code writing a transcript — this also polls immediately whenever the shown
 data is older than the active pace, so re-engaging catches the meters up at
 once), and usage percentages rising between polls (which is how Claude
@@ -46,8 +52,10 @@ Nothing ever polls faster than once per **180 seconds** (supersedes the spec's
 endpoint rate-limits sustained sub-3-minute polling into sticky 429s — this
 app hit it at 60s, and community testing found the same
 ([anthropics/claude-code#31637](https://github.com/anthropics/claude-code/issues/31637),
-[#31021](https://github.com/anthropics/claude-code/issues/31021)). Interval
-choices are 3/5/15 minutes accordingly. A request ledger tracks the trailing
+[#31021](https://github.com/anthropics/claude-code/issues/31021)). The pace
+is set in the settings window with a logarithmic slider — 3 minutes to 2
+hours, snapping to marked stops at 3/5/15/30 minutes and 1/2 hours — while
+the panel's ⋯ menu keeps 3/5/15 quick picks. A request ledger tracks the trailing
 hour of calls against an estimated budget (20/hour to start, tightened
 whenever a real 429 reveals a lower ceiling and remembered across launches);
 the footer shows `API n/Nh` once half the budget is spent and the refresh

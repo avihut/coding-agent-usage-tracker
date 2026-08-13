@@ -37,7 +37,11 @@ the README rather than silently deviating.
   launch, activity).
 - Polling cadence is adaptive (`AdaptiveCadence`, pure + tested): quiet time
   decays the user-chosen active interval ×2 (15 min) / ×4 (1 h) / ×8 (4 h),
-  capped at an hour between polls. Evidence of use snaps it back: FSEvents on
+  capped at an hour between polls — or at the chosen pace itself when that's
+  deliberately slower. The pace is a logarithmic slider in settings
+  (3 min–2 h, `RefreshIntervalScale`: magnetic marks at the presets, clean
+  rounding between them); the panel's ⋯ menu keeps the 3/5/15 quick picks
+  plus the current in-between value so its picker never shows empty. Evidence of use snaps it back: FSEvents on
   `~/.claude/projects` (`ClaudeActivityWatcher` — observational only, never
   reads paths) is the push signal for Claude Code; percentages rising between
   polls (`UsageMovement` — rises and fresh-window usage count, drops are
@@ -105,6 +109,26 @@ the README rather than silently deviating.
   refreshed when >24h old (attempted at most hourly, piggybacked on usage
   refreshes), `PricingTable.bundled` as the offline floor. Estimates are
   list-price counterfactuals; subscription plans don't bill per token.
+- The settings window (⋯ menu → Settings…, `SettingsWindowController` —
+  created on first show, kept alive across closes, explicitly fronted
+  because cooperative activation won't front a background app's window)
+  navigates with a left sidebar (`NavigationSplitView`, toggle removed):
+  a General pane and an API Cost pane — pricing-feed status with a manual
+  Refresh Now (`PricingService.refreshNow` — bypasses the daily staleness
+  gate, same single allowed destination), the list rates behind the
+  estimates, a Claude Code-specific cost explainer, and a what-if
+  playground over `CostSimulator` (UsageCore, closed-form: writes =
+  C+(n−1)g, reads = (n−1)C+g(n−1)(n−2)/2 — cache reads grow quadratically
+  with session length, which is the explainer's core lesson). Panes are
+  hand-rolled cards in a ScrollView, NOT `Form(.grouped)`: grouped forms
+  column-align bare controls (the refresh slider got squeezed into the
+  trailing half-column while its mark labels spanned the row) and
+  mis-measure wrapped text in custom rows (the token-class grid overlapped
+  its neighbors). The panel's ⋯ menu and the General pane share
+  `SettingsBindings` so both surfaces stay in lockstep. `ClaudeUsage
+  --settings` opens the window at launch — the verification hatch, since
+  menus can't be scripted (scratchpad axdump/axpress dump frames and press
+  controls for layout checks).
 - Plan identity: `CredentialsParser` also surfaces `subscriptionType` /
   `rateLimitTier` (`PlanInfo` — metadata beside the token, never the
   refresh token); it rides `Snapshot.plan` and renders under the panel

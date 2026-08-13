@@ -219,3 +219,47 @@ struct UsageMovementTests {
         #expect(!UsageMovement.advanced(from: old, to: new))
     }
 }
+
+@Suite("RefreshIntervalScale")
+struct RefreshIntervalScaleTests {
+    @Test("a chosen pace slower than the decay cap is honored")
+    func slowPaceHonored() {
+        let t0 = Date(timeIntervalSince1970: 1_755_000_000)
+        let cadence = AdaptiveCadence(activeInterval: 7200, now: t0)
+        // Five quiet hours: ×8 decay must not be re-capped below the pace.
+        #expect(cadence.interval(now: t0.addingTimeInterval(5 * 3600)) == 7200)
+    }
+
+    @Test("endpoints and marks map onto the unit track")
+    func positions() {
+        #expect(RefreshIntervalScale.position(of: 180) == 0)
+        #expect(RefreshIntervalScale.position(of: 7200) == 1)
+        let mid = RefreshIntervalScale.position(of: 900)
+        #expect(mid > 0.42 && mid < 0.45)
+    }
+
+    @Test("near-mark positions snap to the mark")
+    func snapping() {
+        let nearFive = RefreshIntervalScale.position(of: 300) + 0.02
+        #expect(RefreshIntervalScale.value(at: nearFive) == 300)
+    }
+
+    @Test("between marks, values round to clean steps")
+    func rounding() {
+        let fast = RefreshIntervalScale.value(at: 0.29)
+        #expect(fast.truncatingRemainder(dividingBy: 60) == 0)
+        #expect(fast > 300 && fast < 900)
+        let slow = RefreshIntervalScale.value(at: 0.93)
+        #expect(slow.truncatingRemainder(dividingBy: 300) == 0)
+        #expect(slow > 3600 && slow < 7200)
+    }
+
+    @Test("duration labels for the dial")
+    func durationLabels() {
+        #expect(UsageFormatting.duration(180) == "3 min")
+        #expect(UsageFormatting.duration(900) == "15 min")
+        #expect(UsageFormatting.duration(3600) == "1 hr")
+        #expect(UsageFormatting.duration(5400) == "1 hr 30 min")
+        #expect(UsageFormatting.duration(7200) == "2 hr")
+    }
+}

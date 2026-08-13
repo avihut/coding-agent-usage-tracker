@@ -17,5 +17,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         controller = StatusItemController(store: UsageStore())
+        // Verification hatch: `ClaudeUsage --settings` opens the settings
+        // window straight away, since the ⋯ menu can't be scripted.
+        if CommandLine.arguments.contains("--settings") {
+            controller?.showSettings()
+        }
     }
 }

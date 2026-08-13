@@ -19,13 +19,17 @@ final class StatusItemController: NSResponder {
     private var hoverTask: Task<Void, Never>?
     private var outsideClickMonitor: Any?
     private var resignActiveObserver: NSObjectProtocol?
+    private lazy var settingsController = SettingsWindowController(store: store)
 
     init(store: UsageStore) {
         self.store = store
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
 
-        let host = NSHostingController(rootView: UsagePanelView(store: store))
+        let host = NSHostingController(
+            rootView: UsagePanelView(store: store, onOpenSettings: { [weak self] in
+                self?.showSettings()
+            }))
         host.sizingOptions = .preferredContentSize
         popover.contentViewController = host
         popover.behavior = .transient
@@ -111,6 +115,13 @@ final class StatusItemController: NSResponder {
             popover.contentViewController?.view.window?.makeKey()
             beginDismissMonitoring()
         }
+    }
+
+    /// Opens the settings window; also the `--settings` launch hatch, since
+    /// the ⋯ menu itself can't be scripted for verification.
+    func showSettings() {
+        if popover.isShown { popover.performClose(nil) }
+        settingsController.show()
     }
 
     // MARK: - Outside-interaction dismissal

@@ -1,10 +1,11 @@
 import Charts
 import SwiftUI
-import ServiceManagement
 import UsageCore
 
 struct UsagePanelView: View {
     var store: UsageStore
+    /// Wired by StatusItemController: closes the panel, opens the window.
+    let onOpenSettings: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -110,19 +111,25 @@ struct UsagePanelView: View {
             .help("Open claude.ai usage settings")
 
             Menu {
-                // No 1-minute option: sustained sub-3-minute polling trips the
-                // endpoint's rate limiter (anthropics/claude-code#31637).
-                Picker("Refresh when active", selection: intervalBinding) {
-                    Text("3 min").tag(180.0)
-                    Text("5 min").tag(300.0)
-                    Text("15 min").tag(900.0)
+                Picker("Refresh when active", selection: SettingsBindings.interval(store)) {
+                    ForEach(
+                        SettingsBindings.menuIntervalChoices(current: store.activeInterval),
+                        id: \.self
+                    ) { seconds in
+                        Text(UsageFormatting.duration(seconds)).tag(seconds)
+                    }
                 }
-                Toggle("Launch at login", isOn: launchAtLoginBinding)
+                Toggle("Launch at login", isOn: SettingsBindings.launchAtLogin())
                 Divider()
+                Button("Settings…") { onOpenSettings() }
                 Button("Quit Claude Usage") { NSApp.terminate(nil) }
             } label: {
                 Image(systemName: "ellipsis.circle")
             }
+            // .button + borderless renders the bare icon; the default menu
+            // style wraps it in a bordered pull-down pill.
+            .menuStyle(.button)
+            .buttonStyle(.borderless)
             .menuIndicator(.hidden)
             .fixedSize()
         }
@@ -164,26 +171,6 @@ struct UsagePanelView: View {
         return text
     }
 
-    private var intervalBinding: Binding<Double> {
-        Binding(
-            get: { store.activeInterval },
-            set: { store.setActiveInterval($0) }
-        )
-    }
-
-    /// Registration happens only when the user flips this toggle (spec §10).
-    private var launchAtLoginBinding: Binding<Bool> {
-        Binding(
-            get: { SMAppService.mainApp.status == .enabled },
-            set: { enabled in
-                if enabled {
-                    try? SMAppService.mainApp.register()
-                } else {
-                    try? SMAppService.mainApp.unregister()
-                }
-            }
-        )
-    }
 }
 
 struct MeterRow: View {

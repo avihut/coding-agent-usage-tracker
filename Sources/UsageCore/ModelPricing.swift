@@ -21,16 +21,30 @@ public struct ModelRates: Codable, Sendable, Equatable {
         self.cacheRead = cacheRead
     }
 
-    /// What a tally would cost at these rates. Cache-write tokens split into
+    /// A tally's cost per token class. Cache-write tokens split into
     /// 5-minute and 1-hour TTL portions because they're billed differently.
-    public func dollars(for tally: TokenTally) -> Double {
+    public struct DollarBreakdown: Sendable, Equatable {
+        public let input: Double
+        public let output: Double
+        public let cacheWrite: Double
+        public let cacheRead: Double
+        public var total: Double { input + output + cacheWrite + cacheRead }
+    }
+
+    public func dollarBreakdown(for tally: TokenTally) -> DollarBreakdown {
         let write1h = min(tally.cacheCreation1h, tally.cacheCreation)
         let write5m = tally.cacheCreation - write1h
-        return Double(tally.input) * input
-            + Double(tally.output) * output
-            + Double(tally.cacheRead) * (cacheRead ?? input * 0.1)
-            + Double(write5m) * (cacheWrite ?? input * 1.25)
-            + Double(write1h) * (cacheWrite1h ?? cacheWrite ?? input * 2)
+        return DollarBreakdown(
+            input: Double(tally.input) * input,
+            output: Double(tally.output) * output,
+            cacheWrite: Double(write5m) * (cacheWrite ?? input * 1.25)
+                + Double(write1h) * (cacheWrite1h ?? cacheWrite ?? input * 2),
+            cacheRead: Double(tally.cacheRead) * (cacheRead ?? input * 0.1))
+    }
+
+    /// What a tally would cost at these rates.
+    public func dollars(for tally: TokenTally) -> Double {
+        dollarBreakdown(for: tally).total
     }
 }
 
@@ -109,6 +123,15 @@ public enum PricingFeedError: Error, Sendable {
     case network(URLError)
     case http(Int)
     case schema
+
+    /// Readable one-liner for the settings screen's refresh feedback.
+    public var shortText: String {
+        switch self {
+        case .network: "network unreachable"
+        case .http(let code): "feed returned HTTP \(code)"
+        case .schema: "feed format not recognized"
+        }
+    }
 }
 
 /// One call against the community pricing feed (LiteLLM's model price list on
@@ -233,6 +256,15 @@ public struct PricingService: Sendable {
     public func refreshIfStale(now: Date = Date()) async -> PricingTable? {
         guard current().isStale(now: now) else { return nil }
         guard let table = try? await client.fetch(now: now) else { return nil }
+        save(table)
+        return table
+    }
+
+    /// A user-clicked refresh: fetches regardless of staleness (the
+    /// automatic path stays daily) and throws so the button can say why it
+    /// failed. Still the same single allowed destination, nothing attached.
+    public func refreshNow(now: Date = Date()) async throws -> PricingTable {
+        let table = try await client.fetch(now: now)
         save(table)
         return table
     }
