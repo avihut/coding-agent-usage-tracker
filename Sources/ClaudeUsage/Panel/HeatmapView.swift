@@ -86,6 +86,19 @@ struct HeatmapView: View {
             let total = priced.compactMap { $0.rates?.dollars(for: $0.row.tally) }.reduce(0, +)
             let unpricedCount = priced.count(where: { $0.rates == nil })
             VStack(alignment: .leading, spacing: 3) {
+                // The headline number: what this period would have cost.
+                VStack(spacing: 0) {
+                    Text("≈ \(UsageFormatting.money(total))")
+                        .font(.system(size: 18, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(.primary)
+                    Text(unpricedCount > 0
+                        ? "at API list prices · \(unpricedCount) unpriced"
+                        : "at API list prices")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 2)
                 ForEach(priced, id: \.row.id) { entry in
                     HStack(alignment: .firstTextBaseline) {
                         Text(entry.row.displayName)
@@ -97,14 +110,6 @@ struct HeatmapView: View {
                             .font(.caption2.monospacedDigit())
                             .layoutPriority(1)
                     }
-                }
-                HStack(alignment: .firstTextBaseline) {
-                    Text(unpricedCount > 0
-                        ? "≈ \(UsageFormatting.money(total)) at API list prices · \(unpricedCount) unpriced"
-                        : "≈ \(UsageFormatting.money(total)) at API list prices")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                    Spacer()
                 }
             }
             .padding(.top, 2)
@@ -425,20 +430,13 @@ struct HeatmapView: View {
         } else {
             "\(date) · no activity"
         }
-        return VStack(alignment: .leading, spacing: 2) {
-            Text(text)
-                .font(.caption2)
-            ForEach(WindowTokens.rows(from: entry?.models ?? [:])) { row in
-                Text("\(row.displayName) · \(UsageFormatting.tallyText(row.tally))")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
-        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.quaternary))
-        .fixedSize()
+        return Text(text)
+            .font(.caption2)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.quaternary))
+            .fixedSize()
     }
 
     private static let claudeOrange = Color(nsColor: StatusItemRenderer.claudeOrange)

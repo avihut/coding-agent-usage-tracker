@@ -337,9 +337,9 @@ struct MeterHistoryView: View {
                     .frame(width: 260, height: 70)
             } else {
                 historyChart
-                Text(selection.map(readoutText) ?? "Hover the graph for point details")
+                Text(readout.map(readoutText) ?? "Hover the graph for point details")
                     .font(.caption2.monospacedDigit())
-                    .foregroundStyle(selection == nil ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.secondary))
+                    .foregroundStyle(readout == nil ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.secondary))
                     .lineLimit(1)
             }
             tokensSection
@@ -362,12 +362,12 @@ struct MeterHistoryView: View {
                 .foregroundStyle(Color(nsColor: StatusItemRenderer.claudeOrange))
                 .interpolationMethod(.monotone)
             }
-            if let sel = selection {
-                RuleMark(x: .value("Time", sel.point.t))
+            if let readout {
+                RuleMark(x: .value("Time", readout.t))
                     .foregroundStyle(.quaternary)
                 PointMark(
-                    x: .value("Time", sel.point.t),
-                    y: .value("Percent", sel.point.percent)
+                    x: .value("Time", readout.t),
+                    y: .value("Percent", readout.percent)
                 )
                 .foregroundStyle(Color(nsColor: StatusItemRenderer.claudeOrange))
                 .symbolSize(30)
@@ -396,25 +396,45 @@ struct MeterHistoryView: View {
         .frame(width: 260, height: 110)
     }
 
-    /// The sample nearest the hovered time, plus its predecessor — the pair
-    /// bounds the poll interval the readout attributes tokens to.
-    private var selection: (point: Point, previous: Point?)? {
+    /// A continuously-hoverable reading: percent is interpolated between the
+    /// surrounding samples (flat beyond the ends), so sparse data doesn't
+    /// make the cursor jump between far-apart points. Tokens attribute to the
+    /// enclosing poll interval.
+    private struct Readout {
+        let t: Date
+        let percent: Int
+        /// The measured interval containing `t`; nil before the first sample.
+        let from: Date?
+        let to: Date?
+    }
+
+    private var readout: Readout? {
         guard let hoverDate else { return nil }
         let all = points
-        guard let nearest = all.min(by: {
-            abs($0.t.timeIntervalSince(hoverDate)) < abs($1.t.timeIntervalSince(hoverDate))
-        }) else { return nil }
-        return (nearest, all.last { $0.t < nearest.t })
+        guard let first = all.first, let last = all.last else { return nil }
+        let t = min(max(hoverDate, Date().addingTimeInterval(-window)), Date())
+        if t <= first.t {
+            return Readout(t: t, percent: first.percent, from: nil, to: nil)
+        }
+        if t >= last.t {
+            return Readout(t: t, percent: last.percent, from: last.t, to: t)
+        }
+        let index = all.lastIndex { $0.t <= t } ?? 0
+        let p0 = all[index]
+        let p1 = all[index + 1]
+        let span = p1.t.timeIntervalSince(p0.t)
+        let fraction = span > 0 ? t.timeIntervalSince(p0.t) / span : 0
+        let percent = Double(p0.percent) + fraction * Double(p1.percent - p0.percent)
+        return Readout(t: t, percent: Int(percent.rounded()), from: p0.t, to: p1.t)
     }
 
     /// "14:32 · 34% · 1.2M tokens · $3.40" — tokens and cost cover what the
-    /// transcripts logged between this sample and the previous one.
-    private func readoutText(_ sel: (point: Point, previous: Point?)) -> String {
-        var parts = [UsageFormatting.clockTime(sel.point.t), "\(sel.point.percent)%"]
-        if let previous = sel.previous {
+    /// transcripts logged in the poll interval the cursor sits in.
+    private func readoutText(_ readout: Readout) -> String {
+        var parts = [UsageFormatting.clockTime(readout.t), "\(readout.percent)%"]
+        if let from = readout.from, let to = readout.to {
             let rows = WindowTokens.breakdown(
-                timeline: timeline,
-                from: previous.t.addingTimeInterval(1), to: sel.point.t)
+                timeline: timeline, from: from.addingTimeInterval(1), to: to)
             let total = WindowTokens.total(rows)
             if total.total > 0 {
                 parts.append("\(TokenFormat.compact(total.total)) tokens")
@@ -478,6 +498,14 @@ struct MeterHistoryView: View {
                         .font(.caption2.monospacedDigit())
                         .layoutPriority(1)
                 }
+            }
+            let dollars = rows
+                .compactMap { pricing.rates(for: $0.model)?.dollars(for: $0.tally) }
+                .reduce(0, +)
+            if dollars > 0 {
+                Text("≈ \(UsageFormatting.money(dollars)) at API list prices")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
             }
         }
         Text("Local Claude Code sessions on this Mac only.")

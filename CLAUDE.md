@@ -74,10 +74,12 @@ the README rather than silently deviating.
   Never write inside `~/.claude`, never go near `.credentials.json` from
   the scanners, nothing leaves the machine. The same scan also attributes
   tokens per model (`TokenTally`: in/out/cache-write incl. the 1h-TTL
-  split/cache-read): per day forever (`DailyActivity.models`, day tooltips
-  and the per-period summary via `HeatmapLayout.modelTotals`) and per
-  minute for a trailing 8 days (`TokenSlot` timeline, cache-bounded —
-  feeds the per-meter window breakdowns via `WindowTokens`).
+  split/cache-read): per day forever (`DailyActivity.models`, feeding the
+  per-period summary via `HeatmapLayout.modelTotals`) and per minute for a
+  trailing 8 days (`TokenSlot` timeline, cache-bounded — feeds the
+  per-meter window breakdowns via `WindowTokens`). Day tooltips stay a
+  one-liner by request; the per-model detail lives in the meter popovers
+  and the period summary.
 - Cost estimates: `PricingTable` (per-token `ModelRates`, exact-id then
   date-stripped lookup) from `PricingService` — disk-cached LiteLLM feed
   refreshed when >24h old (attempted at most hourly, piggybacked on usage
