@@ -6,7 +6,7 @@ import UsageCore
 /// whole session live.
 struct CostPlaygroundView: View {
     let pricing: PricingTable
-    let modelOptions: [String]
+    let families: [ModelFamily]
 
     @State private var model: String
     @State private var steps: Double = Self.defaults.steps
@@ -19,9 +19,9 @@ struct CostPlaygroundView: View {
     /// growing 2.5K per step — the shape of real transcripts here.
     private static let defaults = (steps: 60.0, context: 18_000.0, growth: 2_500.0, output: 400.0)
 
-    init(pricing: PricingTable, modelOptions: [String], initialModel: String) {
+    init(pricing: PricingTable, families: [ModelFamily], initialModel: String) {
         self.pricing = pricing
-        self.modelOptions = modelOptions
+        self.families = families
         _model = State(initialValue: initialModel)
     }
 
@@ -29,8 +29,12 @@ struct CostPlaygroundView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Picker("Model", selection: $model) {
-                    ForEach(modelOptions, id: \.self) { id in
-                        Text(ModelNames.display(id)).tag(id)
+                    ForEach(families) { family in
+                        Section(family.name) {
+                            ForEach(family.models, id: \.self) { id in
+                                Text(ModelNames.display(id)).tag(id)
+                            }
+                        }
                     }
                 }
                 .fixedSize()

@@ -118,10 +118,11 @@ final class StatusItemController: NSResponder {
     }
 
     /// Opens the settings window; also the `--settings` launch hatch, since
-    /// the ⋯ menu itself can't be scripted for verification.
-    func showSettings() {
+    /// the ⋯ menu itself can't be scripted for verification. `pane` only
+    /// matters on the first show (the hatch always launches fresh).
+    func showSettings(pane: SettingsSection = .general) {
         if popover.isShown { popover.performClose(nil) }
-        settingsController.show()
+        settingsController.show(pane: pane)
     }
 
     // MARK: - Outside-interaction dismissal

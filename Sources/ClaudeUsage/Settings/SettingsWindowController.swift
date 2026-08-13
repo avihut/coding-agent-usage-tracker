@@ -14,9 +14,10 @@ final class SettingsWindowController {
         self.store = store
     }
 
-    func show() {
+    func show(pane: SettingsSection = .general) {
         if window == nil {
-            let host = NSHostingController(rootView: SettingsView(store: store))
+            let host = NSHostingController(
+                rootView: SettingsView(store: store, initialSection: pane))
             let window = NSWindow(contentViewController: host)
             window.title = "Claude Usage Settings"
             window.styleMask = [.titled, .closable, .miniaturizable, .resizable]

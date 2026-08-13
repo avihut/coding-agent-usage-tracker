@@ -64,7 +64,12 @@ enum SettingsSection: String, CaseIterable, Identifiable {
 struct SettingsView: View {
     var store: UsageStore
 
-    @State private var section: SettingsSection? = .general
+    @State private var section: SettingsSection?
+
+    init(store: UsageStore, initialSection: SettingsSection = .general) {
+        self.store = store
+        _section = State(initialValue: initialSection)
+    }
 
     var body: some View {
         NavigationSplitView {
@@ -264,42 +269,51 @@ private struct CostSettingsPane: View {
             "List rates for your models",
             footer: "US$ per million tokens. Subscription sessions cache with the 1-hour TTL, so their writes bill at the ×2 column. Models missing from the feed show — and sit out cost estimates."
         ) {
-            Grid(alignment: .trailingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 6) {
-                GridRow {
-                    Text("model").gridColumnAlignment(.leading)
-                    Text("input")
-                    Text("output")
-                    Text("cache read")
-                    Text("write 5m")
-                    Text("write 1h")
-                }
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                ForEach(rateRows, id: \.self) { model in
-                    let rates = store.pricing.rates(for: model)
-                    GridRow {
-                        Text(ModelNames.display(model))
-                            .font(.callout)
-                            .gridColumnAlignment(.leading)
-                        rateCell(rates?.input)
-                        rateCell(rates?.output)
-                        rateCell(rates?.cacheRead ?? rates.map { $0.input * 0.1 })
-                        rateCell(rates?.cacheWrite ?? rates.map { $0.input * 1.25 })
-                        rateCell(rates?.cacheWrite1h ?? rates.map { $0.input * 2 })
+            VStack(alignment: .leading, spacing: 9) {
+                rateLine("model", ["input", "output", "cache read", "write 5m", "write 1h"], header: true)
+                ForEach(Array(ModelFamily.group(rateRows, usage: seenTotals).enumerated()),
+                        id: \.element.id) { index, family in
+                    if index > 0 { Divider() }
+                    ForEach(family.models, id: \.self) { model in
+                        let rates = store.pricing.rates(for: model)
+                        rateLine(ModelNames.display(model), [
+                            perMTok(rates?.input),
+                            perMTok(rates?.output),
+                            perMTok(rates?.cacheRead ?? rates.map { $0.input * 0.1 }),
+                            perMTok(rates?.cacheWrite ?? rates.map { $0.input * 1.25 }),
+                            perMTok(rates?.cacheWrite1h ?? rates.map { $0.input * 2 }),
+                        ])
                     }
                 }
             }
         }
     }
 
-    private func rateCell(_ perToken: Double?) -> some View {
-        Text(perToken.map { String(format: "$%.2f", $0 * 1_000_000) } ?? "—")
-            .font(.callout.monospacedDigit())
-            .foregroundStyle(.secondary)
+    /// One table line: the name column keeps its natural width (names never
+    /// truncate), the five rate columns share the card's remaining width
+    /// evenly — the table spans the card instead of hugging its left edge.
+    private func rateLine(_ name: String, _ values: [String], header: Bool = false) -> some View {
+        HStack(spacing: 8) {
+            Text(name)
+                .font(header ? .caption2 : .callout)
+                .foregroundStyle(header ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.primary))
+                .fixedSize(horizontal: true, vertical: false)
+                .frame(minWidth: 96, alignment: .leading)
+            ForEach(Array(values.enumerated()), id: \.offset) { _, value in
+                Text(value)
+                    .font(header ? .caption2 : .callout.monospacedDigit())
+                    .foregroundStyle(header ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.secondary))
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+        }
     }
 
-    /// Models seen in local transcripts, heaviest lifetime usage first.
-    private var seenModels: [String] {
+    private func perMTok(_ perToken: Double?) -> String {
+        perToken.map { String(format: "$%.2f", $0 * 1_000_000) } ?? "—"
+    }
+
+    /// Lifetime tokens per raw model id, from local transcripts.
+    private var seenTotals: [String: Int] {
         var totals: [String: Int] = [:]
         for day in store.activity {
             for (model, tally) in day.models {
@@ -307,6 +321,11 @@ private struct CostSettingsPane: View {
             }
         }
         return totals
+    }
+
+    /// Models seen in local transcripts, heaviest lifetime usage first.
+    private var seenModels: [String] {
+        seenTotals
             .sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }
             .map(\.key)
     }
@@ -405,32 +424,83 @@ private struct CostSettingsPane: View {
     // MARK: Playground
 
     private var playgroundCard: some View {
-        SettingsCard(
+        let families = playgroundFamilies
+        return SettingsCard(
             "Session cost playground",
             footer: "The simulator runs the loop described above in closed form — every dial re-prices the whole session at the selected model's list rates."
         ) {
             CostPlaygroundView(
                 pricing: store.pricing,
-                modelOptions: playgroundModels,
-                initialModel: playgroundModels.first ?? "claude-fable-5")
+                families: families,
+                initialModel: families.first?.models.first ?? "claude-fable-5")
         }
     }
 
-    /// Priced models for the picker: the ones seen locally first (heaviest
-    /// usage leading), then the rest of the table's base ids alphabetically.
-    private var playgroundModels: [String] {
-        let seenPriced = seenModels.filter { store.pricing.rates(for: $0) != nil }
-        let seenNames = Set(seenPriced.map(ModelNames.display))
-        let others = store.pricing.rates.keys
+    /// Priced models grouped per family for the picker — the models seen
+    /// locally plus the rest of the table's base ids.
+    private var playgroundFamilies: [ModelFamily] {
+        var pricedIDs = seenModels.filter { store.pricing.rates(for: $0) != nil }
+        let seenNames = Set(pricedIDs.map(ModelNames.display))
+        pricedIDs += store.pricing.rates.keys
             .filter { !Self.hasDateSuffix($0) && !seenNames.contains(ModelNames.display($0)) }
             .sorted()
-        return seenPriced + others
+        return ModelFamily.group(pricedIDs, usage: seenTotals)
     }
 
     /// "claude-haiku-4-5-20251001" — dated release aliases of a base id.
     private static func hasDateSuffix(_ id: String) -> Bool {
         guard let last = id.split(separator: "-").last else { return false }
         return last.count == 8 && last.allSatisfy(\.isNumber)
+    }
+}
+
+/// One model family — "Opus" and its versions, newest first. Both the rates
+/// table and the playground picker arrange models this way.
+struct ModelFamily: Identifiable, Equatable {
+    let name: String
+    let models: [String]
+    var id: String { name }
+
+    /// Families you've used first (by local usage, then name); versions
+    /// newest-first inside each family, unversioned previews last.
+    static func group(_ ids: [String], usage: [String: Int]) -> [ModelFamily] {
+        var familyUsage: [String: Int] = [:]
+        for (model, total) in usage {
+            familyUsage[familyName(model), default: 0] += total
+        }
+        var byFamily: [String: [String]] = [:]
+        for id in ids {
+            byFamily[familyName(id), default: []].append(id)
+        }
+        return byFamily
+            .map { name, models in
+                ModelFamily(name: name, models: models.sorted(by: versionDescending))
+            }
+            .sorted { a, b in
+                let usageA = familyUsage[a.name] ?? 0
+                let usageB = familyUsage[b.name] ?? 0
+                return usageA != usageB ? usageA > usageB : a.name < b.name
+            }
+    }
+
+    /// "claude-opus-4-8" → "Opus".
+    private static func familyName(_ id: String) -> String {
+        ModelNames.display(id).split(separator: " ").first.map(String.init) ?? id
+    }
+
+    private static func versionDescending(_ a: String, _ b: String) -> Bool {
+        let versionA = versionComponents(a)
+        let versionB = versionComponents(b)
+        if versionA == versionB { return ModelNames.display(a) < ModelNames.display(b) }
+        return versionB.lexicographicallyPrecedes(versionA)
+    }
+
+    /// "Opus 4.8" → [4, 8]; "Mythos Preview" → [].
+    private static func versionComponents(_ id: String) -> [Int] {
+        ModelNames.display(id)
+            .split(separator: " ")
+            .dropFirst()
+            .flatMap { $0.split(separator: ".").compactMap { Int($0) } }
     }
 }
 
@@ -445,9 +515,32 @@ private struct RefreshIntervalSlider: View {
     /// Half the NSSlider knob: the track is inset this much per side.
     private static let thumbInset: CGFloat = 10
 
+    /// Minor tick values interleaved between the magnetic marks, spaced
+    /// about evenly on the log track.
+    private static let minorTicks: [Double] = [
+        240, 360, 480, 600, 720, 1_200, 2_700, 5_400,
+    ]
+
     var body: some View {
         VStack(spacing: 0) {
             Slider(value: positionBinding, in: 0...1)
+            // Notches: taller at the magnetic stops, shorter between them.
+            Canvas { context, size in
+                let usable = size.width - 2 * Self.thumbInset
+                for tick in Self.minorTicks {
+                    let x = Self.thumbInset + RefreshIntervalScale.position(of: tick) * usable
+                    context.fill(
+                        Path(CGRect(x: x - 0.5, y: 2, width: 1, height: 4)),
+                        with: .color(.primary.opacity(0.18)))
+                }
+                for mark in RefreshIntervalScale.marks {
+                    let x = Self.thumbInset + RefreshIntervalScale.position(of: mark) * usable
+                    context.fill(
+                        Path(CGRect(x: x - 0.75, y: 0, width: 1.5, height: 7)),
+                        with: .color(.primary.opacity(0.38)))
+                }
+            }
+            .frame(height: 8)
             GeometryReader { geo in
                 let usable = geo.size.width - 2 * Self.thumbInset
                 ForEach(RefreshIntervalScale.marks, id: \.self) { mark in
