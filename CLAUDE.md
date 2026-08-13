@@ -79,7 +79,14 @@ the README rather than silently deviating.
   trailing 8 days (`TokenSlot` timeline, cache-bounded — feeds the
   per-meter window breakdowns via `WindowTokens`). Day tooltips stay a
   one-liner by request; the per-model detail lives in the meter popovers
-  and the period summary.
+  and the period summary. That summary is a tabular grid (aligned
+  input/output/cost columns) doubling as a legend: models wear stable
+  rank-assigned `ModelPalette` colors, hovering a row filters the chart to
+  that model (heatmap re-ramped against `HeatmapLayout.modelMaxTokens`,
+  its busiest own day, so light models keep contrast), the 7D bars are
+  per-model stacked with band order fixed period-wide, and clicking any
+  day pushes (animated, with a back button) into a per-day drill-down —
+  model donut + the same grid scoped to that day.
 - Cost estimates: `PricingTable` (per-token `ModelRates`, exact-id then
   date-stripped lookup) from `PricingService` — disk-cached LiteLLM feed
   refreshed when >24h old (attempted at most hourly, piggybacked on usage

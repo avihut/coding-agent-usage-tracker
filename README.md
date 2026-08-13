@@ -11,11 +11,15 @@ panel with per-limit meters and reset times (subscription type under the
 title), live client with cached fallback and readable error states, adaptive
 refresh (see below) plus wake/network-restore triggers, launch-at-login
 toggle (off by default), stable signing verified across rebuilds. Local
-transcript analytics: activity heatmap (7D bars / 30D calendar / all-time
-grid) with per-day, per-model token tooltips; per-meter hover popovers with
-percent history, per-window token breakdowns, and per-poll-interval readouts;
-per-period model usage rows with cost estimates at API list prices (pricing
-feed fetched daily, bundled fallback). Remaining: the §13 acceptance
+transcript analytics: activity heatmap (7D per-model stacked bars / 30D
+calendar / all-time grid) with one-line day tooltips, and click-to-drill day
+views — a model donut plus that day's usage table, animated push/pop with a
+back button; per-meter hover popovers with percent history, per-window token
+breakdowns, and per-poll-interval readouts; a per-period model usage table
+(aligned input/output/cost columns, cost estimates at API list prices,
+pricing feed fetched daily with bundled fallback) whose rows double as a
+legend — hovering one filters the chart above to that model in its own
+color. Remaining: the §13 acceptance
 checklist items that need real-world time (sleep/wake, token expiry).
 
 ## Adaptive refresh

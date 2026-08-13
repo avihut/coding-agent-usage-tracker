@@ -114,6 +114,32 @@ struct HeatmapLayoutTests {
         ])
     }
 
+    @Test("per-model maxima track each model's busiest visible day")
+    func modelMaxTokens() {
+        let activity = [
+            DailyActivity(
+                day: Self.day(2026, 7, 1), tokens: 9000, messages: 5,
+                models: ["claude-fable-5": TokenTally(input: 9000)]),
+            DailyActivity(
+                day: Self.day(2026, 8, 5), tokens: 500, messages: 2,
+                models: [
+                    "claude-fable-5": TokenTally(input: 300, output: 200),
+                    "claude-haiku-4-5-20251001": TokenTally(input: 40, output: 10),
+                ]),
+            DailyActivity(
+                day: Self.day(2026, 8, 7), tokens: 120, messages: 1,
+                models: ["claude-haiku-4-5-20251001": TokenTally(input: 100, output: 20)]),
+        ]
+        let layout = Self.build(activity, dayCount: 7)
+
+        // The 9K Fable day is outside the window; each model scales to its
+        // own busiest in-window day, not the overall busiest.
+        #expect(layout.modelMaxTokens == [
+            "claude-fable-5": 500,
+            "claude-haiku-4-5-20251001": 120,
+        ])
+    }
+
     @Test("month marks label the window start and each month change")
     func monthMarks() {
         // Jul 11 – Aug 9 2026: partial first week, then August enters at the

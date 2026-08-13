@@ -34,6 +34,10 @@ public struct HeatmapLayout: Equatable, Sendable {
     /// The window's tokens attributed per raw model id, for the period's
     /// usage/cost summary.
     public let modelTotals: [String: TokenTally]
+    /// Each model's busiest single day in the window — the intensity
+    /// denominator when the heatmap is filtered to one model, so a light
+    /// model still shows its own usage pattern at full contrast.
+    public let modelMaxTokens: [String: Int]
 
     /// Longest span the "All" period renders. Not a retention policy: it
     /// stops one wild timestamp from expanding the grid to tens of thousands
@@ -42,12 +46,12 @@ public struct HeatmapLayout: Equatable, Sendable {
 
     public static let empty = HeatmapLayout(
         weeks: [], byDay: [:], maxTokens: 1, totalTokens: 0, activeDays: 0, monthMarks: [],
-        modelTotals: [:])
+        modelTotals: [:], modelMaxTokens: [:])
 
     public init(
         weeks: [[Date?]], byDay: [Date: DailyActivity],
         maxTokens: Int, totalTokens: Int, activeDays: Int, monthMarks: [MonthMark],
-        modelTotals: [String: TokenTally]
+        modelTotals: [String: TokenTally], modelMaxTokens: [String: Int]
     ) {
         self.weeks = weeks
         self.byDay = byDay
@@ -56,6 +60,7 @@ public struct HeatmapLayout: Equatable, Sendable {
         self.activeDays = activeDays
         self.monthMarks = monthMarks
         self.modelTotals = modelTotals
+        self.modelMaxTokens = modelMaxTokens
     }
 
     public var isEmpty: Bool { activeDays == 0 }
@@ -96,11 +101,13 @@ public struct HeatmapLayout: Equatable, Sendable {
         let weeks = stride(from: 0, to: cells.count, by: 7).map { Array(cells[$0..<$0 + 7]) }
 
         var modelTotals: [String: TokenTally] = [:]
+        var modelMaxTokens: [String: Int] = [:]
         for entry in visible {
             for (model, tally) in entry.models {
                 var merged = modelTotals[model] ?? TokenTally()
                 merged.add(tally)
                 modelTotals[model] = merged
+                modelMaxTokens[model] = max(modelMaxTokens[model] ?? 0, tally.total)
             }
         }
 
@@ -113,7 +120,7 @@ public struct HeatmapLayout: Equatable, Sendable {
             monthMarks: monthMarks(
                 weeks: weeks, rangeStart: rangeStart, today: today,
                 calendar: calendar, locale: locale),
-            modelTotals: modelTotals)
+            modelTotals: modelTotals, modelMaxTokens: modelMaxTokens)
     }
 
     private static func monthMarks(
