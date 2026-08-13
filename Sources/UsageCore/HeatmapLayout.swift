@@ -31,6 +31,9 @@ public struct HeatmapLayout: Equatable, Sendable {
     public let totalTokens: Int
     public let activeDays: Int
     public let monthMarks: [MonthMark]
+    /// The window's tokens attributed per raw model id, for the period's
+    /// usage/cost summary.
+    public let modelTotals: [String: TokenTally]
 
     /// Longest span the "All" period renders. Not a retention policy: it
     /// stops one wild timestamp from expanding the grid to tens of thousands
@@ -38,11 +41,13 @@ public struct HeatmapLayout: Equatable, Sendable {
     public static let maximumSpanInDays = 5 * 366
 
     public static let empty = HeatmapLayout(
-        weeks: [], byDay: [:], maxTokens: 1, totalTokens: 0, activeDays: 0, monthMarks: [])
+        weeks: [], byDay: [:], maxTokens: 1, totalTokens: 0, activeDays: 0, monthMarks: [],
+        modelTotals: [:])
 
     public init(
         weeks: [[Date?]], byDay: [Date: DailyActivity],
-        maxTokens: Int, totalTokens: Int, activeDays: Int, monthMarks: [MonthMark]
+        maxTokens: Int, totalTokens: Int, activeDays: Int, monthMarks: [MonthMark],
+        modelTotals: [String: TokenTally]
     ) {
         self.weeks = weeks
         self.byDay = byDay
@@ -50,6 +55,7 @@ public struct HeatmapLayout: Equatable, Sendable {
         self.totalTokens = totalTokens
         self.activeDays = activeDays
         self.monthMarks = monthMarks
+        self.modelTotals = modelTotals
     }
 
     public var isEmpty: Bool { activeDays == 0 }
@@ -89,6 +95,15 @@ public struct HeatmapLayout: Equatable, Sendable {
 
         let weeks = stride(from: 0, to: cells.count, by: 7).map { Array(cells[$0..<$0 + 7]) }
 
+        var modelTotals: [String: TokenTally] = [:]
+        for entry in visible {
+            for (model, tally) in entry.models {
+                var merged = modelTotals[model] ?? TokenTally()
+                merged.add(tally)
+                modelTotals[model] = merged
+            }
+        }
+
         return HeatmapLayout(
             weeks: weeks,
             byDay: byDay,
@@ -97,7 +112,8 @@ public struct HeatmapLayout: Equatable, Sendable {
             activeDays: byDay.count,
             monthMarks: monthMarks(
                 weeks: weeks, rangeStart: rangeStart, today: today,
-                calendar: calendar, locale: locale))
+                calendar: calendar, locale: locale),
+            modelTotals: modelTotals)
     }
 
     private static func monthMarks(

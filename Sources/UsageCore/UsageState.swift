@@ -62,13 +62,16 @@ public struct Snapshot: Sendable, Equatable {
     public let summary: MenuBarSummary
     public let spendLine: SpendLine?
     public let fetchedAt: Date
+    /// From the credentials read for this fetch; nil on cache-served states.
+    public let plan: PlanInfo?
 
-    public init(response: UsageResponse, fetchedAt: Date) {
+    public init(response: UsageResponse, fetchedAt: Date, plan: PlanInfo? = nil) {
         let meters = MeterBuilder.meters(from: response)
         self.meters = meters
         self.summary = MeterBuilder.menuBarSummary(from: meters)
         self.spendLine = MeterBuilder.spendLine(from: response)
         self.fetchedAt = fetchedAt
+        self.plan = plan
     }
 }
 

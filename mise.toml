@@ -23,7 +23,9 @@ description = "Build, bundle, sign, and launch the menu bar app"
 run = [
     "scripts/bundle.sh",
     # `open` on a running bundle ID only activates the old process — kill it
-    # so the freshly built binary is what actually launches.
+    # so the freshly built binary is what actually launches, and wait for it
+    # to actually exit or `open` races the teardown and fails with -600.
     "pkill -x ClaudeUsage || true",
+    "for i in $(seq 1 30); do pgrep -x ClaudeUsage >/dev/null || break; sleep 0.1; done",
     "open ClaudeUsage.app",
 ]

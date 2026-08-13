@@ -15,10 +15,17 @@ public struct Credential: Sendable {
     public let accessToken: String
     /// Which source produced this credential — safe to show in diagnostics.
     public let sourceName: String
+    /// Plan facts stored beside the token (subscription type, tier) — display
+    /// metadata, not a secret.
+    public let plan: PlanInfo
 
-    public init(accessToken: String, sourceName: String) {
+    public init(
+        accessToken: String, sourceName: String,
+        plan: PlanInfo = PlanInfo(subscriptionType: nil, rateLimitTier: nil)
+    ) {
         self.accessToken = accessToken
         self.sourceName = sourceName
+        self.plan = plan
     }
 }
 

@@ -11,7 +11,7 @@ struct UsagePanelView: View {
             header
             content
             Divider()
-            HeatmapView(activity: store.activity)
+            HeatmapView(activity: store.activity, pricing: store.pricing)
             footer
         }
         .padding(14)
@@ -20,16 +20,23 @@ struct UsagePanelView: View {
     }
 
     @ViewBuilder private var header: some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text("Claude Usage").font(.headline)
-            Text("v\(AppIdentity.version)")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-            Spacer()
-            if case .cached(let snapshot, _) = store.state {
-                Text("cached \(UsageFormatting.clockTime(snapshot.fetchedAt))")
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Claude Usage").font(.headline)
+                Text("v\(AppIdentity.version)")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                Spacer()
+                if case .cached(let snapshot, _) = store.state {
+                    Text("cached \(UsageFormatting.clockTime(snapshot.fetchedAt))")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+            }
+            if let plan = store.state.snapshot?.plan?.displayLabel {
+                Text(plan)
                     .font(.caption)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(.secondary)
             }
         }
         if let error = store.state.error {
@@ -57,7 +64,9 @@ struct UsagePanelView: View {
                     meter: meter,
                     stale: store.state.isStale,
                     burn: store.burnEstimates[meter.label],
-                    samples: store.samples)
+                    samples: store.samples,
+                    timeline: store.tokenTimeline,
+                    pricing: store.pricing)
             }
             if snapshot.meters.isEmpty {
                 Text("No limits reported").font(.callout).foregroundStyle(.secondary)
@@ -88,10 +97,11 @@ struct UsagePanelView: View {
                 store.refresh(.manual)
             } label: {
                 Image(systemName: "arrow.clockwise")
+                    .foregroundStyle(refreshPressureStyle)
             }
             .buttonStyle(.borderless)
             .disabled(store.isRefreshing)
-            .help("Refresh now (at most once per minute)")
+            .help(refreshHelp)
 
             Link(destination: URL(string: "https://claude.ai/settings/usage")!) {
                 Image(systemName: "arrow.up.right.square")
@@ -99,8 +109,10 @@ struct UsagePanelView: View {
             .help("Open claude.ai usage settings")
 
             Menu {
+                // No 1-minute option: sustained sub-3-minute polling trips the
+                // endpoint's rate limiter (anthropics/claude-code#31637).
                 Picker("Refresh when active", selection: intervalBinding) {
-                    Text("1 min").tag(60.0)
+                    Text("3 min").tag(180.0)
                     Text("5 min").tag(300.0)
                     Text("15 min").tag(900.0)
                 }
@@ -127,7 +139,28 @@ struct UsagePanelView: View {
         // (or usage moving) snaps it back — worth a word of transparency.
         let pace = store.paceMultiplier(now: now)
         if pace > 1 { parts.append("idle ×\(pace)") }
+        // Surface the API budget only once it's half spent — quiet otherwise.
+        let budget = store.apiBudget(now: now)
+        if budget.fraction >= 0.5 { parts.append("API \(budget.used)/\(budget.ceiling)h") }
         return parts.joined(separator: " · ")
+    }
+
+    /// Orange once the hour's requests reach 80% of the estimated budget,
+    /// red at or past it — the warning lives on the button that spends it.
+    private var refreshPressureStyle: AnyShapeStyle {
+        let fraction = store.apiBudget(now: Date()).fraction
+        if fraction >= 1 { return AnyShapeStyle(.red) }
+        if fraction >= 0.8 { return AnyShapeStyle(.orange) }
+        return AnyShapeStyle(.tint)
+    }
+
+    private var refreshHelp: String {
+        let budget = store.apiBudget(now: Date())
+        var text = "Refresh now (at most once per 3 minutes)"
+        if budget.fraction >= 0.8 {
+            text += " — \(budget.used) of ~\(budget.ceiling) hourly requests used; more may trip the API's rate limit"
+        }
+        return text
     }
 
     private var intervalBinding: Binding<Double> {
@@ -157,8 +190,11 @@ struct MeterRow: View {
     let stale: Bool
     let burn: BurnEstimate?
     let samples: [UsageSample]
+    let timeline: [TokenSlot]
+    let pricing: PricingTable
 
-    @State private var hovering = false
+    @State private var hoveringRow = false
+    @State private var hoveringPopover = false
     @State private var showHistory = false
 
     var body: some View {
@@ -183,19 +219,36 @@ struct MeterRow: View {
             captionLine.font(.caption2)
         }
         .contentShape(Rectangle())
+        // iStat-style lifecycle: hover opens after a beat, clicking opens
+        // immediately (never closes), and the popover survives the cursor
+        // travelling onto it — it hides only once the cursor has left both
+        // the row and the popover for a grace period.
         .onHover { inside in
-            hovering = inside
+            hoveringRow = inside
             if inside {
                 Task { @MainActor in
                     try? await Task.sleep(for: .milliseconds(300))
-                    if hovering { showHistory = true }
+                    if hoveringRow { showHistory = true }
                 }
             } else {
-                showHistory = false
+                scheduleHideIfLeft()
             }
         }
+        .onTapGesture { showHistory = true }
         .popover(isPresented: $showHistory, arrowEdge: .trailing) {
-            MeterHistoryView(meter: meter, samples: samples)
+            MeterHistoryView(
+                meter: meter, samples: samples, timeline: timeline, pricing: pricing)
+                .onHover { inside in
+                    hoveringPopover = inside
+                    if !inside { scheduleHideIfLeft() }
+                }
+        }
+    }
+
+    private func scheduleHideIfLeft() {
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(350))
+            if !hoveringRow && !hoveringPopover { showHistory = false }
         }
     }
 
@@ -240,10 +293,15 @@ struct MeterRow: View {
 }
 
 /// iStat-style per-limit history: this meter's sampled percent across its own
-/// limit window (5h for the session meter, 7 days for weeklies).
+/// limit window (5h for the session meter, 7 days for weeklies), plus the
+/// tokens local transcripts attribute to that window, by model.
 struct MeterHistoryView: View {
     let meter: Meter
     let samples: [UsageSample]
+    let timeline: [TokenSlot]
+    let pricing: PricingTable
+
+    @State private var hoverDate: Date?
 
     private var window: TimeInterval { meter.rank == 0 ? 5 * 3600 : 7 * 86400 }
     private var windowLabel: String { meter.rank == 0 ? "last 5h" : "last 7 days" }
@@ -276,27 +334,154 @@ struct MeterHistoryView: View {
                 Text("Collecting samples — this fills in as refreshes accumulate.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
-                    .frame(width: 240, height: 70)
+                    .frame(width: 260, height: 70)
             } else {
-                Chart(points) { point in
-                    AreaMark(
-                        x: .value("Time", point.t),
-                        y: .value("Percent", point.percent)
-                    )
-                    .foregroundStyle(Color(nsColor: StatusItemRenderer.claudeOrange).opacity(0.18))
-                    LineMark(
-                        x: .value("Time", point.t),
-                        y: .value("Percent", point.percent)
-                    )
-                    .foregroundStyle(Color(nsColor: StatusItemRenderer.claudeOrange))
-                    .interpolationMethod(.monotone)
-                }
-                .chartYScale(domain: 0...100)
-                .chartYAxis { AxisMarks(values: [0, 50, 100]) }
-                .chartXScale(domain: Date().addingTimeInterval(-window)...Date())
-                .frame(width: 260, height: 110)
+                historyChart
+                Text(selection.map(readoutText) ?? "Hover the graph for point details")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(selection == nil ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.secondary))
+                    .lineLimit(1)
             }
+            tokensSection
         }
         .padding(10)
+    }
+
+    private var historyChart: some View {
+        Chart {
+            ForEach(points) { point in
+                AreaMark(
+                    x: .value("Time", point.t),
+                    y: .value("Percent", point.percent)
+                )
+                .foregroundStyle(Color(nsColor: StatusItemRenderer.claudeOrange).opacity(0.18))
+                LineMark(
+                    x: .value("Time", point.t),
+                    y: .value("Percent", point.percent)
+                )
+                .foregroundStyle(Color(nsColor: StatusItemRenderer.claudeOrange))
+                .interpolationMethod(.monotone)
+            }
+            if let sel = selection {
+                RuleMark(x: .value("Time", sel.point.t))
+                    .foregroundStyle(.quaternary)
+                PointMark(
+                    x: .value("Time", sel.point.t),
+                    y: .value("Percent", sel.point.percent)
+                )
+                .foregroundStyle(Color(nsColor: StatusItemRenderer.claudeOrange))
+                .symbolSize(30)
+            }
+        }
+        .chartYScale(domain: 0...100)
+        .chartYAxis { AxisMarks(values: [0, 50, 100]) }
+        .chartXScale(domain: Date().addingTimeInterval(-window)...Date())
+        .chartOverlay { proxy in
+            GeometryReader { geo in
+                Rectangle()
+                    .fill(Color.clear)
+                    .contentShape(Rectangle())
+                    .onContinuousHover { phase in
+                        switch phase {
+                        case .active(let location):
+                            guard let plotFrame = proxy.plotFrame else { return }
+                            let x = location.x - geo[plotFrame].origin.x
+                            hoverDate = proxy.value(atX: x, as: Date.self)
+                        case .ended:
+                            hoverDate = nil
+                        }
+                    }
+            }
+        }
+        .frame(width: 260, height: 110)
+    }
+
+    /// The sample nearest the hovered time, plus its predecessor — the pair
+    /// bounds the poll interval the readout attributes tokens to.
+    private var selection: (point: Point, previous: Point?)? {
+        guard let hoverDate else { return nil }
+        let all = points
+        guard let nearest = all.min(by: {
+            abs($0.t.timeIntervalSince(hoverDate)) < abs($1.t.timeIntervalSince(hoverDate))
+        }) else { return nil }
+        return (nearest, all.last { $0.t < nearest.t })
+    }
+
+    /// "14:32 · 34% · 1.2M tokens · $3.40" — tokens and cost cover what the
+    /// transcripts logged between this sample and the previous one.
+    private func readoutText(_ sel: (point: Point, previous: Point?)) -> String {
+        var parts = [UsageFormatting.clockTime(sel.point.t), "\(sel.point.percent)%"]
+        if let previous = sel.previous {
+            let rows = WindowTokens.breakdown(
+                timeline: timeline,
+                from: previous.t.addingTimeInterval(1), to: sel.point.t)
+            let total = WindowTokens.total(rows)
+            if total.total > 0 {
+                parts.append("\(TokenFormat.compact(total.total)) tokens")
+                let dollars = rows
+                    .compactMap { pricing.rates(for: $0.model)?.dollars(for: $0.tally) }
+                    .reduce(0, +)
+                if dollars > 0 { parts.append(UsageFormatting.money(dollars)) }
+            }
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    /// Tokens are attributed to the limit's real window when the API gave a
+    /// live reset time (a session runs resetsAt − 5h → resetsAt); with no
+    /// live reset the trailing window is an honest stand-in.
+    private var tokenWindow: (start: Date, label: String) {
+        let now = Date()
+        if let resetsAt = meter.resetsAt, resetsAt > now {
+            return (
+                resetsAt.addingTimeInterval(-window),
+                meter.rank == 0 ? "this session" : "this week"
+            )
+        }
+        return (now.addingTimeInterval(-window), windowLabel)
+    }
+
+    /// "Weekly · Fable" → "Fable": a scoped meter's breakdown shows only its
+    /// own model's usage, never the whole timeline.
+    private var scopeName: String? {
+        guard meter.rank == 2, meter.label.hasPrefix("Weekly · ") else { return nil }
+        return String(meter.label.dropFirst("Weekly · ".count))
+    }
+
+    @ViewBuilder private var tokensSection: some View {
+        let (start, label) = tokenWindow
+        let all = WindowTokens.breakdown(timeline: timeline, from: start, to: Date())
+        let rows = scopeName.map { WindowTokens.scoped(all, name: $0) } ?? all
+        Divider()
+        HStack(alignment: .firstTextBaseline) {
+            Text("Tokens \(label)").font(.caption2.bold()).foregroundStyle(.secondary)
+            Spacer()
+            if rows.count > 1 {
+                Text(TokenFormat.compact(WindowTokens.total(rows).total))
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+        }
+        if rows.isEmpty {
+            Text("No local token data in this window.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        } else {
+            ForEach(rows) { row in
+                HStack(alignment: .firstTextBaseline) {
+                    Text(row.displayName)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                    Text(UsageFormatting.tallyText(row.tally))
+                        .font(.caption2.monospacedDigit())
+                        .layoutPriority(1)
+                }
+            }
+        }
+        Text("Local Claude Code sessions on this Mac only.")
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
     }
 }

@@ -92,6 +92,28 @@ struct HeatmapLayoutTests {
         #expect(Self.days(layout) == [Self.now])
     }
 
+    @Test("model totals sum only the visible window's days")
+    func modelTotals() {
+        let activity = [
+            DailyActivity(
+                day: Self.day(2026, 7, 1), tokens: 500, messages: 5,
+                models: ["claude-fable-5": TokenTally(input: 400, output: 100)]),
+            DailyActivity(
+                day: Self.day(2026, 8, 5), tokens: 100, messages: 2,
+                models: [
+                    "claude-fable-5": TokenTally(input: 30, output: 20),
+                    "claude-haiku-4-5-20251001": TokenTally(input: 40, output: 10),
+                ]),
+        ]
+        let layout = Self.build(activity, dayCount: 7)
+
+        // July 1 sits outside the trailing week, so its models don't count.
+        #expect(layout.modelTotals == [
+            "claude-fable-5": TokenTally(input: 30, output: 20),
+            "claude-haiku-4-5-20251001": TokenTally(input: 40, output: 10),
+        ])
+    }
+
     @Test("month marks label the window start and each month change")
     func monthMarks() {
         // Jul 11 – Aug 9 2026: partial first week, then August enters at the

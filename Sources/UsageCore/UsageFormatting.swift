@@ -74,6 +74,33 @@ public enum UsageFormatting {
         return "next in \(minutes)m \(seconds)s"
     }
 
+    /// "1.4M in · 84K out · 96% cached" — input side folds cache reads and
+    /// writes together; the cached share says how much of it was discounted.
+    /// Pass `cachedShare: false` where width is tighter than curiosity.
+    public static func tallyText(_ tally: TokenTally, cachedShare: Bool = true) -> String {
+        var text = "\(TokenFormat.compact(tally.inputSide)) in · \(TokenFormat.compact(tally.output)) out"
+        if cachedShare, let share = tally.cachedShare {
+            text += " · \(Int((share * 100).rounded()))% cached"
+        }
+        return text
+    }
+
+    /// "$4.20", "$1,234", "<$0.01" — cost estimates at API list prices.
+    public static func money(_ dollars: Double) -> String {
+        if dollars > 0 && dollars < 0.01 { return "<$0.01" }
+        let formatter = NumberFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.numberStyle = .decimal
+        formatter.groupingSeparator = ","
+        formatter.usesGroupingSeparator = true
+        formatter.roundingMode = .halfUp
+        let digits = dollars >= 100 ? 0 : 2
+        formatter.minimumFractionDigits = digits
+        formatter.maximumFractionDigits = digits
+        let text = formatter.string(from: NSNumber(value: dollars)) ?? String(format: "%.2f", dollars)
+        return "$\(text)"
+    }
+
     /// "09:45" — for "Updated …" and "cached …" annotations.
     public static func clockTime(_ date: Date, timeZone: TimeZone = .current) -> String {
         let formatter = DateFormatter()

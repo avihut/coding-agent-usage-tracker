@@ -23,8 +23,9 @@ public struct AdaptiveCadence: Sendable, Equatable {
     /// Nothing polls automatically before this instant.
     public private(set) var backoffUntil: Date?
 
-    /// Never poll faster than this, matching `TriggerGate` (spec §9).
-    public static let floor: TimeInterval = 60
+    /// Never poll faster than this, matching `TriggerGate` (spec §9): the
+    /// endpoint rate-limits sustained sub-3-minute polling.
+    public static let floor: TimeInterval = TriggerGate.floor
     /// Never poll slower than this — a meter an hour stale stops being a meter.
     public static let ceiling: TimeInterval = 3600
     /// First 429 waits this long, unless Retry-After asks for more...
@@ -69,7 +70,7 @@ public struct AdaptiveCadence: Sendable, Equatable {
     /// which keeps `lastEvidence` fresh — yet the human returning still
     /// deserves numbers no staler than the pace they chose. Also recovers
     /// timers App Nap has let drift. Never during backoff; the trigger gate
-    /// still owns the 60-second floor.
+    /// still owns the polling floor.
     public func shouldPollOnActivity(dataAge: TimeInterval?, now: Date) -> Bool {
         if isBackingOff(now: now) { return false }
         guard let dataAge else { return true }

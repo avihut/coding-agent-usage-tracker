@@ -7,26 +7,49 @@ struct CredentialParsingTests {
     @Test("wrapped shape: {\"claudeAiOauth\": {\"accessToken\": ...}}")
     func wrappedShape() throws {
         let json = Data(#"{"claudeAiOauth": {"accessToken": "tok-123", "refreshToken": "ref-999"}}"#.utf8)
-        #expect(try CredentialsParser.accessToken(fromJSON: json) == "tok-123")
+        #expect(try CredentialsParser.parse(fromJSON: json).token == "tok-123")
     }
 
     @Test("bare OAuth object shape: {\"accessToken\": ...}")
     func bareShape() throws {
         let json = Data(#"{"accessToken": "tok-456", "expiresAt": 1}"#.utf8)
-        #expect(try CredentialsParser.accessToken(fromJSON: json) == "tok-456")
+        #expect(try CredentialsParser.parse(fromJSON: json).token == "tok-456")
     }
 
     @Test("token is trimmed of stray whitespace")
     func trimsWhitespace() throws {
         let json = Data(#"{"accessToken": "  tok-789\n"}"#.utf8)
-        #expect(try CredentialsParser.accessToken(fromJSON: json) == "tok-789")
+        #expect(try CredentialsParser.parse(fromJSON: json).token == "tok-789")
+    }
+
+    @Test("plan metadata rides along; absent fields degrade to nil")
+    func planMetadata() throws {
+        let json = Data(#"""
+            {"claudeAiOauth": {"accessToken": "tok-1", "subscriptionType": "max",
+             "rateLimitTier": "default_claude_max_20x"}}
+            """#.utf8)
+        let plan = try CredentialsParser.parse(fromJSON: json).plan
+        #expect(plan == PlanInfo(subscriptionType: "max", rateLimitTier: "default_claude_max_20x"))
+        #expect(plan.displayLabel == "Max plan · 20x")
+
+        let bare = Data(#"{"accessToken": "tok-2"}"#.utf8)
+        let empty = try CredentialsParser.parse(fromJSON: bare).plan
+        #expect(empty.displayLabel == nil)
+    }
+
+    @Test("plan label variants")
+    func planLabels() {
+        #expect(PlanInfo(subscriptionType: "pro", rateLimitTier: nil).displayLabel == "Pro plan")
+        // A tier that isn't a multiplier suffix stays off the label.
+        #expect(PlanInfo(subscriptionType: "max", rateLimitTier: "standard").displayLabel == "Max plan")
+        #expect(PlanInfo(subscriptionType: "  ", rateLimitTier: "x").displayLabel == nil)
     }
 
     @Test("unrecognized JSON shape throws, without echoing contents")
     func unrecognizedShape() {
         let json = Data(#"{"something": "else"}"#.utf8)
         #expect(throws: CredentialError.self) {
-            try CredentialsParser.accessToken(fromJSON: json)
+            try CredentialsParser.parse(fromJSON: json)
         }
     }
 
@@ -34,7 +57,7 @@ struct CredentialParsingTests {
     func malformedJSON() {
         let json = Data("not json at all".utf8)
         #expect(throws: CredentialError.self) {
-            try CredentialsParser.accessToken(fromJSON: json)
+            try CredentialsParser.parse(fromJSON: json)
         }
     }
 
@@ -42,7 +65,7 @@ struct CredentialParsingTests {
     func emptyToken() {
         let json = Data(#"{"accessToken": "   "}"#.utf8)
         #expect(throws: CredentialError.self) {
-            try CredentialsParser.accessToken(fromJSON: json)
+            try CredentialsParser.parse(fromJSON: json)
         }
     }
 

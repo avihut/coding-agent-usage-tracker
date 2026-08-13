@@ -43,10 +43,10 @@ struct AdaptiveCadenceTests {
         #expect(cadence.multiplier(now: later) == 1)
     }
 
-    @Test("never faster than 60s, even fully active")
+    @Test("never faster than the 180s floor, even if a faster interval sneaks in")
     func floors() {
         let cadence = AdaptiveCadence(activeInterval: 60, now: t0)
-        #expect(cadence.interval(now: t0) == 60)
+        #expect(cadence.interval(now: t0) == TriggerGate.floor)
     }
 
     @Test("429s back off exponentially from five minutes, capped at an hour")

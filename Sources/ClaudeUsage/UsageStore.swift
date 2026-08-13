@@ -21,19 +21,28 @@ final class UsageStore {
     private(set) var samples: [UsageSample] = []
     private(set) var burnEstimates: [String: BurnEstimate] = [:]
     private(set) var activity: [DailyActivity] = []
+    /// Recent per-minute, per-model transcript usage; feeds the per-meter
+    /// window breakdown in the panel.
+    private(set) var tokenTimeline: [TokenSlot] = []
+    /// Best pricing table available (live feed, disk cache, or bundled).
+    private(set) var pricing: PricingTable
 
     private let service: UsageService
     private let history: UsageHistory
     private let scanner: TranscriptScanner
     private let promptScanner: PromptHistoryScanner
+    private let pricingService: PricingService
     private var gate = TriggerGate()
     private let scheduler = Scheduler()
     private var cadence: AdaptiveCadence
+    private var ledger: RequestLedger
     private var watcher: ClaudeActivityWatcher?
     private var lastActivityScan: Date?
+    private var lastPricingAttempt: Date?
 
     static let defaultInterval: TimeInterval = 300
     private static let intervalKey = "refreshIntervalSeconds"
+    private static let ceilingKey = "apiHourlyCeiling"
 
     init(service: UsageService? = nil) {
         let bundleID = Bundle.main.bundleIdentifier ?? "com.avihu.ClaudeUsage"
@@ -41,10 +50,16 @@ final class UsageStore {
         self.history = .standard(bundleID: bundleID)
         self.scanner = .standard(bundleID: bundleID)
         self.promptScanner = .standard()
+        self.pricingService = .standard(bundleID: bundleID)
+        self.pricing = pricingService.current()
         let stored = UserDefaults.standard.double(forKey: Self.intervalKey)
-        let interval = stored >= 60 ? stored : Self.defaultInterval
+        // Stored 60s choices predate the 180s floor — clamp, don't honor.
+        let interval = stored >= 60 ? max(TriggerGate.floor, stored) : Self.defaultInterval
         self.activeInterval = interval
         self.cadence = AdaptiveCadence(activeInterval: interval, now: Date())
+        let storedCeiling = UserDefaults.standard.integer(forKey: Self.ceilingKey)
+        self.ledger = RequestLedger(
+            ceiling: storedCeiling > 0 ? storedCeiling : RequestLedger.defaultCeiling)
         self.samples = history.load()
 
         scheduler.onTrigger = { [weak self] reason in
@@ -80,6 +95,7 @@ final class UsageStore {
             return
         }
         isRefreshing = true
+        ledger.recordRequest(at: now)
         Task {
             let previous = state.snapshot
             let newState = await service.refresh()
@@ -91,6 +107,25 @@ final class UsageStore {
                 samples = history.append(snapshot, existing: samples)
                 recomputeBurnEstimates(for: snapshot)
             }
+            await refreshPricingIfNeeded()
+        }
+    }
+
+    /// How close the last hour of requests is to the endpoint's estimated
+    /// budget — the honesty gauge behind "refresh all you want".
+    func apiBudget(now: Date) -> (used: Int, ceiling: Int, fraction: Double) {
+        (ledger.used(at: now), ledger.ceiling, ledger.pressure(at: now))
+    }
+
+    /// Piggybacks on usage refreshes: at most one feed fetch attempt per
+    /// hour, and only while the table is older than a day (or bundled).
+    private func refreshPricingIfNeeded() async {
+        let now = Date()
+        guard pricing.isStale(now: now) else { return }
+        if let last = lastPricingAttempt, now.timeIntervalSince(last) < 3600 { return }
+        lastPricingAttempt = now
+        if let fresh = await pricingService.refreshIfStale(now: now) {
+            pricing = fresh
         }
     }
 
@@ -129,9 +164,13 @@ final class UsageStore {
         let scanner = scanner
         let promptScanner = promptScanner
         Task.detached(priority: .utility) { [weak self] in
+            let scan = scanner.scan()
             let activity = ActivityMerge.merge(
-                transcripts: scanner.scan(), prompts: promptScanner.scan())
-            await MainActor.run { self?.activity = activity }
+                transcripts: scan.daily, prompts: promptScanner.scan())
+            await MainActor.run {
+                self?.activity = activity
+                self?.tokenTimeline = scan.timeline
+            }
         }
     }
 
@@ -143,6 +182,9 @@ final class UsageStore {
         let now = Date()
         if case .rateLimited(let retryAfter) = newState.error {
             cadence.noteRateLimited(retryAfter: retryAfter, at: now)
+            // The 429 just showed us the window's real budget — remember it.
+            ledger.noteRateLimited(at: now)
+            UserDefaults.standard.set(ledger.ceiling, forKey: Self.ceilingKey)
         } else if case .live(let snapshot) = newState {
             cadence.noteSuccess(
                 usageAdvanced: UsageMovement.advanced(from: previous, to: snapshot), at: now)
@@ -176,7 +218,7 @@ final class UsageStore {
     }
 
     func setActiveInterval(_ interval: TimeInterval) {
-        let clamped = max(60, interval)
+        let clamped = max(TriggerGate.floor, interval)
         activeInterval = clamped
         cadence.activeInterval = clamped
         UserDefaults.standard.set(clamped, forKey: Self.intervalKey)

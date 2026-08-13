@@ -13,7 +13,10 @@ the README rather than silently deviating.
   token only, re-read on every refresh cycle, never cached in memory or disk.
 - The token is never logged, persisted, placed in a URL, or included in any
   error surface. Cache response bodies only.
-- Only network destination: `api.anthropic.com`. No analytics, no telemetry.
+- Exactly two network destinations: `api.anthropic.com` (usage, with the
+  OAuth token) and `raw.githubusercontent.com` (LiteLLM pricing feed —
+  plain GET, never any credential or account data attached; user-directed
+  spec §10 amendment, 2026-08-13, see README). No analytics, no telemetry.
 - No App Sandbox. No entitlements we don't need.
 - Never install or register anything (login items, launch agents) without
   asking the user in-session. Launch-at-login is a user-clicked toggle only.
@@ -69,7 +72,21 @@ the README rather than silently deviating.
   counts, survives Claude Code's `cleanupPeriodDays` sweep): days with
   prompts but no surviving transcripts render faint as "no token data".
   Never write inside `~/.claude`, never go near `.credentials.json` from
-  the scanners, nothing leaves the machine.
+  the scanners, nothing leaves the machine. The same scan also attributes
+  tokens per model (`TokenTally`: in/out/cache-write incl. the 1h-TTL
+  split/cache-read): per day forever (`DailyActivity.models`, day tooltips
+  and the per-period summary via `HeatmapLayout.modelTotals`) and per
+  minute for a trailing 8 days (`TokenSlot` timeline, cache-bounded —
+  feeds the per-meter window breakdowns via `WindowTokens`).
+- Cost estimates: `PricingTable` (per-token `ModelRates`, exact-id then
+  date-stripped lookup) from `PricingService` — disk-cached LiteLLM feed
+  refreshed when >24h old (attempted at most hourly, piggybacked on usage
+  refreshes), `PricingTable.bundled` as the offline floor. Estimates are
+  list-price counterfactuals; subscription plans don't bill per token.
+- Plan identity: `CredentialsParser` also surfaces `subscriptionType` /
+  `rateLimitTier` (`PlanInfo` — metadata beside the token, never the
+  refresh token); it rides `Snapshot.plan` and renders under the panel
+  title.
 - Burn estimates come from persisted percent samples (`UsageHistory` in App
   Support) using the monotonic tail after the last drop, so limit resets
   never produce bogus negative rates. Verdicts: red = exhausts before
@@ -113,8 +130,13 @@ the README rather than silently deviating.
   `popoverDidClose`); global monitors never see in-panel events, so any hit
   means the user went elsewhere.
 - Timers get generous `tolerance`; refresh on `didWakeNotification` and
-  network-path restore. Never poll faster than 60s — adaptive cadence may
-  only ever slow polling down from the user's chosen active interval.
+  network-path restore. Never poll faster than 180s (`TriggerGate.floor`;
+  tightened from 60s on 2026-08-13 — the endpoint rate-limits sustained
+  sub-3-minute polling, anthropics/claude-code#31637) — adaptive cadence may
+  only ever slow polling down from the user's chosen active interval, and
+  `RequestLedger` tracks the trailing hour against an estimated budget
+  (learned tighter from real 429s) so the panel can warn before manual
+  refreshes trip the limiter.
 
 ## Testing
 

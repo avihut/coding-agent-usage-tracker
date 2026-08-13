@@ -31,8 +31,11 @@ public struct UsageService: Sendable {
         // The token is re-read every cycle (Claude Code rotates it) and lives
         // only in this frame for the duration of one request (spec §5).
         let token: String
+        let plan: PlanInfo
         do {
-            token = try credentials.readCredential().accessToken
+            let credential = try credentials.readCredential()
+            token = credential.accessToken
+            plan = credential.plan
         } catch let error as CredentialError {
             return fallback(.from(error))
         } catch {
@@ -51,7 +54,7 @@ public struct UsageService: Sendable {
         guard let response = try? UsageResponse.decode(from: body) else {
             return fallback(.schema)
         }
-        let snapshot = Snapshot(response: response, fetchedAt: Date())
+        let snapshot = Snapshot(response: response, fetchedAt: Date(), plan: plan)
         cache.save(body: body, fetchedAt: snapshot.fetchedAt)
         return .live(snapshot)
     }

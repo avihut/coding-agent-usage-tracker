@@ -32,12 +32,20 @@ struct TranscriptScannerTests {
         not json at all
         """
 
+    /// A `now` that keeps the fixture timestamps inside timeline retention.
+    static let scanNow = utcCalendar().date(
+        from: DateComponents(year: 2026, month: 8, day: 3))!
+
+    static func minute(_ iso: String) -> Date {
+        FlexibleISO8601.date(from: iso)!
+    }
+
     @Test("aggregates per day, sums all token kinds, dedups repeated requestIds")
     func aggregates() throws {
         let (scanner, root) = try makeScanner()
         try Self.transcript.write(to: root.appending(path: "a.jsonl"), atomically: true, encoding: .utf8)
 
-        let activity = scanner.scan()
+        let activity = scanner.scan(now: Self.scanNow).daily
 
         #expect(activity.count == 2)
         // Day 1: r1 counted once (200 total incl. cache tokens), r2 = 400.
@@ -52,9 +60,10 @@ struct TranscriptScannerTests {
         let (scanner, root) = try makeScanner()
         try Self.transcript.write(to: root.appending(path: "a.jsonl"), atomically: true, encoding: .utf8)
 
-        let first = scanner.scan()
-        let second = scanner.scan()
+        let first = scanner.scan(now: Self.scanNow)
+        let second = scanner.scan(now: Self.scanNow)
         #expect(first == second)
+        #expect(!first.timeline.isEmpty)
     }
 
     @Test("modified files are re-parsed")
@@ -62,13 +71,13 @@ struct TranscriptScannerTests {
         let (scanner, root) = try makeScanner()
         let file = root.appending(path: "a.jsonl")
         try Self.transcript.write(to: file, atomically: true, encoding: .utf8)
-        _ = scanner.scan()
+        _ = scanner.scan(now: Self.scanNow)
 
         let extra = Self.transcript + "\n" +
             #"{"timestamp":"2026-08-03T08:00:00.000Z","requestId":"r9","message":{"id":"m9","usage":{"input_tokens":10,"output_tokens":5}}}"#
         try extra.write(to: file, atomically: true, encoding: .utf8)
 
-        let activity = scanner.scan()
+        let activity = scanner.scan(now: Self.scanNow).daily
         #expect(activity.count == 3)
         #expect(activity[2].tokens == 15)
     }
@@ -82,7 +91,86 @@ struct TranscriptScannerTests {
             cacheDirectory: base.appending(path: "cache"),
             calendar: Self.utcCalendar()
         )
-        #expect(scanner.scan().isEmpty)
+        let scan = scanner.scan()
+        #expect(scan.daily.isEmpty)
+        #expect(scan.timeline.isEmpty)
+    }
+
+    @Test("timeline: minute buckets per model, merged across files, dedup honored")
+    func timeline() throws {
+        let (scanner, root) = try makeScanner()
+        let a = """
+            {"timestamp":"2026-08-02T09:00:10.000Z","requestId":"t1","message":{"id":"n1","model":"claude-fable-5","usage":{"input_tokens":10,"output_tokens":5,"cache_creation_input_tokens":100,"cache_read_input_tokens":1000}}}
+            {"timestamp":"2026-08-02T09:00:40.000Z","requestId":"t2","message":{"id":"n2","model":"claude-fable-5","usage":{"input_tokens":1,"output_tokens":2}}}
+            {"timestamp":"2026-08-02T09:00:50.000Z","requestId":"t3","message":{"id":"n3","model":"claude-haiku-4-5-20251001","usage":{"input_tokens":7,"output_tokens":3}}}
+            {"timestamp":"2026-08-02T09:01:10.000Z","requestId":"t1","message":{"id":"n4","model":"claude-fable-5","usage":{"input_tokens":999,"output_tokens":999}}}
+            {"timestamp":"2026-08-02T10:30:00.000Z","requestId":"t5","message":{"id":"n6","usage":{"input_tokens":4,"output_tokens":4}}}
+            """
+        let b = """
+            {"timestamp":"2026-08-02T09:00:55.000Z","requestId":"u1","message":{"id":"p1","model":"claude-fable-5","usage":{"input_tokens":2,"output_tokens":1}}}
+            """
+        try a.write(to: root.appending(path: "a.jsonl"), atomically: true, encoding: .utf8)
+        try b.write(to: root.appending(path: "b.jsonl"), atomically: true, encoding: .utf8)
+
+        let scan = scanner.scan(now: Self.scanNow)
+
+        // The same records also attribute the day's tokens per model.
+        #expect(scan.daily[0].models == [
+            "claude-fable-5": TokenTally(input: 13, output: 8, cacheCreation: 100, cacheRead: 1000),
+            "claude-haiku-4-5-20251001": TokenTally(input: 7, output: 3),
+            "unknown": TokenTally(input: 4, output: 4),
+        ])
+
+        #expect(scan.timeline == [
+            // Same minute: t1 + t2 from file a, u1 from file b; the duplicate
+            // t1 retry is dropped.
+            TokenSlot(
+                t: Self.minute("2026-08-02T09:00:00.000Z"), model: "claude-fable-5",
+                tally: TokenTally(input: 13, output: 8, cacheCreation: 100, cacheRead: 1000)),
+            TokenSlot(
+                t: Self.minute("2026-08-02T09:00:00.000Z"), model: "claude-haiku-4-5-20251001",
+                tally: TokenTally(input: 7, output: 3)),
+            // A record without a model still counts, bucketed as "unknown".
+            TokenSlot(
+                t: Self.minute("2026-08-02T10:30:00.000Z"), model: "unknown",
+                tally: TokenTally(input: 4, output: 4)),
+        ])
+    }
+
+    @Test("slots age out of the timeline after retention; daily totals never do")
+    func retention() throws {
+        let (scanner, root) = try makeScanner()
+        let content = """
+            {"timestamp":"2026-07-20T09:00:00.000Z","requestId":"old","message":{"id":"o1","model":"claude-fable-5","usage":{"input_tokens":50,"output_tokens":50}}}
+            {"timestamp":"2026-08-02T09:00:00.000Z","requestId":"new","message":{"id":"o2","model":"claude-fable-5","usage":{"input_tokens":5,"output_tokens":5}}}
+            """
+        try content.write(to: root.appending(path: "a.jsonl"), atomically: true, encoding: .utf8)
+
+        let scan = scanner.scan(now: Self.scanNow)
+
+        #expect(scan.daily.count == 2) // July 20 still feeds the heatmap
+        #expect(scan.timeline.count == 1)
+        #expect(scan.timeline[0].t == Self.minute("2026-08-02T09:00:00.000Z"))
+
+        // The same trim applies to cached entries on later scans.
+        let later = scanner.scan(now: Self.utcCalendar().date(
+            from: DateComponents(year: 2026, month: 8, day: 11))!)
+        #expect(later.timeline.isEmpty)
+        #expect(later.daily.count == 2)
+    }
+
+    @Test("a stale cache version is discarded, not misread")
+    func staleCacheVersion() throws {
+        let (scanner, root) = try makeScanner()
+        try Self.transcript.write(to: root.appending(path: "a.jsonl"), atomically: true, encoding: .utf8)
+        try FileManager.default.createDirectory(
+            at: scanner.cacheURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try #"{"version":1,"files":{"bogus":{"mtime":0,"size":0,"days":{}}}}"#
+            .write(to: scanner.cacheURL, atomically: true, encoding: .utf8)
+
+        let scan = scanner.scan(now: Self.scanNow)
+        #expect(scan.daily.count == 2)
+        #expect(!scan.timeline.isEmpty)
     }
 }
 

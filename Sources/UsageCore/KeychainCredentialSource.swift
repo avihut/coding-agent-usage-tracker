@@ -44,9 +44,7 @@ public struct KeychainCredentialSource: CredentialSource {
         guard let data = item as? Data else {
             throw CredentialError.unreadable("keychain item has no data payload")
         }
-        return Credential(
-            accessToken: try CredentialsParser.accessToken(fromJSON: data),
-            sourceName: name
-        )
+        let parsed = try CredentialsParser.parse(fromJSON: data)
+        return Credential(accessToken: parsed.token, sourceName: name, plan: parsed.plan)
     }
 }

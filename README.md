@@ -7,10 +7,15 @@ for distribution.
 ## Status
 
 Fully built: menu bar item (`✳︎ 6·17·22%`, per-segment severity colors),
-panel with per-limit meters and reset times, live client with cached
-fallback and readable error states, adaptive refresh (see below) plus
-wake/network-restore triggers, launch-at-login toggle (off by default),
-stable signing verified across rebuilds. Remaining: the §13 acceptance
+panel with per-limit meters and reset times (subscription type under the
+title), live client with cached fallback and readable error states, adaptive
+refresh (see below) plus wake/network-restore triggers, launch-at-login
+toggle (off by default), stable signing verified across rebuilds. Local
+transcript analytics: activity heatmap (7D bars / 30D calendar / all-time
+grid) with per-day, per-model token tooltips; per-meter hover popovers with
+percent history, per-window token breakdowns, and per-poll-interval readouts;
+per-period model usage rows with cost estimates at API list prices (pricing
+feed fetched daily, bundled fallback). Remaining: the §13 acceptance
 checklist items that need real-world time (sleep/wake, token expiry).
 
 ## Adaptive refresh
@@ -27,8 +32,19 @@ app/web use gets noticed). An HTTP 429 pauses polling — 5 minutes,
 doubling per repeat up to an hour, honoring `Retry-After` up to two hours —
 and heals automatically on the next success; the panel says so and shows the
 retry countdown. Manual refresh still works during a pause. The panel footer
-shows "idle ×N" whenever the cadence is decayed. Nothing ever polls faster
-than once per 60 seconds.
+shows "idle ×N" whenever the cadence is decayed.
+
+Nothing ever polls faster than once per **180 seconds** (supersedes the spec's
+60s floor, and the app's own earlier 1-minute option). Field evidence: this
+endpoint rate-limits sustained sub-3-minute polling into sticky 429s — this
+app hit it at 60s, and community testing found the same
+([anthropics/claude-code#31637](https://github.com/anthropics/claude-code/issues/31637),
+[#31021](https://github.com/anthropics/claude-code/issues/31021)). Interval
+choices are 3/5/15 minutes accordingly. A request ledger tracks the trailing
+hour of calls against an estimated budget (20/hour to start, tightened
+whenever a real 429 reveals a lower ceiling and remembered across launches);
+the footer shows `API n/Nh` once half the budget is spent and the refresh
+button turns orange/red as manual clicks approach it.
 
 ## Why this is OK (policy note)
 
@@ -45,6 +61,20 @@ of Anthropic's subscription-auth policy:
 
 If this app ever grows a feature that calls a model, it switches to API-key auth
 at that moment.
+
+### Second network destination: the pricing feed
+
+Cost estimates need current API list prices and Anthropic publishes no pricing
+API, so the app fetches LiteLLM's community-maintained
+`model_prices_and_context_window.json` from `raw.githubusercontent.com` — a
+plain unauthenticated GET carrying only the app's own User-Agent, at most once
+per day (attempted at most hourly while stale), filtered down to Anthropic
+models and cached in App Support. This deliberately amends spec §10's
+"api.anthropic.com only" rule (user-directed, 2026-08-13); nothing about the
+account, the token, or local usage is ever sent there. If the fetch fails, a
+pricing table bundled at build time keeps estimates rendering, marked as such.
+Estimates are list-price counterfactuals ("what would this have cost on the
+API") — subscription plans don't bill per token.
 
 ## Known risk: undocumented endpoint
 

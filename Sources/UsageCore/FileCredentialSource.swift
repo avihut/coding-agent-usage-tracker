@@ -23,9 +23,7 @@ public struct FileCredentialSource: CredentialSource {
         } catch {
             throw CredentialError.unreadable("credentials file exists but could not be read")
         }
-        return Credential(
-            accessToken: try CredentialsParser.accessToken(fromJSON: data),
-            sourceName: name
-        )
+        let parsed = try CredentialsParser.parse(fromJSON: data)
+        return Credential(accessToken: parsed.token, sourceName: name, plan: parsed.plan)
     }
 }

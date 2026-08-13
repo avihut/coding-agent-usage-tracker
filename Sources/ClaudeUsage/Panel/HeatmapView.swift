@@ -5,6 +5,7 @@ import UsageCore
 /// prompt history.
 struct HeatmapView: View {
     let activity: [DailyActivity]
+    let pricing: PricingTable
 
     enum Period: String, CaseIterable, Identifiable {
         case week = "7D"
@@ -70,9 +71,52 @@ struct HeatmapView: View {
                     Spacer()
                     legend
                 }
+                modelSummary
             }
         }
         .onChange(of: activity, initial: true) { rebuildLayout(for: period) }
+    }
+
+    /// The period's usage per model, each row priced, with what the whole
+    /// window would have cost at API list prices.
+    @ViewBuilder private var modelSummary: some View {
+        let rows = WindowTokens.rows(from: layout.modelTotals)
+        if !rows.isEmpty {
+            let priced = rows.map { row in (row: row, rates: pricing.rates(for: row.model)) }
+            let total = priced.compactMap { $0.rates?.dollars(for: $0.row.tally) }.reduce(0, +)
+            let unpricedCount = priced.count(where: { $0.rates == nil })
+            VStack(alignment: .leading, spacing: 3) {
+                ForEach(priced, id: \.row.id) { entry in
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(entry.row.displayName)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        Spacer(minLength: 8)
+                        Text(modelRowText(entry.row.tally, rates: entry.rates))
+                            .font(.caption2.monospacedDigit())
+                            .layoutPriority(1)
+                    }
+                }
+                HStack(alignment: .firstTextBaseline) {
+                    Text(unpricedCount > 0
+                        ? "≈ \(UsageFormatting.money(total)) at API list prices · \(unpricedCount) unpriced"
+                        : "≈ \(UsageFormatting.money(total)) at API list prices")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                    Spacer()
+                }
+            }
+            .padding(.top, 2)
+        }
+    }
+
+    private func modelRowText(_ tally: TokenTally, rates: ModelRates?) -> String {
+        var text = UsageFormatting.tallyText(tally, cachedShare: false)
+        if let rates {
+            text += " · \(UsageFormatting.money(rates.dollars(for: tally)))"
+        }
+        return text
     }
 
     private func rebuildLayout(for period: Period) {
@@ -381,13 +425,20 @@ struct HeatmapView: View {
         } else {
             "\(date) · no activity"
         }
-        return Text(text)
-            .font(.caption2)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.quaternary))
-            .fixedSize()
+        return VStack(alignment: .leading, spacing: 2) {
+            Text(text)
+                .font(.caption2)
+            ForEach(WindowTokens.rows(from: entry?.models ?? [:])) { row in
+                Text("\(row.displayName) · \(UsageFormatting.tallyText(row.tally))")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.quaternary))
+        .fixedSize()
     }
 
     private static let claudeOrange = Color(nsColor: StatusItemRenderer.claudeOrange)
