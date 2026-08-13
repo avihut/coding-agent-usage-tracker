@@ -94,7 +94,12 @@ the README rather than silently deviating.
   hovering a row there swaps the percent chart for that model's
   cumulative token curve. Hover-driven stats lines are fixed-height by
   design — swapping text must never reflow the layout under the cursor —
-  and today's cell/bar carries a subtle ring.
+  and today's cell/bar carries a subtle ring (grids only — the 7D bar's
+  bold weekday label suffices). A Tokens|Cost segmented picker beside the
+  period picker re-values every chart surface (cell intensity, bar
+  heights/segments/labels, tooltips, stats line, drill ring) via
+  `CostIndex` — per-day cost prebuilt next to the layout so render
+  passes never price models; unpriced models drop out of cost mode.
 - Cost estimates: `PricingTable` (per-token `ModelRates`, exact-id then
   date-stripped lookup) from `PricingService` — disk-cached LiteLLM feed
   refreshed when >24h old (attempted at most hourly, piggybacked on usage

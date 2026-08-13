@@ -26,7 +26,18 @@ struct HeatmapView: View {
         }
     }
 
+    /// What the charts measure: token volume or estimated cost. One selector
+    /// picks the time span, this one picks the value dimension.
+    enum Dimension: String, CaseIterable, Identifiable {
+        case tokens = "Tokens"
+        case cost = "Cost"
+
+        var id: String { rawValue }
+    }
+
     @State private var period: Period = .month
+    @State private var dimension: Dimension = .tokens
+    @State private var costIndex: CostIndex = .empty
     @State private var hoveredDay: Date?
     @State private var hoveredModel: String?
     @State private var selectedDay: Date?
@@ -102,17 +113,27 @@ struct HeatmapView: View {
 
     // MARK: - Period mode
 
+    /// Both pickers sit flush against the content's right edge — `fixedSize`
+    /// instead of a fixed frame, which centered the control and left a
+    /// phantom right inset.
     private var titleRow: some View {
-        HStack {
+        HStack(spacing: 6) {
             Text("Activity").font(.caption.bold())
             Spacer()
+            Picker("Dimension", selection: $dimension) {
+                ForEach(Dimension.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .controlSize(.mini)
+            .labelsHidden()
+            .fixedSize()
             Picker("Period", selection: periodBinding) {
                 ForEach(Period.allCases) { Text($0.rawValue).tag($0) }
             }
             .pickerStyle(.segmented)
             .controlSize(.mini)
             .labelsHidden()
-            .frame(width: 150)
+            .fixedSize()
         }
     }
 
@@ -142,20 +163,68 @@ struct HeatmapView: View {
         }
     }
 
-    /// "7.3B tokens · 24 active days" — scoped to the hovered model while
-    /// the legend is filtering the chart.
+    /// "7.3B tokens · 24 active days" (or "≈ $6,860 · …" in cost mode) —
+    /// scoped to the hovered model while the legend is filtering the chart.
     private var footerStats: String {
         if let hoveredModel, let tally = layout.modelTotals[hoveredModel] {
             let days = layout.byDay.values.count(
                 where: { ($0.models[hoveredModel]?.total ?? 0) > 0 })
-            return "\(ModelNames.display(hoveredModel)) · "
-                + "\(TokenFormat.compact(tally.total)) tokens · \(days) active days"
+            let value = switch dimension {
+            case .tokens:
+                "\(TokenFormat.compact(tally.total)) tokens"
+            case .cost:
+                "≈ \(UsageFormatting.money(pricing.rates(for: hoveredModel)?.dollars(for: tally) ?? 0))"
+            }
+            return "\(ModelNames.display(hoveredModel)) · \(value) · \(days) active days"
         }
-        return "\(TokenFormat.compact(layout.totalTokens)) tokens · \(layout.activeDays) active days"
+        let value = switch dimension {
+        case .tokens: "\(TokenFormat.compact(layout.totalTokens)) tokens"
+        case .cost: "≈ \(UsageFormatting.money(costIndex.total))"
+        }
+        return "\(value) · \(layout.activeDays) active days"
     }
 
     private func rebuildLayout(for period: Period) {
         layout = HeatmapLayout.build(activity: activity, dayCount: period.dayCount)
+        costIndex = CostIndex.build(days: layout.byDay, pricing: pricing)
+    }
+
+    // MARK: - Dimension values
+
+    private func dayValue(_ entry: DailyActivity) -> Double {
+        switch dimension {
+        case .tokens: Double(entry.tokens)
+        case .cost: costIndex.byDay[entry.day] ?? 0
+        }
+    }
+
+    private var maxDayValue: Double {
+        switch dimension {
+        case .tokens: Double(layout.maxTokens)
+        case .cost: costIndex.maxByDay
+        }
+    }
+
+    private func modelDayValue(_ entry: DailyActivity, model: String) -> Double {
+        guard let tally = entry.models[model] else { return 0 }
+        switch dimension {
+        case .tokens: return Double(tally.total)
+        case .cost: return pricing.rates(for: model)?.dollars(for: tally) ?? 0
+        }
+    }
+
+    private func modelMaxValue(_ model: String) -> Double {
+        switch dimension {
+        case .tokens: Double(layout.modelMaxTokens[model] ?? 1)
+        case .cost: costIndex.modelMax[model] ?? 1
+        }
+    }
+
+    private func formatted(_ value: Double) -> String {
+        switch dimension {
+        case .tokens: TokenFormat.compact(Int(value))
+        case .cost: UsageFormatting.money(value)
+        }
     }
 
     /// Switches period and grid in one update — staging them separately shows
@@ -220,7 +289,7 @@ struct HeatmapView: View {
     private func dayRing(rows: [ModelTokenUsage], entry: DailyActivity) -> some View {
         Chart(rows) { row in
             SectorMark(
-                angle: .value("Tokens", row.tally.total),
+                angle: .value(dimension == .cost ? "Cost" : "Tokens", ringValue(row)),
                 innerRadius: .ratio(0.62),
                 angularInset: 1.5)
                 .foregroundStyle(modelColors[row.model] ?? Self.claudeOrange)
@@ -235,11 +304,20 @@ struct HeatmapView: View {
                 if let plotFrame = proxy.plotFrame {
                     let frame = geo[plotFrame]
                     VStack(spacing: 0) {
-                        Text(TokenFormat.compact(entry.tokens))
-                            .font(.system(size: 15, weight: .semibold).monospacedDigit())
-                        Text("tokens")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
+                        switch dimension {
+                        case .tokens:
+                            Text(TokenFormat.compact(entry.tokens))
+                                .font(.system(size: 15, weight: .semibold).monospacedDigit())
+                            Text("tokens")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        case .cost:
+                            Text("≈ \(UsageFormatting.money(costIndex.byDay[entry.day] ?? 0))")
+                                .font(.system(size: 15, weight: .semibold).monospacedDigit())
+                            Text("est. cost")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
                         Text("\(entry.messages) msgs")
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
@@ -247,6 +325,13 @@ struct HeatmapView: View {
                     .position(x: frame.midX, y: frame.midY)
                 }
             }
+        }
+    }
+
+    private func ringValue(_ row: ModelTokenUsage) -> Double {
+        switch dimension {
+        case .tokens: Double(row.tally.total)
+        case .cost: pricing.rates(for: row.model)?.dollars(for: row.tally) ?? 0
         }
     }
 
@@ -416,7 +501,9 @@ struct HeatmapView: View {
 
     // MARK: - 7D bar chart
 
-    private static let barPlotHeight: CGFloat = 64
+    private static let barPlotHeight: CGFloat = 76
+    /// Space above the tallest bar for its value label.
+    private static let barLabelHeadroom: CGFloat = 12
 
     private var barChart: some View {
         let days = layout.weeks.flatMap { $0 }.compactMap { $0 }
@@ -450,6 +537,17 @@ struct HeatmapView: View {
         let entry = layout.byDay[day]
         return ZStack(alignment: .bottom) {
             Color.clear
+            // The day's total rides just above its bar.
+            if let entry {
+                let value = dayValue(entry)
+                if value > 0 {
+                    Text(formatted(value))
+                        .font(.system(size: 8).monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .fixedSize()
+                        .padding(.bottom, barHeight(for: entry) + 2)
+                }
+            }
             barFill(for: entry)
                 .frame(height: barHeight(for: entry))
                 // Today needs no ring here — the bold weekday label below
@@ -505,27 +603,31 @@ struct HeatmapView: View {
     }
 
     /// Render order is top→bottom, so the period's heaviest model sits at
-    /// the bottom of every bar and bands align across days.
+    /// the bottom of every bar and bands align across days. Segments carry
+    /// the selected dimension — in cost mode unpriced models drop out.
     private func barSegments(for entry: DailyActivity?) -> [(model: String, fraction: CGFloat)] {
         guard let entry, entry.tokens > 0, !entry.models.isEmpty else { return [] }
-        let ordered = summaryRows.compactMap { row -> (model: String, tokens: Int)? in
-            guard let tally = entry.models[row.model], tally.total > 0 else { return nil }
-            return (row.model, tally.total)
+        let ordered = summaryRows.compactMap { row -> (model: String, value: Double)? in
+            let value = modelDayValue(entry, model: row.model)
+            guard value > 0 else { return nil }
+            return (row.model, value)
         }
-        let sum = ordered.reduce(0) { $0 + $1.tokens }
+        let sum = ordered.reduce(0) { $0 + $1.value }
         guard sum > 0 else { return [] }
         return ordered.reversed().map {
-            (model: $0.model, fraction: CGFloat($0.tokens) / CGFloat(sum))
+            (model: $0.model, fraction: CGFloat($0.value / sum))
         }
     }
 
-    /// Height carries the magnitude; color keeps the heatmap's intensity ramp.
-    /// Stubs keep empty and prompt-only days (magnitude unknown) visible.
+    /// Height carries the magnitude; color keeps the heatmap's intensity
+    /// ramp. Stubs keep empty and prompt-only days (magnitude unknown)
+    /// visible, and the headroom leaves space for the value label on top.
     private func barHeight(for entry: DailyActivity?) -> CGFloat {
         guard let entry, entry.tokens > 0 || entry.prompts > 0 else { return 2 }
-        guard entry.tokens > 0 else { return 5 }
-        let fraction = Double(entry.tokens) / Double(layout.maxTokens)
-        return max(4, Self.barPlotHeight * fraction)
+        let value = dayValue(entry)
+        guard value > 0 else { return 5 }
+        let fraction = value / max(.leastNonzeroMagnitude, maxDayValue)
+        return max(4, (Self.barPlotHeight - Self.barLabelHeadroom) * fraction)
     }
 
     private static let weekdayFormatter: DateFormatter = {
@@ -591,7 +693,7 @@ struct HeatmapView: View {
         let date = Self.dayTitleFormatter.string(from: day)
         let entry = layout.byDay[day]
         let text = if let entry, entry.tokens > 0 {
-            "\(date) · \(TokenFormat.compact(entry.tokens)) tokens · \(entry.messages) msgs"
+            "\(date) · \(tooltipValue(entry)) · \(entry.messages) msgs"
         } else if let entry, entry.prompts > 0 {
             "\(date) · \(entry.prompts) prompts · no token data"
         } else {
@@ -604,6 +706,13 @@ struct HeatmapView: View {
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
             .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.quaternary))
             .fixedSize()
+    }
+
+    private func tooltipValue(_ entry: DailyActivity) -> String {
+        switch dimension {
+        case .tokens: "\(TokenFormat.compact(entry.tokens)) tokens"
+        case .cost: "≈ \(UsageFormatting.money(costIndex.byDay[entry.day] ?? 0))"
+        }
     }
 
     // MARK: - Coloring
@@ -623,14 +732,17 @@ struct HeatmapView: View {
         if let hoveredModel {
             // Legend filter: paint only this model's share, on its own
             // scale, so a light model still shows its pattern.
-            let tokens = entry.models[hoveredModel]?.total ?? 0
-            guard tokens > 0 else { return Self.emptyColor }
-            let maxTokens = max(1, layout.modelMaxTokens[hoveredModel] ?? 1)
+            let value = modelDayValue(entry, model: hoveredModel)
+            guard value > 0 else { return Self.emptyColor }
+            let maxValue = max(.leastNonzeroMagnitude, modelMaxValue(hoveredModel))
             return ramp(modelColors[hoveredModel] ?? Self.claudeOrange,
-                        fraction: Double(tokens) / Double(maxTokens))
+                        fraction: value / maxValue)
         }
         guard entry.tokens > 0 else { return Self.promptOnlyColor }
-        return ramp(Self.claudeOrange, fraction: Double(entry.tokens) / Double(layout.maxTokens))
+        let value = dayValue(entry)
+        // Cost mode: a day whose models are all unpriced is worth nothing.
+        guard value > 0 else { return Self.emptyColor }
+        return ramp(Self.claudeOrange, fraction: value / max(.leastNonzeroMagnitude, maxDayValue))
     }
 
     private func ramp(_ base: Color, fraction: Double) -> Color {
