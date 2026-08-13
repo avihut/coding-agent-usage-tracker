@@ -22,6 +22,9 @@ struct UsagePanelView: View {
     @ViewBuilder private var header: some View {
         HStack(alignment: .firstTextBaseline) {
             Text("Claude Usage").font(.headline)
+            Text("v\(AppIdentity.version)")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
             Spacer()
             if case .cached(let snapshot, _) = store.state {
                 Text("cached \(UsageFormatting.clockTime(snapshot.fetchedAt))")
