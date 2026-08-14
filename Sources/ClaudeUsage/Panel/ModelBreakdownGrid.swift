@@ -85,6 +85,12 @@ struct ModelBreakdownGrid: View {
         .background(
             RoundedRectangle(cornerRadius: 4)
                 .fill(Color.primary.opacity(hoveredModel == row.model ? 0.07 : 0)))
+        // Hover targets tile the inter-row gaps: half the VStack spacing
+        // added around the hit shape, then taken back from layout — the
+        // cursor never crosses dead space between rows, so the chart's
+        // focus can't flicker off mid-travel. Visuals are untouched (the
+        // highlight background sits inside the extra padding).
+        .padding(.vertical, 1)
         .contentShape(Rectangle())
         .onHover { inside in
             if inside {
@@ -93,5 +99,6 @@ struct ModelBreakdownGrid: View {
                 hoveredModel = nil
             }
         }
+        .padding(.vertical, -1)
     }
 }
