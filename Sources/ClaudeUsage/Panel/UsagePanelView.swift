@@ -488,6 +488,16 @@ struct MeterHistoryView: View {
         formatter.dateFormat = "EEE HH:mm"
         return formatter
     }()
+    private static let dayName: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEE"
+        return formatter
+    }()
+    private static let monthDayTime: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d HH:mm"
+        return formatter
+    }()
 
     private var window: TimeInterval { meter.rank == 0 ? 5 * 3600 : 7 * 86400 }
     private var orange: Color { Color(nsColor: StatusItemRenderer.claudeOrange) }
@@ -947,6 +957,25 @@ struct MeterHistoryView: View {
             }
         }
         .chartXScale(domain: start...end)
+        // A frame of several days labels its axis with day names at the
+        // day boundaries — dates mean less than weekdays at that zoom.
+        // Beyond ~a week the names would repeat, so the month scale keeps
+        // the default date ticks; within a day, the default hour ticks.
+        .chartXAxis {
+            let length = end.timeIntervalSince(start)
+            if length >= 48 * 3600, length <= 8 * 86400 {
+                AxisMarks(values: .stride(by: .day)) { value in
+                    AxisGridLine()
+                    AxisValueLabel {
+                        if let day = value.as(Date.self) {
+                            Text(Self.dayName.string(from: day))
+                        }
+                    }
+                }
+            } else {
+                AxisMarks()
+            }
+        }
         // Diagonal hatching over the unreachable region — the limit is spent
         // before the window ends, so everything past the crossing is dead
         // time. Drawn behind the marks so curves stay crisp over it.
@@ -1341,8 +1370,14 @@ struct MeterHistoryView: View {
         .frame(width: Self.chartWidth)
     }
 
+    /// Frame-aware timestamps: hours within a day, weekday + time across
+    /// several days, month + day once weekday names would repeat.
     private func timeLabel(_ date: Date) -> String {
-        meter.rank == 0 ? UsageFormatting.clockTime(date) : Self.weekdayTime.string(from: date)
+        let (start, end) = domain
+        let length = end.timeIntervalSince(start)
+        if length > 8 * 86400 { return Self.monthDayTime.string(from: date) }
+        if length > 24 * 3600 { return Self.weekdayTime.string(from: date) }
+        return UsageFormatting.clockTime(date)
     }
 
     // MARK: - Hover readout
