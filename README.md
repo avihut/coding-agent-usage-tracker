@@ -18,7 +18,7 @@ day views — a model donut plus that day's usage table, animated push/pop with 
 back button; per-meter hover popovers graphing percent history overlaid
 with every model's cumulative token curve — a Sliding/Window span picker
 switches between the trailing window and the limit window start-to-reset,
-where a now-notch separates measured usage from the prediction engine's
+where a vertical now rule separates measured usage from the prediction engine's
 dashed projected trajectory, a red mark pins the moment the current pace
 would spend the limit (hatching the unreachable region beyond it), and an
 iStat-style strip under the plot shows active-vs-idle stretches — with

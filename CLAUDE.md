@@ -105,8 +105,8 @@ the README rather than silently deviating.
   shared popover would otherwise leak one meter's choice onto the next)
   switches the X domain between trailing-now and the limit window
   start-to-reset; the
-  Window span draws a 30s-ticking now-notch and the prediction engine's
-  dashed trajectory, and hover readouts right of the notch report
+  Window span draws a 30s-ticking vertical now rule and the prediction engine's
+  dashed trajectory, and hover readouts right of it report
   "proj. N%" off that curve. When the pace spends the limit before reset,
   a red rule marks the crossing and a Canvas in chartBackground hatches
   the unreachable region diagonally; the crossing's time label shows only
