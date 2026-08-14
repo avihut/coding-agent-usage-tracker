@@ -6,30 +6,47 @@ public struct MenuBarSegment: Sendable, Equatable {
     public let tag: String
     public let percent: Int?
     public let level: DisplayLevel
+    /// The meter's exhaustion-risk scale (0…1) when a prediction exists —
+    /// the renderer blends yellow→red by it, same as the panel's meter bar.
+    /// Nil falls back to the discrete `level` palette.
+    public let severity: Double?
 
-    public init(tag: String, percent: Int?, level: DisplayLevel) {
+    public init(tag: String, percent: Int?, level: DisplayLevel, severity: Double? = nil) {
         self.tag = tag
         self.percent = percent
         self.level = level
+        self.severity = severity
     }
 }
 
 public enum UsageFormatting {
     /// The menu bar triple (spec §8): rank-0, rank-1, then the maximum of the
     /// scoped percentages carrying the worst scoped level. Tags: S(ession),
-    /// W(eekly), and the scoped model's initial (e.g. F for Fable).
-    public static func menuBarSegments(from meters: [Meter]) -> [MenuBarSegment] {
+    /// W(eekly), and the scoped model's initial (e.g. F for Fable). With
+    /// predictions, each segment also carries its meter's exhaustion-risk
+    /// severity (the scoped slot: the worst among its meters).
+    public static func menuBarSegments(
+        from meters: [Meter], predictions: [String: UsagePrediction] = [:]
+    ) -> [MenuBarSegment] {
+        func severity(_ meter: Meter?) -> Double? {
+            meter.flatMap { predictions[$0.label]?.severity }
+        }
         let session = meters.first { $0.rank == 0 }
         let weekly = meters.first { $0.rank == 1 }
         let scoped = meters.filter { $0.rank == 2 }
         let topScoped = scoped.max { ($0.percent ?? -1) < ($1.percent ?? -1) }
         return [
-            MenuBarSegment(tag: "S", percent: session?.percent, level: session?.level ?? .normal),
-            MenuBarSegment(tag: "W", percent: weekly?.percent, level: weekly?.level ?? .normal),
+            MenuBarSegment(
+                tag: "S", percent: session?.percent, level: session?.level ?? .normal,
+                severity: severity(session)),
+            MenuBarSegment(
+                tag: "W", percent: weekly?.percent, level: weekly?.level ?? .normal,
+                severity: severity(weekly)),
             MenuBarSegment(
                 tag: scopedTag(for: topScoped?.label),
                 percent: scoped.compactMap(\.percent).max(),
-                level: scoped.map(\.level).max() ?? .normal
+                level: scoped.map(\.level).max() ?? .normal,
+                severity: scoped.compactMap { severity($0) }.max()
             ),
         ]
     }
@@ -48,20 +65,40 @@ public enum UsageFormatting {
         timeZone: TimeZone = .current,
         locale: Locale = .current
     ) -> String {
-        let interval = resetsAt.timeIntervalSince(now)
-        guard interval > 0 else { return "resets soon" }
+        eventPhrase("resets", resetsAt, now: now, timeZone: timeZone, locale: locale)
+    }
+
+    /// "runs out in 2h 10m" / "runs out Sat 14:00" — the predicted limit
+    /// crossing, in resetText's exact tiers so both halves of a caption
+    /// line always speak the same dialect.
+    public static func exhaustText(
+        _ exhaustsAt: Date,
+        now: Date,
+        timeZone: TimeZone = .current,
+        locale: Locale = .current
+    ) -> String {
+        eventPhrase("runs out", exhaustsAt, now: now, timeZone: timeZone, locale: locale)
+    }
+
+    /// The shared future-event vocabulary: relative "in 3h 20m" inside a
+    /// day, weekday-absolute "Sat 14:00" beyond, "soon" once it's due.
+    private static func eventPhrase(
+        _ verb: String, _ date: Date, now: Date, timeZone: TimeZone, locale: Locale
+    ) -> String {
+        let interval = date.timeIntervalSince(now)
+        guard interval > 0 else { return "\(verb) soon" }
         if interval < 24 * 3600 {
             let minutes = Int((interval / 60).rounded(.up))
             let (hours, remainder) = (minutes / 60, minutes % 60)
-            if hours == 0 { return "resets in \(remainder)m" }
-            if remainder == 0 { return "resets in \(hours)h" }
-            return "resets in \(hours)h \(remainder)m"
+            if hours == 0 { return "\(verb) in \(remainder)m" }
+            if remainder == 0 { return "\(verb) in \(hours)h" }
+            return "\(verb) in \(hours)h \(remainder)m"
         }
         let formatter = DateFormatter()
         formatter.locale = locale
         formatter.timeZone = timeZone
         formatter.dateFormat = "EEE HH:mm"
-        return "resets \(formatter.string(from: resetsAt))"
+        return "\(verb) \(formatter.string(from: date))"
     }
 
     /// "next in 4m 32s" — live countdown to the scheduled refresh.

@@ -34,6 +34,12 @@ public struct UsagePrediction: Sendable, Equatable {
     /// Nil when the rate is flat or the window resets first.
     public let exhaustsAt: Date?
     public let verdict: Verdict
+    /// How hard the forecast presses on the limit, as a continuous scale:
+    /// 0 while the projection sits at or below the yellow threshold,
+    /// ramping linearly to 1 where the reset-time projection reaches the
+    /// limit. Risk surfaces (meter bars, menu bar segments) blend their
+    /// color yellow→red by this — no hard warning/critical cliff.
+    public let severity: Double
     /// The meter-caption insight, e.g. "on track — proj. 35% at reset".
     public let text: String
     /// Trajectory from now to reset for charting, clamped at 100 (a knee
@@ -106,6 +112,7 @@ public enum PredictionEngine {
                 projectedAtReset: liveReset != nil ? percent : nil,
                 exhaustsAt: nil,
                 verdict: .green,
+                severity: 0,
                 text: "steady — not burning",
                 curve: liveReset.map { reset in
                     [.init(t: now, percent: Double(percent)),
@@ -122,12 +129,16 @@ public enum PredictionEngine {
                 projectedAtReset: nil,
                 exhaustsAt: exhaustDate,
                 verdict: .green,
+                severity: 0,
                 text: "≈\(durationText(hours: hoursToExhaust)) to limit",
                 curve: [])
         }
 
         let hoursToReset = reset.timeIntervalSince(now) / 3600
         let projected = Double(percent) + rate * hoursToReset
+        // The unclamped projection placed on the yellow-threshold→limit ramp.
+        let severity = max(0, min(1,
+            (projected - yellowProjectionThreshold) / (100 - yellowProjectionThreshold)))
         let start = UsagePrediction.Point(t: now, percent: Double(percent))
 
         if projected >= 100 {
@@ -136,6 +147,7 @@ public enum PredictionEngine {
                 projectedAtReset: 100,
                 exhaustsAt: exhaustDate,
                 verdict: .red,
+                severity: severity,
                 text: "≈\(durationText(hours: hoursToExhaust)) until limit",
                 curve: [start,
                         .init(t: exhaustDate, percent: 100),
@@ -148,6 +160,7 @@ public enum PredictionEngine {
                 projectedAtReset: Int(projected.rounded()),
                 exhaustsAt: nil,
                 verdict: .yellow,
+                severity: severity,
                 text: "tight — proj. \(Int(projected.rounded()))% at reset",
                 curve: [start, endpoint])
         }
@@ -156,6 +169,7 @@ public enum PredictionEngine {
             projectedAtReset: Int(projected.rounded()),
             exhaustsAt: nil,
             verdict: .green,
+            severity: 0,
             text: "on track — proj. \(Int(projected.rounded()))% at reset",
             curve: [start, endpoint])
     }

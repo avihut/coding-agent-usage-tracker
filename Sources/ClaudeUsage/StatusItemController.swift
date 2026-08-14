@@ -70,7 +70,7 @@ final class StatusItemController: NSResponder {
 
     private func render() {
         statusItem.button?.attributedTitle = StatusItemRenderer.attributedText(
-            for: StatusItemRenderer.model(for: store.state))
+            for: StatusItemRenderer.model(for: store.state, predictions: store.predictions))
     }
 
     // MARK: - Hover graph

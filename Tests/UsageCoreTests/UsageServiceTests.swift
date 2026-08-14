@@ -161,6 +161,38 @@ struct FormattingTests {
         #expect(UsageFormatting.resetText(now.addingTimeInterval(-5), now: now) == "resets soon")
     }
 
+    @Test("exhaust text speaks resetText's exact tiers with its own verb")
+    func exhaustPhrase() {
+        let now = Date(timeIntervalSince1970: 0)
+        #expect(UsageFormatting.exhaustText(now.addingTimeInterval(2 * 3600 + 10 * 60), now: now) == "runs out in 2h 10m")
+        #expect(UsageFormatting.exhaustText(now.addingTimeInterval(45 * 60), now: now) == "runs out in 45m")
+        #expect(UsageFormatting.exhaustText(now.addingTimeInterval(-1), now: now) == "runs out soon")
+        // Beyond a day both phrases go weekday-absolute (epoch is a Thursday).
+        let utc = TimeZone(identifier: "UTC")!
+        let posix = Locale(identifier: "en_US_POSIX")
+        let far = now.addingTimeInterval(30 * 3600)
+        #expect(UsageFormatting.exhaustText(far, now: now, timeZone: utc, locale: posix) == "runs out Fri 06:00")
+        #expect(UsageFormatting.resetText(far, now: now, timeZone: utc, locale: posix) == "resets Fri 06:00")
+    }
+
+    @Test("segments carry each meter's prediction severity")
+    func segmentsSeverity() throws {
+        let meters = MeterBuilder.meters(from: try UsageResponse.decode(from: loadFixture("real-2026-08-07")))
+        let now = Date(timeIntervalSince1970: 0)
+        let predictions = [
+            // Burns through the limit before reset — severity pegged at 1.
+            "Session (5h)": PredictionEngine.prediction(
+                percent: 80, resetsAt: now.addingTimeInterval(2 * 3600), ratePerHour: 20, now: now),
+            // Projected 90 at reset — a third of the way up the 85→100 ramp.
+            "Weekly · Fable": PredictionEngine.prediction(
+                percent: 60, resetsAt: now.addingTimeInterval(3 * 3600), ratePerHour: 10, now: now),
+        ]
+        let segments = UsageFormatting.menuBarSegments(from: meters, predictions: predictions)
+        #expect(segments[0].severity == 1)
+        #expect(segments[1].severity == nil)
+        #expect(abs((segments[2].severity ?? 0) - 1.0 / 3.0) < 0.0001)
+    }
+
     @Test("reset text beyond 24h is weekday + time")
     func resetAbsolute() {
         let now = Date(timeIntervalSince1970: 0)                       // Thu 1970-01-01

@@ -283,6 +283,27 @@ struct HeatmapView: View {
         selectedDay = day
     }
 
+    /// The adjacent drillable day on one side within the shown period —
+    /// nil at the edge, which hides that arrow.
+    private func neighborDay(of day: Date, direction: Int) -> Date? {
+        let days = layout.byDay.keys.sorted()
+        guard let index = days.firstIndex(of: day) else { return nil }
+        let target = index + direction
+        guard days.indices.contains(target) else { return nil }
+        return days[target]
+    }
+
+    private func dayStepButton(_ symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 16, height: 16)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
     private func dayContent(_ entry: DailyActivity) -> some View {
         let rows = WindowTokens.rows(from: entry.models)
         return VStack(alignment: .leading, spacing: 8) {
@@ -301,6 +322,14 @@ struct HeatmapView: View {
                 }
                 .buttonStyle(.plain)
                 Spacer()
+                // Step between the period's drillable days without popping
+                // back to the grid; an arrow with nowhere to go disappears.
+                if let previous = neighborDay(of: entry.day, direction: -1) {
+                    dayStepButton("chevron.left.circle") { drill(into: previous) }
+                }
+                if let next = neighborDay(of: entry.day, direction: 1) {
+                    dayStepButton("chevron.right.circle") { drill(into: next) }
+                }
                 dimensionPicker
             }
             if rows.isEmpty {

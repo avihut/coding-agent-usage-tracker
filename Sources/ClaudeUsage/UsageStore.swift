@@ -46,6 +46,8 @@ final class UsageStore {
     static let defaultInterval: TimeInterval = 300
     private static let intervalKey = "refreshIntervalSeconds"
     private static let ceilingKey = "apiHourlyCeiling"
+    static let warningThresholdKey = "warningThresholdPercent"
+    static let criticalThresholdKey = "criticalThresholdPercent"
 
     init(service: UsageService? = nil) {
         let bundleID = Bundle.main.bundleIdentifier ?? "com.avihu.ClaudeUsage"
@@ -101,7 +103,7 @@ final class UsageStore {
         ledger.recordRequest(at: now)
         Task {
             let previous = state.snapshot
-            let newState = await service.refresh()
+            let newState = await service.refresh(thresholds: Self.currentThresholds())
             state = newState
             isRefreshing = false
             noteOutcome(newState, previous: previous)
@@ -118,6 +120,30 @@ final class UsageStore {
     /// budget — the honesty gauge behind "refresh all you want".
     func apiBudget(now: Date) -> (used: Int, ceiling: Int, fraction: Double) {
         (ledger.used(at: now), ledger.ceiling, ledger.pressure(at: now))
+    }
+
+    /// The user's warning/critical cutoffs, defaults standing in for unset.
+    static func currentThresholds() -> Thresholds {
+        let defaults = UserDefaults.standard
+        let warning = defaults.integer(forKey: warningThresholdKey)
+        let critical = defaults.integer(forKey: criticalThresholdKey)
+        return Thresholds(
+            warningPercent: warning > 0 ? warning : Thresholds.standard.warningPercent,
+            criticalPercent: critical > 0 ? critical : Thresholds.standard.criticalPercent)
+    }
+
+    /// Re-classifies what's on screen right after a threshold edit — the
+    /// next poll would agree anyway; this makes the settings slider live.
+    func thresholdsChanged() {
+        let thresholds = Self.currentThresholds()
+        switch state {
+        case .live(let snapshot):
+            state = .live(snapshot.rebuilt(thresholds: thresholds))
+        case .cached(let snapshot, let error):
+            state = .cached(snapshot.rebuilt(thresholds: thresholds), error: error)
+        case .loading, .unavailable:
+            break
+        }
     }
 
     /// Piggybacks on usage refreshes: at most one feed fetch attempt per

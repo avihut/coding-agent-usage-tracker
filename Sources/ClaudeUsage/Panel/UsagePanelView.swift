@@ -20,6 +20,9 @@ struct UsagePanelView: View {
     @State private var hoveredMeter: String?
     @State private var hoveringPopover = false
     @State private var meterFrames: [String: CGRect] = [:]
+    /// Clicking the red (budget-spent) reload button opens its explanation
+    /// instead of refreshing.
+    @State private var showRefreshBlocked = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -106,9 +109,12 @@ struct UsagePanelView: View {
                 }
                 Spacer()
                 if let plan = store.state.snapshot?.plan?.displayLabel {
-                    Text(plan)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Link(destination: URL(string: "https://claude.ai/upgrade")!) {
+                        Text(plan)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .help("Choose your plan on claude.ai")
                 }
             }
         }
@@ -160,7 +166,14 @@ struct UsagePanelView: View {
             }
             Spacer()
             Button {
-                store.refresh(.manual)
+                // A red button is soft-disabled: the click surfaces WHY
+                // instead of spending a request that risks the lockout the
+                // color warns about. Hover already tells; click insists.
+                if store.apiBudget(now: Date()).fraction >= 1 {
+                    showRefreshBlocked = true
+                } else {
+                    store.refresh(.manual)
+                }
             } label: {
                 Image(systemName: "arrow.clockwise")
                     .foregroundStyle(refreshPressureStyle)
@@ -168,6 +181,13 @@ struct UsagePanelView: View {
             .buttonStyle(.borderless)
             .disabled(store.isRefreshing)
             .help(refreshHelp)
+            .popover(isPresented: $showRefreshBlocked, arrowEdge: .bottom) {
+                Text(refreshHelp)
+                    .font(.caption)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(width: 220)
+                    .padding(10)
+            }
 
             Link(destination: URL(string: "https://claude.ai/settings/usage")!) {
                 Image(systemName: "arrow.up.right.square")
@@ -341,9 +361,10 @@ struct MeterRow: View {
         hoveredMeter == meter.id || openMeter == meter.id
     }
 
-    /// "resets in 3h 20m · on track — proj. 35% at reset", burn part colored
-    /// by its verdict (green / yellow / red). Before enough samples exist
-    /// (two readings ≥5 min apart) the burn slot says it's measuring.
+    /// "resets in 3h 20m" — joined by "runs out in 1h 05m" ONLY when the
+    /// forecast actually crosses the limit, in resetText's own tiers. An
+    /// on-track forecast stays silent; the bar's tint carries the risk.
+    /// Before enough samples exist the burn slot says it's measuring.
     private var captionLine: Text {
         var parts: [Text] = []
         if let resetsAt = meter.resetsAt {
@@ -351,9 +372,11 @@ struct MeterRow: View {
                 Text(UsageFormatting.resetText(resetsAt, now: Date()))
                     .foregroundStyle(.secondary))
         }
-        if let prediction {
-            parts.append(Text(prediction.text).foregroundStyle(burnColor(prediction.verdict)))
-        } else if meter.percent != nil && !stale {
+        if let prediction, let exhaust = prediction.exhaustsAt {
+            parts.append(
+                Text(UsageFormatting.exhaustText(exhaust, now: Date()))
+                    .foregroundStyle(riskColor(severity: prediction.severity) ?? .orange))
+        } else if prediction == nil, meter.percent != nil, !stale {
             parts.append(Text("measuring rate…").foregroundStyle(.tertiary))
         }
         guard var line = parts.first else { return Text("") }
@@ -363,16 +386,23 @@ struct MeterRow: View {
         return line
     }
 
-    private func burnColor(_ verdict: UsagePrediction.Verdict) -> Color {
-        switch verdict {
-        case .green: .green
-        case .yellow: .yellow
-        case .red: .red
-        }
+    /// The continuous exhaustion-risk ramp: nil while the forecast is
+    /// clean, pure yellow where the projection touches the warning
+    /// threshold, sliding linearly to pure red where the limit is spent.
+    private func riskColor(severity: Double) -> Color? {
+        guard severity > 0 else { return nil }
+        return Color.yellow.mix(with: .red, by: severity)
     }
 
+    /// Exhaustion risk first — regular accent while the forecast is clean,
+    /// the severity blend otherwise. Percent thresholds only stand in
+    /// until a rate exists.
     private var barColor: Color {
         if stale { return Color(nsColor: .secondaryLabelColor) }
+        if let prediction {
+            return riskColor(severity: prediction.severity)
+                ?? Color(nsColor: .controlAccentColor)
+        }
         switch meter.level {
         case .normal: return Color(nsColor: .controlAccentColor)
         case .warning: return .orange
@@ -479,6 +509,10 @@ struct MeterHistoryView: View {
     /// so nothing wraps or truncates and the axis flipping between percent
     /// and tokens never resizes the plot.
     private static let axisLabelWidth: CGFloat = 42
+    /// Vertical room (in domain percent units — the plot maps ~1 unit per
+    /// point) a Y-axis label needs; standard marks closer than this to the
+    /// projection mark are dropped instead of overlapped.
+    private static let axisLabelClearance = 12.0
     // The Y domain's ceiling is dynamic — dataCeiling × 1.15, headroom
     // where the now and session-duration labels live, atop the data
     // instead of on it and inside the chart instead of crashing into the
@@ -1023,11 +1057,30 @@ struct MeterHistoryView: View {
                     }
                 }
             } else {
-                AxisMarks(values: [0, 50, 100]) { value in
+                // The projected-finish height gets its own labeled mark; a
+                // standard label it would eclipse steps aside rather than
+                // overlap (the projection is the one worth reading).
+                let projection = axisProjection
+                AxisMarks(values: [0, 50, 100].filter { mark in
+                    guard let projection else { return true }
+                    return abs(Double(mark) - projection) >= Self.axisLabelClearance
+                }) { value in
                     AxisGridLine()
                     AxisValueLabel {
                         if let percent = value.as(Double.self) {
-                            Text("\(Int(percent))")
+                            Text("\(Int(percent))%")
+                                .lineLimit(1)
+                                .frame(width: Self.axisLabelWidth, alignment: .leading)
+                        }
+                    }
+                }
+                if let projection {
+                    AxisMarks(values: [projection]) { _ in
+                        AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [2, 3]))
+                        AxisValueLabel {
+                            Text("\(Int(projection))%")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(orange)
                                 .lineLimit(1)
                                 .frame(width: Self.axisLabelWidth, alignment: .leading)
                         }
@@ -1147,6 +1200,17 @@ struct MeterHistoryView: View {
               exhaust > domain.start, exhaust < domain.end
         else { return nil }
         return exhaust
+    }
+
+    /// The Window span's projected finish height for the Y axis — only
+    /// while the forecast stays within the limit (an exhausting one is the
+    /// red rule's story) and the axis still speaks percent.
+    private var axisProjection: Double? {
+        guard effectiveSpan == .window, focusedModel == nil,
+              let prediction, prediction.exhaustsAt == nil,
+              let projected = prediction.projectedAtReset, projected < 100
+        else { return nil }
+        return Double(projected)
     }
 
     private struct ActivitySegment: Equatable {

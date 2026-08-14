@@ -64,14 +64,26 @@ public struct Snapshot: Sendable, Equatable {
     public let fetchedAt: Date
     /// From the credentials read for this fetch; nil on cache-served states.
     public let plan: PlanInfo?
+    /// Retained so a threshold edit can re-classify levels in place instead
+    /// of waiting out the poll interval.
+    public let response: UsageResponse
 
-    public init(response: UsageResponse, fetchedAt: Date, plan: PlanInfo? = nil) {
-        let meters = MeterBuilder.meters(from: response)
+    public init(
+        response: UsageResponse, fetchedAt: Date, plan: PlanInfo? = nil,
+        thresholds: Thresholds = .standard
+    ) {
+        let meters = MeterBuilder.meters(from: response, thresholds: thresholds)
         self.meters = meters
         self.summary = MeterBuilder.menuBarSummary(from: meters)
         self.spendLine = MeterBuilder.spendLine(from: response)
         self.fetchedAt = fetchedAt
         self.plan = plan
+        self.response = response
+    }
+
+    /// The same snapshot re-classified under different thresholds.
+    public func rebuilt(thresholds: Thresholds) -> Snapshot {
+        Snapshot(response: response, fetchedAt: fetchedAt, plan: plan, thresholds: thresholds)
     }
 }
 

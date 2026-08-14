@@ -12,9 +12,19 @@ public enum DisplayLevel: Int, Sendable, Comparable {
     }
 }
 
-public enum Thresholds {
-    public static let warningPercent = 70
-    public static let criticalPercent = 90
+/// Percent cutoffs for the color classification. `.standard` carries the
+/// spec defaults; Settings → Thresholds lets the user move them, and every
+/// build of a snapshot re-reads whatever is current.
+public struct Thresholds: Sendable, Equatable {
+    public var warningPercent: Int
+    public var criticalPercent: Int
+
+    public init(warningPercent: Int = 70, criticalPercent: Int = 90) {
+        self.warningPercent = warningPercent
+        self.criticalPercent = criticalPercent
+    }
+
+    public static let standard = Thresholds()
 }
 
 public struct Meter: Sendable, Equatable, Identifiable {
@@ -57,10 +67,12 @@ public struct SpendLine: Sendable, Equatable {
 
 /// Pure transformation: decoded response → ordered view models. No UI, no I/O.
 public enum MeterBuilder {
-    public static func meters(from response: UsageResponse) -> [Meter] {
+    public static func meters(
+        from response: UsageResponse, thresholds: Thresholds = .standard
+    ) -> [Meter] {
         let limits = response.limits ?? []
         return limits.enumerated()
-            .map { index, limit in meter(from: limit, index: index) }
+            .map { index, limit in meter(from: limit, index: index, thresholds: thresholds) }
             .sorted { ($0.rank, $0.orderInResponse) < ($1.rank, $1.orderInResponse) }
             .map(\.meter)
     }
@@ -89,7 +101,9 @@ public enum MeterBuilder {
         )
     }
 
-    private static func meter(from limit: UsageLimit, index: Int) -> (meter: Meter, rank: Int, orderInResponse: Int) {
+    private static func meter(
+        from limit: UsageLimit, index: Int, thresholds: Thresholds
+    ) -> (meter: Meter, rank: Int, orderInResponse: Int) {
         let (label, rank) = labelAndRank(for: limit)
         let percent = limit.percent.map { max(0, min(100, Int($0.rounded()))) }
         let meter = Meter(
@@ -97,7 +111,7 @@ public enum MeterBuilder {
             label: label,
             percent: percent,
             resetsAt: limit.resetsAt,
-            level: level(percent: percent, severity: limit.severity),
+            level: level(percent: percent, severity: limit.severity, thresholds: thresholds),
             rank: rank
         )
         return (meter, rank, index)
@@ -119,12 +133,14 @@ public enum MeterBuilder {
         }
     }
 
-    private static func level(percent: Int?, severity: String?) -> DisplayLevel {
+    private static func level(
+        percent: Int?, severity: String?, thresholds: Thresholds
+    ) -> DisplayLevel {
         let forced: DisplayLevel = (severity != nil && severity != "normal") ? .warning : .normal
         guard let percent else { return forced }
         let byPercent: DisplayLevel =
-            percent >= Thresholds.criticalPercent ? .critical
-            : percent >= Thresholds.warningPercent ? .warning
+            percent >= thresholds.criticalPercent ? .critical
+            : percent >= thresholds.warningPercent ? .warning
             : .normal
         return max(forced, byPercent)
     }

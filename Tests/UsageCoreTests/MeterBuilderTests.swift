@@ -56,6 +56,17 @@ struct MeterBuilderTests {
         #expect(meters.allSatisfy { $0.resetsAt != nil })
     }
 
+    @Test("custom thresholds re-classify the same percents")
+    func customThresholds() throws {
+        let response = try UsageResponse.decode(from: fixtureData("nominal"))
+        let meters = MeterBuilder.meters(
+            from: response, thresholds: Thresholds(warningPercent: 30, criticalPercent: 50))
+        #expect(meters.map(\.level) == [.normal, .warning, .critical])
+        let rebuilt = Snapshot(response: response, fetchedAt: Date())
+            .rebuilt(thresholds: Thresholds(warningPercent: 30, criticalPercent: 50))
+        #expect(rebuilt.meters.map(\.level) == [.normal, .warning, .critical])
+    }
+
     @Test("nominal: menu bar summary")
     func nominalSummary() throws {
         let summary = MeterBuilder.menuBarSummary(from: try metersFromFixture("nominal"))

@@ -64,8 +64,12 @@ the README rather than silently deviating.
 - Dates go through `FlexibleISO8601`: the live API sends six fractional
   digits + numeric offset (`.137024+00:00`), which both stock
   `ISO8601DateFormatter` variants reject.
-- Color thresholds live in `Thresholds` (≥70 warning, ≥90 critical); an API
-  `severity != "normal"` forces at least warning regardless of percent.
+- Color thresholds live in `Thresholds` (defaults ≥70 warning, ≥90
+  critical — user-adjustable in Settings → Thresholds, persisted in
+  UserDefaults, min 5 points apart); an API `severity != "normal"` forces
+  at least warning regardless of percent. `Snapshot` retains its decoded
+  response so `store.thresholdsChanged()` re-classifies the live snapshot
+  the moment a slider moves.
 - Endpoint knowledge stays in `UsageClient` + `UsageModels` so migrating to
   a supported endpoint, if one ships, is a one-file change.
 - The activity heatmap reads Claude Code's local transcripts
@@ -217,11 +221,24 @@ the README rather than silently deviating.
   percent samples (`UsageHistory` in App Support) using the monotonic tail
   after the last drop (limit resets never produce bogus negative rates),
   then a single `UsagePrediction` per meter — rate, projected-at-reset,
-  exhaustion date, verdict, caption text, and a chartable trajectory curve
+  exhaustion date, verdict, a continuous `severity` (0 at the 85%
+  projection, ramping linearly to 1 where the reset-time projection
+  reaches the limit), caption text, and a chartable trajectory curve
   clamped at 100 with a knee at the crossing. Every surface that talks
-  about the future (meter captions, the popover's Window graph) reads it;
-  never re-derive projections ad hoc. Verdicts: red = exhausts before
-  reset at current rate, yellow = projected ≥85% at reset, green otherwise.
+  about the future reads it; never re-derive projections ad hoc.
+  Verdicts: red = exhausts before reset at current rate, yellow =
+  projected ≥85% at reset, green otherwise. PRESENTATION (2026-08-14):
+  on-track forecasts are silent — no caption; a predicted crossing
+  appends "runs out in 1h 05m" / "runs out Sat 14:00"
+  (`UsageFormatting.exhaustText`, sharing resetText's `eventPhrase`
+  tiers) to the reset line. Risk rides color, not text: meter bars and
+  menu bar segment numbers blend yellow→red by `severity` (accent/white
+  while clean; percent-threshold palette only when no prediction
+  exists — no hard warning/critical cliff). The Window chart labels the
+  projected finish percent on the Y axis in the trajectory's orange
+  (only while finishing within limits; a standard mark it would eclipse
+  is dropped, `axisLabelClearance` 12 domain units ≈ one label height);
+  percent-mode Y labels carry a % sign.
 
 ## Swift practices
 

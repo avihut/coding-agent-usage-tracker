@@ -64,6 +64,7 @@ struct PredictionEngineTests {
         let prediction = PredictionEngine.prediction(
             percent: 80, resetsAt: reset, ratePerHour: 20, now: now)
         #expect(prediction.verdict == .red)
+        #expect(prediction.severity == 1)
         #expect(prediction.text.contains("1h"))
         #expect(prediction.projectedAtReset == 100)
         #expect(prediction.exhaustsAt == now.addingTimeInterval(3600))
@@ -80,6 +81,8 @@ struct PredictionEngineTests {
         let prediction = PredictionEngine.prediction(
             percent: 60, resetsAt: reset, ratePerHour: 10, now: now)
         #expect(prediction.verdict == .yellow)
+        // Projected 90 sits a third of the way up the 85→100 ramp.
+        #expect(abs(prediction.severity - 1.0 / 3.0) < 0.0001)
         #expect(prediction.text.contains("90%"))
         #expect(prediction.projectedAtReset == 90)
         #expect(prediction.exhaustsAt == nil)
@@ -94,6 +97,7 @@ struct PredictionEngineTests {
         let prediction = PredictionEngine.prediction(
             percent: 20, resetsAt: reset, ratePerHour: 5, now: now)
         #expect(prediction.verdict == .green)
+        #expect(prediction.severity == 0)
         #expect(prediction.text.contains("35%"))
         #expect(prediction.projectedAtReset == 35)
         #expect(prediction.curve == [
@@ -107,6 +111,7 @@ struct PredictionEngineTests {
         let prediction = PredictionEngine.prediction(
             percent: 50, resetsAt: reset, ratePerHour: 0.05, now: now)
         #expect(prediction.verdict == .green)
+        #expect(prediction.severity == 0)
         #expect(prediction.text == "steady — not burning")
         #expect(prediction.projectedAtReset == 50)
         #expect(prediction.curve == [
@@ -119,6 +124,7 @@ struct PredictionEngineTests {
         let prediction = PredictionEngine.prediction(
             percent: 50, resetsAt: nil, ratePerHour: 10, now: now)
         #expect(prediction.verdict == .green)
+        #expect(prediction.severity == 0)
         #expect(prediction.text.contains("to limit"))
         #expect(prediction.projectedAtReset == nil)
         #expect(prediction.exhaustsAt == now.addingTimeInterval(5 * 3600))

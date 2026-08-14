@@ -180,6 +180,10 @@ private struct GeneralSettingsPane: View {
     /// What the transcripts weigh on disk, measured once per appearance
     /// off the main thread.
     @State private var diskUsage: TranscriptDiskUsage?
+    /// The percent cutoffs behind DisplayLevel, seeded from defaults on
+    /// appearance; edits write through and re-classify the live snapshot.
+    @State private var warningPercent = Thresholds.standard.warningPercent
+    @State private var criticalPercent = Thresholds.standard.criticalPercent
 
     var body: some View {
         SettingsPaneScroll {
@@ -199,6 +203,29 @@ private struct GeneralSettingsPane: View {
                         value: RefreshIntervalScale.value(at:))
                 }
                 note("The pace while Claude is in use — the slider snaps to the marked stops, or lands anywhere between. Quiet stretches slow polling down on their own (to one poll per hour, or your chosen pace when that's slower) and fresh activity snaps it back. Nothing polls faster than once per 3 minutes — the usage endpoint rate-limits harder polling.")
+            }
+            SettingsCard("Thresholds") {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("Warning at")
+                        Spacer()
+                        Text("\(warningPercent)%")
+                            .font(.callout.monospacedDigit())
+                            .foregroundStyle(.orange)
+                    }
+                    Slider(value: warningBinding, in: 30...95, step: 5)
+                        .controlSize(.small)
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("Error at")
+                        Spacer()
+                        Text("\(criticalPercent)%")
+                            .font(.callout.monospacedDigit())
+                            .foregroundStyle(.red)
+                    }
+                    Slider(value: criticalBinding, in: 35...100, step: 5)
+                        .controlSize(.small)
+                }
+                note("Where the percent scale itself turns worrying: meters and the menu bar wear the warning color from the first cutoff and the error color from the second. The exhaustion forecast colors on its own yellow→red ramp and isn't affected. The two keep at least 5% apart.")
             }
             SettingsCard("Activity") {
                 VStack(alignment: .leading, spacing: 4) {
@@ -261,6 +288,9 @@ private struct GeneralSettingsPane: View {
             }
         }
         .onAppear {
+            let thresholds = UsageStore.currentThresholds()
+            warningPercent = thresholds.warningPercent
+            criticalPercent = thresholds.criticalPercent
             retentionDays = ClaudeCodeSettings.standard().readCleanupPeriodDays()
                 ?? ClaudeCodeSettings.defaultDays
             let root = FileManager.default.homeDirectoryForCurrentUser
@@ -280,6 +310,34 @@ private struct GeneralSettingsPane: View {
 
     private static func byteText(_ bytes: Int64) -> String {
         byteFormatter.string(fromByteCount: bytes)
+    }
+
+    /// Both sliders write through and keep a 5-point gap by pushing the
+    /// other cutoff along rather than colliding with it.
+    private var warningBinding: Binding<Double> {
+        Binding(
+            get: { Double(warningPercent) },
+            set: { newValue in
+                warningPercent = Int(newValue.rounded())
+                criticalPercent = max(criticalPercent, warningPercent + 5)
+                persistThresholds()
+            })
+    }
+
+    private var criticalBinding: Binding<Double> {
+        Binding(
+            get: { Double(criticalPercent) },
+            set: { newValue in
+                criticalPercent = Int(newValue.rounded())
+                warningPercent = min(warningPercent, criticalPercent - 5)
+                persistThresholds()
+            })
+    }
+
+    private func persistThresholds() {
+        UserDefaults.standard.set(warningPercent, forKey: UsageStore.warningThresholdKey)
+        UserDefaults.standard.set(criticalPercent, forKey: UsageStore.criticalThresholdKey)
+        store.thresholdsChanged()
     }
 
     /// Selection writes straight through to settings.json — binding-set,

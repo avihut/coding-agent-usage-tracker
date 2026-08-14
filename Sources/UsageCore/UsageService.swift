@@ -27,7 +27,7 @@ public struct UsageService: Sendable {
         UsageService(credentials: .standard, client: UsageClient(), cache: .standard(bundleID: bundleID))
     }
 
-    public func refresh() async -> DisplayState {
+    public func refresh(thresholds: Thresholds = .standard) async -> DisplayState {
         // The token is re-read every cycle (Claude Code rotates it) and lives
         // only in this frame for the duration of one request (spec §5).
         let token: String
@@ -37,24 +37,24 @@ public struct UsageService: Sendable {
             token = credential.accessToken
             plan = credential.plan
         } catch let error as CredentialError {
-            return fallback(.from(error))
+            return fallback(.from(error), thresholds: thresholds)
         } catch {
-            return fallback(.credentialsUnreadable)
+            return fallback(.credentialsUnreadable, thresholds: thresholds)
         }
 
         let body: Data
         do {
             body = try await fetchWithOneRetry(token: token)
         } catch let error as UsageClientError {
-            return fallback(.from(error))
+            return fallback(.from(error), thresholds: thresholds)
         } catch {
-            return fallback(.network)
+            return fallback(.network, thresholds: thresholds)
         }
 
         guard let response = try? UsageResponse.decode(from: body) else {
-            return fallback(.schema)
+            return fallback(.schema, thresholds: thresholds)
         }
-        let snapshot = Snapshot(response: response, fetchedAt: Date(), plan: plan)
+        let snapshot = Snapshot(response: response, fetchedAt: Date(), plan: plan, thresholds: thresholds)
         cache.save(body: body, fetchedAt: snapshot.fetchedAt)
         return .live(snapshot)
     }
@@ -71,10 +71,12 @@ public struct UsageService: Sendable {
         }
     }
 
-    private func fallback(_ error: UsageError) -> DisplayState {
+    private func fallback(_ error: UsageError, thresholds: Thresholds) -> DisplayState {
         guard let (body, fetchedAt) = cache.load(),
               let response = try? UsageResponse.decode(from: body)
         else { return .unavailable(error) }
-        return .cached(Snapshot(response: response, fetchedAt: fetchedAt), error: error)
+        return .cached(
+            Snapshot(response: response, fetchedAt: fetchedAt, thresholds: thresholds),
+            error: error)
     }
 }
