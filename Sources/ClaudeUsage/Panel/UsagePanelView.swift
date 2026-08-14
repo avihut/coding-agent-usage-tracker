@@ -40,7 +40,8 @@ struct UsagePanelView: View {
         ) { meter in
             MeterHistoryView(
                 meter: meter, samples: store.samples,
-                timeline: store.tokenTimeline, pricing: store.pricing)
+                timeline: store.tokenTimeline, pricing: store.pricing,
+                prediction: store.predictions[meter.label])
                 .onHover { inside in
                     hoveringPopover = inside
                     if !inside { scheduleHideIfLeft() }
@@ -125,7 +126,7 @@ struct UsagePanelView: View {
                 MeterRow(
                     meter: meter,
                     stale: store.state.isStale,
-                    burn: store.burnEstimates[meter.label],
+                    prediction: store.predictions[meter.label],
                     openMeter: $openMeter,
                     hoveredMeter: $hoveredMeter,
                     onLeave: scheduleHideIfLeft)
@@ -255,7 +256,7 @@ private struct MeterFramePreference: PreferenceKey {
 struct MeterRow: View {
     let meter: Meter
     let stale: Bool
-    let burn: BurnEstimate?
+    let prediction: UsagePrediction?
 
     /// Panel-wide single-popover authority and hover tracker, owned by
     /// UsagePanelView — which also hosts the one shared popover.
@@ -342,8 +343,8 @@ struct MeterRow: View {
                 Text(UsageFormatting.resetText(resetsAt, now: Date()))
                     .foregroundStyle(.secondary))
         }
-        if let burn {
-            parts.append(Text(burn.text).foregroundStyle(burnColor(burn.verdict)))
+        if let prediction {
+            parts.append(Text(prediction.text).foregroundStyle(burnColor(prediction.verdict)))
         } else if meter.percent != nil && !stale {
             parts.append(Text("measuring rate…").foregroundStyle(.tertiary))
         }
@@ -354,7 +355,7 @@ struct MeterRow: View {
         return line
     }
 
-    private func burnColor(_ verdict: BurnEstimate.Verdict) -> Color {
+    private func burnColor(_ verdict: UsagePrediction.Verdict) -> Color {
         switch verdict {
         case .green: .green
         case .yellow: .yellow
@@ -372,25 +373,67 @@ struct MeterRow: View {
     }
 }
 
-/// iStat-style per-limit history: this meter's sampled percent across its own
-/// limit window (5h for the session meter, 7 days for weeklies), plus the
-/// tokens local transcripts attribute to that window in the shared breakdown
-/// table. The table doubles as a legend — hovering a row swaps the chart to
-/// that model's cumulative tokens and the stats line to its share.
+
+/// Per-limit history and forecast: the meter's sampled percent overlaid with
+/// every model's cumulative token curve (normalized to the plot height), in
+/// either a sliding trailing window or the limit window start-to-reset — the
+/// latter with a now-notch separating measured from predicted, and the
+/// prediction engine's dashed trajectory to the reset. The breakdown table
+/// doubles as a legend: hovering a curve or its row focuses the pair and
+/// dims the rest — one `focusedModel` drives both surfaces, so they can
+/// never disagree.
 struct MeterHistoryView: View {
     let meter: Meter
     let samples: [UsageSample]
     let timeline: [TokenSlot]
     let pricing: PricingTable
+    let prediction: UsagePrediction?
 
+    /// One-word span choices: a trailing window ending now, or the limit
+    /// window itself, start to reset.
+    enum Span: String, CaseIterable {
+        case sliding = "Sliding"
+        case window = "Window"
+    }
+
+    @State private var span: Span = .sliding
     @State private var hoverDate: Date?
-    @State private var hoveredModel: String?
+    /// The focused model — set by hovering its curve or its legend row.
+    @State private var focusedModel: String?
 
     private static let chartWidth: CGFloat = 300
     private static let chartHeight: CGFloat = 110
+    private static let weekdayTime: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEE HH:mm"
+        return formatter
+    }()
 
     private var window: TimeInterval { meter.rank == 0 ? 5 * 3600 : 7 * 86400 }
-    private var windowLabel: String { meter.rank == 0 ? "last 5h" : "last 7 days" }
+    private var orange: Color { Color(nsColor: StatusItemRenderer.claudeOrange) }
+
+    /// A live future reset unlocks the Window span; without one (stale data,
+    /// missing reset) the picker hides and the view stays sliding.
+    private var liveReset: Date? {
+        meter.resetsAt.flatMap { $0 > Date() ? $0 : nil }
+    }
+
+    private var effectiveSpan: Span { liveReset == nil ? .sliding : span }
+
+    private var domain: (start: Date, end: Date) {
+        if effectiveSpan == .window, let reset = liveReset {
+            return (reset.addingTimeInterval(-window), reset)
+        }
+        let now = Date()
+        return (now.addingTimeInterval(-window), now)
+    }
+
+    private var spanLabel: String {
+        switch effectiveSpan {
+        case .window: meter.rank == 0 ? "this session" : "this week"
+        case .sliding: meter.rank == 0 ? "last 5h" : "last 7 days"
+        }
+    }
 
     private struct Point: Identifiable {
         let id: TimeInterval
@@ -399,9 +442,10 @@ struct MeterHistoryView: View {
     }
 
     private var points: [Point] {
-        let cutoff = Date().addingTimeInterval(-window)
+        let (start, end) = domain
+        let measuredEnd = min(end, Date())
         return samples
-            .filter { $0.t >= cutoff }
+            .filter { $0.t >= start && $0.t <= measuredEnd }
             .compactMap { sample in
                 sample.percents[meter.label].map {
                     Point(id: sample.t.timeIntervalSince1970, t: sample.t, percent: $0)
@@ -410,33 +454,49 @@ struct MeterHistoryView: View {
     }
 
     /// This window's per-model usage, scoped for scoped meters — the rows of
-    /// the shared table and the legend the chart follows.
+    /// the shared table and the curves the chart overlays.
     private var windowRows: [ModelTokenUsage] {
-        let (start, _) = tokenWindow
-        let all = WindowTokens.breakdown(timeline: timeline, from: start, to: Date())
+        let all = WindowTokens.breakdown(timeline: timeline, from: domain.start, to: Date())
         return scopeName.map { WindowTokens.scoped(all, name: $0) } ?? all
     }
 
-    private var rowColors: [String: Color] {
-        ModelPalette.assignment(for: windowRows.map(\.model))
+    /// One model's cumulative curve, normalized so the busiest model's total
+    /// spans the plot — magnitudes stay comparable between models while
+    /// sharing the percent chart's 0...100 canvas.
+    private struct ModelCurve {
+        let model: String
+        let color: Color
+        let points: [(t: Date, normalized: Double)]
     }
 
     var body: some View {
         let rows = windowRows
-        let colors = rowColors
+        let colors = ModelPalette.assignment(for: rows.map(\.model))
+        let curves = modelCurves(rows: rows, colors: colors)
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline) {
                 Text(meter.label).font(.caption.bold())
                 Spacer()
-                Text(windowLabel).font(.caption2).foregroundStyle(.secondary)
+                if liveReset != nil {
+                    Picker("Span", selection: $span) {
+                        ForEach(Span.allCases, id: \.self) { choice in
+                            Text(choice.rawValue).tag(choice)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .controlSize(.mini)
+                    .labelsHidden()
+                    .fixedSize()
+                } else {
+                    Text(spanLabel).font(.caption2).foregroundStyle(.secondary)
+                }
             }
-            // Fixed-height stats line, the popover's counterpart of the main
-            // section's: window totals normally, the hovered model's share
-            // while the table filters the chart. Never reflows on hover.
+            // Fixed-height stats line: window totals normally, the focused
+            // model's share while a curve/row pair is lit. Never reflows.
             HStack(spacing: 5) {
-                if let hoveredModel {
+                if let focusedModel {
                     Circle()
-                        .fill(colors[hoveredModel] ?? .gray)
+                        .fill(colors[focusedModel] ?? .gray)
                         .frame(width: 6, height: 6)
                 }
                 Text(statsText(rows: rows))
@@ -446,16 +506,19 @@ struct MeterHistoryView: View {
                 Spacer(minLength: 0)
             }
             .frame(height: 14)
-            if let hoveredModel {
-                modelChart(model: hoveredModel, color: colors[hoveredModel] ?? .gray)
-            } else if points.count < 2 {
+            if points.count < 2 && curves.isEmpty {
                 Text("Collecting samples — this fills in as refreshes accumulate.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                     .frame(width: Self.chartWidth, height: Self.chartHeight)
             } else {
-                percentChart
+                // The 30s tick keeps the now-notch sliding and the sliding
+                // domain honest while the popover stays open.
+                TimelineView(.periodic(from: .now, by: 30)) { context in
+                    chart(curves: curves, now: context.date)
+                }
             }
+            domainLabels
             Text(readout.map(readoutText) ?? hoverHint)
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(readout == nil ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.secondary))
@@ -469,7 +532,7 @@ struct MeterHistoryView: View {
             } else {
                 ModelBreakdownGrid(
                     rows: rows, colors: colors, pricing: pricing,
-                    hoveredModel: $hoveredModel)
+                    hoveredModel: $focusedModel)
             }
             Text("Local Claude Code sessions on this Mac only.")
                 .font(.caption2)
@@ -478,51 +541,172 @@ struct MeterHistoryView: View {
         .padding(10)
     }
 
-    /// "89.2M tokens this session", or the hovered model's slice of it.
-    private func statsText(rows: [ModelTokenUsage]) -> String {
-        let (_, label) = tokenWindow
-        if let hoveredModel, let row = rows.first(where: { $0.model == hoveredModel }) {
-            return "\(row.displayName) · \(TokenFormat.compact(row.tally.total)) tokens \(label)"
-        }
-        return "\(TokenFormat.compact(WindowTokens.total(rows).total)) tokens \(label)"
-    }
+    // MARK: - Chart
 
-    private var hoverHint: String {
-        hoveredModel.map { "Cumulative \(ModelNames.display($0)) tokens" }
-            ?? "Hover the graph for point details"
-    }
-
-    /// The hovered model's cumulative tokens across the window — the
-    /// popover's version of the legend filtering the chart.
-    private func modelChart(model: String, color: Color) -> some View {
-        let curve = cumulativeCurve(model: model)
-        let (start, _) = tokenWindow
-        return Chart(curve, id: \.t) { point in
-            AreaMark(x: .value("Time", point.t), y: .value("Tokens", point.total))
-                .foregroundStyle(color.opacity(0.18))
-            LineMark(x: .value("Time", point.t), y: .value("Tokens", point.total))
-                .foregroundStyle(color)
-                .interpolationMethod(.monotone)
-        }
-        .chartYAxis {
-            AxisMarks(position: .trailing, values: .automatic(desiredCount: 3)) { value in
-                AxisGridLine()
-                AxisValueLabel {
-                    if let tokens = value.as(Double.self) {
-                        Text(TokenFormat.compact(Int(tokens)))
+    private func chart(curves: [ModelCurve], now: Date) -> some View {
+        let (start, end) = domain
+        return Chart {
+            // Model curves underlay the percent line; the focused one draws
+            // last so its full-opacity line sits on top of its dimmed peers.
+            ForEach(drawOrder(curves), id: \.model) { curve in
+                if focusedModel == curve.model {
+                    ForEach(curve.points, id: \.t) { point in
+                        AreaMark(
+                            x: .value("Time", point.t),
+                            y: .value("Usage", point.normalized))
+                        .foregroundStyle(curve.color.opacity(0.15))
+                        .interpolationMethod(.monotone)
                     }
                 }
+                ForEach(curve.points, id: \.t) { point in
+                    LineMark(
+                        x: .value("Time", point.t),
+                        y: .value("Usage", point.normalized),
+                        series: .value("Series", curve.model))
+                    .foregroundStyle(curve.color.opacity(lineOpacity(curve.model)))
+                    .interpolationMethod(.monotone)
+                }
+            }
+            if focusedModel == nil {
+                ForEach(points) { point in
+                    AreaMark(
+                        x: .value("Time", point.t),
+                        y: .value("Usage", Double(point.percent)))
+                    .foregroundStyle(orange.opacity(0.18))
+                    .interpolationMethod(.monotone)
+                }
+            }
+            ForEach(points) { point in
+                LineMark(
+                    x: .value("Time", point.t),
+                    y: .value("Usage", Double(point.percent)),
+                    series: .value("Series", "percent"))
+                .foregroundStyle(orange.opacity(focusedModel == nil ? 1 : 0.3))
+                .interpolationMethod(.monotone)
+            }
+            if effectiveSpan == .window {
+                // The prediction engine's trajectory: dashed, measured side
+                // of the notch left alone.
+                if let prediction, prediction.curve.count >= 2 {
+                    ForEach(prediction.curve, id: \.t) { point in
+                        LineMark(
+                            x: .value("Time", point.t),
+                            y: .value("Usage", point.percent),
+                            series: .value("Series", "prediction"))
+                        .foregroundStyle(orange.opacity(focusedModel == nil ? 0.8 : 0.25))
+                        .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+                    }
+                }
+                // The now-notch: everything left is measured, right is ahead.
+                RuleMark(x: .value("Now", now))
+                    .foregroundStyle(.tertiary)
+                    .lineStyle(StrokeStyle(lineWidth: 1))
+                    .annotation(position: .top, alignment: .center) {
+                        Text("now").font(.system(size: 8)).foregroundStyle(.tertiary)
+                    }
+            }
+            if let readout {
+                RuleMark(x: .value("Time", readout.t))
+                    .foregroundStyle(.quaternary)
+                PointMark(
+                    x: .value("Time", readout.t),
+                    y: .value("Usage", Double(readout.percent)))
+                .foregroundStyle(orange.opacity(readout.predicted ? 0.8 : 1))
+                .symbolSize(30)
             }
         }
-        .chartXScale(domain: start...Date())
+        .chartYScale(domain: 0...100)
+        .chartYAxis { AxisMarks(values: [0, 50, 100]) }
+        .chartXScale(domain: start...end)
+        .chartOverlay { proxy in
+            GeometryReader { geo in
+                Rectangle()
+                    .fill(Color.clear)
+                    .contentShape(Rectangle())
+                    .onContinuousHover { phase in
+                        switch phase {
+                        case .active(let location):
+                            guard let plotFrame = proxy.plotFrame else { return }
+                            let origin = geo[plotFrame].origin
+                            hoverDate = proxy.value(atX: location.x - origin.x, as: Date.self)
+                            updateFocus(
+                                at: proxy.value(atX: location.x - origin.x, as: Date.self),
+                                yValue: proxy.value(atY: location.y - origin.y, as: Double.self),
+                                curves: curves)
+                        case .ended:
+                            hoverDate = nil
+                            focusedModel = nil
+                        }
+                    }
+            }
+        }
         .frame(width: Self.chartWidth, height: Self.chartHeight)
     }
 
+    /// Unfocused curves first, the focused one last (drawn on top).
+    private func drawOrder(_ curves: [ModelCurve]) -> [ModelCurve] {
+        guard let focusedModel else { return curves }
+        return curves.filter { $0.model != focusedModel }
+            + curves.filter { $0.model == focusedModel }
+    }
+
+    private func lineOpacity(_ model: String) -> Double {
+        guard let focusedModel else { return 0.55 }
+        return model == focusedModel ? 1 : 0.15
+    }
+
+    /// Graph-side focus: the curve whose value at the cursor's time sits
+    /// nearest the cursor's height wins, within a grab distance — otherwise
+    /// the hover is about the percent line/whitespace and nothing focuses.
+    private func updateFocus(at date: Date?, yValue: Double?, curves: [ModelCurve]) {
+        guard let date, let yValue else { return }
+        var best: (model: String, distance: Double)?
+        for curve in curves {
+            guard let value = interpolate(curve.points, at: date) else { continue }
+            let distance = abs(value - yValue)
+            if best == nil || distance < best!.distance {
+                best = (curve.model, distance)
+            }
+        }
+        let hit = (best?.distance ?? .infinity) <= 8 ? best?.model : nil
+        if focusedModel != hit { focusedModel = hit }
+    }
+
+    private func interpolate(
+        _ pts: [(t: Date, normalized: Double)], at date: Date
+    ) -> Double? {
+        guard let first = pts.first, let last = pts.last else { return nil }
+        if date <= first.t { return first.normalized }
+        if date >= last.t { return last.normalized }
+        for (p0, p1) in zip(pts, pts.dropFirst()) where date <= p1.t {
+            let span = p1.t.timeIntervalSince(p0.t)
+            guard span > 0 else { return p1.normalized }
+            let fraction = date.timeIntervalSince(p0.t) / span
+            return p0.normalized + fraction * (p1.normalized - p0.normalized)
+        }
+        return last.normalized
+    }
+
+    private func modelCurves(
+        rows: [ModelTokenUsage], colors: [String: Color]
+    ) -> [ModelCurve] {
+        let raw = rows.map { row in (model: row.model, curve: cumulativeCurve(model: row.model)) }
+        let maxTotal = raw.compactMap { $0.curve.last?.total }.max() ?? 0
+        guard maxTotal > 0 else { return [] }
+        let norm = 100.0 / Double(maxTotal)
+        return raw.map { entry in
+            ModelCurve(
+                model: entry.model,
+                color: colors[entry.model] ?? .gray,
+                points: entry.curve.map { ($0.t, Double($0.total) * norm) })
+        }
+    }
+
     /// Running total per ~180 buckets so a busy week doesn't hand Charts
-    /// thousands of minute slots.
+    /// thousands of minute slots. Covers the measured part of the domain.
     private func cumulativeCurve(model: String) -> [(t: Date, total: Int)] {
-        let (start, _) = tokenWindow
-        let end = Date()
+        let start = domain.start
+        let end = min(domain.end, Date())
         let bucket = max(60, end.timeIntervalSince(start) / 180)
         var curve: [(t: Date, total: Int)] = [(start, 0)]
         var total = 0
@@ -538,79 +722,74 @@ struct MeterHistoryView: View {
         return curve
     }
 
-    private var percentChart: some View {
-        Chart {
-            ForEach(points) { point in
-                AreaMark(
-                    x: .value("Time", point.t),
-                    y: .value("Percent", point.percent)
-                )
-                .foregroundStyle(Color(nsColor: StatusItemRenderer.claudeOrange).opacity(0.18))
-                LineMark(
-                    x: .value("Time", point.t),
-                    y: .value("Percent", point.percent)
-                )
-                .foregroundStyle(Color(nsColor: StatusItemRenderer.claudeOrange))
-                .interpolationMethod(.monotone)
-            }
-            if let readout {
-                RuleMark(x: .value("Time", readout.t))
-                    .foregroundStyle(.quaternary)
-                PointMark(
-                    x: .value("Time", readout.t),
-                    y: .value("Percent", readout.percent)
-                )
-                .foregroundStyle(Color(nsColor: StatusItemRenderer.claudeOrange))
-                .symbolSize(30)
-            }
+    // MARK: - Text lines
+
+    /// "89.2M tokens this session", or the focused model's slice of it.
+    private func statsText(rows: [ModelTokenUsage]) -> String {
+        if let focusedModel, let row = rows.first(where: { $0.model == focusedModel }) {
+            return "\(row.displayName) · \(TokenFormat.compact(row.tally.total)) tokens \(spanLabel)"
         }
-        .chartYScale(domain: 0...100)
-        .chartYAxis { AxisMarks(values: [0, 50, 100]) }
-        .chartXScale(domain: Date().addingTimeInterval(-window)...Date())
-        .chartOverlay { proxy in
-            GeometryReader { geo in
-                Rectangle()
-                    .fill(Color.clear)
-                    .contentShape(Rectangle())
-                    .onContinuousHover { phase in
-                        switch phase {
-                        case .active(let location):
-                            guard let plotFrame = proxy.plotFrame else { return }
-                            let x = location.x - geo[plotFrame].origin.x
-                            hoverDate = proxy.value(atX: x, as: Date.self)
-                        case .ended:
-                            hoverDate = nil
-                        }
-                    }
-            }
-        }
-        .frame(width: Self.chartWidth, height: Self.chartHeight)
+        return "\(TokenFormat.compact(WindowTokens.total(rows).total)) tokens \(spanLabel)"
     }
 
-    /// A continuously-hoverable reading: percent is interpolated between the
-    /// surrounding samples (flat beyond the ends), so sparse data doesn't
-    /// make the cursor jump between far-apart points. Tokens attribute to the
-    /// enclosing poll interval.
+    private var hoverHint: String {
+        focusedModel.map { "\(ModelNames.display($0)) focused — others dimmed" }
+            ?? "Hover the graph for point details"
+    }
+
+    /// Start and end of the visible domain under the chart — in Window span
+    /// the end is the reset itself.
+    private var domainLabels: some View {
+        let (start, end) = domain
+        return HStack {
+            Text(timeLabel(start))
+            Spacer()
+            Text(effectiveSpan == .window ? "resets \(timeLabel(end))" : "now")
+        }
+        .font(.caption2)
+        .foregroundStyle(.tertiary)
+        .frame(width: Self.chartWidth)
+    }
+
+    private func timeLabel(_ date: Date) -> String {
+        meter.rank == 0 ? UsageFormatting.clockTime(date) : Self.weekdayTime.string(from: date)
+    }
+
+    // MARK: - Hover readout
+
+    /// A continuously-hoverable reading: measured percent is interpolated
+    /// between the surrounding samples; right of the now-notch the value
+    /// comes off the prediction curve and says so. Tokens attribute to the
+    /// enclosing poll interval (measured side only).
     private struct Readout {
         let t: Date
         let percent: Int
-        /// The measured interval containing `t`; nil before the first sample.
         let from: Date?
         let to: Date?
+        let predicted: Bool
     }
 
     private var readout: Readout? {
-        // Point readouts belong to the percent chart; in model mode the
-        // stats line carries the numbers.
-        guard hoveredModel == nil, let hoverDate else { return nil }
+        // Point readouts belong to the percent/prediction lines; in focus
+        // mode the stats line carries the numbers.
+        guard focusedModel == nil, let hoverDate else { return nil }
+        let now = Date()
+        let (domainStart, domainEnd) = domain
+        let t = min(max(hoverDate, domainStart), domainEnd)
+        if effectiveSpan == .window, t > now {
+            guard let prediction,
+                  let projected = PredictionEngine.percent(onCurve: prediction.curve, at: t)
+            else { return nil }
+            return Readout(
+                t: t, percent: Int(projected.rounded()), from: nil, to: nil, predicted: true)
+        }
         let all = points
         guard let first = all.first, let last = all.last else { return nil }
-        let t = min(max(hoverDate, Date().addingTimeInterval(-window)), Date())
         if t <= first.t {
-            return Readout(t: t, percent: first.percent, from: nil, to: nil)
+            return Readout(t: t, percent: first.percent, from: nil, to: nil, predicted: false)
         }
         if t >= last.t {
-            return Readout(t: t, percent: last.percent, from: last.t, to: t)
+            return Readout(t: t, percent: last.percent, from: last.t, to: t, predicted: false)
         }
         let index = all.lastIndex { $0.t <= t } ?? 0
         let p0 = all[index]
@@ -618,13 +797,19 @@ struct MeterHistoryView: View {
         let span = p1.t.timeIntervalSince(p0.t)
         let fraction = span > 0 ? t.timeIntervalSince(p0.t) / span : 0
         let percent = Double(p0.percent) + fraction * Double(p1.percent - p0.percent)
-        return Readout(t: t, percent: Int(percent.rounded()), from: p0.t, to: p1.t)
+        return Readout(
+            t: t, percent: Int(percent.rounded()), from: p0.t, to: p1.t, predicted: false)
     }
 
-    /// "14:32 · 34% · 1.2M tokens · $3.40" — tokens and cost cover what the
-    /// transcripts logged in the poll interval the cursor sits in.
+    /// "14:32 · 34% · 1.2M tokens · $3.40" measured; "16:05 · proj. 41%"
+    /// beyond the notch.
     private func readoutText(_ readout: Readout) -> String {
-        var parts = [UsageFormatting.clockTime(readout.t), "\(readout.percent)%"]
+        var parts = [UsageFormatting.clockTime(readout.t)]
+        if readout.predicted {
+            parts.append("proj. \(readout.percent)%")
+            return parts.joined(separator: " · ")
+        }
+        parts.append("\(readout.percent)%")
         if let from = readout.from, let to = readout.to {
             let rows = WindowTokens.breakdown(
                 timeline: timeline, from: from.addingTimeInterval(1), to: to)
@@ -640,25 +825,10 @@ struct MeterHistoryView: View {
         return parts.joined(separator: " · ")
     }
 
-    /// Tokens are attributed to the limit's real window when the API gave a
-    /// live reset time (a session runs resetsAt − 5h → resetsAt); with no
-    /// live reset the trailing window is an honest stand-in.
-    private var tokenWindow: (start: Date, label: String) {
-        let now = Date()
-        if let resetsAt = meter.resetsAt, resetsAt > now {
-            return (
-                resetsAt.addingTimeInterval(-window),
-                meter.rank == 0 ? "this session" : "this week"
-            )
-        }
-        return (now.addingTimeInterval(-window), windowLabel)
-    }
-
     /// "Weekly · Fable" → "Fable": a scoped meter's breakdown shows only its
     /// own model's usage, never the whole timeline.
     private var scopeName: String? {
         guard meter.rank == 2, meter.label.hasPrefix("Weekly · ") else { return nil }
         return String(meter.label.dropFirst("Weekly · ".count))
     }
-
 }

@@ -27,14 +27,14 @@ struct UsageHistoryTests {
     }
 }
 
-@Suite("BurnRate")
-struct BurnRateTests {
+@Suite("PredictionEngine")
+struct PredictionEngineTests {
     let now = Date(timeIntervalSince1970: 1_000_000)
 
     @Test("steady climb yields percent-per-hour slope")
     func slope() {
         let samples = [sample(60, 10, now: now), sample(30, 15, now: now), sample(0, 20, now: now)]
-        let rate = BurnRate.ratePerHour(samples: samples, label: "Session (5h)", window: 2 * 3600, now: now)
+        let rate = PredictionEngine.ratePerHour(samples: samples, label: "Session (5h)", window: 2 * 3600, now: now)
         #expect(rate != nil)
         #expect(abs(rate! - 10) < 0.01)
     }
@@ -45,55 +45,122 @@ struct BurnRateTests {
             sample(90, 80, now: now), sample(60, 90, now: now),
             sample(30, 5, now: now), sample(0, 10, now: now),
         ]
-        let rate = BurnRate.ratePerHour(samples: samples, label: "Session (5h)", window: 3 * 3600, now: now)
+        let rate = PredictionEngine.ratePerHour(samples: samples, label: "Session (5h)", window: 3 * 3600, now: now)
         #expect(rate != nil)
         #expect(abs(rate! - 10) < 0.01)
     }
 
     @Test("insufficient span or points yields nil")
     func insufficient() {
-        #expect(BurnRate.ratePerHour(samples: [sample(0, 10, now: now)], label: "Session (5h)", window: 3600, now: now) == nil)
+        #expect(PredictionEngine.ratePerHour(samples: [sample(0, 10, now: now)], label: "Session (5h)", window: 3600, now: now) == nil)
         let tight = [sample(2, 10, now: now), sample(0, 11, now: now)]
-        #expect(BurnRate.ratePerHour(samples: tight, label: "Session (5h)", window: 3600, now: now) == nil)
-        #expect(BurnRate.ratePerHour(samples: [], label: "missing", window: 3600, now: now) == nil)
+        #expect(PredictionEngine.ratePerHour(samples: tight, label: "Session (5h)", window: 3600, now: now) == nil)
+        #expect(PredictionEngine.ratePerHour(samples: [], label: "missing", window: 3600, now: now) == nil)
     }
 
-    @Test("red: current rate exhausts before reset")
+    @Test("red: current rate exhausts before reset, curve knees at 100")
     func red() {
-        let estimate = BurnRate.estimate(
-            percent: 80, resetsAt: now.addingTimeInterval(2 * 3600), ratePerHour: 20, now: now)
-        #expect(estimate?.verdict == .red)
-        #expect(estimate?.text.contains("1h") == true)
+        let reset = now.addingTimeInterval(2 * 3600)
+        let prediction = PredictionEngine.prediction(
+            percent: 80, resetsAt: reset, ratePerHour: 20, now: now)
+        #expect(prediction.verdict == .red)
+        #expect(prediction.text.contains("1h"))
+        #expect(prediction.projectedAtReset == 100)
+        #expect(prediction.exhaustsAt == now.addingTimeInterval(3600))
+        #expect(prediction.curve == [
+            .init(t: now, percent: 80),
+            .init(t: now.addingTimeInterval(3600), percent: 100),
+            .init(t: reset, percent: 100),
+        ])
     }
 
     @Test("yellow: projected close to the limit at reset")
     func yellow() {
-        let estimate = BurnRate.estimate(
-            percent: 60, resetsAt: now.addingTimeInterval(3 * 3600), ratePerHour: 10, now: now)
-        #expect(estimate?.verdict == .yellow)
-        #expect(estimate?.text.contains("90%") == true)
+        let reset = now.addingTimeInterval(3 * 3600)
+        let prediction = PredictionEngine.prediction(
+            percent: 60, resetsAt: reset, ratePerHour: 10, now: now)
+        #expect(prediction.verdict == .yellow)
+        #expect(prediction.text.contains("90%"))
+        #expect(prediction.projectedAtReset == 90)
+        #expect(prediction.exhaustsAt == nil)
+        #expect(prediction.curve == [
+            .init(t: now, percent: 60), .init(t: reset, percent: 90),
+        ])
     }
 
-    @Test("green: comfortable projection")
+    @Test("green: comfortable projection with straight curve")
     func green() {
-        let estimate = BurnRate.estimate(
-            percent: 20, resetsAt: now.addingTimeInterval(3 * 3600), ratePerHour: 5, now: now)
-        #expect(estimate?.verdict == .green)
-        #expect(estimate?.text.contains("35%") == true)
+        let reset = now.addingTimeInterval(3 * 3600)
+        let prediction = PredictionEngine.prediction(
+            percent: 20, resetsAt: reset, ratePerHour: 5, now: now)
+        #expect(prediction.verdict == .green)
+        #expect(prediction.text.contains("35%"))
+        #expect(prediction.projectedAtReset == 35)
+        #expect(prediction.curve == [
+            .init(t: now, percent: 20), .init(t: reset, percent: 35),
+        ])
     }
 
-    @Test("flat rate is green and steady; nil rate gives no estimate")
-    func steadyAndNil() {
-        let flat = BurnRate.estimate(percent: 50, resetsAt: now, ratePerHour: 0.05, now: now)
-        #expect(flat?.verdict == .green)
-        #expect(BurnRate.estimate(percent: 50, resetsAt: now, ratePerHour: nil, now: now) == nil)
+    @Test("flat rate is green and steady with a flat curve")
+    func steady() {
+        let reset = now.addingTimeInterval(3600)
+        let prediction = PredictionEngine.prediction(
+            percent: 50, resetsAt: reset, ratePerHour: 0.05, now: now)
+        #expect(prediction.verdict == .green)
+        #expect(prediction.text == "steady — not burning")
+        #expect(prediction.projectedAtReset == 50)
+        #expect(prediction.curve == [
+            .init(t: now, percent: 50), .init(t: reset, percent: 50),
+        ])
+    }
+
+    @Test("no live reset: exhaustion date but no projection or curve")
+    func noReset() {
+        let prediction = PredictionEngine.prediction(
+            percent: 50, resetsAt: nil, ratePerHour: 10, now: now)
+        #expect(prediction.verdict == .green)
+        #expect(prediction.text.contains("to limit"))
+        #expect(prediction.projectedAtReset == nil)
+        #expect(prediction.exhaustsAt == now.addingTimeInterval(5 * 3600))
+        #expect(prediction.curve.isEmpty)
+        // A reset in the past counts as no live reset.
+        let stale = PredictionEngine.prediction(
+            percent: 50, resetsAt: now.addingTimeInterval(-60), ratePerHour: 10, now: now)
+        #expect(stale.curve.isEmpty)
+    }
+
+    @Test("predict pulls percent and rate from the meter and samples")
+    func predictEndToEnd() {
+        let meter = Meter(
+            id: "0-session", label: "Session (5h)", percent: 20,
+            resetsAt: now.addingTimeInterval(3 * 3600), level: .normal, rank: 0)
+        let samples = [sample(60, 10, now: now), sample(30, 15, now: now), sample(0, 20, now: now)]
+        let prediction = PredictionEngine.predict(meter: meter, samples: samples, now: now)
+        #expect(prediction?.verdict == .green)
+        #expect(abs((prediction?.ratePerHour ?? 0) - 10) < 0.01)
+        // Too little data → no prediction at all.
+        #expect(PredictionEngine.predict(meter: meter, samples: [], now: now) == nil)
+    }
+
+    @Test("curve interpolation crosses the knee correctly")
+    func curveInterpolation() {
+        let curve: [UsagePrediction.Point] = [
+            .init(t: now, percent: 80),
+            .init(t: now.addingTimeInterval(3600), percent: 100),
+            .init(t: now.addingTimeInterval(7200), percent: 100),
+        ]
+        #expect(PredictionEngine.percent(onCurve: curve, at: now.addingTimeInterval(1800)) == 90)
+        #expect(PredictionEngine.percent(onCurve: curve, at: now.addingTimeInterval(5400)) == 100)
+        #expect(PredictionEngine.percent(onCurve: curve, at: now.addingTimeInterval(-60)) == 80)
+        #expect(PredictionEngine.percent(onCurve: curve, at: now.addingTimeInterval(9999)) == 100)
+        #expect(PredictionEngine.percent(onCurve: [], at: now) == nil)
     }
 
     @Test("duration formatting")
     func durations() {
-        #expect(BurnRate.durationText(hours: 1.5) == "1h 30m")
-        #expect(BurnRate.durationText(hours: 0.05) == "3m")
-        #expect(BurnRate.durationText(hours: 30) == "1d 6h")
-        #expect(BurnRate.durationText(hours: 2) == "2h")
+        #expect(PredictionEngine.durationText(hours: 1.5) == "1h 30m")
+        #expect(PredictionEngine.durationText(hours: 0.05) == "3m")
+        #expect(PredictionEngine.durationText(hours: 30) == "1d 6h")
+        #expect(PredictionEngine.durationText(hours: 2) == "2h")
     }
 }

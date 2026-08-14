@@ -15,9 +15,13 @@ transcript analytics: activity heatmap (7D per-model stacked bars with
 per-day totals / 30D calendar / all-time grid, each viewable by token
 volume or estimated cost) with one-line day tooltips, and click-to-drill
 day views — a model donut plus that day's usage table, animated push/pop with a
-back button; per-meter hover popovers with percent history, per-poll-interval
-readouts, and the same breakdown table (hovering a model row swaps the
-chart to that model's cumulative token curve); a per-period model usage table
+back button; per-meter hover popovers graphing percent history overlaid
+with every model's cumulative token curve — a Sliding/Window span picker
+switches between the trailing window and the limit window start-to-reset,
+where a now-notch separates measured usage from the prediction engine's
+dashed projected trajectory — with per-poll-interval readouts and the same
+breakdown table as a legend (hovering a curve or a row focuses that model
+everywhere and dims the rest); a per-period model usage table
 (aligned input/cached/output/cost columns — cache re-reads of the
 conversation shown apart from fresh input — cost estimates at API list
 prices, pricing feed fetched daily with bundled fallback) whose rows

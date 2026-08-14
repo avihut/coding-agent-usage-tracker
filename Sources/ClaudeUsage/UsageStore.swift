@@ -19,7 +19,7 @@ final class UsageStore {
     private(set) var activeInterval: TimeInterval
     private(set) var nextRefreshAt: Date?
     private(set) var samples: [UsageSample] = []
-    private(set) var burnEstimates: [String: BurnEstimate] = [:]
+    private(set) var predictions: [String: UsagePrediction] = [:]
     private(set) var activity: [DailyActivity] = []
     /// Recent per-minute, per-model transcript usage; feeds the per-meter
     /// window breakdown in the panel.
@@ -108,7 +108,7 @@ final class UsageStore {
             scheduleNext()
             if case .live(let snapshot) = newState {
                 samples = history.append(snapshot, existing: samples)
-                recomputeBurnEstimates(for: snapshot)
+                recomputePredictions(for: snapshot)
             }
             await refreshPricingIfNeeded()
         }
@@ -223,20 +223,15 @@ final class UsageStore {
         scheduleNext()
     }
 
-    private func recomputeBurnEstimates(for snapshot: Snapshot) {
+    private func recomputePredictions(for snapshot: Snapshot) {
         let now = Date()
-        var estimates: [String: BurnEstimate] = [:]
+        var fresh: [String: UsagePrediction] = [:]
         for meter in snapshot.meters {
-            guard let percent = meter.percent else { continue }
-            let rate = BurnRate.ratePerHour(
-                samples: samples, label: meter.label,
-                window: BurnRate.window(forRank: meter.rank), now: now)
-            if let estimate = BurnRate.estimate(
-                percent: percent, resetsAt: meter.resetsAt, ratePerHour: rate, now: now) {
-                estimates[meter.label] = estimate
+            if let prediction = PredictionEngine.predict(meter: meter, samples: samples, now: now) {
+                fresh[meter.label] = prediction
             }
         }
-        burnEstimates = estimates
+        predictions = fresh
     }
 
     func setActiveInterval(_ interval: TimeInterval) {

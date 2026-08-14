@@ -94,9 +94,17 @@ the README rather than silently deviating.
   per-model stacked with band order fixed period-wide, and clicking any
   day pushes (animated, with a back button) into a per-day drill-down —
   model donut + the same grid scoped to that day. The grid is one shared
-  component (`ModelBreakdownGrid`), also the meter popovers' table:
-  hovering a row there swaps the percent chart for that model's
-  cumulative token curve. Hover-driven stats lines are fixed-height by
+  component (`ModelBreakdownGrid`), also the meter popovers' table. The
+  popover chart overlays the meter's percent line with EVERY model's
+  cumulative token curve (normalized so the busiest model spans the plot);
+  one `focusedModel` state drives both the chart (focused curve full
+  opacity + area, rest dimmed) and the legend rows — hover either surface
+  and both light, since they render from the same binding. A
+  Sliding|Window span picker (hidden without a live reset) switches the
+  X domain between trailing-now and the limit window start-to-reset; the
+  Window span draws a 30s-ticking now-notch and the prediction engine's
+  dashed trajectory, and hover readouts right of the notch report
+  "proj. N%" off that curve. Hover-driven stats lines are fixed-height by
   design — swapping text must never reflow the layout under the cursor —
   and today's cell/bar carries a subtle ring (grids only — the 7D bar's
   bold weekday label suffices). A Tokens|Cost segmented picker beside the
@@ -138,9 +146,15 @@ the README rather than silently deviating.
   `rateLimitTier` (`PlanInfo` — metadata beside the token, never the
   refresh token); it rides `Snapshot.plan` and renders under the panel
   title.
-- Burn estimates come from persisted percent samples (`UsageHistory` in App
-  Support) using the monotonic tail after the last drop, so limit resets
-  never produce bogus negative rates. Verdicts: red = exhausts before
+- Predictions are one engine (`PredictionEngine` in UsageCore — the
+  consolidation of the old BurnRate/BurnEstimate pair): rate from persisted
+  percent samples (`UsageHistory` in App Support) using the monotonic tail
+  after the last drop (limit resets never produce bogus negative rates),
+  then a single `UsagePrediction` per meter — rate, projected-at-reset,
+  exhaustion date, verdict, caption text, and a chartable trajectory curve
+  clamped at 100 with a knee at the crossing. Every surface that talks
+  about the future (meter captions, the popover's Window graph) reads it;
+  never re-derive projections ad hoc. Verdicts: red = exhausts before
   reset at current rate, yellow = projected ≥85% at reset, green otherwise.
 
 ## Swift practices
