@@ -396,10 +396,25 @@ struct MeterHistoryView: View {
         case window = "Window"
     }
 
-    @State private var span: Span = .sliding
+    /// The span choice, remembered per meter across popover dismissals and
+    /// relaunches — the single shared popover would otherwise leak one
+    /// meter's choice onto the next while sweeping rows.
+    @AppStorage private var span: Span
     @State private var hoverDate: Date?
     /// The focused model — set by hovering its curve or its legend row.
     @State private var focusedModel: String?
+
+    init(
+        meter: Meter, samples: [UsageSample], timeline: [TokenSlot],
+        pricing: PricingTable, prediction: UsagePrediction?
+    ) {
+        self.meter = meter
+        self.samples = samples
+        self.timeline = timeline
+        self.pricing = pricing
+        self.prediction = prediction
+        _span = AppStorage(wrappedValue: .sliding, "meterPopoverSpan-\(meter.id)")
+    }
 
     private static let chartWidth: CGFloat = 300
     private static let chartHeight: CGFloat = 110

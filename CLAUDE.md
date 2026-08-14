@@ -100,8 +100,11 @@ the README rather than silently deviating.
   one `focusedModel` state drives both the chart (focused curve full
   opacity + area, rest dimmed) and the legend rows — hover either surface
   and both light, since they render from the same binding. A
-  Sliding|Window span picker (hidden without a live reset) switches the
-  X domain between trailing-now and the limit window start-to-reset; the
+  Sliding|Window span picker (hidden without a live reset; choice
+  persisted per meter via @AppStorage `meterPopoverSpan-<id>`, since the
+  shared popover would otherwise leak one meter's choice onto the next)
+  switches the X domain between trailing-now and the limit window
+  start-to-reset; the
   Window span draws a 30s-ticking now-notch and the prediction engine's
   dashed trajectory, and hover readouts right of the notch report
   "proj. N%" off that curve. Hover-driven stats lines are fixed-height by
