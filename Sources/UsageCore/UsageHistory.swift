@@ -4,10 +4,14 @@ import Foundation
 public struct UsageSample: Codable, Sendable, Equatable {
     public let t: Date
     public let percents: [String: Int]
+    /// Each meter's reported window end at sample time — the exact cliff
+    /// moment for reset-aware drawing. Absent in samples from older builds.
+    public let resets: [String: Date]?
 
-    public init(t: Date, percents: [String: Int]) {
+    public init(t: Date, percents: [String: Int], resets: [String: Date]? = nil) {
         self.t = t
         self.percents = percents
+        self.resets = resets
     }
 }
 
@@ -39,11 +43,14 @@ public struct UsageHistory: Sendable {
     /// returns the updated series. Best-effort persistence, like UsageCache.
     public func append(_ snapshot: Snapshot, existing: [UsageSample], now: Date = Date()) -> [UsageSample] {
         var percents: [String: Int] = [:]
+        var resets: [String: Date] = [:]
         for meter in snapshot.meters {
             if let percent = meter.percent { percents[meter.label] = percent }
+            if let reset = meter.resetsAt { resets[meter.label] = reset }
         }
         var samples = existing
-        samples.append(UsageSample(t: now, percents: percents))
+        samples.append(UsageSample(
+            t: now, percents: percents, resets: resets.isEmpty ? nil : resets))
         samples.removeAll { now.timeIntervalSince($0.t) > retention }
 
         do {

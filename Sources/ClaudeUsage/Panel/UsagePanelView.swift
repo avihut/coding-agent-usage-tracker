@@ -492,6 +492,41 @@ struct MeterHistoryView: View {
             }
     }
 
+    /// The drawn percent series: the in-domain samples, the last sample
+    /// before the frame (so the line enters at its true height), and a
+    /// reset cliff wherever the percent dropped between neighbors — the
+    /// line holds its level to the old window's end, falls to zero there,
+    /// then climbs again. A limit reset is an instant, and sparse samples
+    /// straddling it must not draw as a gradual decline. `points` alone
+    /// keeps anchoring the token normalization: its first/last must stay
+    /// in-domain.
+    private var chartPoints: [Point] {
+        let (start, end) = domain
+        let measuredEnd = min(end, Date())
+        var series: [ResetCliffs.Sample] = []
+        var lastBefore: ResetCliffs.Sample?
+        for sample in samples where sample.t <= measuredEnd {
+            guard let percent = sample.percents[meter.label] else { continue }
+            let point = ResetCliffs.Sample(
+                t: sample.t, percent: percent, resetsAt: sample.resets?[meter.label])
+            if sample.t < start { lastBefore = point } else { series.append(point) }
+        }
+        if let lastBefore { series.insert(lastBefore, at: 0) }
+        let cliffs = ResetCliffs.cliffs(
+            between: series, window: window, currentReset: meter.resetsAt)
+        var drawn = series.map {
+            Point(id: $0.t.timeIntervalSince1970, t: $0.t, percent: $0.percent)
+        }
+        for cliff in cliffs {
+            drawn.append(Point(
+                id: cliff.at.timeIntervalSince1970 + 0.25, t: cliff.at, percent: cliff.from))
+            drawn.append(Point(
+                id: cliff.at.timeIntervalSince1970 + 0.75,
+                t: cliff.at.addingTimeInterval(1), percent: 0))
+        }
+        return drawn.sorted { $0.t < $1.t }
+    }
+
     /// This window's per-model usage, scoped for scoped meters — the rows of
     /// the shared table and the curves the chart overlays.
     private var windowRows: [ModelTokenUsage] {
@@ -605,6 +640,7 @@ struct MeterHistoryView: View {
         let (start, end) = domain
         let measuredEnd = min(end, now)
         let segments = activitySegments(now: now)
+        let drawnPercent = chartPoints
         // The stored hover re-anchored onto this render's freshly built
         // segments — see liveNub for why no direct comparison can do it.
         let hovered = hoveredSegment.flatMap { liveNub(for: $0, in: segments) }
@@ -650,7 +686,7 @@ struct MeterHistoryView: View {
                 }
             }
             if focusedModel == nil {
-                ForEach(points) { point in
+                ForEach(drawnPercent) { point in
                     AreaMark(
                         x: .value("Time", point.t),
                         yStart: .value("Usage", 0),
@@ -659,7 +695,7 @@ struct MeterHistoryView: View {
                     .interpolationMethod(.monotone)
                 }
             }
-            ForEach(points) { point in
+            ForEach(drawnPercent) { point in
                 LineMark(
                     x: .value("Time", point.t),
                     y: .value("Usage", Double(point.percent)),
@@ -1216,7 +1252,9 @@ struct MeterHistoryView: View {
             return Readout(
                 t: t, percent: Int(projected.rounded()), from: nil, to: nil, predicted: true)
         }
-        let all = points
+        // Interpolate on the drawn series — the reset cliffs included, so
+        // the readout steps where the line steps.
+        let all = chartPoints
         guard let first = all.first, let last = all.last else { return nil }
         if t <= first.t {
             return Readout(t: t, percent: first.percent, from: nil, to: nil, predicted: false)
