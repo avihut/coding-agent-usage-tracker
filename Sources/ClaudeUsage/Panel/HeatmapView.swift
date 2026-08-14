@@ -49,6 +49,9 @@ struct HeatmapView: View {
     /// kickoff, animated to 0; the outgoing view derives its offset from
     /// the same value, so the pair always moves in lockstep.
     @State private var slideX: CGFloat = 0
+    /// Model whose cost math is open from a ring-sector click; the grid's
+    /// own row popover keeps its private state.
+    @State private var ringCostModel: String?
     /// Invalidates a superseded slide's cleanup when the arrows are mashed.
     @State private var stepToken = 0
     /// The panel's content width — what a full slide traverses.
@@ -129,6 +132,7 @@ struct HeatmapView: View {
             hoveredDay = nil
             outgoingStep = nil
             slideX = 0
+            ringCostModel = nil
         }
     }
 
@@ -373,7 +377,9 @@ struct HeatmapView: View {
             // the container edges, centered on the ring.
             ZStack(alignment: .topLeading) {
                 if let outgoing = outgoingStep {
-                    dayDetail(outgoing.entry, rows: outgoing.rows)
+                    // The outgoing frame is scenery — its ring must not
+                    // co-present the cost popover the live copy owns.
+                    dayDetail(outgoing.entry, rows: outgoing.rows, live: false)
                         .offset(x: slideX - CGFloat(outgoing.direction) * Self.daySlideWidth)
                 }
                 dayDetail(entry, rows: rows)
@@ -389,7 +395,9 @@ struct HeatmapView: View {
         }
     }
 
-    private func dayDetail(_ entry: DailyActivity, rows: [ModelTokenUsage]) -> some View {
+    private func dayDetail(
+        _ entry: DailyActivity, rows: [ModelTokenUsage], live: Bool = true
+    ) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             if rows.isEmpty {
                 Text(entry.prompts > 0 && entry.tokens == 0
@@ -399,7 +407,7 @@ struct HeatmapView: View {
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 48)
             } else {
-                dayRing(rows: rows, entry: entry)
+                dayRing(rows: rows, entry: entry, live: live)
                 ModelBreakdownGrid(
                     rows: rows, colors: modelColors, pricing: pricing,
                     hoveredModel: $hoveredModel)
@@ -408,8 +416,11 @@ struct HeatmapView: View {
     }
 
     /// Donut of the day's tokens per model in the legend's colors; the center
-    /// restates the day's totals.
-    private func dayRing(rows: [ModelTokenUsage], entry: DailyActivity) -> some View {
+    /// restates the day's totals. Clicking a sector opens the same cost-math
+    /// popover as clicking that model's grid row.
+    private func dayRing(
+        rows: [ModelTokenUsage], entry: DailyActivity, live: Bool
+    ) -> some View {
         Chart(rows) { row in
             SectorMark(
                 angle: .value(dimension == .cost ? "Cost" : "Tokens", ringValue(row)),
@@ -440,6 +451,21 @@ struct HeatmapView: View {
                             hoveredModel = nil
                         }
                     }
+                    .onTapGesture { location in
+                        guard let plotFrame = proxy.plotFrame else { return }
+                        ringCostModel = ringHit(
+                            at: location, in: geo[plotFrame], rows: rows)
+                    }
+            }
+        }
+        .popover(
+            isPresented: Binding(
+                get: { live && rows.contains { $0.model == ringCostModel } },
+                set: { if !$0 { ringCostModel = nil } }),
+            arrowEdge: .bottom
+        ) {
+            if let row = rows.first(where: { $0.model == ringCostModel }) {
+                CostMathView(row: row, rates: pricing.rates(for: row.model))
             }
         }
         .chartBackground { proxy in

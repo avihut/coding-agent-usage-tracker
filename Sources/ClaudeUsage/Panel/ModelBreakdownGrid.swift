@@ -122,8 +122,9 @@ struct ModelBreakdownGrid: View {
 /// The arithmetic behind one row's estimate — each token class multiplied
 /// out at its list rate, summing to the est. cost column. The class labels
 /// also decode the grid's vocabulary: its "input" column folds fresh input
-/// and cache writes together, "cached" is the cache reads.
-private struct CostMathView: View {
+/// and cache writes together, "cached" is the cache reads. Shared with the
+/// day ring, whose sectors present the same popover on click.
+struct CostMathView: View {
     let row: ModelTokenUsage
     let rates: ModelRates?
 
