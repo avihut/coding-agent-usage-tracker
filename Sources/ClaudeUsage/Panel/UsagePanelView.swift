@@ -436,12 +436,12 @@ struct MeterHistoryView: View {
     /// so nothing wraps or truncates and the axis flipping between percent
     /// and tokens never resizes the plot.
     private static let axisLabelWidth: CGFloat = 42
-    /// The Y domain's ceiling — headroom above 100 where the now and
-    /// session-duration labels live, atop the data instead of on it and
-    /// inside the chart instead of crashing into the stats line. The same
-    /// trick the activity strip plays below 0. (chartPlotStyle top padding
-    /// is NOT this — it shifts the plot against its own axis marks.)
-    private static let plotCeiling: Double = 115
+    // The Y domain's ceiling is dynamic — dataCeiling × 1.15, headroom
+    // where the now and session-duration labels live, atop the data
+    // instead of on it and inside the chart instead of crashing into the
+    // stats line. The same trick the activity strip plays below 0.
+    // (chartPlotStyle top padding is NOT this — it shifts the plot
+    // against its own axis marks.)
     private static let weekdayTime: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "EEE HH:mm"
@@ -492,6 +492,13 @@ struct MeterHistoryView: View {
             }
     }
 
+    private struct PercentSeries {
+        let drawn: [Point]
+        /// The reset moments inside the frame — where the drawn line
+        /// cliffs, and where the vertical reset markers stand.
+        let resets: [Date]
+    }
+
     /// The drawn percent series: the in-domain samples, the last sample
     /// before the frame (so the line enters at its true height), and a
     /// reset cliff wherever the percent dropped between neighbors — the
@@ -500,7 +507,7 @@ struct MeterHistoryView: View {
     /// straddling it must not draw as a gradual decline. `points` alone
     /// keeps anchoring the token normalization: its first/last must stay
     /// in-domain.
-    private var chartPoints: [Point] {
+    private var percentSeries: PercentSeries {
         let (start, end) = domain
         let measuredEnd = min(end, Date())
         var series: [ResetCliffs.Sample] = []
@@ -524,7 +531,9 @@ struct MeterHistoryView: View {
                 id: cliff.at.timeIntervalSince1970 + 0.75,
                 t: cliff.at.addingTimeInterval(1), percent: 0))
         }
-        return drawn.sorted { $0.t < $1.t }
+        return PercentSeries(
+            drawn: drawn.sorted { $0.t < $1.t },
+            resets: cliffs.map(\.at).filter { $0 >= start })
     }
 
     /// This window's per-model usage, scoped for scoped meters — the rows of
@@ -640,7 +649,14 @@ struct MeterHistoryView: View {
         let (start, end) = domain
         let measuredEnd = min(end, now)
         let segments = activitySegments(now: now)
-        let drawnPercent = chartPoints
+        let series = percentSeries
+        let drawnPercent = series.drawn
+        // Y geometry scales from the tallest curve: the headroom band that
+        // hosts the top labels is always 15% of the data ceiling, so the
+        // Window span keeps its familiar 100→115 shape and a Sliding frame
+        // holding 2.6 limits gets 260→299 — labels never land on data.
+        let ceiling = dataCeiling(curves)
+        let plotTop = ceiling * 1.15
         // The stored hover re-anchored onto this render's freshly built
         // segments — see liveNub for why no direct comparison can do it.
         let hovered = hoveredSegment.flatMap { liveNub(for: $0, in: segments) }
@@ -662,6 +678,24 @@ struct MeterHistoryView: View {
                     yStart: .value("Usage", Self.stripBottom),
                     yEnd: .value("Usage", Self.stripTop))
                 .foregroundStyle(nubColor(segment).opacity(nubOpacity(segment, hovered: hovered)))
+            }
+            // Scaffolding under the data: a muted dashed vertical at each
+            // reset that happened inside the frame, and — when the frame
+            // holds more than one limit — a dashed horizontal pinning where
+            // a single limit tops out. The percent line can never cross
+            // that line; the token curves honestly can.
+            ForEach(series.resets, id: \.timeIntervalSinceReferenceDate) { reset in
+                RuleMark(
+                    x: .value("Reset", reset),
+                    yStart: .value("Usage", 0), yEnd: .value("Usage", ceiling))
+                .foregroundStyle(.tertiary)
+                .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
+            }
+            if effectiveSpan == .sliding,
+               ceiling > 100 || end.timeIntervalSince(start) > window * 1.01 {
+                RuleMark(y: .value("Usage", 100))
+                    .foregroundStyle(.tertiary)
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
             }
             // Model curves underlay the percent line; the focused one draws
             // last so its full-opacity line sits on top of its dimmed peers.
@@ -769,14 +803,14 @@ struct MeterHistoryView: View {
                     RectangleMark(
                         xStart: .value("Time", start),
                         xEnd: .value("Time", hovered.start),
-                        yStart: .value("Usage", 0), yEnd: .value("Usage", 100))
+                        yStart: .value("Usage", 0), yEnd: .value("Usage", ceiling))
                     .foregroundStyle(curtain)
                 }
                 if hovered.end < end {
                     RectangleMark(
                         xStart: .value("Time", hovered.end),
                         xEnd: .value("Time", end),
-                        yStart: .value("Usage", 0), yEnd: .value("Usage", 100))
+                        yStart: .value("Usage", 0), yEnd: .value("Usage", ceiling))
                     .foregroundStyle(curtain)
                 }
                 // The session's duration, highlighted in the headroom band
@@ -785,7 +819,7 @@ struct MeterHistoryView: View {
                 PointMark(
                     x: .value("Time", hovered.start.addingTimeInterval(
                         hovered.end.timeIntervalSince(hovered.start) / 2)),
-                    y: .value("Usage", 100))
+                    y: .value("Usage", ceiling))
                 .symbolSize(0)
                 .annotation(
                     position: .top, alignment: .center, spacing: 2,
@@ -821,7 +855,7 @@ struct MeterHistoryView: View {
                 RuleMark(
                     x: .value("Time", readout.t),
                     yStart: .value("Usage", Self.stripBottom),
-                    yEnd: .value("Usage", 100))
+                    yEnd: .value("Usage", ceiling))
                     .foregroundStyle(.quaternary)
                 PointMark(
                     x: .value("Time", readout.t),
@@ -830,14 +864,15 @@ struct MeterHistoryView: View {
                 .symbolSize(30)
             }
         }
-        .chartYScale(domain: Self.stripBottom - 1...Self.plotCeiling)
-        // While a model is focused the axis speaks its language: the same
-        // gridlines re-labeled as tokens through the shared conversion.
+        .chartYScale(domain: Self.stripBottom - 1...plotTop)
+        // While a model is focused the axis speaks its language: the
+        // gridlines re-labeled as tokens through the shared conversion,
+        // climbing in steps of half a limit as far as the curves reach.
         // Both modes render labels at one fixed width — token strings are
         // wider than "100", and a mode flip must never resize the plot.
         .chartYAxis {
             if focusedModel != nil, let percentPerToken {
-                AxisMarks(values: [0, 50, 100]) { value in
+                AxisMarks(values: Array(stride(from: 0.0, through: ceiling, by: 50))) { value in
                     AxisGridLine()
                     AxisValueLabel {
                         if let percent = value.as(Double.self) {
@@ -1127,11 +1162,29 @@ struct MeterHistoryView: View {
     /// through a reset — curves then fall back to busiest-model scaling
     /// and the axis stays percent.
     private func percentPerToken(rows: [ModelTokenUsage]) -> Double? {
+        if effectiveSpan == .sliding { return slidingPercentPerToken }
         let total = WindowTokens.total(rows).total
         guard total > 0, let first = points.first, let last = points.last else { return nil }
         let delta = Double(last.percent - first.percent)
         guard delta >= 1 else { return nil }
         return delta / Double(total)
+    }
+
+    /// The Sliding span's anchor. Its frame can straddle resets, where
+    /// percent deltas lie, so one limit's worth of tokens is measured on
+    /// the CURRENT live window instead: the live percent over the tokens
+    /// spent since that window began. Curves normalized by it read as
+    /// fractions of a single limit — and may honestly exceed it across a
+    /// frame longer than one window.
+    private var slidingPercentPerToken: Double? {
+        guard let reset = liveReset, let percent = meter.percent, percent >= 1
+        else { return nil }
+        let windowStart = reset.addingTimeInterval(-window)
+        let all = WindowTokens.breakdown(timeline: timeline, from: windowStart, to: Date())
+        let scoped = scopeName.map { WindowTokens.scoped(all, name: $0) } ?? all
+        let total = WindowTokens.total(scoped).total
+        guard total > 0 else { return nil }
+        return Double(percent) / Double(total)
     }
 
     /// Layered labels: when the focused model's name and the now label
@@ -1162,12 +1215,26 @@ struct MeterHistoryView: View {
             guard maxTotal > 0 else { return [] }
             norm = 100.0 / Double(maxTotal)
         }
+        // The Window span is one window — nothing can honestly exceed one
+        // limit there, so the cap is a safety net. A Sliding frame can
+        // span several windows and the overshoot IS the information.
+        let cap = effectiveSpan == .window
         return raw.map { entry in
             ModelCurve(
                 model: entry.model,
                 color: colors[entry.model] ?? .gray,
-                points: entry.curve.map { ($0.t, min(100, Double($0.total) * norm)) })
+                points: entry.curve.map {
+                    let value = Double($0.total) * norm
+                    return ($0.t, cap ? min(100, value) : value)
+                })
         }
+    }
+
+    /// The tallest drawn value: 100 in the Window span (curves cap there),
+    /// beyond it when a Sliding frame holds more than one limit's worth.
+    /// The plot top and the label headroom band scale from it.
+    private func dataCeiling(_ curves: [ModelCurve]) -> Double {
+        max(100, curves.flatMap { $0.points }.map { $0.normalized }.max() ?? 100)
     }
 
     /// Running total per ~180 buckets so a busy week doesn't hand Charts
@@ -1254,7 +1321,7 @@ struct MeterHistoryView: View {
         }
         // Interpolate on the drawn series — the reset cliffs included, so
         // the readout steps where the line steps.
-        let all = chartPoints
+        let all = percentSeries.drawn
         guard let first = all.first, let last = all.last else { return nil }
         if t <= first.t {
             return Readout(t: t, percent: first.percent, from: nil, to: nil, predicted: false)
