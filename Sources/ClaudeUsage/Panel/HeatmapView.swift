@@ -334,6 +334,26 @@ struct HeatmapView: View {
         .chartLegend(.hidden)
         .frame(height: 132)
         .frame(maxWidth: .infinity)
+        // Ring → legend: the sector under the cursor takes the shared
+        // hoveredModel, so ring and legend rows light together — the same
+        // two-way sync the meter chart has with its legend.
+        .chartOverlay { proxy in
+            GeometryReader { geo in
+                Rectangle()
+                    .fill(Color.clear)
+                    .contentShape(Rectangle())
+                    .onContinuousHover { phase in
+                        switch phase {
+                        case .active(let location):
+                            guard let plotFrame = proxy.plotFrame else { return }
+                            hoveredModel = ringHit(
+                                at: location, in: geo[plotFrame], rows: rows)
+                        case .ended:
+                            hoveredModel = nil
+                        }
+                    }
+            }
+        }
         .chartBackground { proxy in
             GeometryReader { geo in
                 if let plotFrame = proxy.plotFrame {
@@ -361,6 +381,30 @@ struct HeatmapView: View {
                 }
             }
         }
+    }
+
+    /// The model whose sector the cursor is in: radius must land on the
+    /// ring's band (with a little forgiveness either side), then the
+    /// clockwise angle from 12 o'clock walks the rows' cumulative shares —
+    /// the same order and values SectorMark laid them out with.
+    private func ringHit(
+        at point: CGPoint, in frame: CGRect, rows: [ModelTokenUsage]
+    ) -> String? {
+        let dx = point.x - frame.midX
+        let dy = point.y - frame.midY
+        let radius = (dx * dx + dy * dy).squareRoot()
+        let outer = min(frame.width, frame.height) / 2
+        guard radius >= outer * 0.55, radius <= outer * 1.05 else { return nil }
+        let total = rows.reduce(0.0) { $0 + ringValue($1) }
+        guard total > 0 else { return nil }
+        var angle = atan2(Double(dx), Double(-dy))
+        if angle < 0 { angle += 2 * .pi }
+        var cumulative = 0.0
+        for row in rows {
+            cumulative += ringValue(row) / total * 2 * .pi
+            if angle <= cumulative { return row.model }
+        }
+        return rows.last?.model
     }
 
     private func ringValue(_ row: ModelTokenUsage) -> Double {
