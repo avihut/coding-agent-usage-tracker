@@ -6,6 +6,11 @@ struct UsagePanelView: View {
     var store: UsageStore
     /// Wired by StatusItemController: closes the panel, opens the window.
     let onOpenSettings: () -> Void
+    /// The one meter whose popover is up. Shared across rows so opening one
+    /// atomically closes the previous — per-row booleans let a sweep across
+    /// the meters stack overlapping presentations, and racing NSPopovers
+    /// flicker and let the wrong row's popover win.
+    @State private var openMeter: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -73,7 +78,8 @@ struct UsagePanelView: View {
                     burn: store.burnEstimates[meter.label],
                     samples: store.samples,
                     timeline: store.tokenTimeline,
-                    pricing: store.pricing)
+                    pricing: store.pricing,
+                    openMeter: $openMeter)
             }
             if snapshot.meters.isEmpty {
                 Text("No limits reported").font(.callout).foregroundStyle(.secondary)
@@ -196,9 +202,25 @@ struct MeterRow: View {
     let timeline: [TokenSlot]
     let pricing: PricingTable
 
+    /// Panel-wide single-popover authority, owned by UsagePanelView.
+    @Binding var openMeter: String?
     @State private var hoveringRow = false
     @State private var hoveringPopover = false
-    @State private var showHistory = false
+
+    /// This row's view of the shared authority: presented iff it's the open
+    /// one; dismissal (Esc, transient close) releases the slot only if still
+    /// the holder, never stomping a sibling that already took over.
+    private var showHistory: Binding<Bool> {
+        Binding(
+            get: { openMeter == meter.label },
+            set: { shown in
+                if shown {
+                    openMeter = meter.label
+                } else if openMeter == meter.label {
+                    openMeter = nil
+                }
+            })
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -222,23 +244,28 @@ struct MeterRow: View {
             captionLine.font(.caption2)
         }
         .contentShape(Rectangle())
-        // iStat-style lifecycle: hover opens after a beat, clicking opens
-        // immediately (never closes), and the popover survives the cursor
-        // travelling onto it — it hides only once the cursor has left both
-        // the row and the popover for a grace period.
+        // Menu-style lifecycle: the first open waits out a brief dwell so a
+        // cursor merely passing through never pops anything, but while any
+        // popover is up, hovering a sibling row switches to it instantly.
+        // The popover survives the cursor travelling onto it — it hides only
+        // once the cursor has left both the row and the popover for a grace
+        // period.
         .onHover { inside in
             hoveringRow = inside
             if inside {
-                Task { @MainActor in
-                    try? await Task.sleep(for: .milliseconds(300))
-                    if hoveringRow { showHistory = true }
+                if openMeter != nil {
+                    openMeter = meter.label
+                } else {
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(120))
+                        if hoveringRow && openMeter == nil { openMeter = meter.label }
+                    }
                 }
             } else {
                 scheduleHideIfLeft()
             }
         }
-        .onTapGesture { showHistory = true }
-        .popover(isPresented: $showHistory, arrowEdge: .trailing) {
+        .popover(isPresented: showHistory, arrowEdge: .trailing) {
             MeterHistoryView(
                 meter: meter, samples: samples, timeline: timeline, pricing: pricing)
                 .onHover { inside in
@@ -251,7 +278,9 @@ struct MeterRow: View {
     private func scheduleHideIfLeft() {
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(350))
-            if !hoveringRow && !hoveringPopover { showHistory = false }
+            if !hoveringRow && !hoveringPopover && openMeter == meter.label {
+                openMeter = nil
+            }
         }
     }
 
