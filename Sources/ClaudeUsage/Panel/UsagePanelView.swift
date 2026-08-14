@@ -707,9 +707,9 @@ struct MeterHistoryView: View {
                 }
             }
             domainLabels
-            Text(segmentReadout ?? readout.map(readoutText) ?? hoverHint)
+            Text(resetReadout ?? segmentReadout ?? readout.map(readoutText) ?? hoverHint)
                 .font(.caption2.monospacedDigit())
-                .foregroundStyle(readout == nil && segmentReadout == nil
+                .foregroundStyle(readout == nil && segmentReadout == nil && resetReadout == nil
                     ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.secondary))
                 .lineLimit(1)
                 .frame(height: 14, alignment: .leading)
@@ -1194,6 +1194,16 @@ struct MeterHistoryView: View {
     private func nubOpacity(_ segment: ActivitySegment, hovered: ActivitySegment?) -> Double {
         guard let hovered else { return 0.7 }
         return segment == hovered ? 1 : 0.25
+    }
+
+    /// "Wed 09:15 – Wed 14:15 · window 5 hr" while a reset line is
+    /// hovered — the bounds and length of the limit window being lit.
+    private var resetReadout: String? {
+        hoveredReset.map { reset in
+            let windowStart = reset.addingTimeInterval(-window)
+            return "\(timeLabel(windowStart)) – \(timeLabel(reset)) · window "
+                + UsageFormatting.duration(window)
+        }
     }
 
     /// "Wed 09:15 – Wed 11:30 · active 2 hr 15 min" while a nub is hovered;
