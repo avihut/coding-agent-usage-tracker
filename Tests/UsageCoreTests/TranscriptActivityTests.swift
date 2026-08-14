@@ -137,6 +137,28 @@ struct TranscriptScannerTests {
         ])
     }
 
+    @Test("the cache-write TTL split survives parsing; absent splits read as 5m")
+    func ttlSplit() throws {
+        let (scanner, root) = try makeScanner()
+        let lines = """
+            {"timestamp":"2026-08-02T09:00:10.000Z","requestId":"h1","message":{"id":"q1","model":"claude-fable-5","usage":{"input_tokens":5,"output_tokens":2,"cache_creation_input_tokens":998,"cache_read_input_tokens":50,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":998}}}}
+            {"timestamp":"2026-08-02T09:00:20.000Z","requestId":"h2","message":{"id":"q2","model":"claude-fable-5","usage":{"input_tokens":1,"output_tokens":1,"cache_creation_input_tokens":100,"cache_read_input_tokens":0}}}
+            """
+        try lines.write(to: root.appending(path: "ttl.jsonl"), atomically: true, encoding: .utf8)
+
+        let scan = scanner.scan(now: Self.scanNow)
+
+        // Both records share the minute: the 1h slice carries through the
+        // merge, and the split-less older record contributes only 5m writes.
+        #expect(scan.timeline == [
+            TokenSlot(
+                t: Self.minute("2026-08-02T09:00:00.000Z"), model: "claude-fable-5",
+                tally: TokenTally(
+                    input: 6, output: 3, cacheCreation: 1098, cacheRead: 50,
+                    cacheCreation1h: 998)),
+        ])
+    }
+
     @Test("slots age out of the timeline after retention; daily totals never do")
     func retention() throws {
         let (scanner, root) = try makeScanner()

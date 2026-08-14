@@ -159,7 +159,7 @@ public struct TranscriptScanner: Sendable {
                 slots: entry.slots.filter { $0.t >= cutoff })
         }
 
-        saveCache(CacheFile(version: 2, files: files))
+        saveCache(CacheFile(version: 3, files: files))
 
         var totals: [String: DayCount] = [:]
         var slotTotals: [SlotKey: TokenTally] = [:]
@@ -227,7 +227,8 @@ public struct TranscriptScanner: Sendable {
                 input: usage.inputTokens ?? 0,
                 output: usage.outputTokens ?? 0,
                 cacheCreation: usage.cacheCreationInputTokens ?? 0,
-                cacheRead: usage.cacheReadInputTokens ?? 0)
+                cacheRead: usage.cacheReadInputTokens ?? 0,
+                cacheCreation1h: usage.cacheCreation?.ephemeral1h ?? 0)
 
             let key = formatter.string(from: date)
             var count = days[key] ?? DayCount(tokens: 0, messages: 0)
@@ -262,8 +263,8 @@ public struct TranscriptScanner: Sendable {
     private func loadCache() -> CacheFile {
         guard let data = try? Data(contentsOf: cacheURL),
               let cache = try? JSONDecoder().decode(CacheFile.self, from: data),
-              cache.version == 2
-        else { return CacheFile(version: 2, files: [:]) }
+              cache.version == 3
+        else { return CacheFile(version: 3, files: [:]) }
         return cache
     }
 
