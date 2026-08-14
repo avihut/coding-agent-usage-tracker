@@ -423,9 +423,11 @@ struct MeterHistoryView: View {
 
     private static let chartWidth: CGFloat = 300
     private static let chartHeight: CGFloat = 124
-    /// One width for Y-axis labels in both modes ("100" vs "419M") — the
-    /// axis flipping between percent and tokens must never resize the plot.
-    private static let axisLabelWidth: CGFloat = 30
+    /// One width for Y-axis labels in both modes — sized for the widest
+    /// token string TokenFormat.compact emits ("838.9M", six characters),
+    /// so nothing wraps or truncates and the axis flipping between percent
+    /// and tokens never resizes the plot.
+    private static let axisLabelWidth: CGFloat = 42
     /// The Y domain's ceiling — headroom above 100 where the now and
     /// session-duration labels live, atop the data instead of on it and
     /// inside the chart instead of crashing into the stats line. The same
@@ -796,6 +798,7 @@ struct MeterHistoryView: View {
                     AxisValueLabel {
                         if let percent = value.as(Double.self) {
                             Text(TokenFormat.compact(Int(percent / percentPerToken)))
+                                .lineLimit(1)
                                 .frame(width: Self.axisLabelWidth, alignment: .leading)
                         }
                     }
@@ -806,6 +809,7 @@ struct MeterHistoryView: View {
                     AxisValueLabel {
                         if let percent = value.as(Double.self) {
                             Text("\(Int(percent))")
+                                .lineLimit(1)
                                 .frame(width: Self.axisLabelWidth, alignment: .leading)
                         }
                     }
