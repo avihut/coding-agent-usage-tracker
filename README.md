@@ -115,7 +115,12 @@ change.
 mise run app    # build + bundle + sign + launch the menu bar app
 mise run test   # unit tests
 mise run cli    # build + sign + run the CLI debug tool (prints raw JSON)
+mise run bundle # assemble + sign the .app without launching it
 ```
+
+Every lifecycle script in `scripts/` has a matching mise task — `mise tasks`
+lists the full catalog, including the AX verification pair
+(`axdump` / `axpress`).
 
 Signing uses the local `Apple Development` identity so the Keychain ACL from
 "Always Allow" survives rebuilds (override with `CODESIGN_IDENTITY=...`). Those

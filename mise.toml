@@ -29,3 +29,19 @@ run = [
     "for i in $(seq 1 30); do pgrep -x ClaudeUsage >/dev/null || break; sleep 0.1; done",
     "open ClaudeUsage.app",
 ]
+
+[tasks.bundle]
+description = "Assemble + sign ClaudeUsage.app without launching (arg: release|debug)"
+run = "scripts/bundle.sh"
+
+[tasks.sign]
+description = "Sign a binary with the stable identity (arg: path to binary)"
+run = "scripts/sign.sh"
+
+[tasks.axdump]
+description = "Dump the app's AX tree with frames (arg: pid, default newest ClaudeUsage)"
+run = "swift scripts/axdump.swift"
+
+[tasks.axpress]
+description = "Press/select an AX element by title/description/value (args: [pid] target)"
+run = "swift scripts/axpress.swift"

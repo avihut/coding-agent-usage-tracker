@@ -128,10 +128,12 @@ the README rather than silently deviating.
   `SettingsBindings` so both surfaces stay in lockstep. `ClaudeUsage
   --settings` opens the window at launch and `--panel` opens the main
   panel — the verification hatches, since menus and the status item can't
-  be scripted (scratchpad axdump/axpress dump frames and press controls
-  for layout checks). Popover windows never appear in AXWindows, and any
-  real user click dismisses the panel — don't AX-verify it while the user
-  is mousing.
+  be scripted (`mise run axdump` / `mise run axpress` — the harness's eyes
+  and hands — dump frames and press controls for layout checks; both
+  default to the newest running ClaudeUsage). Popover windows never
+  appear in AXWindows (both tools sweep the app element's roleless
+  children to catch them), and any real user click dismisses the panel —
+  don't AX-verify it while the user is mousing.
 - Plan identity: `CredentialsParser` also surfaces `subscriptionType` /
   `rateLimitTier` (`PlanInfo` — metadata beside the token, never the
   refresh token); it rides `Snapshot.plan` and renders under the panel
@@ -214,8 +216,12 @@ the README rather than silently deviating.
   `git worktree add`, `git checkout -b`, or in-place branch switching.
   Moving/renaming worktrees invalidates `.build` (absolute paths in the
   module cache) — `rm -rf .build` and rebuild.
-- Day-to-day: `mise run test` / `mise run cli` / `mise run build` from the
-  worktree.
+- Every app/dev-lifecycle script must be runnable as a mise task — when a
+  script lands in `scripts/`, a `mise.toml` task wrapping it lands in the
+  same change (`mise tasks` is the catalog).
+- Day-to-day: `mise run test` / `mise run cli` / `mise run build` /
+  `mise run app` (rebundle + relaunch) / `mise run bundle` (no launch)
+  from the worktree.
 - Work is milestone-gated (spec §12, mirrored in the session task list):
   stop and show the user at each milestone boundary; don't start the next
   without their go.
