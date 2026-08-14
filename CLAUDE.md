@@ -110,8 +110,9 @@ the README rather than silently deviating.
   opacity + area, rest dimmed) and the legend rows — hover either surface
   and both light, since they render from the same binding. While focused,
   the Y axis re-labels its same gridlines as tokens (percent ÷
-  percentPerToken) and the model's name rides above its curve tip in its
-  color. Chart labels are LAYERED: strip duration > focused-model name >
+  percentPerToken) at one fixed label width — the mode flip must never
+  resize the plot — and the model's name rides above its curve tip in
+  its color. Chart labels are LAYERED: strip duration > focused-model name >
   now — lower layers disappear while an upper one overlaps
   (nowEclipsed's track-space estimate). A
   Sliding|Window span picker (hidden without a live reset; choice
