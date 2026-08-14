@@ -14,8 +14,8 @@ import UsageCore
 /// carry color legibly over Liquid Glass (HIG: keep fine features neutral,
 /// let fills carry color) — so exhaustion risk arrives as solid geometry:
 /// a ramp-colored dot ahead of a number under watch, escalating to a
-/// filled capsule with bold white digits once the forecast firmly spends
-/// the limit.
+/// filled capsule carrying the segment's tag and digits in bold white
+/// once the forecast firmly spends the limit.
 enum StatusItemRenderer {
     struct Model: Equatable {
         let segments: [MenuBarSegment]?
@@ -160,19 +160,23 @@ enum StatusItemRenderer {
         let quiet = model.stale ? staleColor : dim
         for (index, segment) in segments.enumerated() {
             if index > 0 { runs.append(.text("·", quiet, font)) }
-            runs.append(.text(segment.tag, quiet, font))
             guard let percent = segment.percent else {
+                runs.append(.text(segment.tag, quiet, font))
                 runs.append(.text("–", quiet, font))
                 continue
             }
             switch ornament(for: segment, stale: model.stale) {
             case .plain(let color):
+                runs.append(.text(segment.tag, quiet, font))
                 runs.append(.text("\(percent)", color, font))
             case .dot(let color):
+                runs.append(.text(segment.tag, quiet, font))
                 runs.append(.dot(color))
                 runs.append(.text("\(percent)", bright, font))
             case .badge:
-                runs.append(.badge("\(percent)"))
+                // Tag and number share the pill — the alarm names its
+                // limit instead of leaving a dim orphan letter beside it.
+                runs.append(.badge("\(segment.tag)\(percent)"))
             }
         }
         runs.append(.text("%", quiet, font))

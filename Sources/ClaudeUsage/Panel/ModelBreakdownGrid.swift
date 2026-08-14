@@ -5,12 +5,14 @@ import UsageCore
 /// drill-down, and the meter popovers: a headline cost total over aligned
 /// input/cached/output/cost columns. Rows double as a legend — each carries
 /// its model's color, and hovering a row filters the chart above to that
-/// model via the bound `hoveredModel`.
+/// model via the bound `hoveredModel`. Clicking a row opens the cost math:
+/// every token class multiplied out at its list rate.
 struct ModelBreakdownGrid: View {
     let rows: [ModelTokenUsage]
     let colors: [String: Color]
     let pricing: PricingTable
     @Binding var hoveredModel: String?
+    @State private var costDetail: String?
 
     private static let tokenColumnWidth: CGFloat = 44
     private static let costColumnWidth: CGFloat = 54
@@ -99,6 +101,102 @@ struct ModelBreakdownGrid: View {
                 hoveredModel = nil
             }
         }
+        .pointerStyle(.link)
+        .onTapGesture { costDetail = row.model }
+        .popover(
+            isPresented: Binding(
+                get: { costDetail == row.model },
+                set: { if !$0 { costDetail = nil } }),
+            arrowEdge: .bottom
+        ) {
+            CostMathView(row: row, rates: rates)
+        }
         .padding(.vertical, -1)
+    }
+}
+
+/// The arithmetic behind one row's estimate — each token class multiplied
+/// out at its list rate, summing to the est. cost column. The class labels
+/// also decode the grid's vocabulary: its "input" column folds fresh input
+/// and cache writes together, "cached" is the cache reads.
+private struct CostMathView: View {
+    let row: ModelTokenUsage
+    let rates: ModelRates?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(row.displayName)
+                .font(.callout.weight(.semibold))
+            if let rates {
+                let lines = rates.components(for: row.tally).filter { $0.tokens > 0 }
+                Grid(alignment: .trailingFirstTextBaseline, horizontalSpacing: 10, verticalSpacing: 3) {
+                    GridRow {
+                        Text("").gridColumnAlignment(.leading)
+                        Text("tokens")
+                        Text("× $ / MTok")
+                        Text("")
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    ForEach(lines) { line in
+                        GridRow {
+                            Text(Self.label(line.tokenClass))
+                                .foregroundStyle(.secondary)
+                                .gridColumnAlignment(.leading)
+                            Text(TokenFormat.compact(line.tokens))
+                                .monospacedDigit()
+                            Text("× \(UsageFormatting.ratePerMTok(line.rate))\(line.listed ? "" : "*")")
+                                .monospacedDigit()
+                                .foregroundStyle(.secondary)
+                            Text(UsageFormatting.money(line.dollars))
+                                .monospacedDigit()
+                        }
+                        .font(.caption)
+                    }
+                    Divider()
+                    GridRow {
+                        Text("est. cost")
+                            .foregroundStyle(.secondary)
+                            .gridColumnAlignment(.leading)
+                        Text(TokenFormat.compact(row.tally.total))
+                            .monospacedDigit()
+                        Text("")
+                        Text(UsageFormatting.money(rates.dollars(for: row.tally)))
+                            .monospacedDigit()
+                    }
+                    .font(.caption.weight(.semibold))
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    if lines.contains(where: { !$0.listed }) {
+                        Text("* not in the price feed — the standard multiple stood in.")
+                    }
+                    Text("The input column above is fresh input + cache writes; cached is cache reads.")
+                }
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(width: 230, alignment: .leading)
+            } else {
+                Text("No list price for \(row.model)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text("The pricing feed has no entry for this model id, so its tokens aren't in the totals.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(width: 200, alignment: .leading)
+            }
+        }
+        .padding(12)
+    }
+
+    private static func label(_ tokenClass: CostComponent.TokenClass) -> String {
+        switch tokenClass {
+        case .freshInput: "fresh input"
+        case .cacheWrite5m: "cache write · 5 min"
+        case .cacheWrite1h: "cache write · 1 hr"
+        case .cacheRead: "cache read"
+        case .output: "output"
+        }
     }
 }

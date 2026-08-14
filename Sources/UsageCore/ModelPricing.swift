@@ -1,5 +1,27 @@
 import Foundation
 
+/// One token class priced out — a single line of the arithmetic behind a
+/// cost estimate. `listed` is false when the feed carried no rate for the
+/// class and a standard multiple of another rate stood in.
+public struct CostComponent: Sendable, Equatable, Identifiable {
+    public enum TokenClass: String, Sendable, CaseIterable {
+        case freshInput
+        case cacheWrite5m
+        case cacheWrite1h
+        case cacheRead
+        case output
+    }
+
+    public let tokenClass: TokenClass
+    public let tokens: Int
+    /// USD per token actually applied.
+    public let rate: Double
+    public let listed: Bool
+
+    public var id: TokenClass { tokenClass }
+    public var dollars: Double { Double(tokens) * rate }
+}
+
 /// USD per token, straight from the pricing feed. Cache fields are optional —
 /// costing falls back to Anthropic's standard multipliers when absent.
 public struct ModelRates: Codable, Sendable, Equatable {
@@ -31,15 +53,38 @@ public struct ModelRates: Codable, Sendable, Equatable {
         public var total: Double { input + output + cacheWrite + cacheRead }
     }
 
-    public func dollarBreakdown(for tally: TokenTally) -> DollarBreakdown {
+    /// The estimate's arithmetic, one line per token class in reading
+    /// order. This is the single costing source: `dollarBreakdown` and
+    /// `dollars` are sums over these lines, and the cost-math popover
+    /// renders them verbatim.
+    public func components(for tally: TokenTally) -> [CostComponent] {
         let write1h = min(tally.cacheCreation1h, tally.cacheCreation)
         let write5m = tally.cacheCreation - write1h
+        return [
+            CostComponent(
+                tokenClass: .freshInput, tokens: tally.input, rate: input, listed: true),
+            CostComponent(
+                tokenClass: .cacheWrite5m, tokens: write5m,
+                rate: cacheWrite ?? input * 1.25, listed: cacheWrite != nil),
+            CostComponent(
+                tokenClass: .cacheWrite1h, tokens: write1h,
+                rate: cacheWrite1h ?? cacheWrite ?? input * 2, listed: cacheWrite1h != nil),
+            CostComponent(
+                tokenClass: .cacheRead, tokens: tally.cacheRead,
+                rate: cacheRead ?? input * 0.1, listed: cacheRead != nil),
+            CostComponent(
+                tokenClass: .output, tokens: tally.output, rate: output, listed: true),
+        ]
+    }
+
+    public func dollarBreakdown(for tally: TokenTally) -> DollarBreakdown {
+        var byClass: [CostComponent.TokenClass: Double] = [:]
+        for line in components(for: tally) { byClass[line.tokenClass, default: 0] += line.dollars }
         return DollarBreakdown(
-            input: Double(tally.input) * input,
-            output: Double(tally.output) * output,
-            cacheWrite: Double(write5m) * (cacheWrite ?? input * 1.25)
-                + Double(write1h) * (cacheWrite1h ?? cacheWrite ?? input * 2),
-            cacheRead: Double(tally.cacheRead) * (cacheRead ?? input * 0.1))
+            input: byClass[.freshInput] ?? 0,
+            output: byClass[.output] ?? 0,
+            cacheWrite: (byClass[.cacheWrite5m] ?? 0) + (byClass[.cacheWrite1h] ?? 0),
+            cacheRead: byClass[.cacheRead] ?? 0)
     }
 
     /// What a tally would cost at these rates.

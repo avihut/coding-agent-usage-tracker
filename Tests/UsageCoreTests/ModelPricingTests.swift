@@ -84,6 +84,47 @@ struct ModelPricingTests {
         #expect(abs(rates.dollars(for: tally) - 13.5) < 0.0001)
     }
 
+    @Test("cost components spell the math out and sum to the total")
+    func components() {
+        let rates = ModelRates(
+            input: 1e-5, output: 5e-5, cacheWrite: 1.25e-5, cacheWrite1h: 2e-5, cacheRead: 1e-6)
+        let tally = TokenTally(
+            input: 1_000_000, output: 100_000, cacheCreation: 500_000, cacheRead: 2_000_000,
+            cacheCreation1h: 200_000)
+
+        let lines = rates.components(for: tally)
+        let classes = lines.map { $0.tokenClass }
+        let summed = lines.map { $0.dollars }.reduce(0, +)
+        #expect(classes == [.freshInput, .cacheWrite5m, .cacheWrite1h, .cacheRead, .output])
+        #expect(lines.allSatisfy { $0.listed })
+        #expect(lines[1].tokens == 300_000) // the 5m slice is creation minus the 1h slice
+        #expect(lines[2].tokens == 200_000)
+        #expect(abs(lines[2].dollars - 4) < 0.0001) // 200K × $20/MTok
+        #expect(abs(summed - rates.dollars(for: tally)) < 0.0001)
+    }
+
+    @Test("fallback rates are flagged as unlisted in the components")
+    func componentFallbacks() {
+        let rates = ModelRates(input: 1e-5, output: 5e-5)
+        let lines = rates.components(for: TokenTally(
+            input: 1, output: 1, cacheCreation: 2, cacheRead: 1, cacheCreation1h: 1))
+
+        let unlisted = lines.filter { !$0.listed }.map { $0.tokenClass }
+        #expect(unlisted == [.cacheWrite5m, .cacheWrite1h, .cacheRead])
+        #expect(abs(lines[1].rate - 1.25e-5) < 1e-12) // write ×1.25
+        #expect(abs(lines[2].rate - 2e-5) < 1e-12) // 1h write ×2 when no write rate at all
+        #expect(abs(lines[3].rate - 1e-6) < 1e-12) // read ×0.1
+    }
+
+    @Test("per-MTok rate formatting")
+    func ratePerMTok() {
+        #expect(UsageFormatting.ratePerMTok(1.5e-5) == "$15")
+        #expect(UsageFormatting.ratePerMTok(6.25e-6) == "$6.25")
+        #expect(UsageFormatting.ratePerMTok(1.875e-5) == "$18.75")
+        #expect(UsageFormatting.ratePerMTok(5e-7) == "$0.50")
+        #expect(UsageFormatting.ratePerMTok(1e-7) == "$0.10")
+    }
+
     @Test("staleness: bundled is always stale, live only after 24h")
     func staleness() throws {
         let table = try PricingFeedClient.decode(feed: Self.feed, now: Self.now)

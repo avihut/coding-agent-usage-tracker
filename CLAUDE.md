@@ -108,7 +108,10 @@ the README rather than silently deviating.
   per-model stacked with band order fixed period-wide, and clicking any
   day pushes (animated, with a back button) into a per-day drill-down —
   model donut + the same grid scoped to that day. The grid is one shared
-  component (`ModelBreakdownGrid`), also the meter popovers' table. The
+  component (`ModelBreakdownGrid`), also the meter popovers' table;
+  clicking a row pops the cost math (`ModelRates.components`, the single
+  costing source `dollarBreakdown` sums over: tokens × $/MTok per token
+  class, 5m/1h cache-write split, `*` on fallback rates). The
   popover chart overlays the meter's percent line with EVERY model's
   cumulative token curve, all through ONE shared conversion
   (percentPerToken = the window's percent gain / its total tokens) so
@@ -129,15 +132,22 @@ the README rather than silently deviating.
   shared popover would otherwise leak one meter's choice onto the next)
   switches the X domain between trailing-now and the limit window
   start-to-reset; the
-  Window span draws a 30s-ticking vertical now rule and the prediction engine's
-  dashed trajectory, and hover readouts right of it report
+  Window span draws a 30s-ticking vertical now rule (labeled with the
+  clock time — all axis/annotation labels on this chart are semibold) and
+  the prediction engine's dashed trajectory in the risk ramp color, and
+  hover readouts right of it report
   "proj. N%" off that curve. When the pace spends the limit before reset,
   a red rule marks the crossing and a Canvas in chartBackground hatches
-  the unreachable region diagonally; the crossing's time label shows only
-  while hovering the dead zone (always-on it crowded the axis labels).
+  the unreachable region diagonally; the crossing's timestamp sits
+  ALWAYS-ON in red in the X axis row — base ticks it would overlap step
+  aside (`withoutEclipsed`, `xAxisClearanceFraction` 0.15 of the domain,
+  reach shifted with the label's edge-aware anchor + `fixedSize` so it
+  never truncates at a plot edge), and sub-48h frames swap automatic
+  hour ticks for explicit ones while a crossing exists, since automatic
+  marks can't be eclipsed.
   Chart annotation labels must neither escape the chart nor sit on the
   data. Hover-only labels fit INTO the plot (`overflowResolution`
-  x/y `.fit(to: .plot)` — the exhaust time label). Top-of-chart labels
+  x/y `.fit(to: .plot)`). Top-of-chart labels
   get reserved room INSTEAD: the Y domain extends above 100
   (plotCeiling, the strip trick mirrored upward) and the now /
   session-duration labels live in that headroom band — their rules and
@@ -234,8 +244,11 @@ the README rather than silently deviating.
   tiers) to the reset line. Risk rides color, not text: meter bars and
   menu bar segment numbers blend yellow→red by `severity` (accent/white
   while clean; percent-threshold palette only when no prediction
-  exists — no hard warning/critical cliff). The Window chart labels the
-  projected finish percent on the Y axis in the trajectory's orange
+  exists — no hard warning/critical cliff). The blend lives in ONE
+  file-scope `riskColor(severity:)` (UsagePanelView.swift) — bars,
+  captions, the chart's dashed trajectory and its Y-axis projection
+  label all call it. The Window chart labels the
+  projected finish percent on the Y axis in that ramp color
   (only while finishing within limits; a standard mark it would eclipse
   is dropped, `axisLabelClearance` 12 domain units ≈ one label height);
   percent-mode Y labels carry a % sign.
@@ -267,9 +280,9 @@ the README rather than silently deviating.
   thin glyph strokes can't carry color legibly over Liquid Glass (HIG:
   color rides fills, not fine features) — and exhaustion risk arrives as
   solid geometry instead: a ramp-colored dot ahead of a watched number
-  (severity 0→0.75), escalating to a filled red capsule with bold white
-  digits at severity ≥ 0.75 (or discrete critical). Stale stays grey and
-  ornament-free.
+  (severity 0→0.75), escalating to a filled red capsule carrying the
+  segment's tag + digits in bold white at severity ≥ 0.75 (or discrete
+  critical). Stale stays grey and ornament-free.
 - The status item is a raw `NSStatusItem` owned by `StatusItemController` —
   NOT `MenuBarExtra`. The menu bar's appearance follows wallpaper tinting,
   not the app's appearance; MenuBarExtra rasterizes its label in the app's

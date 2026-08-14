@@ -138,6 +138,21 @@ public enum UsageFormatting {
         return "$\(text)"
     }
 
+    /// "$15", "$6.25", "$0.50" — a per-token rate spoken per million tokens,
+    /// the unit Anthropic's price list uses. Sub-dollar rates keep two
+    /// decimals so "$0.50" doesn't clip to "$0.5".
+    public static func ratePerMTok(_ perToken: Double) -> String {
+        let value = perToken * 1_000_000
+        let formatter = NumberFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.numberStyle = .decimal
+        formatter.roundingMode = .halfUp
+        formatter.minimumFractionDigits = value < 1 ? 2 : 0
+        formatter.maximumFractionDigits = 2
+        let text = formatter.string(from: NSNumber(value: value)) ?? String(format: "%.2f", value)
+        return "$\(text)"
+    }
+
     /// "3 min", "45 min", "1 hr 30 min", "7 days" — the refresh-pace dial's
     /// vocabulary, stretched to day scale for limit windows. Sub-minute
     /// precision is deliberately absent; so are minutes at day scale.

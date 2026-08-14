@@ -109,11 +109,18 @@ struct UsagePanelView: View {
                 }
                 Spacer()
                 if let plan = store.state.snapshot?.plan?.displayLabel {
-                    Link(destination: URL(string: "https://claude.ai/upgrade")!) {
+                    // A working link dressed as a plain caption: Link's tint
+                    // shouted over the header, so the hand cursor and help
+                    // tag carry the affordance instead of color.
+                    Button {
+                        NSWorkspace.shared.open(URL(string: "https://claude.ai/upgrade")!)
+                    } label: {
                         Text(plan)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                    .buttonStyle(.plain)
+                    .pointerStyle(.link)
                     .help("Choose your plan on claude.ai")
                 }
             }
@@ -386,14 +393,6 @@ struct MeterRow: View {
         return line
     }
 
-    /// The continuous exhaustion-risk ramp: nil while the forecast is
-    /// clean, pure yellow where the projection touches the warning
-    /// threshold, sliding linearly to pure red where the limit is spent.
-    private func riskColor(severity: Double) -> Color? {
-        guard severity > 0 else { return nil }
-        return Color.yellow.mix(with: .red, by: severity)
-    }
-
     /// Exhaustion risk first — regular accent while the forecast is clean,
     /// the severity blend otherwise. Percent thresholds only stand in
     /// until a rate exists.
@@ -409,6 +408,16 @@ struct MeterRow: View {
         case .critical: return .red
         }
     }
+}
+
+/// The continuous exhaustion-risk ramp: nil while the forecast is clean,
+/// pure yellow where the projection touches the warning threshold, sliding
+/// linearly to pure red where the limit is spent. Every risk surface —
+/// meter bars, captions, the chart's projection curve and axis label —
+/// blends through this one function.
+private func riskColor(severity: Double) -> Color? {
+    guard severity > 0 else { return nil }
+    return Color.yellow.mix(with: .red, by: severity)
 }
 
 
@@ -513,6 +522,9 @@ struct MeterHistoryView: View {
     /// point) a Y-axis label needs; standard marks closer than this to the
     /// projection mark are dropped instead of overlapped.
     private static let axisLabelClearance = 12.0
+    /// X-axis eclipse reach, as a fraction of the visible domain: half the
+    /// crossing label plus half a base tick label, in plot-relative width.
+    private static let xAxisClearanceFraction = 0.15
     // The Y domain's ceiling is dynamic — dataCeiling × 1.15, headroom
     // where the now and session-duration labels live, atop the data
     // instead of on it and inside the chart instead of crashing into the
@@ -913,14 +925,17 @@ struct MeterHistoryView: View {
             }
             if effectiveSpan == .window {
                 // The prediction engine's trajectory: dashed, measured side
-                // of the notch left alone.
+                // of the notch left alone. It speaks the risk ramp — accent
+                // while the forecast is clean, yellow-to-red as the
+                // projection climbs past the warning threshold.
                 if let prediction, prediction.curve.count >= 2 {
+                    let trajectory = riskColor(severity: prediction.severity) ?? orange
                     ForEach(prediction.curve, id: \.t) { point in
                         LineMark(
                             x: .value("Time", point.t),
                             y: .value("Usage", point.percent),
                             series: .value("Series", "prediction"))
-                        .foregroundStyle(orange.opacity(focusedModel == nil ? 0.8 : 0.25))
+                        .foregroundStyle(trajectory.opacity(focusedModel == nil ? 0.8 : 0.25))
                         .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
                     }
                 }
@@ -941,11 +956,15 @@ struct MeterHistoryView: View {
                         overflowResolution: .init(x: .fit(to: .plot), y: .disabled)
                     ) {
                         if nowLabelShown {
-                            Text("now").font(.system(size: 8)).foregroundStyle(.primary)
+                            Text(UsageFormatting.clockTime(now))
+                                .font(.system(size: 8, weight: .semibold))
+                                .foregroundStyle(.primary)
                         }
                     }
-                // Where the current pace hits the limit: a red mark with the
-                // time it happens; the hatched region beyond it is unusable.
+                // Where the current pace hits the limit; the hatched region
+                // beyond it is unusable. The crossing's timestamp lives in
+                // the X axis row (always on), not up here — as an annotation
+                // it landed on the strip's red nub and vanished into it.
                 if let exhaust = exhaustDate {
                     RuleMark(
                         x: .value("Exhausted", exhaust),
@@ -953,18 +972,6 @@ struct MeterHistoryView: View {
                         yEnd: .value("Usage", 100))
                         .foregroundStyle(.red.opacity(0.75))
                         .lineStyle(StrokeStyle(lineWidth: 1))
-                        .annotation(
-                            position: .bottom, alignment: .center, spacing: 1,
-                            overflowResolution: .init(x: .fit(to: .plot), y: .fit(to: .plot))
-                        ) {
-                            // Only while exploring the dead zone — always-on
-                            // it crowded the axis labels below the plot.
-                            if hoverDate.map({ $0 >= exhaust }) == true {
-                                Text(timeLabel(exhaust))
-                                    .font(.system(size: 8))
-                                    .foregroundStyle(.red)
-                            }
-                        }
                 }
             }
             // Nub hover: dimming curtains cover the graph outside the
@@ -1051,6 +1058,7 @@ struct MeterHistoryView: View {
                     AxisValueLabel {
                         if let percent = value.as(Double.self) {
                             Text(TokenFormat.compact(Int(percent / percentPerToken)))
+                                .fontWeight(.semibold)
                                 .lineLimit(1)
                                 .frame(width: Self.axisLabelWidth, alignment: .leading)
                         }
@@ -1069,6 +1077,7 @@ struct MeterHistoryView: View {
                     AxisValueLabel {
                         if let percent = value.as(Double.self) {
                             Text("\(Int(percent))%")
+                                .fontWeight(.semibold)
                                 .lineLimit(1)
                                 .frame(width: Self.axisLabelWidth, alignment: .leading)
                         }
@@ -1080,7 +1089,8 @@ struct MeterHistoryView: View {
                         AxisValueLabel {
                             Text("\(Int(projection))%")
                                 .font(.caption2.weight(.semibold))
-                                .foregroundStyle(orange)
+                                .foregroundStyle(
+                                    riskColor(severity: prediction?.severity ?? 0) ?? orange)
                                 .lineLimit(1)
                                 .frame(width: Self.axisLabelWidth, alignment: .leading)
                         }
@@ -1093,19 +1103,53 @@ struct MeterHistoryView: View {
         // day boundaries — dates mean less than weekdays at that zoom.
         // Beyond ~a week the names would repeat, so the month scale keeps
         // the default date ticks; within a day, the default hour ticks.
+        // When the forecast crosses the limit, the crossing's timestamp
+        // joins the axis row in red — always on — and any base tick whose
+        // label it would overlap steps aside (the Y axis projection's
+        // eclipse rule, applied to time).
         .chartXAxis {
             let length = end.timeIntervalSince(start)
             if length >= 48 * 3600, length <= 8 * 86400 {
-                AxisMarks(values: .stride(by: .day)) { value in
+                AxisMarks(values: withoutEclipsed(dayTicks)) { value in
                     AxisGridLine()
                     AxisValueLabel {
                         if let day = value.as(Date.self) {
                             Text(Self.dayName.string(from: day))
+                                .fontWeight(.semibold)
+                        }
+                    }
+                }
+            } else if exhaustDate != nil, length < 48 * 3600 {
+                // Automatic ticks can't be eclipsed, so the crossing's
+                // presence switches this frame to explicit hour marks.
+                AxisMarks(values: withoutEclipsed(hourTicks)) { value in
+                    AxisGridLine()
+                    AxisValueLabel {
+                        if let date = value.as(Date.self) {
+                            Text(UsageFormatting.clockTime(date))
+                                .fontWeight(.semibold)
                         }
                     }
                 }
             } else {
-                AxisMarks()
+                AxisMarks { _ in
+                    AxisGridLine()
+                    AxisValueLabel()
+                        .font(.caption2.weight(.semibold))
+                }
+            }
+            if let exhaust = exhaustDate {
+                AxisMarks(values: [exhaust]) { _ in
+                    // fixedSize + an edge-aware anchor: centered on its tick
+                    // the label truncated against the plot edge whenever the
+                    // crossing sat near the reset.
+                    AxisValueLabel(anchor: exhaustLabelAnchor) {
+                        Text(timeLabel(exhaust))
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.red)
+                            .fixedSize()
+                    }
+                }
             }
         }
         // Diagonal hatching over the unreachable region — the limit is spent
@@ -1211,6 +1255,72 @@ struct MeterHistoryView: View {
               let projected = prediction.projectedAtReset, projected < 100
         else { return nil }
         return Double(projected)
+    }
+
+    /// Day-boundary X ticks, explicit (rather than `.stride(by: .day)`) so
+    /// the exhaustion label can eclipse the ones it would overlap.
+    private var dayTicks: [Date] {
+        let (start, end) = domain
+        let calendar = Calendar.current
+        var day = calendar.startOfDay(for: start)
+        if day < start { day = calendar.date(byAdding: .day, value: 1, to: day) ?? end }
+        var ticks: [Date] = []
+        while day <= end {
+            ticks.append(day)
+            guard let next = calendar.date(byAdding: .day, value: 1, to: day) else { break }
+            day = next
+        }
+        return ticks
+    }
+
+    /// Whole-hour X ticks for sub-two-day frames, strided to land a handful
+    /// of labels. Only rendered while a crossing needs the eclipse rule.
+    private var hourTicks: [Date] {
+        let (start, end) = domain
+        let length = end.timeIntervalSince(start)
+        let strideHours = length <= 6 * 3600 ? 1 : length <= 12 * 3600 ? 2 : 6
+        let calendar = Calendar.current
+        guard var tick = calendar.nextDate(
+            after: start, matching: DateComponents(minute: 0, second: 0),
+            matchingPolicy: .nextTime)
+        else { return [] }
+        var ticks: [Date] = []
+        while tick <= end {
+            ticks.append(tick)
+            guard let next = calendar.date(byAdding: .hour, value: strideHours, to: tick)
+            else { break }
+            tick = next
+        }
+        return ticks
+    }
+
+    /// Near a plot edge the crossing's label hangs inward from its tick
+    /// instead of centering on it — centered, the edge clipped it to "Sat…".
+    private var exhaustLabelAnchor: UnitPoint {
+        guard let exhaust = exhaustDate else { return .top }
+        let (start, end) = domain
+        let fraction = exhaust.timeIntervalSince(start) / end.timeIntervalSince(start)
+        if fraction > 0.88 { return .topTrailing }
+        if fraction < 0.12 { return .topLeading }
+        return .top
+    }
+
+    /// The crossing's timestamp owns its stretch of the axis row: base
+    /// ticks whose labels would crowd it step aside rather than overlap.
+    /// The reach follows the anchor — a trailing-anchored label lies almost
+    /// entirely left of its tick, so the eclipse shifts with it.
+    private func withoutEclipsed(_ ticks: [Date]) -> [Date] {
+        guard let exhaust = exhaustDate else { return ticks }
+        let (start, end) = domain
+        let clearance = end.timeIntervalSince(start) * Self.xAxisClearanceFraction
+        let anchor = exhaustLabelAnchor
+        let (leftReach, rightReach): (Double, Double) = anchor == .topTrailing
+            ? (1.7, 0.4)
+            : anchor == .topLeading ? (0.4, 1.7) : (1, 1)
+        return ticks.filter {
+            let offset = $0.timeIntervalSince(exhaust)
+            return offset < -clearance * leftReach || offset > clearance * rightReach
+        }
     }
 
     private struct ActivitySegment: Equatable {
