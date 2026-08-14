@@ -74,17 +74,28 @@ struct HeatmapView: View {
                         .foregroundStyle(.secondary)
                 }
             } else {
+                // The slide animates via transition-attached animations, NOT
+                // withAnimation on the state change: the panel host sizes the
+                // popover from the preferred content size, and an animated
+                // container height streams per-frame size updates into
+                // NSPopover, each restarting its own implicit resize
+                // animation — the window crawls behind the content and the
+                // whole drill reads sluggish. With the height changing
+                // discretely, AppKit animates the window resize once,
+                // natively, while the contents slide.
                 ZStack(alignment: .topLeading) {
                     if let entry = selectedEntry {
                         dayContent(entry)
                             .transition(.asymmetric(
                                 insertion: .move(edge: .trailing).combined(with: .opacity),
-                                removal: .move(edge: .trailing).combined(with: .opacity)))
+                                removal: .move(edge: .trailing).combined(with: .opacity))
+                                .animation(Self.drillAnimation))
                     } else {
                         periodContent
                             .transition(.asymmetric(
                                 insertion: .move(edge: .leading).combined(with: .opacity),
-                                removal: .move(edge: .leading).combined(with: .opacity)))
+                                removal: .move(edge: .leading).combined(with: .opacity))
+                                .animation(Self.drillAnimation))
                     }
                 }
                 .clipped()
@@ -261,12 +272,15 @@ struct HeatmapView: View {
 
     // MARK: - Day drill-down
 
-    /// Only days with recorded activity drill.
+    /// Only days with recorded activity drill. Plain assignment — the
+    /// slide animation rides on the transitions themselves so the
+    /// container height (and with it the popover window) never animates
+    /// per frame.
     private func drill(into day: Date) {
         guard layout.byDay[day] != nil else { return }
         hoveredModel = nil
         hoveredDay = nil
-        withAnimation(Self.drillAnimation) { selectedDay = day }
+        selectedDay = day
     }
 
     private func dayContent(_ entry: DailyActivity) -> some View {
@@ -275,7 +289,7 @@ struct HeatmapView: View {
             HStack {
                 Button {
                     hoveredModel = nil
-                    withAnimation(Self.drillAnimation) { selectedDay = nil }
+                    selectedDay = nil
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "chevron.left")
