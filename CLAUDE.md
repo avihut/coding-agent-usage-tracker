@@ -262,7 +262,14 @@ the README rather than silently deviating.
 - Keychain query: login keychain, no `kSecUseDataProtectionKeychain`.
 - Menu bar rendering: height from `NSStatusBar.system.thickness` (never
   hardcoded), `monospacedDigitSystemFont` so width doesn't jitter,
-  `isTemplate = false` (we color by severity).
+  `isTemplate = false`. Since v0.21.0 the title is a DRAWN NSImage
+  (`StatusItemRenderer.image`), not attributedTitle: digits stay white —
+  thin glyph strokes can't carry color legibly over Liquid Glass (HIG:
+  color rides fills, not fine features) — and exhaustion risk arrives as
+  solid geometry instead: a ramp-colored dot ahead of a watched number
+  (severity 0→0.75), escalating to a filled red capsule with bold white
+  digits at severity ≥ 0.75 (or discrete critical). Stale stays grey and
+  ornament-free.
 - The status item is a raw `NSStatusItem` owned by `StatusItemController` —
   NOT `MenuBarExtra`. The menu bar's appearance follows wallpaper tinting,
   not the app's appearance; MenuBarExtra rasterizes its label in the app's

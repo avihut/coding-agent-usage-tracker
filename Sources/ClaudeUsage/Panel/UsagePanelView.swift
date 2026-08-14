@@ -1512,7 +1512,7 @@ struct MeterHistoryView: View {
     }
 
     private var hoverHint: String {
-        focusedModel.map { "\(ModelNames.display($0)) focused — others dimmed" }
+        focusedModel.map { "\(ModelNames.display($0)) focused" }
             ?? "Hover the graph for point details"
     }
 

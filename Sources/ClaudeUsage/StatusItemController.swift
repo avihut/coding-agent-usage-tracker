@@ -59,6 +59,7 @@ final class StatusItemController: NSResponder {
     private func observeState() {
         withObservationTracking {
             _ = store.state
+            _ = store.predictions
         } onChange: {
             Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -69,8 +70,16 @@ final class StatusItemController: NSResponder {
     }
 
     private func render() {
-        statusItem.button?.attributedTitle = StatusItemRenderer.attributedText(
-            for: StatusItemRenderer.model(for: store.state, predictions: store.predictions))
+        guard let button = statusItem.button else { return }
+        let model = StatusItemRenderer.model(for: store.state, predictions: store.predictions)
+        // Drawn as literal pixels, not attributedTitle: the dot and badge
+        // are filled geometry no attributed string can carry. Fixed colors
+        // keep the image immune to the appearance-context lies a tinted
+        // menu bar tells.
+        button.image = StatusItemRenderer.image(
+            for: model, height: NSStatusBar.system.thickness)
+        button.attributedTitle = NSAttributedString()
+        button.imagePosition = .imageOnly
     }
 
     // MARK: - Hover graph
