@@ -174,5 +174,14 @@ extension StatusItemController: NSPopoverDelegate {
     // so the monitors never outlive the panel.
     func popoverDidClose(_ notification: Notification) {
         endDismissMonitoring()
+        NotificationCenter.default.post(name: .panelDidClose, object: nil)
     }
+}
+
+extension Notification.Name {
+    /// Posted whenever the main panel closes, on every close path. The
+    /// panel's hosting controller is created once and its view never leaves
+    /// the hierarchy on close, so SwiftUI `.onDisappear` never fires in
+    /// there — views with per-show state listen for this instead.
+    static let panelDidClose = Notification.Name("panelDidClose")
 }

@@ -1,4 +1,5 @@
 import Charts
+import Combine
 import SwiftUI
 import UsageCore
 
@@ -96,8 +97,11 @@ struct HeatmapView: View {
             if selectedDay != nil, selectedEntry == nil { selectedDay = nil }
         }
         // Closing the panel pops any drill-down (no animation — offscreen):
-        // reopening should always land on the period totals.
-        .onDisappear {
+        // reopening should always land on the period totals. The panel's
+        // hosting view is created once and never leaves the hierarchy on
+        // close, so .onDisappear can't catch this — the status item
+        // controller posts .panelDidClose on every close path instead.
+        .onReceive(NotificationCenter.default.publisher(for: .panelDidClose)) { _ in
             selectedDay = nil
             hoveredModel = nil
             hoveredDay = nil
