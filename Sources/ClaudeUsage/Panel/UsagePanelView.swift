@@ -575,13 +575,9 @@ struct MeterHistoryView: View {
         let (start, end) = domain
         let measuredEnd = min(end, now)
         let segments = activitySegments(now: now)
-        // The stored hover re-anchored onto this tick's freshly built
-        // segments — the trailing session's end moves with time, so the
-        // stored copy stops being equal to any current segment and the
-        // hovered nub would read as a muted peer.
-        let hovered = hoveredSegment.flatMap { stored in
-            segments.first { sameNub($0, stored) }
-        }
+        // The stored hover re-anchored onto this render's freshly built
+        // segments — see liveNub for why no direct comparison can do it.
+        let hovered = hoveredSegment.flatMap { liveNub(for: $0, in: segments) }
         return Chart {
             // Activity strip, iStat-style: a band under the plot floor —
             // orange where transcripts logged tokens, a faint track where
@@ -846,19 +842,29 @@ struct MeterHistoryView: View {
         segment.kind == .exhausted ? .red : orange
     }
 
-    /// Nub identity across chart ticks: the trailing session's end and the
-    /// exhausted stretch's start both move with time, so plain equality
-    /// can't anchor the hover — the kind plus (for active nubs) the fixed
-    /// start can.
-    private func sameNub(_ a: ActivitySegment, _ b: ActivitySegment) -> Bool {
-        a.kind == b.kind && (a.kind == .exhausted || a.start == b.start)
+    /// The stored hover re-anchored onto freshly built segments. No date
+    /// field survives a rebuild — the sliding domain re-anchors at Date()
+    /// every render, shifting every bucket boundary, and the trailing end /
+    /// exhausted start move with time — so equality on any of them orphans
+    /// the hover. The stored nub's midpoint finding the segment that
+    /// contains it is drift-proof (drift is micro/30s-scale, nubs are
+    /// minutes wide).
+    private func liveNub(
+        for stored: ActivitySegment, in segments: [ActivitySegment]
+    ) -> ActivitySegment? {
+        if stored.kind == .exhausted { return segments.first { $0.kind == .exhausted } }
+        let mid = stored.start.addingTimeInterval(
+            stored.end.timeIntervalSince(stored.start) / 2)
+        return segments.first { $0.kind == .active && $0.start <= mid && mid <= $0.end }
     }
 
     /// The hovered nub at full strength; with any nub hovered, its peers
-    /// recede along with the curtained graph above them.
+    /// recede along with the curtained graph above them. `hovered` is the
+    /// live-resolved nub, an element of the same array being drawn, so
+    /// equality here is exact.
     private func nubOpacity(_ segment: ActivitySegment, hovered: ActivitySegment?) -> Double {
         guard let hovered else { return 0.7 }
-        return sameNub(segment, hovered) ? 1 : 0.25
+        return segment == hovered ? 1 : 0.25
     }
 
     /// "Wed 09:15 – Wed 11:30 · active 2 hr 15 min" while a nub is hovered;

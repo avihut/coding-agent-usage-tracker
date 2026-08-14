@@ -134,11 +134,14 @@ the README rather than silently deviating.
   duration shows semibold in the headroom band centered over the nub
   (the now label yields the band), and the readout line reports the
   stretch's range and duration; curve focus and point readouts stand
-  down there. Nub hover state re-anchors onto each tick's fresh
-  segments via sameNub (kind + start; exhausted by kind alone) — the
-  trailing session's end and the exhausted start move with time, so
-  Equatable comparison let a 30s tick orphan the hover and mute the
-  nub under the cursor. The dead stretch past the exhaustion
+  down there. Nub hover state re-anchors onto each render's fresh
+  segments via liveNub — the stored nub's midpoint finds the live
+  segment containing it; exhausted matches by kind — because NO date
+  field on a segment is comparison-stable: the sliding domain
+  re-anchors at Date() on every render (shifting every bucket
+  boundary) and the trailing end / exhausted start move with time.
+  Matching by equality or by start orphaned the hover (muted or
+  unhighlighted nubs). The dead stretch past the exhaustion
   crossing gets a red nub of its own ("unreachable" in the readout).
   Segmented pickers are built ONLY through the shared `SegmentedPicker`
   (Sources/ClaudeUsage/SegmentedPicker.swift — mini/bare/semibold, one
