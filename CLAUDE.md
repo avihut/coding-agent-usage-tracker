@@ -76,7 +76,12 @@ the README rather than silently deviating.
   counts, survives Claude Code's `cleanupPeriodDays` sweep): days with
   prompts but no surviving transcripts render faint as "no token data".
   Never write inside `~/.claude`, never go near `.credentials.json` from
-  the scanners, nothing leaves the machine. The same scan also attributes
+  the scanners, nothing leaves the machine — with ONE user-authorized
+  exception (2026-08-14): the Settings → General transcript-retention
+  control writes exactly `cleanupPeriodDays` in `~/.claude/settings.json`
+  through `ClaudeCodeSettings` (read-modify-write preserving every other
+  key, atomic, refuses to touch a file whose content doesn't parse).
+  Nothing else ever writes there. The same scan also attributes
   tokens per model (`TokenTally`: in/out/cache-write incl. the 1h-TTL
   split/cache-read): per day forever (`DailyActivity.models`, feeding the
   per-period summary via `HeatmapLayout.modelTotals`) and per minute for a

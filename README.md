@@ -33,7 +33,10 @@ conversation shown apart from fresh input — cost estimates at API list
 prices, pricing feed fetched daily with bundled fallback) whose rows
 double as a legend — hovering one filters the chart above to that model in its own
 color. A sidebar-navigated settings window (⋯ menu → Settings…) holds the
-general knobs — including the refresh-pace slider — plus an API-cost page:
+general knobs — the refresh-pace slider, the session grace period, and
+Claude Code's own transcript retention (`cleanupPeriodDays`, the app's one
+sanctioned write into `~/.claude/settings.json`, preserving every other
+key) — plus an API-cost page:
 pricing-feed status with a manual refresh, the list rates in use, a Claude
 Code-specific explainer of how transcripts turn into cost estimates (four
 token classes, the agentic loop, quadratic cache reads), and a

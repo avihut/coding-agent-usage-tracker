@@ -173,6 +173,10 @@ private struct GeneralSettingsPane: View {
     /// Idle tolerance for the popover activity strips.
     @AppStorage(ActivityGrace.storageKey)
     private var graceSeconds = ActivityGrace.defaultSeconds
+    /// Claude Code's own transcript retention, mirrored from — and
+    /// written back to — ~/.claude/settings.json.
+    @State private var retentionDays = ClaudeCodeSettings.defaultDays
+    @State private var retentionWriteFailed = false
 
     var body: some View {
         SettingsPaneScroll {
@@ -211,6 +215,27 @@ private struct GeneralSettingsPane: View {
                 }
                 note("The activity strips under the popover charts bridge idle gaps shorter than this — Claude waiting while you read or type a reply still counts as the same working session. Slide to off to mark only the moments Claude itself was producing tokens.")
             }
+            SettingsCard("Claude Code") {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("Transcript retention")
+                        Spacer()
+                        Picker("Transcript retention", selection: retentionBinding) {
+                            ForEach(retentionChoices, id: \.self) { days in
+                                Text(retentionLabel(days)).tag(days)
+                            }
+                        }
+                        .labelsHidden()
+                        .fixedSize()
+                    }
+                    if retentionWriteFailed {
+                        Text("Couldn't update ~/.claude/settings.json — its current content didn't parse, so it was left untouched.")
+                            .font(.caption2)
+                            .foregroundStyle(.red)
+                    }
+                }
+                note("How long Claude Code keeps local transcripts (its cleanupPeriodDays setting — this control reads and writes ~/.claude/settings.json directly, the app's one write there). The heatmap and per-model history come from those transcripts, so longer retention keeps more history. Takes effect when Claude Code next runs.")
+            }
             SettingsCard("Startup") {
                 Toggle("Launch at login", isOn: SettingsBindings.launchAtLogin())
                     .toggleStyle(.switch)
@@ -222,6 +247,38 @@ private struct GeneralSettingsPane: View {
                 infoRow("Network destinations", "api.anthropic.com · raw.githubusercontent.com")
                 note("Usage comes from the same endpoint the Claude app's own Usage screen reads; activity and tokens from this Mac's local Claude Code transcripts, read-only. No analytics, no telemetry.")
             }
+        }
+        .onAppear {
+            retentionDays = ClaudeCodeSettings.standard().readCleanupPeriodDays()
+                ?? ClaudeCodeSettings.defaultDays
+        }
+    }
+
+    /// Selection writes straight through to settings.json — binding-set,
+    /// not onChange, so the onAppear mirror never triggers a write.
+    private var retentionBinding: Binding<Int> {
+        Binding(
+            get: { retentionDays },
+            set: { days in
+                retentionDays = days
+                retentionWriteFailed =
+                    !ClaudeCodeSettings.standard().writeCleanupPeriodDays(days)
+            })
+    }
+
+    /// The stock ladder, plus whatever custom value the file already
+    /// holds so the picker never misrepresents it.
+    private var retentionChoices: [Int] {
+        let standard = [30, 60, 90, 180, 365, 730]
+        return standard.contains(retentionDays)
+            ? standard : (standard + [retentionDays]).sorted()
+    }
+
+    private func retentionLabel(_ days: Int) -> String {
+        switch days {
+        case 365: return "1 year"
+        case 730: return "2 years"
+        default: return "\(days) days"
         }
     }
 }
