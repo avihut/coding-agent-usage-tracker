@@ -403,6 +403,8 @@ struct MeterHistoryView: View {
     @State private var hoverDate: Date?
     /// The focused model — set by hovering its curve or its legend row.
     @State private var focusedModel: String?
+    /// The activity-strip nub under the cursor, if any.
+    @State private var hoveredSegment: ActivitySegment?
 
     init(
         meter: Meter, samples: [UsageSample], timeline: [TokenSlot],
@@ -534,9 +536,10 @@ struct MeterHistoryView: View {
                 }
             }
             domainLabels
-            Text(readout.map(readoutText) ?? hoverHint)
+            Text(segmentReadout ?? readout.map(readoutText) ?? hoverHint)
                 .font(.caption2.monospacedDigit())
-                .foregroundStyle(readout == nil ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.secondary))
+                .foregroundStyle(readout == nil && segmentReadout == nil
+                    ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.secondary))
                 .lineLimit(1)
                 .frame(height: 14, alignment: .leading)
             Divider()
@@ -554,6 +557,13 @@ struct MeterHistoryView: View {
                 .foregroundStyle(.tertiary)
         }
         .padding(10)
+        // Meter switches reuse this view (single shared popover) — hover
+        // state must not leak across.
+        .onChange(of: meter.id) {
+            hoverDate = nil
+            focusedModel = nil
+            hoveredSegment = nil
+        }
     }
 
     // MARK: - Chart
@@ -561,6 +571,7 @@ struct MeterHistoryView: View {
     private func chart(curves: [ModelCurve], now: Date) -> some View {
         let (start, end) = domain
         let measuredEnd = min(end, now)
+        let segments = activitySegments(now: now)
         return Chart {
             // Activity strip, iStat-style: a band under the plot floor —
             // orange where transcripts logged tokens, a faint track where
@@ -570,12 +581,20 @@ struct MeterHistoryView: View {
                 yStart: .value("Usage", Self.stripBottom),
                 yEnd: .value("Usage", Self.stripTop))
             .foregroundStyle(Color.primary.opacity(0.08))
-            ForEach(activitySegments(now: now), id: \.start) { segment in
+            ForEach(segments, id: \.start) { segment in
                 RectangleMark(
                     xStart: .value("Time", segment.start), xEnd: .value("Time", segment.end),
                     yStart: .value("Usage", Self.stripBottom),
                     yEnd: .value("Usage", Self.stripTop))
-                .foregroundStyle(orange.opacity(0.7))
+                .foregroundStyle(orange.opacity(hoveredSegment == segment ? 1 : 0.7))
+            }
+            // Hovering a nub lifts its whole time slice out of the graph.
+            if let hoveredSegment {
+                RectangleMark(
+                    xStart: .value("Time", hoveredSegment.start),
+                    xEnd: .value("Time", hoveredSegment.end),
+                    yStart: .value("Usage", 0), yEnd: .value("Usage", 100))
+                .foregroundStyle(orange.opacity(0.08))
             }
             // Model curves underlay the percent line; the focused one draws
             // last so its full-opacity line sits on top of its dimmed peers.
@@ -645,11 +664,15 @@ struct MeterHistoryView: View {
                         .lineStyle(StrokeStyle(lineWidth: 1))
                         .annotation(
                             position: .bottom, alignment: .center, spacing: 1,
-                            overflowResolution: .init(x: .fit(to: .plot), y: .disabled)
+                            overflowResolution: .init(x: .fit(to: .plot), y: .fit(to: .plot))
                         ) {
-                            Text(timeLabel(exhaust))
-                                .font(.system(size: 8))
-                                .foregroundStyle(.red)
+                            // Only while exploring the dead zone — always-on
+                            // it crowded the axis labels below the plot.
+                            if hoverDate.map({ $0 >= exhaust }) == true {
+                                Text(timeLabel(exhaust))
+                                    .font(.system(size: 8))
+                                    .foregroundStyle(.red)
+                            }
                         }
                 }
             }
@@ -705,14 +728,26 @@ struct MeterHistoryView: View {
                         case .active(let location):
                             guard let plotFrame = proxy.plotFrame else { return }
                             let origin = geo[plotFrame].origin
-                            hoverDate = proxy.value(atX: location.x - origin.x, as: Date.self)
-                            updateFocus(
-                                at: proxy.value(atX: location.x - origin.x, as: Date.self),
-                                yValue: proxy.value(atY: location.y - origin.y, as: Double.self),
-                                curves: curves)
+                            let date = proxy.value(atX: location.x - origin.x, as: Date.self)
+                            let yValue = proxy.value(atY: location.y - origin.y, as: Double.self)
+                            hoverDate = date
+                            // Below the plot floor the cursor is on the
+                            // activity strip: nubs take the hover there,
+                            // curves let go.
+                            if let yValue, yValue < 0 {
+                                let hit = date.flatMap { d in
+                                    segments.first { $0.start <= d && d <= $0.end }
+                                }
+                                if hoveredSegment != hit { hoveredSegment = hit }
+                                if focusedModel != nil { focusedModel = nil }
+                            } else {
+                                if hoveredSegment != nil { hoveredSegment = nil }
+                                updateFocus(at: date, yValue: yValue, curves: curves)
+                            }
                         case .ended:
                             hoverDate = nil
                             focusedModel = nil
+                            hoveredSegment = nil
                         }
                     }
             }
@@ -734,9 +769,17 @@ struct MeterHistoryView: View {
         return exhaust
     }
 
-    private struct ActivitySegment {
+    private struct ActivitySegment: Equatable {
         let start: Date
         let end: Date
+    }
+
+    /// "Wed 09:15 – Wed 11:30 · active 2 hr 15 min" while a nub is hovered.
+    private var segmentReadout: String? {
+        hoveredSegment.map { segment in
+            "\(timeLabel(segment.start)) – \(timeLabel(segment.end)) · active "
+                + UsageFormatting.duration(segment.end.timeIntervalSince(segment.start))
+        }
     }
 
     /// Contiguous stretches of the measured domain where transcripts logged
@@ -901,8 +944,9 @@ struct MeterHistoryView: View {
 
     private var readout: Readout? {
         // Point readouts belong to the percent/prediction lines; in focus
-        // mode the stats line carries the numbers.
-        guard focusedModel == nil, let hoverDate else { return nil }
+        // mode the stats line carries the numbers, and on the activity
+        // strip the segment readout does.
+        guard focusedModel == nil, hoveredSegment == nil, let hoverDate else { return nil }
         let now = Date()
         let (domainStart, domainEnd) = domain
         let t = min(max(hoverDate, domainStart), domainEnd)
