@@ -1416,22 +1416,15 @@ struct MeterHistoryView: View {
 
     /// Running total per ~180 buckets so a busy week doesn't hand Charts
     /// thousands of minute slots. Covers the measured part of the domain.
-    private func cumulativeCurve(model: String) -> [(t: Date, total: Int)] {
+    /// CumulativeSeries holds the level flat across idle gaps — sparse
+    /// cumulative points would otherwise interpolate as phantom growth.
+    private func cumulativeCurve(model: String) -> [CumulativePoint] {
         let start = domain.start
         let end = min(domain.end, Date())
-        let bucket = max(60, end.timeIntervalSince(start) / 180)
-        var curve: [(t: Date, total: Int)] = [(start, 0)]
-        var total = 0
-        var nextBoundary = start.addingTimeInterval(bucket)
-        for slot in timeline where slot.model == model && slot.t >= start && slot.t <= end {
-            if slot.t > nextBoundary {
-                curve.append((nextBoundary, total))
-                while nextBoundary < slot.t { nextBoundary.addTimeInterval(bucket) }
-            }
-            total += slot.tally.total
-        }
-        curve.append((end, total))
-        return curve
+        let moments = timeline
+            .filter { $0.model == model }
+            .map { (t: $0.t, amount: $0.tally.total) }
+        return CumulativeSeries.build(moments: moments, start: start, end: end)
     }
 
     // MARK: - Text lines
