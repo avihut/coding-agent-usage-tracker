@@ -636,13 +636,13 @@ struct MeterHistoryView: View {
                     }
                 }
                 // The now separator: everything left is measured, right is
-                // ahead. Same weight as the exhaustion rule — .tertiary was
-                // invisible against the chart, leaving only the label.
+                // ahead. Full primary — anything softer (.tertiary, then
+                // .secondary) got lost against the chart.
                 RuleMark(x: .value("Now", now))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.primary)
                     .lineStyle(StrokeStyle(lineWidth: 1))
                     .annotation(position: .top, alignment: .center) {
-                        Text("now").font(.system(size: 8)).foregroundStyle(.secondary)
+                        Text("now").font(.system(size: 8)).foregroundStyle(.primary)
                     }
                 // Where the current pace hits the limit: a red mark with the
                 // time it happens; the hatched region beyond it is unusable.
