@@ -2,7 +2,9 @@ import Foundation
 
 /// The activity strip's idle tolerance: Claude sitting quiet while the user
 /// reads or types a reply is still the same working session, so gaps shorter
-/// than the grace period are bridged into one stretch. Zero means raw truth —
+/// than the grace period are bridged into one stretch — and the newest
+/// stretch gets the same courtesy against "now", held open while its idle
+/// time could still turn out to be such a pause. Zero means raw truth —
 /// only the moments Claude itself was producing tokens.
 public enum ActivityGrace {
     public static let defaultSeconds: TimeInterval = 900
@@ -23,6 +25,22 @@ public enum ActivityGrace {
             }
         }
         return merged
+    }
+
+    /// The live tail: while the newest stretch's idle time is still within
+    /// the grace period the session may yet continue, so it is held open to
+    /// `now`. Once the gap outgrows the grace the hold releases and the
+    /// stretch reverts to its true end. Never shrinks a stretch already
+    /// reaching `now`.
+    public static func holdOpen(
+        _ stretches: [DateInterval], until now: Date, grace: TimeInterval
+    ) -> [DateInterval] {
+        guard let last = stretches.last, last.end < now,
+              now.timeIntervalSince(last.end) <= grace
+        else { return stretches }
+        var held = stretches
+        held[held.count - 1] = DateInterval(start: last.start, end: now)
+        return held
     }
 }
 

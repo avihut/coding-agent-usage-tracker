@@ -142,7 +142,11 @@ the README rather than silently deviating.
   counting only their own model. Idle gaps within the grace period
   (`ActivityGrace.stitch`, default 15 min, Settings → General slider
   down to off) are bridged — the user pausing to read or reply is still
-  the same session; the raw runs show only at 0. Hovering below the plot floor hands the
+  the same session; the raw runs show only at 0. The newest stretch is
+  held open to now while its idle time is still within grace
+  (`ActivityGrace.holdOpen` — the session may yet continue), snapping
+  back to its true end once the gap outgrows the grace; the hold caps
+  at the exhausted boundary so nubs never overlap the red strip. Hovering below the plot floor hands the
   hover to the strip: the nub brightens, its peers recede, dimming
   curtains (windowBackgroundColor 0.5) cover the graph outside the
   hovered slice — the undimmed slice IS the highlight — the session's

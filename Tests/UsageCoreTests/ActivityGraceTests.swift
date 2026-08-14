@@ -57,6 +57,56 @@ struct ActivityGraceStitchTests {
     }
 }
 
+@Suite("ActivityGrace live tail")
+struct ActivityGraceHoldOpenTests {
+    private func interval(_ start: TimeInterval, _ end: TimeInterval) -> DateInterval {
+        DateInterval(
+            start: Date(timeIntervalSinceReferenceDate: start),
+            end: Date(timeIntervalSinceReferenceDate: end))
+    }
+
+    private func date(_ t: TimeInterval) -> Date {
+        Date(timeIntervalSinceReferenceDate: t)
+    }
+
+    @Test("an idle gap within grace holds the newest stretch open to now")
+    func holds() {
+        let held = ActivityGrace.holdOpen(
+            [interval(0, 600), interval(1200, 1800)], until: date(2280), grace: 900)
+        #expect(held == [interval(0, 600), interval(1200, 2280)])
+    }
+
+    @Test("a gap of exactly grace still holds — the boundary is inclusive")
+    func boundary() {
+        let held = ActivityGrace.holdOpen([interval(0, 600)], until: date(1500), grace: 900)
+        #expect(held == [interval(0, 1500)])
+    }
+
+    @Test("once the gap outgrows grace the stretch shows its true end")
+    func releases() {
+        let stretches = [interval(0, 600)]
+        #expect(ActivityGrace.holdOpen(stretches, until: date(1501), grace: 900) == stretches)
+    }
+
+    @Test("zero grace never holds")
+    func zeroGrace() {
+        let stretches = [interval(0, 600)]
+        #expect(ActivityGrace.holdOpen(stretches, until: date(601), grace: 0) == stretches)
+    }
+
+    @Test("a stretch already reaching or passing now is left alone")
+    func alreadyLive() {
+        let stretches = [interval(0, 600)]
+        #expect(ActivityGrace.holdOpen(stretches, until: date(600), grace: 900) == stretches)
+        #expect(ActivityGrace.holdOpen(stretches, until: date(300), grace: 900) == stretches)
+    }
+
+    @Test("empty input stays empty")
+    func empty() {
+        #expect(ActivityGrace.holdOpen([], until: date(0), grace: 900).isEmpty)
+    }
+}
+
 @Suite("ActivityGraceScale")
 struct ActivityGraceScaleTests {
     @Test("zero sits at the left stop and round-trips")

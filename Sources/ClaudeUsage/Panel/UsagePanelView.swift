@@ -981,10 +981,16 @@ struct MeterHistoryView: View {
         }
         // Human-scale pauses — reading, typing a reply — are still the same
         // session: gaps within the grace period get bridged (0 = raw Claude
-        // activity only).
-        segments = ActivityGrace.stitch(
+        // activity only), and the newest stretch is held open to now while
+        // its idle time could still turn out to be such a pause; once the
+        // gap outgrows the grace, the nub snaps back to the session's true
+        // end. The hold caps at the exhausted boundary — a session can't
+        // run into the unreachable region.
+        let stitched = ActivityGrace.stitch(
             segments.map { DateInterval(start: $0.start, end: $0.end) },
-            grace: graceSeconds
+            grace: graceSeconds)
+        segments = ActivityGrace.holdOpen(
+            stitched, until: min(end, exhaustDate ?? end), grace: graceSeconds
         ).map { ActivitySegment(start: $0.start, end: $0.end) }
         // The dead stretch gets its own nub at the strip's end, so the
         // unreachable region reads from the strip too.
