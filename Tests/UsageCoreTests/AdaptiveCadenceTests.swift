@@ -262,4 +262,13 @@ struct RefreshIntervalScaleTests {
         #expect(UsageFormatting.duration(5400) == "1 hr 30 min")
         #expect(UsageFormatting.duration(7200) == "2 hr")
     }
+
+    @Test("day-scale durations read in days, not stacked hours")
+    func dayScaleDurations() {
+        #expect(UsageFormatting.duration(23 * 3600) == "23 hr")
+        #expect(UsageFormatting.duration(24 * 3600) == "1 day")
+        #expect(UsageFormatting.duration(26 * 3600) == "1 day 2 hr")
+        #expect(UsageFormatting.duration(24 * 3600 + 1800) == "1 day")
+        #expect(UsageFormatting.duration(7 * 86400) == "7 days")
+    }
 }

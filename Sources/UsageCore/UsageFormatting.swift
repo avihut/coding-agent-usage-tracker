@@ -101,13 +101,19 @@ public enum UsageFormatting {
         return "$\(text)"
     }
 
-    /// "3 min", "45 min", "1 hr", "1 hr 30 min" — the refresh-pace dial's
-    /// vocabulary. Sub-minute precision is deliberately absent.
+    /// "3 min", "45 min", "1 hr 30 min", "7 days" — the refresh-pace dial's
+    /// vocabulary, stretched to day scale for limit windows. Sub-minute
+    /// precision is deliberately absent; so are minutes at day scale.
     public static func duration(_ seconds: TimeInterval) -> String {
         let minutes = max(1, Int((seconds / 60).rounded()))
         if minutes < 60 { return "\(minutes) min" }
-        let (hours, rest) = (minutes / 60, minutes % 60)
-        return rest == 0 ? "\(hours) hr" : "\(hours) hr \(rest) min"
+        let (hours, restMinutes) = (minutes / 60, minutes % 60)
+        if hours < 24 {
+            return restMinutes == 0 ? "\(hours) hr" : "\(hours) hr \(restMinutes) min"
+        }
+        let (days, restHours) = (hours / 24, hours % 24)
+        let dayText = days == 1 ? "1 day" : "\(days) days"
+        return restHours == 0 ? dayText : "\(dayText) \(restHours) hr"
     }
 
     /// "09:45" — for "Updated …" and "cached …" annotations.
