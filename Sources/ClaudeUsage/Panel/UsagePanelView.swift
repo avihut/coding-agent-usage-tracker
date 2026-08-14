@@ -623,15 +623,25 @@ struct MeterHistoryView: View {
         return scopeName.map { WindowTokens.scoped(all, name: $0) } ?? all
     }
 
-    /// The grid's rows: the whole window normally; while an active nub is
-    /// hovered, the same models re-tallied over just that session. The row
+    /// The grid's rows: the whole frame normally; while an active nub is
+    /// hovered, the same models re-tallied over just that session — and
+    /// while a reset line is hovered, over the limit window that ended
+    /// there (the true window, even the part outside the frame). The row
     /// set and order stay fixed — hover must never reflow the popover — so
-    /// models silent during the session read zero.
+    /// models silent during the slice read zero.
     private func sessionRows(base: [ModelTokenUsage]) -> [ModelTokenUsage] {
+        if let reset = hoveredReset {
+            return scopedRows(base: base, from: reset.addingTimeInterval(-window), to: reset)
+        }
         guard let session = hoveredSegment, session.kind == .active else { return base }
-        let inSession = WindowTokens.breakdown(
-            timeline: timeline, from: session.sessionStart, to: session.end)
-        let byModel = Dictionary(uniqueKeysWithValues: inSession.map { ($0.model, $0.tally) })
+        return scopedRows(base: base, from: session.sessionStart, to: session.end)
+    }
+
+    private func scopedRows(
+        base: [ModelTokenUsage], from: Date, to: Date
+    ) -> [ModelTokenUsage] {
+        let slice = WindowTokens.breakdown(timeline: timeline, from: from, to: to)
+        let byModel = Dictionary(uniqueKeysWithValues: slice.map { ($0.model, $0.tally) })
         return base.map {
             ModelTokenUsage(model: $0.model, tally: byModel[$0.model] ?? TokenTally())
         }
@@ -795,10 +805,17 @@ struct MeterHistoryView: View {
                 .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [3, 3]))
             }
             // Reset hover: curtain-dim everything outside the limit window
-            // that ended at this line — the undimmed stretch IS the window.
+            // that ended at this line — the undimmed stretch IS the window
+            // — with a solid twin marking where that window began. The
+            // summary below re-tallies to the same window.
             if let hoveredReset {
                 let curtain = Color(nsColor: .windowBackgroundColor).opacity(0.5)
                 let windowStart = max(start, hoveredReset.addingTimeInterval(-window))
+                RuleMark(
+                    x: .value("Window start", windowStart),
+                    yStart: .value("Usage", 0), yEnd: .value("Usage", ceiling))
+                .foregroundStyle(Color.primary)
+                .lineStyle(StrokeStyle(lineWidth: 1.5))
                 if windowStart > start {
                     RectangleMark(
                         xStart: .value("Time", start),
