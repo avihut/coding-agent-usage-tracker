@@ -233,13 +233,21 @@ struct UsagePanelView: View {
         return AnyShapeStyle(.tint)
     }
 
+    /// Tiered with `refreshPressureStyle` — whatever color the button
+    /// wears, hovering it says why.
     private var refreshHelp: String {
         let budget = store.apiBudget(now: Date())
-        var text = "Refresh now (at most once per 3 minutes)"
-        if budget.fraction >= 0.8 {
-            text += " — \(budget.used) of ~\(budget.ceiling) hourly requests used; more may trip the API's rate limit"
+        if budget.fraction >= 1 {
+            return "This hour's ~\(budget.ceiling)-request API budget is spent"
+                + " (\(budget.used) used) — refreshing now risks a rate-limit"
+                + " lockout. The gauge clears as requests age out of the hour."
         }
-        return text
+        if budget.fraction >= 0.8 {
+            return "Refresh now — \(budget.used) of ~\(budget.ceiling) hourly"
+                + " API requests used; nearing the budget, another poll may"
+                + " trip the rate limit"
+        }
+        return "Refresh now (at most once per 3 minutes)"
     }
 
 }
