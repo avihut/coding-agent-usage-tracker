@@ -19,7 +19,10 @@ back button; per-meter hover popovers graphing percent history overlaid
 with every model's cumulative token curve — a Sliding/Window span picker
 switches between the trailing window and the limit window start-to-reset,
 where a now-notch separates measured usage from the prediction engine's
-dashed projected trajectory — with per-poll-interval readouts and the same
+dashed projected trajectory, a red mark pins the moment the current pace
+would spend the limit (hatching the unreachable region beyond it), and an
+iStat-style strip under the plot shows active-vs-idle stretches — with
+per-poll-interval readouts and the same
 breakdown table as a legend (hovering a curve or a row focuses that model
 everywhere and dims the rest); a per-period model usage table
 (aligned input/cached/output/cost columns — cache re-reads of the

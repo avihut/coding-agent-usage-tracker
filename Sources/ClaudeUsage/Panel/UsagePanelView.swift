@@ -560,7 +560,23 @@ struct MeterHistoryView: View {
 
     private func chart(curves: [ModelCurve], now: Date) -> some View {
         let (start, end) = domain
+        let measuredEnd = min(end, now)
         return Chart {
+            // Activity strip, iStat-style: a band under the plot floor —
+            // orange where transcripts logged tokens, a faint track where
+            // they didn't. Future (right of now) stays empty.
+            RectangleMark(
+                xStart: .value("Time", start), xEnd: .value("Time", measuredEnd),
+                yStart: .value("Usage", Self.stripBottom),
+                yEnd: .value("Usage", Self.stripTop))
+            .foregroundStyle(Color.primary.opacity(0.08))
+            ForEach(activitySegments(now: now), id: \.start) { segment in
+                RectangleMark(
+                    xStart: .value("Time", segment.start), xEnd: .value("Time", segment.end),
+                    yStart: .value("Usage", Self.stripBottom),
+                    yEnd: .value("Usage", Self.stripTop))
+                .foregroundStyle(orange.opacity(0.7))
+            }
             // Model curves underlay the percent line; the focused one draws
             // last so its full-opacity line sits on top of its dimmed peers.
             ForEach(drawOrder(curves), id: \.model) { curve in
@@ -568,7 +584,8 @@ struct MeterHistoryView: View {
                     ForEach(curve.points, id: \.t) { point in
                         AreaMark(
                             x: .value("Time", point.t),
-                            y: .value("Usage", point.normalized))
+                            yStart: .value("Usage", 0),
+                            yEnd: .value("Usage", point.normalized))
                         .foregroundStyle(curve.color.opacity(0.15))
                         .interpolationMethod(.monotone)
                     }
@@ -586,7 +603,8 @@ struct MeterHistoryView: View {
                 ForEach(points) { point in
                     AreaMark(
                         x: .value("Time", point.t),
-                        y: .value("Usage", Double(point.percent)))
+                        yStart: .value("Usage", 0),
+                        yEnd: .value("Usage", Double(point.percent)))
                     .foregroundStyle(orange.opacity(0.18))
                     .interpolationMethod(.monotone)
                 }
@@ -619,6 +637,21 @@ struct MeterHistoryView: View {
                     .annotation(position: .top, alignment: .center) {
                         Text("now").font(.system(size: 8)).foregroundStyle(.tertiary)
                     }
+                // Where the current pace hits the limit: a red mark with the
+                // time it happens; the hatched region beyond it is unusable.
+                if let exhaust = exhaustDate {
+                    RuleMark(x: .value("Exhausted", exhaust))
+                        .foregroundStyle(.red.opacity(0.75))
+                        .lineStyle(StrokeStyle(lineWidth: 1))
+                        .annotation(
+                            position: .bottom, alignment: .center, spacing: 1,
+                            overflowResolution: .init(x: .fit(to: .plot), y: .disabled)
+                        ) {
+                            Text(timeLabel(exhaust))
+                                .font(.system(size: 8))
+                                .foregroundStyle(.red)
+                        }
+                }
             }
             if let readout {
                 RuleMark(x: .value("Time", readout.t))
@@ -630,9 +663,38 @@ struct MeterHistoryView: View {
                 .symbolSize(30)
             }
         }
-        .chartYScale(domain: 0...100)
+        .chartYScale(domain: Self.stripBottom - 1...100)
         .chartYAxis { AxisMarks(values: [0, 50, 100]) }
         .chartXScale(domain: start...end)
+        // Diagonal hatching over the unreachable region — the limit is spent
+        // before the window ends, so everything past the crossing is dead
+        // time. Drawn behind the marks so curves stay crisp over it.
+        .chartBackground { proxy in
+            GeometryReader { geo in
+                if let exhaust = exhaustDate,
+                   let plotFrame = proxy.plotFrame,
+                   let xStart = proxy.position(forX: exhaust),
+                   let yTop = proxy.position(forY: 100),
+                   let yBottom = proxy.position(forY: 0) {
+                    let plot = geo[plotFrame]
+                    let region = CGRect(
+                        x: plot.minX + xStart, y: plot.minY + yTop,
+                        width: max(0, plot.width - xStart), height: yBottom - yTop)
+                    Canvas { context, _ in
+                        context.clip(to: Path(region))
+                        context.fill(Path(region), with: .color(.red.opacity(0.05)))
+                        var x = region.minX - region.height
+                        while x < region.maxX {
+                            var stripe = Path()
+                            stripe.move(to: CGPoint(x: x, y: region.maxY))
+                            stripe.addLine(to: CGPoint(x: x + region.height, y: region.minY))
+                            context.stroke(stripe, with: .color(.red.opacity(0.13)), lineWidth: 1)
+                            x += 6
+                        }
+                    }
+                }
+            }
+        }
         .chartOverlay { proxy in
             GeometryReader { geo in
                 Rectangle()
@@ -656,6 +718,59 @@ struct MeterHistoryView: View {
             }
         }
         .frame(width: Self.chartWidth, height: Self.chartHeight)
+    }
+
+    /// The activity strip's band, in chart-Y units below the plot floor.
+    private static let stripBottom: Double = -7
+    private static let stripTop: Double = -2
+
+    /// The projected limit-crossing inside the Window span, if the current
+    /// pace spends the meter before the window resets.
+    private var exhaustDate: Date? {
+        guard effectiveSpan == .window,
+              let exhaust = prediction?.exhaustsAt,
+              exhaust > domain.start, exhaust < domain.end
+        else { return nil }
+        return exhaust
+    }
+
+    private struct ActivitySegment {
+        let start: Date
+        let end: Date
+    }
+
+    /// Contiguous stretches of the measured domain where transcripts logged
+    /// tokens (scoped meters count only their own model), bucketed so a week
+    /// of minute slots collapses to a handful of marks.
+    private func activitySegments(now: Date) -> [ActivitySegment] {
+        let start = domain.start
+        let end = min(domain.end, now)
+        let span = end.timeIntervalSince(start)
+        guard span > 0 else { return [] }
+        let bucket = max(60, span / 120)
+        let needle = scopeName?.lowercased()
+        var active = Array(repeating: false, count: Int(span / bucket) + 1)
+        for slot in timeline where slot.t >= start && slot.t <= end {
+            if let needle, !slot.model.lowercased().contains(needle) { continue }
+            let index = Int(slot.t.timeIntervalSince(start) / bucket)
+            if active.indices.contains(index) { active[index] = true }
+        }
+        var segments: [ActivitySegment] = []
+        var runStart: Int?
+        for (index, isActive) in active.enumerated() {
+            if isActive, runStart == nil { runStart = index }
+            if !isActive, let run = runStart {
+                segments.append(ActivitySegment(
+                    start: start.addingTimeInterval(Double(run) * bucket),
+                    end: start.addingTimeInterval(Double(index) * bucket)))
+                runStart = nil
+            }
+        }
+        if let run = runStart {
+            segments.append(ActivitySegment(
+                start: start.addingTimeInterval(Double(run) * bucket), end: end))
+        }
+        return segments
     }
 
     /// Unfocused curves first, the focused one last (drawn on top).

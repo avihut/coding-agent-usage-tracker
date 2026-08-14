@@ -107,7 +107,13 @@ the README rather than silently deviating.
   start-to-reset; the
   Window span draws a 30s-ticking now-notch and the prediction engine's
   dashed trajectory, and hover readouts right of the notch report
-  "proj. N%" off that curve. Hover-driven stats lines are fixed-height by
+  "proj. N%" off that curve. When the pace spends the limit before reset,
+  a red rule marks the crossing (its time annotated at the bottom) and a
+  Canvas in chartBackground hatches the unreachable region diagonally.
+  All spans carry an iStat-style activity strip: a band below the plot
+  floor (chart Y domain extends to −8; AreaMarks pin yStart: 0 so fills
+  don't bleed into it) — orange segments where transcripts logged tokens,
+  faint track otherwise, scoped meters counting only their own model. Hover-driven stats lines are fixed-height by
   design — swapping text must never reflow the layout under the cursor —
   and today's cell/bar carries a subtle ring (grids only — the 7D bar's
   bold weekday label suffices). A Tokens|Cost segmented picker beside the
