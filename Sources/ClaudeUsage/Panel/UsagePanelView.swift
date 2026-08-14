@@ -956,7 +956,10 @@ struct MeterHistoryView: View {
                         overflowResolution: .init(x: .fit(to: .plot), y: .disabled)
                     ) {
                         if nowLabelShown {
-                            Text(UsageFormatting.clockTime(now))
+                            // Frame-aware like every timestamp here: clock
+                            // within a day, weekday + clock across days,
+                            // date + clock past a week.
+                            Text(timeLabel(now))
                                 .font(.system(size: 8, weight: .semibold))
                                 .foregroundStyle(.primary)
                         }
