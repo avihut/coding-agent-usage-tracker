@@ -400,6 +400,9 @@ struct MeterHistoryView: View {
     /// relaunches — the single shared popover would otherwise leak one
     /// meter's choice onto the next while sweeping rows.
     @AppStorage private var span: Span
+    /// Idle tolerance for the activity strip — adjustable in Settings.
+    @AppStorage(ActivityGrace.storageKey)
+    private var graceSeconds = ActivityGrace.defaultSeconds
     @State private var hoverDate: Date?
     /// The focused model — set by hovering its curve or its legend row.
     @State private var focusedModel: String?
@@ -842,6 +845,13 @@ struct MeterHistoryView: View {
             segments.append(ActivitySegment(
                 start: start.addingTimeInterval(Double(run) * bucket), end: end))
         }
+        // Human-scale pauses — reading, typing a reply — are still the same
+        // session: gaps within the grace period get bridged (0 = raw Claude
+        // activity only).
+        segments = ActivityGrace.stitch(
+            segments.map { DateInterval(start: $0.start, end: $0.end) },
+            grace: graceSeconds
+        ).map { ActivitySegment(start: $0.start, end: $0.end) }
         // The dead stretch gets its own nub at the strip's end, so the
         // unreachable region reads from the strip too.
         if let exhaust = exhaustDate {

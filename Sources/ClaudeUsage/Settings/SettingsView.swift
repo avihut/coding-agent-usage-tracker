@@ -170,6 +170,9 @@ private func note(_ text: String) -> some View {
 
 private struct GeneralSettingsPane: View {
     var store: UsageStore
+    /// Idle tolerance for the popover activity strips.
+    @AppStorage(ActivityGrace.storageKey)
+    private var graceSeconds = ActivityGrace.defaultSeconds
 
     var body: some View {
         SettingsPaneScroll {
@@ -182,9 +185,31 @@ private struct GeneralSettingsPane: View {
                             .font(.callout.monospacedDigit())
                             .foregroundStyle(.secondary)
                     }
-                    RefreshIntervalSlider(seconds: SettingsBindings.interval(store))
+                    MarkedSlider(
+                        seconds: SettingsBindings.interval(store),
+                        marks: RefreshIntervalScale.marks,
+                        position: RefreshIntervalScale.position(of:),
+                        value: RefreshIntervalScale.value(at:))
                 }
                 note("The pace while Claude is in use — the slider snaps to the marked stops, or lands anywhere between. Quiet stretches slow polling down on their own (to one poll per hour, or your chosen pace when that's slower) and fresh activity snaps it back. Nothing polls faster than once per 3 minutes — the usage endpoint rate-limits harder polling.")
+            }
+            SettingsCard("Activity") {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("Session grace period")
+                        Spacer()
+                        Text(graceSeconds == 0 ? "Off" : UsageFormatting.duration(graceSeconds))
+                            .font(.callout.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                    MarkedSlider(
+                        seconds: $graceSeconds,
+                        marks: ActivityGraceScale.marks,
+                        position: ActivityGraceScale.position(of:),
+                        value: ActivityGraceScale.value(at:),
+                        label: { $0 == 0 ? "off" : UsageFormatting.duration($0) })
+                }
+                note("The activity strips under the popover charts bridge idle gaps shorter than this — Claude waiting while you read or type a reply still counts as the same working session. Slide to off to mark only the moments Claude itself was producing tokens.")
             }
             SettingsCard("Startup") {
                 Toggle("Launch at login", isOn: SettingsBindings.launchAtLogin())
@@ -516,13 +541,19 @@ struct ModelFamily: Identifiable, Equatable {
     }
 }
 
-// MARK: - Refresh slider
+// MARK: - Marked slider
 
-/// A native slider over `RefreshIntervalScale`'s log track, with the mark
-/// labels drawn at their true track positions (compensating for the knob's
-/// end insets so labels line up with where the thumb actually stops).
-private struct RefreshIntervalSlider: View {
+/// A native slider over a marked scale's track — the refresh pace and the
+/// activity grace period both draw through this, wired to their own scale's
+/// position/value math. Mark labels sit at their true track positions
+/// (compensating for the knob's end insets so labels line up with where the
+/// thumb actually stops).
+private struct MarkedSlider: View {
     @Binding var seconds: Double
+    let marks: [Double]
+    let position: (Double) -> Double
+    let value: (Double) -> Double
+    var label: (Double) -> String = { UsageFormatting.duration($0) }
 
     /// Half the NSSlider knob: the track is inset this much per side.
     private static let thumbInset: CGFloat = 10
@@ -535,7 +566,7 @@ private struct RefreshIntervalSlider: View {
             // across the whole track (they're ruler marks, not values).
             Canvas { context, size in
                 let usable = size.width - 2 * Self.thumbInset
-                let majors = RefreshIntervalScale.marks.map(RefreshIntervalScale.position(of:))
+                let majors = marks.map(position)
                 let targetStep = 0.0375
                 for (p0, p1) in zip(majors, majors.dropFirst()) {
                     let count = max(1, Int(((p1 - p0) / targetStep).rounded()))
@@ -557,9 +588,9 @@ private struct RefreshIntervalSlider: View {
             .frame(height: 8)
             GeometryReader { geo in
                 let usable = geo.size.width - 2 * Self.thumbInset
-                ForEach(RefreshIntervalScale.marks, id: \.self) { mark in
-                    let x = Self.thumbInset + RefreshIntervalScale.position(of: mark) * usable
-                    Text(UsageFormatting.duration(mark))
+                ForEach(marks, id: \.self) { mark in
+                    let x = Self.thumbInset + position(mark) * usable
+                    Text(label(mark))
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                         .fixedSize()
@@ -570,12 +601,12 @@ private struct RefreshIntervalSlider: View {
         }
     }
 
-    /// The slider drags in normalized log space; the binding round-trips
+    /// The slider drags in normalized track space; the binding round-trips
     /// through the scale so the thumb visibly snaps onto a mark.
     private var positionBinding: Binding<Double> {
         Binding(
-            get: { RefreshIntervalScale.position(of: seconds) },
-            set: { seconds = RefreshIntervalScale.value(at: $0) }
+            get: { position(seconds) },
+            set: { seconds = value($0) }
         )
     }
 }

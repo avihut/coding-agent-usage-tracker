@@ -21,7 +21,9 @@ switches between the trailing window and the limit window start-to-reset,
 where a vertical now rule separates measured usage from the prediction engine's
 dashed projected trajectory, a red mark pins the moment the current pace
 would spend the limit (hatching the unreachable region beyond it), and an
-iStat-style strip under the plot shows active-vs-idle stretches — with
+iStat-style strip under the plot shows active-vs-idle stretches (short
+pauses bridge into one session per an adjustable grace period, default
+15 min, off = raw activity) — with
 per-poll-interval readouts and the same
 breakdown table as a legend (hovering a curve or a row focuses that model
 everywhere and dims the rest); a per-period model usage table

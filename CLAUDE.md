@@ -115,7 +115,10 @@ the README rather than silently deviating.
   band below the plot floor (chart Y domain extends to −8; AreaMarks pin
   yStart: 0 so fills don't bleed into it) — orange segments where
   transcripts logged tokens, faint track otherwise, scoped meters
-  counting only their own model. Hovering below the plot floor hands the
+  counting only their own model. Idle gaps within the grace period
+  (`ActivityGrace.stitch`, default 15 min, Settings → General slider
+  down to off) are bridged — the user pausing to read or reply is still
+  the same session; the raw runs show only at 0. Hovering below the plot floor hands the
   hover to the strip: the nub brightens, its peers recede, dimming
   curtains (windowBackgroundColor 0.5) cover the graph outside the
   hovered slice — the undimmed slice IS the highlight — and the readout
