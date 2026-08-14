@@ -37,7 +37,11 @@ enum StatusItemRenderer {
     private static let dim = NSColor.white.withAlphaComponent(0.55)
     private static let staleColor = NSColor.white.withAlphaComponent(0.45)
     private static let warningColor = NSColor(srgbRed: 1.0, green: 0.624, blue: 0.039, alpha: 1)
-    private static let criticalColor = NSColor(srgbRed: 1.0, green: 0.271, blue: 0.227, alpha: 1)
+    /// Text-legibility red, not UI-element red: system red (#FF453A) is
+    /// tuned for filled shapes and sinks illegibly into dark tinted bars
+    /// at 12pt — this one keeps the hue but lifts luminance enough for
+    /// tiny semibold digits to read.
+    private static let criticalColor = NSColor(srgbRed: 1.0, green: 0.42, blue: 0.36, alpha: 1)
     /// The bright end of the exhaustion-risk ramp; severity blends it
     /// toward `criticalColor`, so warning shades never hard-cut to red.
     private static let riskYellow = NSColor(srgbRed: 1.0, green: 0.839, blue: 0.039, alpha: 1)

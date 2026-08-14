@@ -42,6 +42,8 @@ struct HeatmapView: View {
     @State private var hoveredDay: Date?
     @State private var hoveredModel: String?
     @State private var selectedDay: Date?
+    /// Which way the last day-step arrow pointed — the slide's direction.
+    @State private var stepDirection = 1
     @State private var tipSize: CGSize = .zero
     /// Rebuilt only when the activity or the period changes — never per cell
     /// and never on hover. See `HeatmapLayout`.
@@ -293,15 +295,40 @@ struct HeatmapView: View {
         return days[target]
     }
 
-    private func dayStepButton(_ symbol: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: 16, height: 16)
-                .contentShape(Rectangle())
+    /// Flanks the ring flush at the container edge, vertically centered on
+    /// the ring zone (or the shorter no-data note). Setting the direction
+    /// and stepping are two transactions on purpose: the outgoing view's
+    /// slide edge is whatever its transition said on its LAST render, so
+    /// the direction must land in a render of its own before the day flips
+    /// — folded into one update, reversing direction would slide the old
+    /// chart out the wrong side.
+    @ViewBuilder
+    private func dayStepArrow(for entry: DailyActivity, direction: Int, hasRing: Bool) -> some View {
+        if let target = neighborDay(of: entry.day, direction: direction) {
+            Button {
+                stepDirection = direction
+                Task { @MainActor in drill(into: target) }
+            } label: {
+                Image(systemName: direction < 0
+                    ? "chevron.left.circle.fill" : "chevron.right.circle.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(.secondary)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .frame(height: hasRing ? 132 : 48)
         }
-        .buttonStyle(.plain)
+    }
+
+    /// Day-to-day steps slide in the arrow's direction; the drill push/pop
+    /// slide belongs to the outer container transition.
+    private var dayStepTransition: AnyTransition {
+        let forward = stepDirection >= 0
+        return .asymmetric(
+            insertion: .move(edge: forward ? .trailing : .leading).combined(with: .opacity),
+            removal: .move(edge: forward ? .leading : .trailing).combined(with: .opacity))
+            .animation(Self.drillAnimation)
     }
 
     private func dayContent(_ entry: DailyActivity) -> some View {
@@ -322,16 +349,30 @@ struct HeatmapView: View {
                 }
                 .buttonStyle(.plain)
                 Spacer()
-                // Step between the period's drillable days without popping
-                // back to the grid; an arrow with nowhere to go disappears.
-                if let previous = neighborDay(of: entry.day, direction: -1) {
-                    dayStepButton("chevron.left.circle") { drill(into: previous) }
-                }
-                if let next = neighborDay(of: entry.day, direction: 1) {
-                    dayStepButton("chevron.right.circle") { drill(into: next) }
-                }
                 dimensionPicker
             }
+            // The day's detail slides sideways between days while the
+            // header and arrows hold still — same transition-attached
+            // animation discipline as the drill itself, so the popover
+            // height never animates per frame. The arrows ride overlays
+            // flush at the container edges, centered on the ring.
+            ZStack(alignment: .topLeading) {
+                dayDetail(entry, rows: rows)
+                    .id(entry.day)
+                    .transition(dayStepTransition)
+            }
+            .clipped()
+            .overlay(alignment: .topLeading) {
+                dayStepArrow(for: entry, direction: -1, hasRing: !rows.isEmpty)
+            }
+            .overlay(alignment: .topTrailing) {
+                dayStepArrow(for: entry, direction: 1, hasRing: !rows.isEmpty)
+            }
+        }
+    }
+
+    private func dayDetail(_ entry: DailyActivity, rows: [ModelTokenUsage]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
             if rows.isEmpty {
                 Text(entry.prompts > 0 && entry.tokens == 0
                     ? "\(entry.prompts) prompts · no token data — the transcripts were already cleaned up"
