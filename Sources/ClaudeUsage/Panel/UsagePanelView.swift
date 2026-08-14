@@ -422,7 +422,13 @@ struct MeterHistoryView: View {
     }
 
     private static let chartWidth: CGFloat = 300
-    private static let chartHeight: CGFloat = 110
+    private static let chartHeight: CGFloat = 124
+    /// The Y domain's ceiling — headroom above 100 where the now and
+    /// session-duration labels live, atop the data instead of on it and
+    /// inside the chart instead of crashing into the stats line. The same
+    /// trick the activity strip plays below 0. (chartPlotStyle top padding
+    /// is NOT this — it shifts the plot against its own axis marks.)
+    private static let plotCeiling: Double = 115
     private static let weekdayTime: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "EEE HH:mm"
@@ -569,6 +575,13 @@ struct MeterHistoryView: View {
         let (start, end) = domain
         let measuredEnd = min(end, now)
         let segments = activitySegments(now: now)
+        // The stored hover re-anchored onto this tick's freshly built
+        // segments — the trailing session's end moves with time, so the
+        // stored copy stops being equal to any current segment and the
+        // hovered nub would read as a muted peer.
+        let hovered = hoveredSegment.flatMap { stored in
+            segments.first { sameNub($0, stored) }
+        }
         return Chart {
             // Activity strip, iStat-style: a band under the plot floor —
             // orange where transcripts logged tokens, a faint track where
@@ -583,7 +596,7 @@ struct MeterHistoryView: View {
                     xStart: .value("Time", segment.start), xEnd: .value("Time", segment.end),
                     yStart: .value("Usage", Self.stripBottom),
                     yEnd: .value("Usage", Self.stripTop))
-                .foregroundStyle(nubColor(segment).opacity(nubOpacity(segment)))
+                .foregroundStyle(nubColor(segment).opacity(nubOpacity(segment, hovered: hovered)))
             }
             // Model curves underlay the percent line; the focused one draws
             // last so its full-opacity line sits on top of its dimmed peers.
@@ -640,20 +653,31 @@ struct MeterHistoryView: View {
                 }
                 // The now separator: everything left is measured, right is
                 // ahead. Full primary — anything softer (.tertiary, then
-                // .secondary) got lost against the chart.
-                RuleMark(x: .value("Now", now))
+                // .secondary) got lost against the chart. The rule stops at
+                // 100 so its label sits in the headroom band above the data;
+                // while a nub is hovered it yields the band to the
+                // session-duration label.
+                RuleMark(
+                    x: .value("Now", now),
+                    yStart: .value("Usage", Self.stripBottom),
+                    yEnd: .value("Usage", 100))
                     .foregroundStyle(.primary)
                     .lineStyle(StrokeStyle(lineWidth: 1))
                     .annotation(
                         position: .top, alignment: .center, spacing: 2,
-                        overflowResolution: .init(x: .fit(to: .plot), y: .fit(to: .plot))
+                        overflowResolution: .init(x: .fit(to: .plot), y: .disabled)
                     ) {
-                        Text("now").font(.system(size: 8)).foregroundStyle(.primary)
+                        if hovered == nil {
+                            Text("now").font(.system(size: 8)).foregroundStyle(.primary)
+                        }
                     }
                 // Where the current pace hits the limit: a red mark with the
                 // time it happens; the hatched region beyond it is unusable.
                 if let exhaust = exhaustDate {
-                    RuleMark(x: .value("Exhausted", exhaust))
+                    RuleMark(
+                        x: .value("Exhausted", exhaust),
+                        yStart: .value("Usage", Self.stripBottom),
+                        yEnd: .value("Usage", 100))
                         .foregroundStyle(.red.opacity(0.75))
                         .lineStyle(StrokeStyle(lineWidth: 1))
                         .annotation(
@@ -674,25 +698,47 @@ struct MeterHistoryView: View {
             // hovered slice — the slice keeps full strength, which IS the
             // highlight. Nubs dim via their own opacity (curtains stop at
             // the plot floor).
-            if let hoveredSegment {
+            if let hovered {
                 let curtain = Color(nsColor: .windowBackgroundColor).opacity(0.5)
-                if hoveredSegment.start > start {
+                if hovered.start > start {
                     RectangleMark(
                         xStart: .value("Time", start),
-                        xEnd: .value("Time", hoveredSegment.start),
+                        xEnd: .value("Time", hovered.start),
                         yStart: .value("Usage", 0), yEnd: .value("Usage", 100))
                     .foregroundStyle(curtain)
                 }
-                if hoveredSegment.end < end {
+                if hovered.end < end {
                     RectangleMark(
-                        xStart: .value("Time", hoveredSegment.end),
+                        xStart: .value("Time", hovered.end),
                         xEnd: .value("Time", end),
                         yStart: .value("Usage", 0), yEnd: .value("Usage", 100))
                     .foregroundStyle(curtain)
                 }
+                // The session's duration, highlighted in the headroom band
+                // and centered over its nub — the at-a-glance answer while
+                // the readout line below spells out the range.
+                PointMark(
+                    x: .value("Time", hovered.start.addingTimeInterval(
+                        hovered.end.timeIntervalSince(hovered.start) / 2)),
+                    y: .value("Usage", 100))
+                .symbolSize(0)
+                .annotation(
+                    position: .top, alignment: .center, spacing: 2,
+                    overflowResolution: .init(x: .fit(to: .plot), y: .disabled)
+                ) {
+                    Text(UsageFormatting.duration(
+                        hovered.end.timeIntervalSince(hovered.start)))
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(
+                            hovered.kind == .exhausted
+                                ? AnyShapeStyle(.red) : AnyShapeStyle(.primary))
+                }
             }
             if let readout {
-                RuleMark(x: .value("Time", readout.t))
+                RuleMark(
+                    x: .value("Time", readout.t),
+                    yStart: .value("Usage", Self.stripBottom),
+                    yEnd: .value("Usage", 100))
                     .foregroundStyle(.quaternary)
                 PointMark(
                     x: .value("Time", readout.t),
@@ -701,7 +747,7 @@ struct MeterHistoryView: View {
                 .symbolSize(30)
             }
         }
-        .chartYScale(domain: Self.stripBottom - 1...100)
+        .chartYScale(domain: Self.stripBottom - 1...Self.plotCeiling)
         .chartYAxis { AxisMarks(values: [0, 50, 100]) }
         .chartXScale(domain: start...end)
         // Diagonal hatching over the unreachable region — the limit is spent
@@ -800,11 +846,19 @@ struct MeterHistoryView: View {
         segment.kind == .exhausted ? .red : orange
     }
 
+    /// Nub identity across chart ticks: the trailing session's end and the
+    /// exhausted stretch's start both move with time, so plain equality
+    /// can't anchor the hover — the kind plus (for active nubs) the fixed
+    /// start can.
+    private func sameNub(_ a: ActivitySegment, _ b: ActivitySegment) -> Bool {
+        a.kind == b.kind && (a.kind == .exhausted || a.start == b.start)
+    }
+
     /// The hovered nub at full strength; with any nub hovered, its peers
     /// recede along with the curtained graph above them.
-    private func nubOpacity(_ segment: ActivitySegment) -> Double {
-        guard let hoveredSegment else { return 0.7 }
-        return segment == hoveredSegment ? 1 : 0.25
+    private func nubOpacity(_ segment: ActivitySegment, hovered: ActivitySegment?) -> Double {
+        guard let hovered else { return 0.7 }
+        return sameNub(segment, hovered) ? 1 : 0.25
     }
 
     /// "Wed 09:15 – Wed 11:30 · active 2 hr 15 min" while a nub is hovered;

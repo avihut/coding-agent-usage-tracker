@@ -111,11 +111,16 @@ the README rather than silently deviating.
   a red rule marks the crossing and a Canvas in chartBackground hatches
   the unreachable region diagonally; the crossing's time label shows only
   while hovering the dead zone (always-on it crowded the axis labels).
-  Every .top/.bottom chart annotation gets
-  `overflowResolution: .init(x: .fit(to: .plot), y: .fit(to: .plot))` —
-  without it the label escapes the chart and collides with neighboring
-  text (the exhaust label hit the axis labels; the now label hit the
-  stats line above the chart). All spans carry an iStat-style activity strip: a
+  Chart annotation labels must neither escape the chart nor sit on the
+  data. Hover-only labels fit INTO the plot (`overflowResolution`
+  x/y `.fit(to: .plot)` — the exhaust time label). Top-of-chart labels
+  get reserved room INSTEAD: the Y domain extends above 100
+  (plotCeiling, the strip trick mirrored upward) and the now /
+  session-duration labels live in that headroom band — their rules and
+  the hover crosshair stop at y 100, y-fitting disabled. Three failed
+  shapes, don't repeat them: no headroom crashed the label into the
+  stats line; y-fit dropped it onto the curves; `chartPlotStyle` top
+  padding shifted the plot against its own axis marks. All spans carry an iStat-style activity strip: a
   band below the plot floor (chart Y domain extends to −8; AreaMarks pin
   yStart: 0 so fills don't bleed into it) — orange segments where
   transcripts logged tokens, faint track otherwise, scoped meters
@@ -125,9 +130,15 @@ the README rather than silently deviating.
   the same session; the raw runs show only at 0. Hovering below the plot floor hands the
   hover to the strip: the nub brightens, its peers recede, dimming
   curtains (windowBackgroundColor 0.5) cover the graph outside the
-  hovered slice — the undimmed slice IS the highlight — and the readout
-  line reports the stretch's range and duration; curve focus and point
-  readouts stand down there. The dead stretch past the exhaustion
+  hovered slice — the undimmed slice IS the highlight — the session's
+  duration shows semibold in the headroom band centered over the nub
+  (the now label yields the band), and the readout line reports the
+  stretch's range and duration; curve focus and point readouts stand
+  down there. Nub hover state re-anchors onto each tick's fresh
+  segments via sameNub (kind + start; exhausted by kind alone) — the
+  trailing session's end and the exhausted start move with time, so
+  Equatable comparison let a 30s tick orphan the hover and mute the
+  nub under the cursor. The dead stretch past the exhaustion
   crossing gets a red nub of its own ("unreachable" in the readout).
   Segmented pickers are built ONLY through the shared `SegmentedPicker`
   (Sources/ClaudeUsage/SegmentedPicker.swift — mini/bare/semibold, one
