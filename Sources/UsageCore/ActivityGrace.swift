@@ -27,6 +27,26 @@ public enum ActivityGrace {
         return merged
     }
 
+    /// The true start of a session whose stretch is clipped at `boundary`
+    /// (the frame's left edge): walks minute-grained activity moments
+    /// backwards from the boundary, bridging idle gaps within the grace —
+    /// plus 60s for each moment's own minute of activity. Returns nil when
+    /// no moment before the boundary connects. `moments` must be
+    /// chronological; the walk is best effort, reaching only as far back
+    /// as the moments do.
+    public static func clippedStart(
+        before boundary: Date, moments: [Date], grace: TimeInterval
+    ) -> Date? {
+        var anchor = boundary
+        var start: Date?
+        for t in moments.reversed() where t < boundary {
+            guard anchor.timeIntervalSince(t) <= grace + 60 else { break }
+            start = t
+            anchor = t
+        }
+        return start
+    }
+
     /// The live tail: while the newest stretch's idle time is still within
     /// the grace period the session may yet continue, so it is held open to
     /// `now`. Once the gap outgrows the grace the hold releases and the

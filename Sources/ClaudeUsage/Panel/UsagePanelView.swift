@@ -498,7 +498,7 @@ struct MeterHistoryView: View {
     private func sessionRows(base: [ModelTokenUsage]) -> [ModelTokenUsage] {
         guard let session = hoveredSegment, session.kind == .active else { return base }
         let inSession = WindowTokens.breakdown(
-            timeline: timeline, from: session.start, to: session.end)
+            timeline: timeline, from: session.sessionStart, to: session.end)
         let byModel = Dictionary(uniqueKeysWithValues: inSession.map { ($0.model, $0.tally) })
         return base.map {
             ModelTokenUsage(model: $0.model, tally: byModel[$0.model] ?? TokenTally())
@@ -748,7 +748,7 @@ struct MeterHistoryView: View {
                     overflowResolution: .init(x: .fit(to: .plot), y: .disabled)
                 ) {
                     Text(UsageFormatting.duration(
-                        hovered.end.timeIntervalSince(hovered.start)))
+                        hovered.end.timeIntervalSince(hovered.sessionStart)))
                         .font(.system(size: 8, weight: .semibold))
                         .foregroundStyle(
                             hovered.kind == .exhausted
@@ -907,6 +907,12 @@ struct MeterHistoryView: View {
         let start: Date
         let end: Date
         var kind: Kind = .active
+        /// The session's true start when the frame clips its nub at the
+        /// domain's left edge — labels and the session summary honor it;
+        /// drawing keeps `start`.
+        var fullStart: Date? = nil
+
+        var sessionStart: Date { fullStart ?? start }
     }
 
     private func nubColor(_ segment: ActivitySegment) -> Color {
@@ -939,13 +945,29 @@ struct MeterHistoryView: View {
     }
 
     /// "Wed 09:15 – Wed 11:30 · active 2 hr 15 min" while a nub is hovered;
-    /// the exhausted nub reads "unreachable" instead.
+    /// the exhausted nub reads "unreachable" instead. A frame-clipped
+    /// session reads from its true start, before the domain.
     private var segmentReadout: String? {
         hoveredSegment.map { segment in
             let verb = segment.kind == .exhausted ? "unreachable" : "active"
-            return "\(timeLabel(segment.start)) – \(timeLabel(segment.end)) · \(verb) "
-                + UsageFormatting.duration(segment.end.timeIntervalSince(segment.start))
+            return "\(timeLabel(segment.sessionStart)) – \(timeLabel(segment.end)) · \(verb) "
+                + UsageFormatting.duration(
+                    segment.end.timeIntervalSince(segment.sessionStart))
         }
+    }
+
+    /// The scoped activity moments before `boundary`, walked backwards with
+    /// the strip's grace bridging — the true start of a session whose nub
+    /// the frame clips. Only computed for a first segment touching the
+    /// domain's left edge.
+    private func clippedSessionStart(before boundary: Date) -> Date? {
+        let needle = scopeName?.lowercased()
+        let moments = timeline.compactMap { slot -> Date? in
+            if let needle, !slot.model.lowercased().contains(needle) { return nil }
+            return slot.t
+        }
+        return ActivityGrace.clippedStart(
+            before: boundary, moments: moments, grace: graceSeconds)
     }
 
     /// Contiguous stretches of the measured domain where transcripts logged
@@ -992,6 +1014,13 @@ struct MeterHistoryView: View {
         segments = ActivityGrace.holdOpen(
             stitched, until: min(end, exhaustDate ?? end), grace: graceSeconds
         ).map { ActivitySegment(start: $0.start, end: $0.end) }
+        // A session the frame clips at its left edge is longer than its
+        // nub: walk the timeline before the domain (same grace bridging)
+        // for its true start, so hover reports the whole session.
+        if let first = segments.first, first.kind == .active,
+           first.start.timeIntervalSince(start) < 1 {
+            segments[0].fullStart = clippedSessionStart(before: first.start)
+        }
         // The dead stretch gets its own nub at the strip's end, so the
         // unreachable region reads from the strip too.
         if let exhaust = exhaustDate {

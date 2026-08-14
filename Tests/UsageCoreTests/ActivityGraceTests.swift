@@ -107,6 +107,59 @@ struct ActivityGraceHoldOpenTests {
     }
 }
 
+@Suite("ActivityGrace clipped start")
+struct ActivityGraceClippedStartTests {
+    private func date(_ t: TimeInterval) -> Date {
+        Date(timeIntervalSinceReferenceDate: t)
+    }
+
+    @Test("chained moments within grace walk back to the session's true start")
+    func walksBack() {
+        let moments = [0.0, 60, 120, 420, 660].map(date)
+        let start = ActivityGrace.clippedStart(
+            before: date(720), moments: moments, grace: 300)
+        #expect(start == date(0))
+    }
+
+    @Test("a gap beyond grace (+ the moment's minute) stops the walk")
+    func stopsAtGap() {
+        let moments = [0.0, 1200, 1260].map(date)
+        let start = ActivityGrace.clippedStart(
+            before: date(1320), moments: moments, grace: 300)
+        #expect(start == date(1200))
+    }
+
+    @Test("no moment before the boundary means no clipped start")
+    func nothingBefore() {
+        let start = ActivityGrace.clippedStart(
+            before: date(0), moments: [date(60), date(120)], grace: 300)
+        #expect(start == nil)
+    }
+
+    @Test("a boundary too far from the newest prior moment means no bridge")
+    func boundaryTooFar() {
+        let start = ActivityGrace.clippedStart(
+            before: date(2000), moments: [date(0), date(60)], grace: 300)
+        #expect(start == nil)
+    }
+
+    @Test("zero grace chains only adjacent minutes")
+    func zeroGrace() {
+        let moments = [0.0, 60, 240, 300].map(date)
+        let start = ActivityGrace.clippedStart(
+            before: date(360), moments: moments, grace: 0)
+        #expect(start == date(240))
+    }
+
+    @Test("moments at or after the boundary are ignored, not walk-breaking")
+    func ignoresInFrame() {
+        let moments = [0.0, 60, 500, 900].map(date)
+        let start = ActivityGrace.clippedStart(
+            before: date(120), moments: moments, grace: 300)
+        #expect(start == date(0))
+    }
+}
+
 @Suite("ActivityGraceScale")
 struct ActivityGraceScaleTests {
     @Test("zero sits at the left stop and round-trips")
