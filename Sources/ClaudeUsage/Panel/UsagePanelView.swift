@@ -525,6 +525,33 @@ struct MeterHistoryView: View {
         }
     }
 
+    /// The frame dropdown: current choice + chevron, menu of the long
+    /// labels. Same bare-button dressing as the panel's ⋯ menu — the
+    /// default menu style wraps it in a bordered pull-down pill.
+    private var framePicker: some View {
+        Menu {
+            Picker("Frame", selection: $slidingFrame) {
+                ForEach(SlidingFrame.allCases, id: \.self) { frame in
+                    Text(frame.label).tag(frame)
+                }
+            }
+            .pickerStyle(.inline)
+        } label: {
+            HStack(spacing: 2) {
+                Text(slidingFrame.rawValue)
+                    .font(.caption2.weight(.semibold))
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 7, weight: .semibold))
+            }
+            .foregroundStyle(.secondary)
+            .contentShape(Rectangle())
+        }
+        .menuStyle(.button)
+        .buttonStyle(.borderless)
+        .menuIndicator(.hidden)
+        .fixedSize()
+    }
+
     private struct Point: Identifiable {
         let id: TimeInterval
         let t: Date
@@ -626,22 +653,18 @@ struct MeterHistoryView: View {
             HStack(alignment: .firstTextBaseline) {
                 Text(meter.label).font(.caption.bold())
                 Spacer()
+                // The Sliding span picks its trailing frame from a compact
+                // dropdown beside the span picker; the Window span's frame
+                // IS the limit window, so the dropdown hides there.
+                if effectiveSpan == .sliding {
+                    framePicker
+                }
                 if liveReset != nil {
                     SegmentedPicker(
                         title: "Span", selection: $span,
                         options: Span.allCases.map { ($0.rawValue, $0) })
                 } else {
                     Text(spanLabel).font(.caption2).foregroundStyle(.secondary)
-                }
-            }
-            // The Sliding span picks its trailing frame; the Window span's
-            // frame IS the limit window, so the row hides there.
-            if effectiveSpan == .sliding {
-                HStack {
-                    Spacer()
-                    SegmentedPicker(
-                        title: "Frame", selection: $slidingFrame,
-                        options: SlidingFrame.allCases.map { ($0.rawValue, $0) })
                 }
             }
             // Fixed-height stats line: window totals normally, the focused
@@ -746,10 +769,12 @@ struct MeterHistoryView: View {
             // a single limit tops out. The percent line can never cross
             // that line; the token curves honestly can.
             ForEach(series.resets, id: \.timeIntervalSinceReferenceDate) { reset in
+                // .secondary, not .tertiary — the same lesson as the now
+                // rule: anything softer vanishes against the dark material.
                 RuleMark(
                     x: .value("Reset", reset),
                     yStart: .value("Usage", 0), yEnd: .value("Usage", ceiling))
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.secondary)
                 .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
             }
             if effectiveSpan == .sliding,
