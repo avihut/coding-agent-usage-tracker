@@ -486,6 +486,20 @@ struct MeterHistoryView: View {
         return scopeName.map { WindowTokens.scoped(all, name: $0) } ?? all
     }
 
+    /// The grid's rows: the whole window normally; while an active nub is
+    /// hovered, the same models re-tallied over just that session. The row
+    /// set and order stay fixed — hover must never reflow the popover — so
+    /// models silent during the session read zero.
+    private func sessionRows(base: [ModelTokenUsage]) -> [ModelTokenUsage] {
+        guard let session = hoveredSegment, session.kind == .active else { return base }
+        let inSession = WindowTokens.breakdown(
+            timeline: timeline, from: session.start, to: session.end)
+        let byModel = Dictionary(uniqueKeysWithValues: inSession.map { ($0.model, $0.tally) })
+        return base.map {
+            ModelTokenUsage(model: $0.model, tally: byModel[$0.model] ?? TokenTally())
+        }
+    }
+
     /// One model's cumulative curve, normalized so the busiest model's total
     /// spans the plot — magnitudes stay comparable between models while
     /// sharing the percent chart's 0...100 canvas.
@@ -552,7 +566,7 @@ struct MeterHistoryView: View {
                     .foregroundStyle(.tertiary)
             } else {
                 ModelBreakdownGrid(
-                    rows: rows, colors: colors, pricing: pricing,
+                    rows: sessionRows(base: rows), colors: colors, pricing: pricing,
                     hoveredModel: $focusedModel)
             }
             Text("Local Claude Code sessions on this Mac only.")

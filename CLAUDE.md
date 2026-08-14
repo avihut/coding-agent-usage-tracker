@@ -132,9 +132,10 @@ the README rather than silently deviating.
   curtains (windowBackgroundColor 0.5) cover the graph outside the
   hovered slice — the undimmed slice IS the highlight — the session's
   duration shows semibold in the headroom band centered over the nub
-  (the now label yields the band), and the readout line reports the
-  stretch's range and duration; curve focus and point readouts stand
-  down there. Nub hover state re-anchors onto each render's fresh
+  (the now label yields the band), the readout line reports the
+  stretch's range and duration, and the breakdown grid re-tallies to
+  just that session (row set/order fixed — hover never reflows — silent
+  models read zero); curve focus and point readouts stand down there. Nub hover state re-anchors onto each render's fresh
   segments via liveNub — the stored nub's midpoint finds the live
   segment containing it; exhausted matches by kind — because NO date
   field on a segment is comparison-stable: the sliding domain
