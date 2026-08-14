@@ -512,7 +512,8 @@ struct MeterHistoryView: View {
     var body: some View {
         let rows = windowRows
         let colors = ModelPalette.assignment(for: rows.map(\.model))
-        let curves = modelCurves(rows: rows, colors: colors)
+        let scale = percentPerToken(rows: rows)
+        let curves = modelCurves(rows: rows, colors: colors, percentPerToken: scale)
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline) {
                 Text(meter.label).font(.caption.bold())
@@ -549,7 +550,7 @@ struct MeterHistoryView: View {
                 // The 30s tick keeps the now-notch sliding and the sliding
                 // domain honest while the popover stays open.
                 TimelineView(.periodic(from: .now, by: 30)) { context in
-                    chart(curves: curves, now: context.date)
+                    chart(curves: curves, now: context.date, percentPerToken: scale)
                 }
             }
             domainLabels
@@ -585,13 +586,18 @@ struct MeterHistoryView: View {
 
     // MARK: - Chart
 
-    private func chart(curves: [ModelCurve], now: Date) -> some View {
+    private func chart(
+        curves: [ModelCurve], now: Date, percentPerToken: Double?
+    ) -> some View {
         let (start, end) = domain
         let measuredEnd = min(end, now)
         let segments = activitySegments(now: now)
         // The stored hover re-anchored onto this render's freshly built
         // segments — see liveNub for why no direct comparison can do it.
         let hovered = hoveredSegment.flatMap { liveNub(for: $0, in: segments) }
+        let focusedCurve = focusedModel.flatMap { model in curves.first { $0.model == model } }
+        let nowLabelShown = hovered == nil
+            && !nowEclipsed(by: focusedCurve, now: now, start: start, end: end)
         return Chart {
             // Activity strip, iStat-style: a band under the plot floor —
             // orange where transcripts logged tokens, a faint track where
@@ -677,7 +683,7 @@ struct MeterHistoryView: View {
                         position: .top, alignment: .center, spacing: 2,
                         overflowResolution: .init(x: .fit(to: .plot), y: .disabled)
                     ) {
-                        if hovered == nil {
+                        if nowLabelShown {
                             Text("now").font(.system(size: 8)).foregroundStyle(.primary)
                         }
                     }
@@ -744,6 +750,24 @@ struct MeterHistoryView: View {
                                 ? AnyShapeStyle(.red) : AnyShapeStyle(.primary))
                 }
             }
+            // The focused model's name rides above its curve's tip — the
+            // chart-side echo of the legend row. Labels are layered: this
+            // outranks the now label (which yields on overlap) and the
+            // strip's duration label can't coexist with a curve focus.
+            if let focusedCurve, let tip = focusedCurve.points.last {
+                PointMark(
+                    x: .value("Time", tip.t),
+                    y: .value("Usage", tip.normalized))
+                .symbolSize(0)
+                .annotation(
+                    position: .top, alignment: .center, spacing: 2,
+                    overflowResolution: .init(x: .fit(to: .plot), y: .disabled)
+                ) {
+                    Text(ModelNames.display(focusedCurve.model))
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(focusedCurve.color)
+                }
+            }
             if let readout {
                 RuleMark(
                     x: .value("Time", readout.t),
@@ -758,7 +782,22 @@ struct MeterHistoryView: View {
             }
         }
         .chartYScale(domain: Self.stripBottom - 1...Self.plotCeiling)
-        .chartYAxis { AxisMarks(values: [0, 50, 100]) }
+        // While a model is focused the axis speaks its language: the same
+        // gridlines re-labeled as tokens through the shared conversion.
+        .chartYAxis {
+            if focusedModel != nil, let percentPerToken {
+                AxisMarks(values: [0, 50, 100]) { value in
+                    AxisGridLine()
+                    AxisValueLabel {
+                        if let percent = value.as(Double.self) {
+                            Text(TokenFormat.compact(Int(percent / percentPerToken)))
+                        }
+                    }
+                }
+            } else {
+                AxisMarks(values: [0, 50, 100])
+            }
+        }
         .chartXScale(domain: start...end)
         // Diagonal hatching over the unreachable region — the limit is spent
         // before the window ends, so everything past the crossing is dead
@@ -982,18 +1021,55 @@ struct MeterHistoryView: View {
         return last.normalized
     }
 
+    /// The chart's one tokens→percent conversion: the percent the meter
+    /// gained over the visible window, divided by the tokens spent in it.
+    /// Under this scale the models' combined spend meets the percent
+    /// curve's growth exactly, so every token curve stays perceptually
+    /// contained inside the usage it fed — and the Y axis can speak tokens
+    /// by dividing back. Nil when percent data is missing, flat, or dipped
+    /// through a reset — curves then fall back to busiest-model scaling
+    /// and the axis stays percent.
+    private func percentPerToken(rows: [ModelTokenUsage]) -> Double? {
+        let total = WindowTokens.total(rows).total
+        guard total > 0, let first = points.first, let last = points.last else { return nil }
+        let delta = Double(last.percent - first.percent)
+        guard delta >= 1 else { return nil }
+        return delta / Double(total)
+    }
+
+    /// Layered labels: when the focused model's name and the now label
+    /// would collide, the now label (the lower layer) disappears for the
+    /// moment. Extents are estimated in track space — close enough for a
+    /// yield decision.
+    private func nowEclipsed(
+        by curve: ModelCurve?, now: Date, start: Date, end: Date
+    ) -> Bool {
+        guard let curve, let tip = curve.points.last else { return false }
+        let span = end.timeIntervalSince(start)
+        guard span > 0 else { return false }
+        let xNow = now.timeIntervalSince(start) / span * Self.chartWidth
+        let xLabel = tip.t.timeIntervalSince(start) / span * Self.chartWidth
+        let labelWidth = Double(ModelNames.display(curve.model).count) * 4.5 + 4
+        return abs(xLabel - xNow) < (labelWidth + 18) / 2
+    }
+
     private func modelCurves(
-        rows: [ModelTokenUsage], colors: [String: Color]
+        rows: [ModelTokenUsage], colors: [String: Color], percentPerToken: Double?
     ) -> [ModelCurve] {
         let raw = rows.map { row in (model: row.model, curve: cumulativeCurve(model: row.model)) }
-        let maxTotal = raw.compactMap { $0.curve.last?.total }.max() ?? 0
-        guard maxTotal > 0 else { return [] }
-        let norm = 100.0 / Double(maxTotal)
+        let norm: Double
+        if let percentPerToken {
+            norm = percentPerToken
+        } else {
+            let maxTotal = raw.compactMap { $0.curve.last?.total }.max() ?? 0
+            guard maxTotal > 0 else { return [] }
+            norm = 100.0 / Double(maxTotal)
+        }
         return raw.map { entry in
             ModelCurve(
                 model: entry.model,
                 color: colors[entry.model] ?? .gray,
-                points: entry.curve.map { ($0.t, Double($0.total) * norm) })
+                points: entry.curve.map { ($0.t, min(100, Double($0.total) * norm)) })
         }
     }
 

@@ -101,10 +101,19 @@ the README rather than silently deviating.
   model donut + the same grid scoped to that day. The grid is one shared
   component (`ModelBreakdownGrid`), also the meter popovers' table. The
   popover chart overlays the meter's percent line with EVERY model's
-  cumulative token curve (normalized so the busiest model spans the plot);
+  cumulative token curve, all through ONE shared conversion
+  (percentPerToken = the window's percent gain / its total tokens) so
+  the models' combined spend meets the percent growth exactly and no
+  token curve towers over the usage that contains it (fallback:
+  busiest-model spans the plot, only when percent data is missing/flat);
   one `focusedModel` state drives both the chart (focused curve full
   opacity + area, rest dimmed) and the legend rows — hover either surface
-  and both light, since they render from the same binding. A
+  and both light, since they render from the same binding. While focused,
+  the Y axis re-labels its same gridlines as tokens (percent ÷
+  percentPerToken) and the model's name rides above its curve tip in its
+  color. Chart labels are LAYERED: strip duration > focused-model name >
+  now — lower layers disappear while an upper one overlaps
+  (nowEclipsed's track-space estimate). A
   Sliding|Window span picker (hidden without a live reset; choice
   persisted per meter via @AppStorage `meterPopoverSpan-<id>`, since the
   shared popover would otherwise leak one meter's choice onto the next)
