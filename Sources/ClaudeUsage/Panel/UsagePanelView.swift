@@ -1070,15 +1070,15 @@ struct MeterHistoryView: View {
             } else {
                 // The projected-finish height gets its own labeled mark; a
                 // standard label it would eclipse steps aside rather than
-                // overlap (the projection is the one worth reading).
+                // overlap (the projection is the one worth reading). Only
+                // the LABEL steps aside — its gridline stays.
                 let projection = axisProjection
-                AxisMarks(values: [0, 50, 100].filter { mark in
-                    guard let projection else { return true }
-                    return abs(Double(mark) - projection) >= Self.axisLabelClearance
-                }) { value in
+                AxisMarks(values: [0, 50, 100]) { value in
                     AxisGridLine()
                     AxisValueLabel {
-                        if let percent = value.as(Double.self) {
+                        if let percent = value.as(Double.self),
+                           projection.map({ abs(Double(percent) - $0)
+                               >= Self.axisLabelClearance }) ?? true {
                             Text("\(Int(percent))%")
                                 .fontWeight(.semibold)
                                 .lineLimit(1)
@@ -1113,10 +1113,10 @@ struct MeterHistoryView: View {
         .chartXAxis {
             let length = end.timeIntervalSince(start)
             if length >= 48 * 3600, length <= 8 * 86400 {
-                AxisMarks(values: withoutEclipsed(dayTicks)) { value in
+                AxisMarks(values: dayTicks) { value in
                     AxisGridLine()
                     AxisValueLabel {
-                        if let day = value.as(Date.self) {
+                        if let day = value.as(Date.self), !tickLabelEclipsed(day) {
                             Text(Self.dayName.string(from: day))
                                 .fontWeight(.semibold)
                         }
@@ -1125,10 +1125,10 @@ struct MeterHistoryView: View {
             } else if exhaustDate != nil, length < 48 * 3600 {
                 // Automatic ticks can't be eclipsed, so the crossing's
                 // presence switches this frame to explicit hour marks.
-                AxisMarks(values: withoutEclipsed(hourTicks)) { value in
+                AxisMarks(values: hourTicks) { value in
                     AxisGridLine()
                     AxisValueLabel {
-                        if let date = value.as(Date.self) {
+                        if let date = value.as(Date.self), !tickLabelEclipsed(date) {
                             Text(UsageFormatting.clockTime(date))
                                 .fontWeight(.semibold)
                         }
@@ -1309,21 +1309,20 @@ struct MeterHistoryView: View {
     }
 
     /// The crossing's timestamp owns its stretch of the axis row: base
-    /// ticks whose labels would crowd it step aside rather than overlap.
-    /// The reach follows the anchor — a trailing-anchored label lies almost
-    /// entirely left of its tick, so the eclipse shifts with it.
-    private func withoutEclipsed(_ ticks: [Date]) -> [Date] {
-        guard let exhaust = exhaustDate else { return ticks }
+    /// ticks whose labels would crowd it go silent — the LABEL only, the
+    /// tick's gridline stays on the chart. The reach follows the anchor —
+    /// a trailing-anchored label lies almost entirely left of its tick,
+    /// so the eclipse shifts with it.
+    private func tickLabelEclipsed(_ tick: Date) -> Bool {
+        guard let exhaust = exhaustDate else { return false }
         let (start, end) = domain
         let clearance = end.timeIntervalSince(start) * Self.xAxisClearanceFraction
         let anchor = exhaustLabelAnchor
         let (leftReach, rightReach): (Double, Double) = anchor == .topTrailing
             ? (1.7, 0.4)
             : anchor == .topLeading ? (0.4, 1.7) : (1, 1)
-        return ticks.filter {
-            let offset = $0.timeIntervalSince(exhaust)
-            return offset < -clearance * leftReach || offset > clearance * rightReach
-        }
+        let offset = tick.timeIntervalSince(exhaust)
+        return offset >= -clearance * leftReach && offset <= clearance * rightReach
     }
 
     private struct ActivitySegment: Equatable {

@@ -139,10 +139,13 @@ the README rather than silently deviating.
   "proj. N%" off that curve. When the pace spends the limit before reset,
   a red rule marks the crossing and a Canvas in chartBackground hatches
   the unreachable region diagonally; the crossing's timestamp sits
-  ALWAYS-ON in red in the X axis row — base ticks it would overlap step
-  aside (`withoutEclipsed`, `xAxisClearanceFraction` 0.15 of the domain,
+  ALWAYS-ON in red in the X axis row — base ticks it would overlap
+  silence their LABEL only, never their gridline (`tickLabelEclipsed`,
+  `xAxisClearanceFraction` 0.15 of the domain,
   reach shifted with the label's edge-aware anchor + `fixedSize` so it
-  never truncates at a plot edge), and sub-48h frames swap automatic
+  never truncates at a plot edge; the Y-axis projection eclipse keeps
+  gridlines the same way — eclipse rules on EVERY axis blank labels,
+  not marks), and sub-48h frames swap automatic
   hour ticks for explicit ones while a crossing exists, since automatic
   marks can't be eclipsed.
   Chart annotation labels must neither escape the chart nor sit on the
