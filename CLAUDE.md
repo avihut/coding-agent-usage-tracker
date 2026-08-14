@@ -110,8 +110,12 @@ the README rather than silently deviating.
   "proj. N%" off that curve. When the pace spends the limit before reset,
   a red rule marks the crossing and a Canvas in chartBackground hatches
   the unreachable region diagonally; the crossing's time label shows only
-  while hovering the dead zone (always-on it crowded the axis labels) and
-  fits inside the plot. All spans carry an iStat-style activity strip: a
+  while hovering the dead zone (always-on it crowded the axis labels).
+  Every .top/.bottom chart annotation gets
+  `overflowResolution: .init(x: .fit(to: .plot), y: .fit(to: .plot))` —
+  without it the label escapes the chart and collides with neighboring
+  text (the exhaust label hit the axis labels; the now label hit the
+  stats line above the chart). All spans carry an iStat-style activity strip: a
   band below the plot floor (chart Y domain extends to −8; AreaMarks pin
   yStart: 0 so fills don't bleed into it) — orange segments where
   transcripts logged tokens, faint track otherwise, scoped meters

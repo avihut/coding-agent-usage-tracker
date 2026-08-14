@@ -644,7 +644,10 @@ struct MeterHistoryView: View {
                 RuleMark(x: .value("Now", now))
                     .foregroundStyle(.primary)
                     .lineStyle(StrokeStyle(lineWidth: 1))
-                    .annotation(position: .top, alignment: .center) {
+                    .annotation(
+                        position: .top, alignment: .center, spacing: 2,
+                        overflowResolution: .init(x: .fit(to: .plot), y: .fit(to: .plot))
+                    ) {
                         Text("now").font(.system(size: 8)).foregroundStyle(.primary)
                     }
                 // Where the current pace hits the limit: a red mark with the
