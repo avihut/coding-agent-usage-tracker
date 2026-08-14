@@ -85,8 +85,12 @@ struct ModelBreakdownGrid: View {
         .padding(.horizontal, 4)
         .padding(.vertical, 2)
         .background(
+            // Lit while hovered — and held lit while the row's cost math is
+            // open, so the popover keeps pointing at a marked row even
+            // though the cursor left it.
             RoundedRectangle(cornerRadius: 4)
-                .fill(Color.primary.opacity(hoveredModel == row.model ? 0.07 : 0)))
+                .fill(Color.primary.opacity(
+                    hoveredModel == row.model || costDetail == row.model ? 0.07 : 0)))
         // Hover targets tile the inter-row gaps: half the VStack spacing
         // added around the hit shape, then taken back from layout — the
         // cursor never crosses dead space between rows, so the chart's
@@ -154,13 +158,17 @@ private struct CostMathView: View {
                         .font(.caption)
                     }
                     Divider()
+                    // Both columns total up, so both get named: "total"
+                    // owns the row, "est. cost" sits right before its
+                    // number, echoing the grid column this popover explains.
                     GridRow {
-                        Text("est. cost")
+                        Text("total")
                             .foregroundStyle(.secondary)
                             .gridColumnAlignment(.leading)
                         Text(TokenFormat.compact(row.tally.total))
                             .monospacedDigit()
-                        Text("")
+                        Text("est. cost")
+                            .foregroundStyle(.secondary)
                         Text(UsageFormatting.money(rates.dollars(for: row.tally)))
                             .monospacedDigit()
                     }
