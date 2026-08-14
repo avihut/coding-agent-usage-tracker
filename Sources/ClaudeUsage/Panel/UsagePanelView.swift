@@ -423,6 +423,9 @@ struct MeterHistoryView: View {
 
     private static let chartWidth: CGFloat = 300
     private static let chartHeight: CGFloat = 124
+    /// One width for Y-axis labels in both modes ("100" vs "419M") — the
+    /// axis flipping between percent and tokens must never resize the plot.
+    private static let axisLabelWidth: CGFloat = 30
     /// The Y domain's ceiling — headroom above 100 where the now and
     /// session-duration labels live, atop the data instead of on it and
     /// inside the chart instead of crashing into the stats line. The same
@@ -784,6 +787,8 @@ struct MeterHistoryView: View {
         .chartYScale(domain: Self.stripBottom - 1...Self.plotCeiling)
         // While a model is focused the axis speaks its language: the same
         // gridlines re-labeled as tokens through the shared conversion.
+        // Both modes render labels at one fixed width — token strings are
+        // wider than "100", and a mode flip must never resize the plot.
         .chartYAxis {
             if focusedModel != nil, let percentPerToken {
                 AxisMarks(values: [0, 50, 100]) { value in
@@ -791,11 +796,20 @@ struct MeterHistoryView: View {
                     AxisValueLabel {
                         if let percent = value.as(Double.self) {
                             Text(TokenFormat.compact(Int(percent / percentPerToken)))
+                                .frame(width: Self.axisLabelWidth, alignment: .leading)
                         }
                     }
                 }
             } else {
-                AxisMarks(values: [0, 50, 100])
+                AxisMarks(values: [0, 50, 100]) { value in
+                    AxisGridLine()
+                    AxisValueLabel {
+                        if let percent = value.as(Double.self) {
+                            Text("\(Int(percent))")
+                                .frame(width: Self.axisLabelWidth, alignment: .leading)
+                        }
+                    }
+                }
             }
         }
         .chartXScale(domain: start...end)
