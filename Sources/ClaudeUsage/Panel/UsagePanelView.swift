@@ -455,6 +455,8 @@ struct MeterHistoryView: View {
     @State private var focusedModel: String?
     /// The activity-strip nub under the cursor, if any.
     @State private var hoveredSegment: ActivitySegment?
+    /// The reset line under the cursor — its whole ended window lights up.
+    @State private var hoveredReset: Date?
 
     init(
         meter: Meter, samples: [UsageSample], timeline: [TokenSlot],
@@ -722,7 +724,20 @@ struct MeterHistoryView: View {
             hoverDate = nil
             focusedModel = nil
             hoveredSegment = nil
+            hoveredReset = nil
         }
+    }
+
+    /// The reset line within grabbing distance of the cursor (~4pt of
+    /// track). Reset dates are value-stable across renders, so matching
+    /// the stored hover by value is drift-proof.
+    private func nearestReset(
+        to date: Date, in resets: [Date], start: Date, end: Date
+    ) -> Date? {
+        let tolerance = end.timeIntervalSince(start) * 4 / Double(Self.chartWidth)
+        return resets
+            .min { abs($0.timeIntervalSince(date)) < abs($1.timeIntervalSince(date)) }
+            .flatMap { abs($0.timeIntervalSince(date)) <= tolerance ? $0 : nil }
     }
 
     // MARK: - Chart
@@ -768,14 +783,36 @@ struct MeterHistoryView: View {
             // holds more than one limit — a dashed horizontal pinning where
             // a single limit tops out. The percent line can never cross
             // that line; the token curves honestly can.
+            // Conspicuous on purpose — the same lesson as the now rule:
+            // anything softer vanishes against the dark material. The
+            // hovered line goes full primary and its whole ended window
+            // lights via the curtains below.
             ForEach(series.resets, id: \.timeIntervalSinceReferenceDate) { reset in
-                // .secondary, not .tertiary — the same lesson as the now
-                // rule: anything softer vanishes against the dark material.
                 RuleMark(
                     x: .value("Reset", reset),
                     yStart: .value("Usage", 0), yEnd: .value("Usage", ceiling))
-                .foregroundStyle(.secondary)
-                .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                .foregroundStyle(Color.primary.opacity(hoveredReset == reset ? 1 : 0.7))
+                .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [3, 3]))
+            }
+            // Reset hover: curtain-dim everything outside the limit window
+            // that ended at this line — the undimmed stretch IS the window.
+            if let hoveredReset {
+                let curtain = Color(nsColor: .windowBackgroundColor).opacity(0.5)
+                let windowStart = max(start, hoveredReset.addingTimeInterval(-window))
+                if windowStart > start {
+                    RectangleMark(
+                        xStart: .value("Time", start),
+                        xEnd: .value("Time", windowStart),
+                        yStart: .value("Usage", 0), yEnd: .value("Usage", ceiling))
+                    .foregroundStyle(curtain)
+                }
+                if hoveredReset < end {
+                    RectangleMark(
+                        xStart: .value("Time", hoveredReset),
+                        xEnd: .value("Time", end),
+                        yStart: .value("Usage", 0), yEnd: .value("Usage", ceiling))
+                    .foregroundStyle(curtain)
+                }
             }
             if effectiveSpan == .sliding,
                ceiling > 100 || end.timeIntervalSince(start) > window * 1.01 {
@@ -1052,14 +1089,28 @@ struct MeterHistoryView: View {
                                 }
                                 if hoveredSegment != hit { hoveredSegment = hit }
                                 if focusedModel != nil { focusedModel = nil }
+                                if hoveredReset != nil { hoveredReset = nil }
                             } else {
                                 if hoveredSegment != nil { hoveredSegment = nil }
-                                updateFocus(at: date, yValue: yValue, curves: curves)
+                                // A reset line within reach takes the hover
+                                // before curve focus — its ended window
+                                // lights up instead.
+                                let reset = date.flatMap { d in
+                                    nearestReset(
+                                        to: d, in: series.resets, start: start, end: end)
+                                }
+                                if hoveredReset != reset { hoveredReset = reset }
+                                if reset != nil {
+                                    if focusedModel != nil { focusedModel = nil }
+                                } else {
+                                    updateFocus(at: date, yValue: yValue, curves: curves)
+                                }
                             }
                         case .ended:
                             hoverDate = nil
                             focusedModel = nil
                             hoveredSegment = nil
+                            hoveredReset = nil
                         }
                     }
             }
