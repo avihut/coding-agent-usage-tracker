@@ -6,11 +6,20 @@ struct UsagePanelView: View {
     var store: UsageStore
     /// Wired by StatusItemController: closes the panel, opens the window.
     let onOpenSettings: () -> Void
-    /// The one meter whose popover is up. Shared across rows so opening one
-    /// atomically closes the previous — per-row booleans let a sweep across
-    /// the meters stack overlapping presentations, and racing NSPopovers
-    /// flicker and let the wrong row's popover win.
+    /// Coordinate space the row-frame preferences are measured in — the same
+    /// view the shared popover attaches to, so its anchor rects line up.
+    static let panelSpace = "usage-panel"
+
+    /// The one meter (by id) whose popover is up. A single popover(item:)
+    /// hosted here presents it: per-row popover modifiers raced each other
+    /// on switches — dismissing A while presenting B — and when the new
+    /// presentation lost, SwiftUI wrote false back through the binding and
+    /// nothing stayed open.
     @State private var openMeter: String?
+    /// The meter (by id) the cursor is currently over, if any.
+    @State private var hoveredMeter: String?
+    @State private var hoveringPopover = false
+    @State private var meterFrames: [String: CGRect] = [:]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -24,7 +33,48 @@ struct UsagePanelView: View {
         .padding(14)
         // Wide enough that the breakdown grid never truncates model names.
         .frame(width: 360)
+        .coordinateSpace(name: Self.panelSpace)
+        .onPreferenceChange(MeterFramePreference.self) { meterFrames = $0 }
+        .popover(
+            item: openSelection, attachmentAnchor: openAnchor, arrowEdge: .trailing
+        ) { meter in
+            MeterHistoryView(
+                meter: meter, samples: store.samples,
+                timeline: store.tokenTimeline, pricing: store.pricing)
+                .onHover { inside in
+                    hoveringPopover = inside
+                    if !inside { scheduleHideIfLeft() }
+                }
+        }
         .onAppear { store.scanActivity() }
+    }
+
+    /// The shared popover's item. Resolving through the live snapshot keeps
+    /// the content current across refreshes (Meter.id is positional and
+    /// stable), and a meter vanishing from the API dismisses cleanly.
+    private var openSelection: Binding<Meter?> {
+        Binding(
+            get: {
+                guard let openMeter else { return nil }
+                return store.state.snapshot?.meters.first { $0.id == openMeter }
+            },
+            set: { openMeter = $0?.id })
+    }
+
+    private var openAnchor: PopoverAttachmentAnchor {
+        if let openMeter, let frame = meterFrames[openMeter] {
+            return .rect(.rect(frame))
+        }
+        return .rect(.bounds)
+    }
+
+    /// The leave grace: close only once the cursor has settled on neither a
+    /// meter row nor the popover — travelling between them never drops it.
+    private func scheduleHideIfLeft() {
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(350))
+            if hoveredMeter == nil && !hoveringPopover { openMeter = nil }
+        }
     }
 
     /// Failures lead the panel: with no title row above them anymore, an
@@ -76,10 +126,9 @@ struct UsagePanelView: View {
                     meter: meter,
                     stale: store.state.isStale,
                     burn: store.burnEstimates[meter.label],
-                    samples: store.samples,
-                    timeline: store.tokenTimeline,
-                    pricing: store.pricing,
-                    openMeter: $openMeter)
+                    openMeter: $openMeter,
+                    hoveredMeter: $hoveredMeter,
+                    onLeave: scheduleHideIfLeft)
             }
             if snapshot.meters.isEmpty {
                 Text("No limits reported").font(.callout).foregroundStyle(.secondary)
@@ -194,33 +243,26 @@ struct UsagePanelView: View {
 
 }
 
+/// Rows report their frames (in UsagePanelView.panelSpace) so the shared
+/// popover can anchor to whichever row is open.
+private struct MeterFramePreference: PreferenceKey {
+    static let defaultValue: [String: CGRect] = [:]
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+        value.merge(nextValue()) { _, new in new }
+    }
+}
+
 struct MeterRow: View {
     let meter: Meter
     let stale: Bool
     let burn: BurnEstimate?
-    let samples: [UsageSample]
-    let timeline: [TokenSlot]
-    let pricing: PricingTable
 
-    /// Panel-wide single-popover authority, owned by UsagePanelView.
+    /// Panel-wide single-popover authority and hover tracker, owned by
+    /// UsagePanelView — which also hosts the one shared popover.
     @Binding var openMeter: String?
-    @State private var hoveringRow = false
-    @State private var hoveringPopover = false
-
-    /// This row's view of the shared authority: presented iff it's the open
-    /// one; dismissal (Esc, transient close) releases the slot only if still
-    /// the holder, never stomping a sibling that already took over.
-    private var showHistory: Binding<Bool> {
-        Binding(
-            get: { openMeter == meter.label },
-            set: { shown in
-                if shown {
-                    openMeter = meter.label
-                } else if openMeter == meter.label {
-                    openMeter = nil
-                }
-            })
-    }
+    @Binding var hoveredMeter: String?
+    /// Panel-owned leave grace (cursor on neither a row nor the popover).
+    let onLeave: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -243,45 +285,51 @@ struct MeterRow: View {
             .frame(height: 5)
             captionLine.font(.caption2)
         }
+        // The highlight bleeds a little past the content into the panel
+        // padding, menu-item style; the negative padding hands the space
+        // back so the panel layout doesn't shift.
+        .padding(.vertical, 5)
+        .padding(.horizontal, 7)
         .contentShape(Rectangle())
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color.primary.opacity(lit ? 0.07 : 0)))
+        .background(GeometryReader { geo in
+            Color.clear.preference(
+                key: MeterFramePreference.self,
+                value: [meter.id: geo.frame(in: .named(UsagePanelView.panelSpace))])
+        })
+        .padding(.vertical, -5)
+        .padding(.horizontal, -7)
         // Menu-style lifecycle: the first open waits out a brief dwell so a
-        // cursor merely passing through never pops anything, but while any
-        // popover is up, hovering a sibling row switches to it instantly.
-        // The popover survives the cursor travelling onto it — it hides only
-        // once the cursor has left both the row and the popover for a grace
-        // period.
+        // cursor merely passing through never pops anything (a click skips
+        // the dwell), but while any popover is up, hovering a sibling row
+        // switches to it instantly. Hiding is the panel's leave grace.
         .onHover { inside in
-            hoveringRow = inside
             if inside {
+                hoveredMeter = meter.id
                 if openMeter != nil {
-                    openMeter = meter.label
+                    openMeter = meter.id
                 } else {
                     Task { @MainActor in
                         try? await Task.sleep(for: .milliseconds(120))
-                        if hoveringRow && openMeter == nil { openMeter = meter.label }
+                        if hoveredMeter == meter.id && openMeter == nil {
+                            openMeter = meter.id
+                        }
                     }
                 }
             } else {
-                scheduleHideIfLeft()
+                if hoveredMeter == meter.id { hoveredMeter = nil }
+                onLeave()
             }
         }
-        .popover(isPresented: showHistory, arrowEdge: .trailing) {
-            MeterHistoryView(
-                meter: meter, samples: samples, timeline: timeline, pricing: pricing)
-                .onHover { inside in
-                    hoveringPopover = inside
-                    if !inside { scheduleHideIfLeft() }
-                }
-        }
+        .onTapGesture { openMeter = meter.id }
     }
 
-    private func scheduleHideIfLeft() {
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(350))
-            if !hoveringRow && !hoveringPopover && openMeter == meter.label {
-                openMeter = nil
-            }
-        }
+    /// Hover indicator — also stays lit while this row's popover is up, so
+    /// the open popover visibly belongs to its row.
+    private var lit: Bool {
+        hoveredMeter == meter.id || openMeter == meter.id
     }
 
     /// "resets in 3h 20m · on track — proj. 35% at reset", burn part colored
