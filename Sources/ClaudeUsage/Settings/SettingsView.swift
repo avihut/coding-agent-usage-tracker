@@ -520,8 +520,8 @@ struct ModelFamily: Identifiable, Equatable {
         }
     }
 
-    /// "claude-opus-4-8" → "Opus".
-    private static func familyName(_ id: String) -> String {
+    /// "claude-opus-4-8" → "Opus". Also the model-color ledger's family key.
+    static func familyName(_ id: String) -> String {
         ModelNames.display(id).split(separator: " ").first.map(String.init) ?? id
     }
 

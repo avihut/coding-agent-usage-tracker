@@ -87,8 +87,13 @@ the README rather than silently deviating.
   input/cached/output/cost columns — `uncachedInput` vs `cacheRead`,
   split because agentic harnesses re-read the whole conversation from
   cache every request, and lumping that into "input" misreads as typed
-  prompt volume) doubling as a legend: models wear stable
-  rank-assigned `ModelPalette` colors, hovering a row filters the chart to
+  prompt volume) doubling as a legend: model colors are app-wide and
+  persistent — `ModelPalette.assignment` is the ONLY source; a
+  UserDefaults-backed `ModelColorLedger` (UsageCore, pure, tested)
+  gives each model FAMILY a base hue and each version within it a
+  shade of that hue (kin at a glance, discernable apart), lowest free
+  slot on first sight, kept forever — the launch scan seeds heaviest
+  first so the heaviest family wears Claude orange. Hovering a row filters the chart to
   that model (heatmap re-ramped against `HeatmapLayout.modelMaxTokens`,
   its busiest own day, so light models keep contrast), the 7D bars are
   per-model stacked with band order fixed period-wide, and clicking any

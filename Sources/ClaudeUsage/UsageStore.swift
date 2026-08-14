@@ -192,6 +192,17 @@ final class UsageStore {
             await MainActor.run {
                 self?.activity = activity
                 self?.tokenTimeline = scan.timeline
+                // Seed the persistent model-color ledger in overall usage
+                // order, so first-ever assignment doesn't depend on which
+                // chart happens to render first.
+                var totals: [String: Int] = [:]
+                for day in activity {
+                    for (model, tally) in day.models {
+                        totals[model, default: 0] += tally.total
+                    }
+                }
+                _ = ModelPalette.assignment(
+                    for: totals.sorted { $0.value > $1.value }.map(\.key))
             }
         }
     }
