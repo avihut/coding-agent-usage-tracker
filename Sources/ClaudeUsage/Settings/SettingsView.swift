@@ -26,17 +26,36 @@ enum SettingsBindings {
     }
 
     /// Registration happens only when the user flips this toggle (spec §10).
+    @MainActor
     static func launchAtLogin() -> Binding<Bool> {
         Binding(
-            get: { SMAppService.mainApp.status == .enabled },
+            get: { LoginItemState.shared.enabled },
             set: { enabled in
                 if enabled {
                     try? SMAppService.mainApp.register()
                 } else {
                     try? SMAppService.mainApp.unregister()
                 }
+                // Read back rather than trust the flip — registration can
+                // land as .requiresApproval or fail quietly.
+                LoginItemState.shared.refresh()
             }
         )
+    }
+}
+
+/// Observable mirror of the login-item registration. SMAppService posts no
+/// change notifications, and a Binding computed straight off it never
+/// invalidates SwiftUI — the ⋯ menu's pre-built NSMenu kept rendering its
+/// first read, so the checkmark never appeared. Only the mirror is new;
+/// registration still happens exclusively on the user's flip.
+@MainActor @Observable
+final class LoginItemState {
+    static let shared = LoginItemState()
+    private(set) var enabled = SMAppService.mainApp.status == .enabled
+
+    func refresh() {
+        enabled = SMAppService.mainApp.status == .enabled
     }
 }
 
@@ -288,6 +307,7 @@ private struct GeneralSettingsPane: View {
             }
         }
         .onAppear {
+            LoginItemState.shared.refresh()
             let thresholds = UsageStore.currentThresholds()
             warningPercent = thresholds.warningPercent
             criticalPercent = thresholds.criticalPercent

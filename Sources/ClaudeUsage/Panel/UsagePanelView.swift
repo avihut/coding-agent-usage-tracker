@@ -51,6 +51,12 @@ struct UsagePanelView: View {
                 }
         }
         .onAppear { store.scanActivity() }
+        // Re-sync the login-item mirror between panel sessions: the user
+        // can flip registration in Settings or System Settings while the
+        // panel sits closed-but-alive (onAppear won't fire again).
+        .onReceive(NotificationCenter.default.publisher(for: .panelDidClose)) { _ in
+            LoginItemState.shared.refresh()
+        }
     }
 
     /// The shared popover's item. Resolving through the live snapshot keeps
