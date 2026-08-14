@@ -82,9 +82,17 @@ final class StatusItemController: NSResponder {
             try? await Task.sleep(for: .milliseconds(350))
             guard let self, !Task.isCancelled,
                   !self.popover.isShown, !self.hoverPopover.isShown,
-                  let button = self.statusItem.button
+                  let button = self.statusItem.button,
+                  let meter = self.store.state.snapshot?.meters.first(where: { $0.rank == 0 })
             else { return }
-            let host = NSHostingController(rootView: HoverGraphView(samples: self.store.samples))
+            // The 5h session meter's full popover — the same view as
+            // clicking its row in the panel, so it wakes with the span
+            // and frame pickers exactly as last set (they share the
+            // per-meter @AppStorage keys).
+            let host = NSHostingController(rootView: MeterHistoryView(
+                meter: meter, samples: self.store.samples,
+                timeline: self.store.tokenTimeline, pricing: self.store.pricing,
+                prediction: self.store.predictions[meter.label]))
             host.sizingOptions = .preferredContentSize
             self.hoverPopover.contentViewController = host
             self.hoverPopover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
