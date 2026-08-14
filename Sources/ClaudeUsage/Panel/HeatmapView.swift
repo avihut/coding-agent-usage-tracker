@@ -42,8 +42,17 @@ struct HeatmapView: View {
     @State private var hoveredDay: Date?
     @State private var hoveredModel: String?
     @State private var selectedDay: Date?
-    /// Which way the last day-step arrow pointed — the slide's direction.
-    @State private var stepDirection = 1
+    /// Mid-slide double buffer: the day just left behind, its prebuilt
+    /// rows, and which way it exits.
+    @State private var outgoingStep: (entry: DailyActivity, rows: [ModelTokenUsage], direction: Int)?
+    /// The incoming day's render offset — parked at ±daySlideWidth on
+    /// kickoff, animated to 0; the outgoing view derives its offset from
+    /// the same value, so the pair always moves in lockstep.
+    @State private var slideX: CGFloat = 0
+    /// Invalidates a superseded slide's cleanup when the arrows are mashed.
+    @State private var stepToken = 0
+    /// The panel's content width — what a full slide traverses.
+    private static let daySlideWidth: CGFloat = 332
     @State private var tipSize: CGSize = .zero
     /// Rebuilt only when the activity or the period changes — never per cell
     /// and never on hover. See `HeatmapLayout`.
@@ -118,6 +127,8 @@ struct HeatmapView: View {
             selectedDay = nil
             hoveredModel = nil
             hoveredDay = nil
+            outgoingStep = nil
+            slideX = 0
         }
     }
 
@@ -296,18 +307,27 @@ struct HeatmapView: View {
     }
 
     /// Flanks the ring flush at the container edge, vertically centered on
-    /// the ring zone (or the shorter no-data note). Setting the direction
-    /// and stepping are two transactions on purpose: the outgoing view's
-    /// slide edge is whatever its transition said on its LAST render, so
-    /// the direction must land in a render of its own before the day flips
-    /// — folded into one update, reversing direction would slide the old
-    /// chart out the wrong side.
+    /// the ring zone (or the shorter no-data note). Kickoff and glide are
+    /// separate transactions: the plain sets mount the incoming day
+    /// offscreen and park the outgoing at rest, then withAnimation moves
+    /// only `slideX` — pressing ‹ sends the current chart out to the
+    /// right while the earlier day arrives from the left.
     @ViewBuilder
-    private func dayStepArrow(for entry: DailyActivity, direction: Int, hasRing: Bool) -> some View {
+    private func dayStepArrow(
+        for entry: DailyActivity, rows: [ModelTokenUsage], direction: Int
+    ) -> some View {
         if let target = neighborDay(of: entry.day, direction: direction) {
             Button {
-                stepDirection = direction
-                Task { @MainActor in drill(into: target) }
+                outgoingStep = (entry, rows, direction)
+                slideX = CGFloat(direction) * Self.daySlideWidth
+                drill(into: target)
+                stepToken += 1
+                let token = stepToken
+                withAnimation(Self.drillAnimation) {
+                    slideX = 0
+                } completion: {
+                    if token == stepToken { outgoingStep = nil }
+                }
             } label: {
                 Image(systemName: direction < 0
                     ? "chevron.left.circle.fill" : "chevron.right.circle.fill")
@@ -317,18 +337,8 @@ struct HeatmapView: View {
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
-            .frame(height: hasRing ? 132 : 48)
+            .frame(height: rows.isEmpty ? 48 : 132)
         }
-    }
-
-    /// Day-to-day steps slide in the arrow's direction; the drill push/pop
-    /// slide belongs to the outer container transition.
-    private var dayStepTransition: AnyTransition {
-        let forward = stepDirection >= 0
-        return .asymmetric(
-            insertion: .move(edge: forward ? .trailing : .leading).combined(with: .opacity),
-            removal: .move(edge: forward ? .leading : .trailing).combined(with: .opacity))
-            .animation(Self.drillAnimation)
     }
 
     private func dayContent(_ entry: DailyActivity) -> some View {
@@ -338,6 +348,8 @@ struct HeatmapView: View {
                 Button {
                     hoveredModel = nil
                     selectedDay = nil
+                    outgoingStep = nil
+                    slideX = 0
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "chevron.left")
@@ -352,21 +364,27 @@ struct HeatmapView: View {
                 dimensionPicker
             }
             // The day's detail slides sideways between days while the
-            // header and arrows hold still — same transition-attached
-            // animation discipline as the drill itself, so the popover
-            // height never animates per frame. The arrows ride overlays
-            // flush at the container edges, centered on the ring.
+            // header and arrows hold still. A double-buffered OFFSET
+            // slide, not a transition: id-swap transitions animated only
+            // their opacity here (geometry needs an animated transaction),
+            // and offsets are render transforms — withAnimation can drive
+            // them without ever animating the popover's height, which
+            // still steps discretely. The arrows ride overlays flush at
+            // the container edges, centered on the ring.
             ZStack(alignment: .topLeading) {
+                if let outgoing = outgoingStep {
+                    dayDetail(outgoing.entry, rows: outgoing.rows)
+                        .offset(x: slideX - CGFloat(outgoing.direction) * Self.daySlideWidth)
+                }
                 dayDetail(entry, rows: rows)
-                    .id(entry.day)
-                    .transition(dayStepTransition)
+                    .offset(x: slideX)
             }
             .clipped()
             .overlay(alignment: .topLeading) {
-                dayStepArrow(for: entry, direction: -1, hasRing: !rows.isEmpty)
+                dayStepArrow(for: entry, rows: rows, direction: -1)
             }
             .overlay(alignment: .topTrailing) {
-                dayStepArrow(for: entry, direction: 1, hasRing: !rows.isEmpty)
+                dayStepArrow(for: entry, rows: rows, direction: 1)
             }
         }
     }
