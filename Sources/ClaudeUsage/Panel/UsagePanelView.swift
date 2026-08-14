@@ -404,10 +404,49 @@ struct MeterHistoryView: View {
         case window = "Window"
     }
 
+    /// The Sliding span's trailing frame. Week-to-date follows the
+    /// calendar locale's first weekday (Sunday or Monday).
+    enum SlidingFrame: String, CaseIterable {
+        case h5 = "5h"
+        case h12 = "12h"
+        case h24 = "24h"
+        case week = "wk"
+        case d7 = "7d"
+        case d30 = "30d"
+
+        func length(now: Date) -> TimeInterval {
+            switch self {
+            case .h5: return 5 * 3600
+            case .h12: return 12 * 3600
+            case .h24: return 24 * 3600
+            case .week:
+                let start = Calendar.current.dateInterval(of: .weekOfYear, for: now)?.start
+                // A week only seconds old still deserves a visible frame.
+                return max(3600, now.timeIntervalSince(start ?? now))
+            case .d7: return 7 * 86400
+            case .d30: return 30 * 86400
+            }
+        }
+
+        var label: String {
+            switch self {
+            case .h5: return "last 5h"
+            case .h12: return "last 12h"
+            case .h24: return "last 24h"
+            case .week: return "this week"
+            case .d7: return "last 7 days"
+            case .d30: return "last 30 days"
+            }
+        }
+    }
+
     /// The span choice, remembered per meter across popover dismissals and
     /// relaunches — the single shared popover would otherwise leak one
     /// meter's choice onto the next while sweeping rows.
     @AppStorage private var span: Span
+    /// The Sliding frame, remembered the same way; defaults to the
+    /// meter's native window scale.
+    @AppStorage private var slidingFrame: SlidingFrame
     /// Idle tolerance for the activity strip — adjustable in Settings.
     @AppStorage(ActivityGrace.storageKey)
     private var graceSeconds = ActivityGrace.defaultSeconds
@@ -427,6 +466,8 @@ struct MeterHistoryView: View {
         self.pricing = pricing
         self.prediction = prediction
         _span = AppStorage(wrappedValue: .sliding, "meterPopoverSpan-\(meter.id)")
+        _slidingFrame = AppStorage(
+            wrappedValue: meter.rank == 0 ? .h5 : .d7, "meterSlidingFrame-\(meter.id)")
     }
 
     private static let chartWidth: CGFloat = 300
@@ -464,13 +505,13 @@ struct MeterHistoryView: View {
             return (reset.addingTimeInterval(-window), reset)
         }
         let now = Date()
-        return (now.addingTimeInterval(-window), now)
+        return (now.addingTimeInterval(-slidingFrame.length(now: now)), now)
     }
 
     private var spanLabel: String {
         switch effectiveSpan {
         case .window: meter.rank == 0 ? "this session" : "this week"
-        case .sliding: meter.rank == 0 ? "last 5h" : "last 7 days"
+        case .sliding: slidingFrame.label
         }
     }
 
@@ -581,6 +622,16 @@ struct MeterHistoryView: View {
                         options: Span.allCases.map { ($0.rawValue, $0) })
                 } else {
                     Text(spanLabel).font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            // The Sliding span picks its trailing frame; the Window span's
+            // frame IS the limit window, so the row hides there.
+            if effectiveSpan == .sliding {
+                HStack {
+                    Spacer()
+                    SegmentedPicker(
+                        title: "Frame", selection: $slidingFrame,
+                        options: SlidingFrame.allCases.map { ($0.rawValue, $0) })
                 }
             }
             // Fixed-height stats line: window totals normally, the focused
@@ -1053,6 +1104,10 @@ struct MeterHistoryView: View {
     /// tokens (scoped meters count only their own model), bucketed so a week
     /// of minute slots collapses to a handful of marks.
     private func activitySegments(now: Date) -> [ActivitySegment] {
+        // Month scale: sessions are minutes-to-hours wide — sub-pixel
+        // slivers or misleading bucket-wide blobs at this zoom. The strip
+        // goes quiet rather than cluttered; the heatmap owns that scale.
+        if effectiveSpan == .sliding, slidingFrame == .d30 { return [] }
         let start = domain.start
         let end = min(domain.end, now)
         let span = end.timeIntervalSince(start)
