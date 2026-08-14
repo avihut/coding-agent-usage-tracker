@@ -9,8 +9,9 @@ struct UsagePanelView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            header
+            errorBlock
             content
+            statusRow
             Divider()
             HeatmapView(activity: store.activity, pricing: store.pricing)
             footer
@@ -21,26 +22,9 @@ struct UsagePanelView: View {
         .onAppear { store.scanActivity() }
     }
 
-    @ViewBuilder private var header: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Claude Usage").font(.headline)
-                Text("v\(AppIdentity.version)")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                Spacer()
-                if case .cached(let snapshot, _) = store.state {
-                    Text("cached \(UsageFormatting.clockTime(snapshot.fetchedAt))")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                }
-            }
-            if let plan = store.state.snapshot?.plan?.displayLabel {
-                Text(plan)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
+    /// Failures lead the panel: with no title row above them anymore, an
+    /// error and its hint are the first thing the eye lands on.
+    @ViewBuilder private var errorBlock: some View {
         if let error = store.state.error {
             VStack(alignment: .leading, spacing: 2) {
                 Text(error.shortText)
@@ -48,6 +32,27 @@ struct UsagePanelView: View {
                     .foregroundStyle(store.state.snapshot == nil ? AnyShapeStyle(.red) : AnyShapeStyle(.secondary))
                 if let hint = error.hint {
                     Text(hint).font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    /// Pipeline state right under the meters it describes — fetch time,
+    /// next-poll countdown, budget gauge — with the plan label flushed to
+    /// the opposite end of the same line.
+    @ViewBuilder private var statusRow: some View {
+        if store.state.snapshot != nil || store.nextRefreshAt != nil {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    statusLine(now: context.date)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if let plan = store.state.snapshot?.plan?.displayLabel {
+                    Text(plan)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
         }
@@ -82,17 +87,20 @@ struct UsagePanelView: View {
                 }
             }
         case .unavailable:
-            EmptyView() // the header already shows the error + hint
+            EmptyView() // the error block up top already shows the error + hint
         }
     }
 
     @ViewBuilder private var footer: some View {
         Divider()
         HStack(spacing: 12) {
-            TimelineView(.periodic(from: .now, by: 1)) { context in
-                Text(statusLine(now: context.date))
-                    .font(.caption)
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text("Claude Usage")
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
+                Text("v\(AppIdentity.version)")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
             Spacer()
             Button {
@@ -135,22 +143,29 @@ struct UsagePanelView: View {
         }
     }
 
-    private func statusLine(now: Date) -> String {
-        var parts: [String] = []
+    private func statusLine(now: Date) -> Text {
+        var parts: [Text] = []
         if let fetchedAt = store.state.snapshot?.fetchedAt {
-            parts.append("Updated \(UsageFormatting.clockTime(fetchedAt))")
+            let stamp = UsageFormatting.clockTime(fetchedAt)
+            // The stale badge lives here now that there's no header for it.
+            parts.append(
+                store.state.isStale
+                    ? Text("cached \(stamp)").foregroundStyle(.orange)
+                    : Text("Updated \(stamp)"))
         }
         if let next = store.nextRefreshAt {
-            parts.append(UsageFormatting.countdownText(to: next, now: now))
+            parts.append(Text(UsageFormatting.countdownText(to: next, now: now)))
         }
         // Why "next in 20m" instead of 5: quiet decayed the cadence. Activity
         // (or usage moving) snaps it back — worth a word of transparency.
         let pace = store.paceMultiplier(now: now)
-        if pace > 1 { parts.append("idle ×\(pace)") }
+        if pace > 1 { parts.append(Text("idle ×\(pace)")) }
         // Surface the API budget only once it's half spent — quiet otherwise.
         let budget = store.apiBudget(now: now)
-        if budget.fraction >= 0.5 { parts.append("API \(budget.used)/\(budget.ceiling)h") }
-        return parts.joined(separator: " · ")
+        if budget.fraction >= 0.5 { parts.append(Text("API \(budget.used)/\(budget.ceiling)h")) }
+        guard var line = parts.first else { return Text("") }
+        for part in parts.dropFirst() { line = line + Text(" · ") + part }
+        return line
     }
 
     /// Orange once the hour's requests reach 80% of the estimated budget,

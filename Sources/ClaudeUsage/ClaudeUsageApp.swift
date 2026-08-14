@@ -23,6 +23,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if CommandLine.arguments.contains("--settings") {
             controller?.showSettings(
                 pane: CommandLine.arguments.contains("--pane-cost") ? .apiCost : .general)
+        } else if CommandLine.arguments.contains("--panel") {
+            controller?.showPanel()
         }
     }
 }

@@ -126,9 +126,12 @@ the README rather than silently deviating.
   mis-measure wrapped text in custom rows (the token-class grid overlapped
   its neighbors). The panel's ⋯ menu and the General pane share
   `SettingsBindings` so both surfaces stay in lockstep. `ClaudeUsage
-  --settings` opens the window at launch — the verification hatch, since
-  menus can't be scripted (scratchpad axdump/axpress dump frames and press
-  controls for layout checks).
+  --settings` opens the window at launch and `--panel` opens the main
+  panel — the verification hatches, since menus and the status item can't
+  be scripted (scratchpad axdump/axpress dump frames and press controls
+  for layout checks). Popover windows never appear in AXWindows, and any
+  real user click dismisses the panel — don't AX-verify it while the user
+  is mousing.
 - Plan identity: `CredentialsParser` also surfaces `subscriptionType` /
   `rateLimitTier` (`PlanInfo` — metadata beside the token, never the
   refresh token); it rides `Snapshot.plan` and renders under the panel

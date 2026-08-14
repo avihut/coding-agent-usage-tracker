@@ -117,6 +117,14 @@ final class StatusItemController: NSResponder {
         }
     }
 
+    /// Opens the main panel if it isn't showing — the `--panel` launch
+    /// hatch's entry point: synthetic AX clicks on the status item proved
+    /// unreliable, and the popover never registers in AXWindows anyway.
+    func showPanel() {
+        guard !popover.isShown else { return }
+        togglePopover(nil)
+    }
+
     /// Opens the settings window; also the `--settings` launch hatch, since
     /// the ⋯ menu itself can't be scripted for verification. `pane` only
     /// matters on the first show (the hatch always launches fresh).
