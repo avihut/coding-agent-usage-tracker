@@ -177,6 +177,9 @@ private struct GeneralSettingsPane: View {
     /// written back to — ~/.claude/settings.json.
     @State private var retentionDays = ClaudeCodeSettings.defaultDays
     @State private var retentionWriteFailed = false
+    /// What the transcripts weigh on disk, measured once per appearance
+    /// off the main thread.
+    @State private var diskUsage: TranscriptDiskUsage?
 
     var body: some View {
         SettingsPaneScroll {
@@ -233,8 +236,17 @@ private struct GeneralSettingsPane: View {
                             .font(.caption2)
                             .foregroundStyle(.red)
                     }
+                    if let diskUsage {
+                        Divider()
+                        infoRow(
+                            "On disk now",
+                            "\(Self.byteText(diskUsage.bytes)) · \(diskUsage.days) days of transcripts")
+                        infoRow(
+                            "Projected at \(retentionLabel(retentionDays))",
+                            "≈ \(Self.byteText(diskUsage.projectedBytes(forDays: retentionDays)))")
+                    }
                 }
-                note("How long Claude Code keeps local transcripts (its cleanupPeriodDays setting — this control reads and writes ~/.claude/settings.json directly, the app's one write there). The heatmap and per-model history come from those transcripts, so longer retention keeps more history. Takes effect when Claude Code next runs.")
+                note("How long Claude Code keeps local transcripts (its cleanupPeriodDays setting — this control reads and writes ~/.claude/settings.json directly, the app's one write there). The heatmap and per-model history come from those transcripts, so longer retention keeps more history — and more disk: the projection scales what today's holdings weigh per day to the chosen window. Takes effect when Claude Code next runs.")
             }
             SettingsCard("Startup") {
                 Toggle("Launch at login", isOn: SettingsBindings.launchAtLogin())
@@ -251,7 +263,23 @@ private struct GeneralSettingsPane: View {
         .onAppear {
             retentionDays = ClaudeCodeSettings.standard().readCleanupPeriodDays()
                 ?? ClaudeCodeSettings.defaultDays
+            let root = FileManager.default.homeDirectoryForCurrentUser
+                .appending(path: ".claude/projects")
+            Task.detached(priority: .utility) {
+                let usage = TranscriptDiskUsage.measure(root: root)
+                await MainActor.run { diskUsage = usage }
+            }
         }
+    }
+
+    private static let byteFormatter: ByteCountFormatter = {
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        return formatter
+    }()
+
+    private static func byteText(_ bytes: Int64) -> String {
+        byteFormatter.string(fromByteCount: bytes)
     }
 
     /// Selection writes straight through to settings.json — binding-set,
