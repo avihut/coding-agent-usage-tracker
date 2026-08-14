@@ -39,13 +39,10 @@ struct CostPlaygroundView: View {
                 }
                 .fixedSize()
                 Spacer()
-                Picker("Cache TTL", selection: $oneHourTTL) {
-                    Text("1h · subscription").tag(true)
-                    Text("5m · API key").tag(false)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .fixedSize()
+                SegmentedPicker(
+                    title: "Cache TTL", selection: $oneHourTTL,
+                    options: [("1h · subscription", true), ("5m · API key", false)],
+                    size: .regular)
             }
             dial(
                 "Agent steps", value: $steps, range: 1...300, step: 1,

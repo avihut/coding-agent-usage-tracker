@@ -495,15 +495,9 @@ struct MeterHistoryView: View {
                 Text(meter.label).font(.caption.bold())
                 Spacer()
                 if liveReset != nil {
-                    Picker("Span", selection: $span) {
-                        ForEach(Span.allCases, id: \.self) { choice in
-                            Text(choice.rawValue).tag(choice)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .controlSize(.mini)
-                    .labelsHidden()
-                    .fixedSize()
+                    SegmentedPicker(
+                        title: "Span", selection: $span,
+                        options: Span.allCases.map { ($0.rawValue, $0) })
                 } else {
                     Text(spanLabel).font(.caption2).foregroundStyle(.secondary)
                 }
@@ -586,15 +580,7 @@ struct MeterHistoryView: View {
                     xStart: .value("Time", segment.start), xEnd: .value("Time", segment.end),
                     yStart: .value("Usage", Self.stripBottom),
                     yEnd: .value("Usage", Self.stripTop))
-                .foregroundStyle(orange.opacity(hoveredSegment == segment ? 1 : 0.7))
-            }
-            // Hovering a nub lifts its whole time slice out of the graph.
-            if let hoveredSegment {
-                RectangleMark(
-                    xStart: .value("Time", hoveredSegment.start),
-                    xEnd: .value("Time", hoveredSegment.end),
-                    yStart: .value("Usage", 0), yEnd: .value("Usage", 100))
-                .foregroundStyle(orange.opacity(0.08))
+                .foregroundStyle(nubColor(segment).opacity(nubOpacity(segment)))
             }
             // Model curves underlay the percent line; the focused one draws
             // last so its full-opacity line sits on top of its dimmed peers.
@@ -674,6 +660,27 @@ struct MeterHistoryView: View {
                                     .foregroundStyle(.red)
                             }
                         }
+                }
+            }
+            // Nub hover: dimming curtains cover the graph outside the
+            // hovered slice — the slice keeps full strength, which IS the
+            // highlight. Nubs dim via their own opacity (curtains stop at
+            // the plot floor).
+            if let hoveredSegment {
+                let curtain = Color(nsColor: .windowBackgroundColor).opacity(0.5)
+                if hoveredSegment.start > start {
+                    RectangleMark(
+                        xStart: .value("Time", start),
+                        xEnd: .value("Time", hoveredSegment.start),
+                        yStart: .value("Usage", 0), yEnd: .value("Usage", 100))
+                    .foregroundStyle(curtain)
+                }
+                if hoveredSegment.end < end {
+                    RectangleMark(
+                        xStart: .value("Time", hoveredSegment.end),
+                        xEnd: .value("Time", end),
+                        yStart: .value("Usage", 0), yEnd: .value("Usage", 100))
+                    .foregroundStyle(curtain)
                 }
             }
             if let readout {
@@ -770,14 +777,34 @@ struct MeterHistoryView: View {
     }
 
     private struct ActivitySegment: Equatable {
+        enum Kind: Equatable {
+            case active
+            /// The dead stretch past the projected limit crossing.
+            case exhausted
+        }
+
         let start: Date
         let end: Date
+        var kind: Kind = .active
     }
 
-    /// "Wed 09:15 – Wed 11:30 · active 2 hr 15 min" while a nub is hovered.
+    private func nubColor(_ segment: ActivitySegment) -> Color {
+        segment.kind == .exhausted ? .red : orange
+    }
+
+    /// The hovered nub at full strength; with any nub hovered, its peers
+    /// recede along with the curtained graph above them.
+    private func nubOpacity(_ segment: ActivitySegment) -> Double {
+        guard let hoveredSegment else { return 0.7 }
+        return segment == hoveredSegment ? 1 : 0.25
+    }
+
+    /// "Wed 09:15 – Wed 11:30 · active 2 hr 15 min" while a nub is hovered;
+    /// the exhausted nub reads "unreachable" instead.
     private var segmentReadout: String? {
         hoveredSegment.map { segment in
-            "\(timeLabel(segment.start)) – \(timeLabel(segment.end)) · active "
+            let verb = segment.kind == .exhausted ? "unreachable" : "active"
+            return "\(timeLabel(segment.start)) – \(timeLabel(segment.end)) · \(verb) "
                 + UsageFormatting.duration(segment.end.timeIntervalSince(segment.start))
         }
     }
@@ -812,6 +839,12 @@ struct MeterHistoryView: View {
         if let run = runStart {
             segments.append(ActivitySegment(
                 start: start.addingTimeInterval(Double(run) * bucket), end: end))
+        }
+        // The dead stretch gets its own nub at the strip's end, so the
+        // unreachable region reads from the strip too.
+        if let exhaust = exhaustDate {
+            segments.append(ActivitySegment(
+                start: exhaust, end: domain.end, kind: .exhausted))
         }
         return segments
     }

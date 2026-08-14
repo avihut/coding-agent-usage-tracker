@@ -116,9 +116,15 @@ the README rather than silently deviating.
   yStart: 0 so fills don't bleed into it) — orange segments where
   transcripts logged tokens, faint track otherwise, scoped meters
   counting only their own model. Hovering below the plot floor hands the
-  hover to the strip: the nub brightens, its full-height time slice
-  tints the graph, and the readout line reports the stretch's range and
-  duration; curve focus and point readouts stand down there. Hover-driven stats lines are fixed-height by
+  hover to the strip: the nub brightens, its peers recede, dimming
+  curtains (windowBackgroundColor 0.5) cover the graph outside the
+  hovered slice — the undimmed slice IS the highlight — and the readout
+  line reports the stretch's range and duration; curve focus and point
+  readouts stand down there. The dead stretch past the exhaustion
+  crossing gets a red nub of its own ("unreachable" in the readout).
+  Segmented pickers are built ONLY through the shared `SegmentedPicker`
+  (Sources/ClaudeUsage/SegmentedPicker.swift — mini/bare/semibold, one
+  place for the style; settings panes pass size: .regular). Hover-driven stats lines are fixed-height by
   design — swapping text must never reflow the layout under the cursor —
   and today's cell/bar carries a subtle ring (grids only — the 7D bar's
   bold weekday label suffices). A Tokens|Cost segmented picker beside the

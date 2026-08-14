@@ -128,26 +128,18 @@ struct HeatmapView: View {
             Text("Activity").font(.caption.bold())
             Spacer()
             dimensionPicker
-            Picker("Period", selection: periodBinding) {
-                ForEach(Period.allCases) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .controlSize(.mini)
-            .labelsHidden()
-            .fixedSize()
+            SegmentedPicker(
+                title: "Period", selection: periodBinding,
+                options: Period.allCases.map { ($0.rawValue, $0) })
         }
     }
 
     /// Shared by the period header and the day drill-down, so the
     /// tokens-or-cost lens survives the drill.
     private var dimensionPicker: some View {
-        Picker("Dimension", selection: animatedDimension) {
-            ForEach(Dimension.allCases) { Text($0.rawValue).tag($0) }
-        }
-        .pickerStyle(.segmented)
-        .controlSize(.mini)
-        .labelsHidden()
-        .fixedSize()
+        SegmentedPicker(
+            title: "Dimension", selection: animatedDimension,
+            options: Dimension.allCases.map { ($0.rawValue, $0) })
     }
 
     /// Dimension flips animate, so the day ring's sectors sweep to their
