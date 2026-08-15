@@ -263,14 +263,23 @@ struct HeatmapView: View {
     /// its reserved width at zero opacity rather than vanishing, and the
     /// chart never changes size between pages. All shows everything and
     /// renders no arrows at all.
+    /// One pager step, shared by the arrows and the two-finger swipe:
+    /// direction < 0 = an earlier window, > 0 = later. No-ops at the edges,
+    /// so a swipe on the current window simply does nothing.
+    private func pageStep(_ direction: Int) {
+        guard period != .all else { return }
+        guard direction < 0 ? layout.hasOlder : pageOffset > 0 else { return }
+        pageTick += 1
+        pageOffset += direction < 0 ? 1 : -1
+        rebuildLayout(for: period)
+    }
+
     @ViewBuilder
     private func periodStepArrow(direction: Int) -> some View {
         if period != .all {
             let available = direction < 0 ? layout.hasOlder : pageOffset > 0
             Button {
-                pageTick += 1
-                pageOffset += direction < 0 ? 1 : -1
-                rebuildLayout(for: period)
+                pageStep(direction)
             } label: {
                 Image(systemName: direction < 0
                     ? "chevron.left.circle.fill" : "chevron.right.circle.fill")
@@ -342,6 +351,13 @@ struct HeatmapView: View {
             // heights themselves are page-invariant: the bars sit in a
             // fixed frame and the 30D calendar pads to six week rows.
             .animation(Self.drillAnimation, value: pageTick)
+            // Two-finger swipes page like the arrows do (the value-keyed
+            // animation above morphs either way). The All grid's own
+            // horizontal scroller sits deeper and keeps its events;
+            // pageStep guards All anyway.
+            .background(HorizontalSwipeCatcher { direction in
+                pageStep(direction)
+            })
             if period == .week {
                 weeklyTrendCaption
             }
@@ -543,18 +559,9 @@ struct HeatmapView: View {
     private func dayStepArrow(
         for entry: DailyActivity, rows: [ModelTokenUsage], direction: Int
     ) -> some View {
-        if let target = neighborDay(of: entry.day, direction: direction) {
+        if neighborDay(of: entry.day, direction: direction) != nil {
             Button {
-                outgoingStep = (entry, rows, direction)
-                slideX = CGFloat(direction) * Self.daySlideWidth
-                drill(into: target)
-                stepToken += 1
-                let token = stepToken
-                withAnimation(Self.drillAnimation) {
-                    slideX = 0
-                } completion: {
-                    if token == stepToken { outgoingStep = nil }
-                }
+                stepDay(from: entry, rows: rows, direction: direction)
             } label: {
                 Image(systemName: direction < 0
                     ? "chevron.left.circle.fill" : "chevron.right.circle.fill")
@@ -568,6 +575,23 @@ struct HeatmapView: View {
             // not contract the popover or move the arrow out from under the
             // cursor mid-click-streak.
             .frame(height: 132)
+        }
+    }
+
+    /// One day step, shared by the arrows and the two-finger swipe. Kickoff
+    /// and glide stay separate transactions (the double-buffered offset
+    /// slide); no-ops at the span's edge.
+    private func stepDay(from entry: DailyActivity, rows: [ModelTokenUsage], direction: Int) {
+        guard let target = neighborDay(of: entry.day, direction: direction) else { return }
+        outgoingStep = (entry, rows, direction)
+        slideX = CGFloat(direction) * Self.daySlideWidth
+        drill(into: target)
+        stepToken += 1
+        let token = stepToken
+        withAnimation(Self.drillAnimation) {
+            slideX = 0
+        } completion: {
+            if token == stepToken { outgoingStep = nil }
         }
     }
 
@@ -628,6 +652,11 @@ struct HeatmapView: View {
             .overlay(alignment: .topTrailing) {
                 dayStepArrow(for: entry, rows: rows, direction: 1)
             }
+            // Two-finger swipes ride the same double-buffered slide as the
+            // arrows.
+            .background(HorizontalSwipeCatcher { direction in
+                stepDay(from: entry, rows: rows, direction: direction)
+            })
         }
     }
 

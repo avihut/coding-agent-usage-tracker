@@ -198,7 +198,20 @@ the README rather than silently deviating.
   DayTally), title = scrubbed first user_message, kind always
   .interactive (rollouts carry no headless marker), detail rows from
   user_message + token_count deltas. Gemini stays sessionless.
-- WINDOW LEDGER (2026-08-16 v0.55.0, user-directed: past weeks must be
+- SWIPE NAVIGATION (2026-08-16 v0.60.0): `HorizontalSwipeCatcher`
+  (Panel/) turns a two-finger horizontal trackpad swipe into ONE
+  arrow-equivalent step (threshold 55pt, fired once per gesture phase
+  cycle, momentum/mouse-wheel events never step). Mechanism is a
+  bounds-scoped LOCAL NSEvent monitor, NOT responder-chain views — the
+  activity surfaces live inside the panel's vertical ScrollView and a
+  .background sibling never sees wheel events, while a hit-testing
+  overlay steals clicks/hovers; the monitor claims only gesture-phased,
+  horizontal-dominant events inside its view's bounds and passes all
+  else through (deeper scroll views like the All grid keep their events
+  before it anyway). scrollingDeltaX honors natural scrolling: fingers
+  left = +1 = later. Consumers: 7D/30D pager (`pageStep`) and the day
+  drill (`stepDay`) — both extracted so arrows and swipes share one
+  action; sign convention: direction < 0 = earlier.
   auditable "including seeing if the limit was reached"): `WindowLedger`
   (UsageCore) records each CLOSED limit window's outcome —
   `WindowOutcome{meterID,label,end,start?,lastPercent,peakPercent,
