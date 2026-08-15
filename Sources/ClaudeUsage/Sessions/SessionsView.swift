@@ -500,6 +500,10 @@ private struct SessionDetailPane: View {
                     hoveredModel: $hoveredModel,
                     showContext: $showContext,
                     onSelectRow: { row in jump(to: row, proxy: proxy) })
+                    // Session identity: zoom/pan state dies with a session
+                    // switch but survives the live re-parses that grow the
+                    // same session's rows.
+                    .id(detail.summary.id)
                     .padding(.horizontal, 18)
                     .padding(.vertical, 8)
                 Divider()

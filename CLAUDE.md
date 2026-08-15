@@ -279,9 +279,18 @@ the README rather than silently deviating.
   all-zero) when no window is known — as a dashed secondary curve
   scaled to the plot ceiling (full context = data ceiling, honest in
   both measures), "context N%" at the tip, hover readout appending
-  "· ctx N%"; a gauge, never a model color. Hover/annotation idioms
-  (onContinuousHover plot-frame math, .fit(to: .plot) overflow, hover
-  cleared on exit) stay consistent with the meter popover chart.
+  "· ctx N%"; a gauge, never a model color; (9) pinch zoom (v0.59.0)
+  is X-ONLY — MagnifyGesture drives a visibleLength/scrollX pair
+  (anchor-stable: the event under the fingers stays put; snap-out at
+  ≥98% of full), zoomed panning is Charts' NATIVE horizontal scroll
+  (.chartScrollableAxes + .chartXVisibleDomain + .chartScrollPosition
+  over the unchanged full-domain X scale), and a ChartMinimap strip
+  (total hairline + viewport box, drag-to-scrub recenters) appears
+  above only while zoomed; the pane keys the chart .id(session.id) so
+  zoom dies on session switch but survives live re-parses. Y NEVER
+  zooms. Hover/annotation idioms (onContinuousHover plot-frame math,
+  .fit(to: .plot) overflow, hover cleared on exit) stay consistent
+  with the meter popover chart.
   is provider DATA like the glyph — `UsageProvider.accent:
   ProviderAccent` (pure sRGB components; UsageCore stays UI-framework-
   free): Claude terracotta #D97757, Codex OpenAI-green #10A37F, Gemini

@@ -41,6 +41,20 @@ struct RunningBreakdownChart: View {
     /// cursor already moved onto keeps its highlight regardless of event
     /// order.
     @State private var chartHoverRow: Int?
+    /// X-only zoom: the visible span in event units while pinched in; nil =
+    /// the whole session. The Y scale never zooms — the vertical range IS
+    /// the story. Zoomed, the chart pans natively (two-finger scroll) and
+    /// the minimap above tracks where the viewport sits.
+    @State private var visibleLength: Double?
+    /// Leading edge of the visible span, in event units — Charts' scroll
+    /// position binding, also driven by minimap scrubbing.
+    @State private var scrollX: Double = 0
+    /// Captured at pinch start so the event under the fingers stays put
+    /// while the span stretches around it.
+    @State private var pinchBase: (length: Double, anchorData: Double, anchorFraction: Double)?
+
+    private var fullLength: Double { Double(max(count - 1, 1)) }
+    private static let minVisible: Double = 8
 
     private var accent: Color { ProviderStyle.accentColor }
     private var totals: [Double] { model.running(measure) }
@@ -63,10 +77,27 @@ struct RunningBreakdownChart: View {
         if count >= 2, (model.runningTokens.last ?? 0) > 0 {
             VStack(alignment: .leading, spacing: 4) {
                 header
+                if let length = visibleLength {
+                    ChartMinimap(
+                        values: minimapValues,
+                        viewportStart: scrollX / fullLength,
+                        viewportWidth: length / fullLength,
+                        accent: accent
+                    ) { fraction in
+                        let target = fraction * fullLength - length / 2
+                        scrollX = min(max(target, 0), fullLength - length)
+                    }
+                    .frame(height: 20)
+                }
                 chart
                     .frame(height: 140)
             }
         }
+    }
+
+    /// The whole-session total curve compressed for the minimap strip.
+    private var minimapValues: [Double] {
+        thinned(150).map { totals[$0] }
     }
 
     // MARK: - Header
@@ -133,7 +164,52 @@ struct RunningBreakdownChart: View {
 
     // MARK: - Chart
 
+    /// The zoom shell: pinch drives the visible span (X only), and while
+    /// zoomed the plot pans with Charts' native horizontal scrolling — the
+    /// full-domain X scale stays put underneath, so the Y range and every
+    /// mark keep their meaning.
     private var chart: some View {
+        Group {
+            if let length = visibleLength {
+                chartCore
+                    .chartScrollableAxes(.horizontal)
+                    .chartXVisibleDomain(length: length)
+                    .chartScrollPosition(x: $scrollX)
+            } else {
+                chartCore
+            }
+        }
+        .gesture(magnify)
+    }
+
+    private var magnify: some Gesture {
+        MagnifyGesture()
+            .onChanged { value in
+                let current = visibleLength ?? fullLength
+                if pinchBase == nil {
+                    let anchorFraction = min(max(Double(value.startAnchor.x), 0), 1)
+                    let start = visibleLength == nil ? 0 : scrollX
+                    pinchBase = (current, start + anchorFraction * current, anchorFraction)
+                }
+                guard let base = pinchBase else { return }
+                let magnification = max(Double(value.magnification), 0.01)
+                let proposed = base.length / magnification
+                // Zooming out to (almost) everything snaps cleanly back to
+                // the unzoomed chart instead of leaving a 2% crumb.
+                if proposed >= fullLength * 0.98 {
+                    visibleLength = nil
+                    scrollX = 0
+                    return
+                }
+                let length = max(proposed, Self.minVisible)
+                visibleLength = length
+                scrollX = min(max(base.anchorData - base.anchorFraction * length, 0),
+                              fullLength - length)
+            }
+            .onEnded { _ in pinchBase = nil }
+    }
+
+    private var chartCore: some View {
         let ceiling = max(totals.last ?? 0, measure == .cost ? 0.01 : 1)
         let totalIndices = thinned(240)
         let modelIndices = thinned(120)
@@ -450,5 +526,58 @@ struct RunningBreakdownChart: View {
         else { return nil }
         if let prompt = nearestPrompt(to: xValue, plotWidth: plot.width) { return prompt }
         return max(0, min(count - 1, Int(xValue.rounded())))
+    }
+}
+
+/// The whole session compressed into a strip above the zoomed chart: the
+/// total curve as a hairline, a viewport box marking how much is visible and
+/// where, and scrubbing — drag anywhere to move the viewport there.
+private struct ChartMinimap: View {
+    let values: [Double]
+    /// Viewport geometry as fractions of the whole session.
+    let viewportStart: Double
+    let viewportWidth: Double
+    let accent: Color
+    /// Reports the dragged position (0...1); the chart recenters there.
+    var onScrub: (Double) -> Void
+
+    var body: some View {
+        GeometryReader { geo in
+            let width = geo.size.width
+            let boxWidth = max(viewportWidth * width, 14)
+            let boxX = min(max(viewportStart * width, 0), max(width - boxWidth, 0))
+            ZStack(alignment: .topLeading) {
+                Canvas { context, size in
+                    guard values.count > 1, let peak = values.max(), peak > 0
+                    else { return }
+                    var path = Path()
+                    for (index, value) in values.enumerated() {
+                        let x = size.width * Double(index) / Double(values.count - 1)
+                        let y = size.height - (value / peak) * (size.height - 3) - 1.5
+                        if index == 0 {
+                            path.move(to: CGPoint(x: x, y: y))
+                        } else {
+                            path.addLine(to: CGPoint(x: x, y: y))
+                        }
+                    }
+                    context.stroke(path, with: .color(accent.opacity(0.5)), lineWidth: 1)
+                }
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(accent.opacity(0.12))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 3)
+                            .strokeBorder(accent.opacity(0.6), lineWidth: 1))
+                    .frame(width: boxWidth)
+                    .offset(x: boxX)
+            }
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { drag in
+                        guard width > 0 else { return }
+                        onScrub(min(max(drag.location.x / width, 0), 1))
+                    })
+        }
+        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 3))
     }
 }
