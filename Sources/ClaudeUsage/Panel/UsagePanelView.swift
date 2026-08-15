@@ -257,7 +257,9 @@ struct UsagePanelView: View {
                     Button("Sessions…") { onOpenSessions() }
                 }
                 Button("Settings…") { onOpenSettings() }
+                    .keyboardShortcut(",", modifiers: .command)
                 Button("Quit Claude Usage") { NSApp.terminate(nil) }
+                    .keyboardShortcut("q", modifiers: .command)
             } label: {
                 Image(systemName: "ellipsis.circle")
             }
