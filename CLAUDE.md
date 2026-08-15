@@ -198,7 +198,22 @@ the README rather than silently deviating.
   DayTally), title = scrubbed first user_message, kind always
   .interactive (rollouts carry no headless marker), detail rows from
   user_message + token_count deltas. Gemini stays sessionless.
-- SWIPE NAVIGATION (2026-08-16 v0.60.0): `HorizontalSwipeCatcher`
+- MESSAGE-TABLE PERFORMANCE (2026-08-16 v0.61.0, user: "VERY sluggish"
+  scrolling): the table is LAZY, NOT VIRTUALIZED — LazyVStack creates
+  rows on demand and RETAINS every one it ever created, so per-row
+  AppKit machinery accumulates as you scroll. The rule: message rows
+  carry ZERO per-row .onHover / .pointerStyle / .onTapGesture /
+  .popover (each was a tracking area or presentation host × every
+  visited row; ~1.4K rows crawled). Instead: (1) `MessageRow` is a
+  file-scope Equatable view of pure value inputs (+ .equatable()), so
+  hover/flash changes re-render only the rows whose inputs changed;
+  (2) ONE `rowInteractionLayer` overlay owns hover/click/pointer with
+  fixed-row-height hit math (`Column.rowHeight` 20pt, ids are dense
+  ordinals — v0.53.0 guarantees), with `listHoverRow` ownership
+  mirroring chartHoverRow; (3) ONE popover host: `costPopoverProxy`,
+  an invisible row-sized proxy offset to the open row (same height
+  math), existing only while open. Don't reintroduce per-row
+  interactive modifiers in any long lazy list.
   (Panel/) turns a two-finger horizontal trackpad swipe into ONE
   arrow-equivalent step (threshold 55pt, fired once per gesture phase
   cycle, momentum/mouse-wheel events never step). Mechanism is a

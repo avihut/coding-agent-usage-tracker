@@ -412,6 +412,10 @@ private struct SessionDetailPane: View {
     @State private var flashRow: Int?
     /// The row whose cost popover is open; its hover tint holds while it is.
     @State private var costRow: Int?
+    /// The row the LIST's hover layer last claimed — ownership mirror of the
+    /// chart's chartHoverRow, so leaving the list never clobbers a hover the
+    /// chart has since taken.
+    @State private var listHoverRow: Int?
     @State private var measure: SessionChartMeasure = .cost
     /// The chart's context-size overlay — a display preference, so it
     /// survives selection switches and relaunches.
@@ -512,14 +516,100 @@ private struct SessionDetailPane: View {
                 ScrollView {
                     LazyVStack(spacing: 0) {
                         ForEach(detail.rows) { row in
-                            messageRow(row)
+                            MessageRow(
+                                row: row,
+                                colors: colors,
+                                context: contextText(for: row),
+                                entry: entry(for: row),
+                                sectionLit: hoveredSectionRange?.contains(row.id) == true,
+                                lit: hoveredRow == row.id || costRow == row.id,
+                                flashing: flashRow == row.id)
+                                .equatable()
+                                .frame(height: Column.rowHeight)
                                 .id(row.id)
                         }
                     }
                     .padding(.vertical, 4)
+                    .overlay { rowInteractionLayer(rows: detail.rows) }
+                    .overlay(alignment: .topLeading) {
+                        costPopoverProxy(rows: detail.rows)
+                    }
                 }
             }
         }
+    }
+
+    /// ONE hover/click/pointer layer for the whole table. The rows carry no
+    /// tracking areas, gesture recognizers, or popover hosts of their own —
+    /// LazyVStack retains every row it ever creates, so per-row AppKit
+    /// machinery accumulated as you scrolled (hundreds of tracking areas and
+    /// presentation hosts on big sessions) and scrolling crawled. Fixed row
+    /// height makes the hit-math exact.
+    private func rowInteractionLayer(rows: [SessionEvent]) -> some View {
+        let hoveredHasCost = hoveredRow.map { id in
+            rows.indices.contains(id) && hasCostPopover(rows[id])
+        } ?? false
+        return Color.clear
+            .contentShape(Rectangle())
+            .onContinuousHover { phase in
+                switch phase {
+                case .active(let point):
+                    let id = rowID(at: point.y, count: rows.count)
+                    if listHoverRow != id || hoveredRow != id {
+                        listHoverRow = id
+                        hoveredRow = id
+                    }
+                case .ended:
+                    // Clear the shared hover only while the list owns it —
+                    // the chart may have claimed it already (its own rule).
+                    if hoveredRow == listHoverRow { hoveredRow = nil }
+                    listHoverRow = nil
+                }
+            }
+            .onTapGesture { point in
+                guard let id = rowID(at: point.y, count: rows.count),
+                      hasCostPopover(rows[id])
+                else { return }
+                costRow = id
+            }
+            .pointerStyle(hoveredHasCost ? .link : .default)
+    }
+
+    /// Row ids are dense ordinals and rows have one fixed height, so the
+    /// cursor's y answers directly. 4 = the stack's vertical padding.
+    private func rowID(at y: CGFloat, count: Int) -> Int? {
+        guard y >= 4 else { return nil }
+        let index = Int((y - 4) / Column.rowHeight)
+        return index < count ? index : nil
+    }
+
+    /// The table's single popover host: an invisible proxy positioned over
+    /// the open row (same fixed-height math as the hit layer), existing only
+    /// while a cost popover is up — the panel's one-popover lesson applied
+    /// to a thousand-row list.
+    @ViewBuilder private func costPopoverProxy(rows: [SessionEvent]) -> some View {
+        if let open = costRow, rows.indices.contains(open) {
+            Color.clear
+                .frame(maxWidth: .infinity)
+                .frame(height: Column.rowHeight)
+                .offset(y: 4 + CGFloat(open) * Column.rowHeight)
+                .allowsHitTesting(false)
+                .popover(
+                    isPresented: Binding(
+                        get: { costRow != nil },
+                        set: { if !$0 { costRow = nil } }),
+                    arrowEdge: .bottom
+                ) {
+                    rowCostPopover(rows[open])
+                }
+        }
+    }
+
+    /// The CTX column's string, resolved pane-side so the row view stays a
+    /// pure function of its value inputs.
+    private func contextText(for row: SessionEvent) -> String {
+        guard case .apiCall(let model, let tally, _) = row.kind else { return "" }
+        return contextPercent(model: model, tally: tally)
     }
 
     // MARK: Skeleton
@@ -763,67 +853,6 @@ private struct SessionDetailPane: View {
         .padding(.vertical, 5)
     }
 
-    private enum Column {
-        static let time: CGFloat = 40
-        static let tokens: CGFloat = 56
-        static let output: CGFloat = 48
-        static let ctx: CGFloat = 40
-        static let cost: CGFloat = 58
-        static let running: CGFloat = 64
-    }
-
-    @ViewBuilder private func messageRow(_ row: SessionEvent) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(UsageFormatting.clockTime(row.t))
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .monospacedDigit()
-                .frame(width: Column.time, alignment: .leading)
-            switch row.kind {
-            case .prompt(let preview):
-                (Text("❯ ").foregroundStyle(ProviderStyle.accentColor).bold()
-                    + Text(preview))
-                    .font(.caption)
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            case .command(let name):
-                Text(name)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            case .compaction:
-                Text("⟲ compacted — continued with summarized context")
-                    .font(.caption.italic())
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            case .apiCall(let model, let tally, let toolUses):
-                callColumns(row: row, model: model, tally: tally, toolUses: toolUses)
-            }
-        }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 2.5)
-        .opacity(row.subagent ? 0.7 : 1)
-        .background(rowBackground(row))
-        .contentShape(Rectangle())
-        .onHover { inside in
-            if inside {
-                hoveredRow = row.id
-            } else if hoveredRow == row.id {
-                hoveredRow = nil
-            }
-        }
-        .pointerStyle(hasCostPopover(row) ? .link : .default)
-        .onTapGesture { if hasCostPopover(row) { costRow = row.id } }
-        .popover(
-            isPresented: Binding(
-                get: { costRow == row.id },
-                set: { if !$0 { costRow = nil } }),
-            arrowEdge: .bottom
-        ) {
-            rowCostPopover(row)
-        }
-    }
 
     /// Which rows carry a cost story: calls price themselves, prompts price
     /// their span. Command and compaction markers have nothing to open.
@@ -881,8 +910,125 @@ private struct SessionDetailPane: View {
         .onDisappear { hoveredModel = nil }
     }
 
+    private func entry(for row: SessionEvent) -> SessionLedger.Entry? {
+        ledger.indices.contains(row.id) ? ledger[row.id] : nil
+    }
+
+    /// The model's context window: the live pricing table first; a disk
+    /// cache written before windows rode the feed has none, so the bundled
+    /// floor answers until the next live fetch. Feeds both the CTX column
+    /// and the chart's context overlay.
+    private func contextWindow(for model: String) -> Int? {
+        store.pricing.rates(for: model)?.contextTokens
+            ?? PricingTable.bundled.rates(for: model)?.contextTokens
+    }
+
+    /// The call's context footprint as a share of the model's window: the
+    /// INPUT column (everything the model read) over the pricing feed's
+    /// max_input_tokens. "—" only when nobody knows the window.
+    private func contextPercent(model: String, tally: TokenTally) -> String {
+        guard let window = contextWindow(for: model), window > 0
+        else { return "—" }
+        let percent = Double(tally.inputSide) / Double(window) * 100
+        if percent > 0, percent < 1 { return "<1%" }
+        return "\(Int(percent.rounded()))%"
+    }
+
+    /// The prompt-to-prompt stretch lit while a prompt row is hovered on
+    /// either surface — the list-side echo of the chart's curtained section.
+    private var hoveredSectionRange: Range<Int>? {
+        guard let hoveredRow, let rows = detail?.rows, rows.indices.contains(hoveredRow),
+              case .prompt = rows[hoveredRow].kind
+        else { return nil }
+        return chartModel.sections.first { $0.promptRow == hoveredRow }?.range
+    }
+}
+
+/// The message table's column widths and the one fixed row height that the
+/// hit layer's math and the popover proxy both rely on.
+private enum Column {
+    static let time: CGFloat = 40
+    static let tokens: CGFloat = 56
+    static let output: CGFloat = 48
+    static let ctx: CGFloat = 40
+    static let cost: CGFloat = 58
+    static let running: CGFloat = 64
+    static let rowHeight: CGFloat = 20
+}
+
+/// One message row as a pure function of value inputs, diffed via Equatable
+/// (v0.61.0): a hover or flash change re-renders only the rows whose inputs
+/// actually changed instead of every live lazy child. Carries NO tracking
+/// areas, gestures, or popover hosts — the pane's single interaction layer
+/// owns all of that.
+private struct MessageRow: View, Equatable {
+    let row: SessionEvent
+    let colors: [String: Color]
+    /// Pre-resolved CTX column text ("" for non-call rows).
+    let context: String
+    let entry: SessionLedger.Entry?
+    let sectionLit: Bool
+    let lit: Bool
+    let flashing: Bool
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(UsageFormatting.clockTime(row.t))
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .monospacedDigit()
+                .frame(width: Column.time, alignment: .leading)
+            switch row.kind {
+            case .prompt(let preview):
+                (Text("❯ ").foregroundStyle(ProviderStyle.accentColor).bold()
+                    + Text(preview))
+                    .font(.caption)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            case .command(let name):
+                Text(name)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            case .compaction:
+                Text("⟲ compacted — continued with summarized context")
+                    .font(.caption.italic())
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            case .apiCall(let model, let tally, let toolUses):
+                callColumns(model: model, tally: tally, toolUses: toolUses)
+            }
+        }
+        .padding(.horizontal, 18)
+        .opacity(row.subagent ? 0.7 : 1)
+        .background(background)
+    }
+
+    /// Layered row grounds: prompts keep their standing tint, the hovered
+    /// prompt's whole section echoes the chart's lit stretch, the hovered
+    /// row itself sits on top (and holds while its cost popover is open, so
+    /// the popover keeps pointing at a marked row), and a chart-click flash
+    /// outshines them all while it fades.
+    @ViewBuilder private var background: some View {
+        ZStack {
+            if case .prompt = row.kind {
+                ProviderStyle.accentColor.opacity(0.06)
+            }
+            if sectionLit {
+                Color.primary.opacity(0.045)
+            }
+            if lit {
+                Color.primary.opacity(0.07)
+            }
+            if flashing {
+                ProviderStyle.accentColor.opacity(0.3)
+            }
+        }
+    }
+
     private func callColumns(
-        row: SessionEvent, model: String, tally: TokenTally, toolUses: Int
+        model: String, tally: TokenTally, toolUses: Int
     ) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             HStack(spacing: 5) {
@@ -909,77 +1055,22 @@ private struct SessionDetailPane: View {
                 .frame(width: Column.tokens, alignment: .trailing)
             Text(TokenFormat.compact(tally.output))
                 .frame(width: Column.output, alignment: .trailing)
-            Text(contextPercent(model: model, tally: tally))
+            Text(context)
                 .foregroundStyle(.secondary)
                 .frame(width: Column.ctx, alignment: .trailing)
             Group {
-                if let entry = entry(for: row), let incremental = entry.incremental {
+                if let incremental = entry?.incremental {
                     Text("+\(UsageFormatting.money(incremental))")
                 } else {
                     Text("—")
                 }
             }
             .frame(width: Column.cost, alignment: .trailing)
-            Text(entry(for: row).map { UsageFormatting.money($0.running) } ?? "")
+            Text(entry.map { UsageFormatting.money($0.running) } ?? "")
                 .foregroundStyle(.secondary)
                 .frame(width: Column.running, alignment: .trailing)
         }
         .font(.caption)
         .monospacedDigit()
-    }
-
-    private func entry(for row: SessionEvent) -> SessionLedger.Entry? {
-        ledger.indices.contains(row.id) ? ledger[row.id] : nil
-    }
-
-    /// The model's context window: the live pricing table first; a disk
-    /// cache written before windows rode the feed has none, so the bundled
-    /// floor answers until the next live fetch. Feeds both the CTX column
-    /// and the chart's context overlay.
-    private func contextWindow(for model: String) -> Int? {
-        store.pricing.rates(for: model)?.contextTokens
-            ?? PricingTable.bundled.rates(for: model)?.contextTokens
-    }
-
-    /// The call's context footprint as a share of the model's window: the
-    /// INPUT column (everything the model read) over the pricing feed's
-    /// max_input_tokens. "—" only when nobody knows the window.
-    private func contextPercent(model: String, tally: TokenTally) -> String {
-        guard let window = contextWindow(for: model), window > 0
-        else { return "—" }
-        let percent = Double(tally.inputSide) / Double(window) * 100
-        if percent > 0, percent < 1 { return "<1%" }
-        return "\(Int(percent.rounded()))%"
-    }
-
-    /// Layered row grounds: prompts keep their standing tint, the hovered
-    /// prompt's whole section echoes the chart's lit stretch, the hovered
-    /// row itself sits on top (and holds while its cost popover is open, so
-    /// the popover keeps pointing at a marked row), and a chart-click flash
-    /// outshines them all while it fades.
-    @ViewBuilder private func rowBackground(_ row: SessionEvent) -> some View {
-        ZStack {
-            if case .prompt = row.kind {
-                ProviderStyle.accentColor.opacity(0.06)
-            }
-            if hoveredSectionRange?.contains(row.id) == true {
-                Color.primary.opacity(0.045)
-            }
-            if hoveredRow == row.id || costRow == row.id {
-                Color.primary.opacity(0.07)
-            }
-            if flashRow == row.id {
-                ProviderStyle.accentColor.opacity(0.3)
-            }
-        }
-    }
-
-    /// The prompt-to-prompt stretch lit while a prompt row is hovered on
-    /// either surface — the list-side echo of the chart's curtained section.
-    private var hoveredSectionRange: Range<Int>? {
-        guard let hoveredRow, let rows = detail?.rows, rows.indices.contains(hoveredRow),
-              case .prompt = rows[hoveredRow].kind
-        else { return nil }
-        return chartModel.sections.first { $0.promptRow == hoveredRow }?.range
     }
 }
