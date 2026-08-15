@@ -35,21 +35,30 @@ struct UsagePanelView: View {
     @State private var hoveredSession: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            errorBlock
-            content
-            statusRow
-            Divider()
-            HeatmapView(
-                activity: store.activity, pricing: store.pricing,
-                weeklyProfile: store.weeklyProfile,
-                agentName: store.provider.agentName)
-            sessionsSection
-            footer
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                errorBlock
+                content
+                statusRow
+                Divider()
+                HeatmapView(
+                    activity: store.activity, pricing: store.pricing,
+                    weeklyProfile: store.weeklyProfile,
+                    agentName: store.provider.agentName)
+                sessionsSection
+                footer
+            }
+            .padding(14)
         }
-        .padding(14)
         // Wide enough that the breakdown grid never truncates model names.
         .frame(width: 360)
+        // On a tall enough screen the ScrollView's ideal height IS the
+        // content height, so nothing changes; past the cap the popover
+        // stops growing and the content scrolls instead of clipping.
+        .frame(maxHeight: maxPanelHeight)
+        // On the wrapper, outside the scrolled content: anchor rects stay
+        // in visible coordinates, so the meter popover points at the row
+        // where it currently sits on screen.
         .coordinateSpace(name: Self.panelSpace)
         .onPreferenceChange(MeterFramePreference.self) { meterFrames = $0 }
         .popover(
@@ -73,6 +82,14 @@ struct UsagePanelView: View {
         .onReceive(NotificationCenter.default.publisher(for: .panelDidClose)) { _ in
             LoginItemState.shared.refresh()
         }
+    }
+
+    /// The tallest the panel may grow on the screen it's on, with a little
+    /// air; beyond it the content scrolls. Screens the panel has always fit
+    /// on never hit the cap.
+    private var maxPanelHeight: CGFloat {
+        guard let screen = NSScreen.main ?? NSScreen.screens.first else { return 900 }
+        return screen.visibleFrame.height - 24
     }
 
     /// The shared popover's item. Resolving through the live snapshot keeps
