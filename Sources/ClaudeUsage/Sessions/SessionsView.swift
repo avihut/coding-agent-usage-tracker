@@ -556,6 +556,8 @@ private struct SessionDetailPane: View {
                         .frame(width: Column.tokens, alignment: .trailing)
                     SkeletonBar(width: 30)
                         .frame(width: Column.output, alignment: .trailing)
+                    SkeletonBar(width: 26)
+                        .frame(width: Column.ctx, alignment: .trailing)
                     SkeletonBar(width: 38)
                         .frame(width: Column.cost, alignment: .trailing)
                     SkeletonBar(width: 42)
@@ -714,6 +716,7 @@ private struct SessionDetailPane: View {
             Text("INPUT").frame(width: Column.tokens, alignment: .trailing)
             Text("CACHED").frame(width: Column.tokens, alignment: .trailing)
             Text("OUTPUT").frame(width: Column.output, alignment: .trailing)
+            Text("CTX").frame(width: Column.ctx, alignment: .trailing)
             Text("COST").frame(width: Column.cost, alignment: .trailing)
             Text("RUNNING").frame(width: Column.running, alignment: .trailing)
         }
@@ -727,6 +730,7 @@ private struct SessionDetailPane: View {
         static let time: CGFloat = 40
         static let tokens: CGFloat = 56
         static let output: CGFloat = 48
+        static let ctx: CGFloat = 40
         static let cost: CGFloat = 58
         static let running: CGFloat = 64
     }
@@ -801,6 +805,9 @@ private struct SessionDetailPane: View {
                 .frame(width: Column.tokens, alignment: .trailing)
             Text(TokenFormat.compact(tally.output))
                 .frame(width: Column.output, alignment: .trailing)
+            Text(contextPercent(model: model, tally: tally))
+                .foregroundStyle(.secondary)
+                .frame(width: Column.ctx, alignment: .trailing)
             Group {
                 if let entry = entry(for: row), let incremental = entry.incremental {
                     Text("+\(UsageFormatting.money(incremental))")
@@ -819,6 +826,21 @@ private struct SessionDetailPane: View {
 
     private func entry(for row: SessionEvent) -> SessionLedger.Entry? {
         ledger.indices.contains(row.id) ? ledger[row.id] : nil
+    }
+
+    /// The call's context footprint as a share of the model's window: the
+    /// INPUT column (everything the model read) over the pricing feed's
+    /// max_input_tokens. A disk cache written before windows rode the feed
+    /// has none — the bundled floor answers until the next live fetch.
+    /// "—" only when nobody knows the window.
+    private func contextPercent(model: String, tally: TokenTally) -> String {
+        guard let window = store.pricing.rates(for: model)?.contextTokens
+            ?? PricingTable.bundled.rates(for: model)?.contextTokens,
+            window > 0
+        else { return "—" }
+        let percent = Double(tally.inputSide) / Double(window) * 100
+        if percent > 0, percent < 1 { return "<1%" }
+        return "\(Int(percent.rounded()))%"
     }
 
     /// Layered row grounds: prompts keep their standing tint, the hovered

@@ -13,6 +13,7 @@ struct ModelPricingTests {
             "cache_creation_input_token_cost": 0.0000125,
             "cache_creation_input_token_cost_above_1hr": 0.00002,
             "cache_read_input_token_cost": 0.000001,
+            "max_input_tokens": 200000,
             "mode": "chat"
           },
           "claude-haiku-4-5": {
@@ -40,6 +41,32 @@ struct ModelPricingTests {
         #expect(Set(table.rates.keys) == ["claude-fable-5", "claude-haiku-4-5"])
         #expect(table.source == .live)
         #expect(table.rates["claude-fable-5"]?.cacheWrite1h == 0.00002)
+        // Context windows ride the same entries; absent stays nil, never 0.
+        #expect(table.rates["claude-fable-5"]?.contextTokens == 200_000)
+        #expect(table.rates["claude-haiku-4-5"]?.contextTokens == nil)
+    }
+
+    @Test("bundled context windows mirror the feed: 1M for the 5-family, 200K legacy")
+    func bundledContext() {
+        let bundled = PricingTable.bundled
+        #expect(bundled.rates["claude-fable-5"]?.contextTokens == 1_000_000)
+        #expect(bundled.rates["claude-opus-4-7"]?.contextTokens == 1_000_000)
+        #expect(bundled.rates["claude-haiku-4-5"]?.contextTokens == 200_000)
+        // Feed carries no window for these — the snapshot stays faithful.
+        #expect(bundled.rates["claude-opus-4"]?.contextTokens == nil)
+    }
+
+    @Test("a cache from before context windows counts as stale")
+    func preContextCacheIsStale() {
+        let old = PricingTable(
+            rates: ["claude-fable-5": ModelRates(input: 1e-5, output: 5e-5)],
+            fetchedAt: Self.now, source: .live)
+        #expect(old.isStale(now: Self.now))
+        let fresh = PricingTable(
+            rates: ["claude-fable-5": ModelRates(
+                input: 1e-5, output: 5e-5, contextTokens: 1_000_000)],
+            fetchedAt: Self.now, source: .live)
+        #expect(!fresh.isStale(now: Self.now))
     }
 
     @Test("an all-garbage feed throws rather than yielding an empty table")

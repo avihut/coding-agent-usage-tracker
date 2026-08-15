@@ -31,16 +31,22 @@ public struct ModelRates: Codable, Sendable, Equatable {
     /// 1-hour-TTL cache writes are priced higher than the 5-minute default.
     public let cacheWrite1h: Double?
     public let cacheRead: Double?
+    /// The model's context window (the feed's `max_input_tokens`) — what a
+    /// request's input side is measured against for context-usage gauges.
+    /// Optional: older disk caches and sparse feed entries simply lack it.
+    public let contextTokens: Int?
 
     public init(
         input: Double, output: Double,
-        cacheWrite: Double? = nil, cacheWrite1h: Double? = nil, cacheRead: Double? = nil
+        cacheWrite: Double? = nil, cacheWrite1h: Double? = nil, cacheRead: Double? = nil,
+        contextTokens: Int? = nil
     ) {
         self.input = input
         self.output = output
         self.cacheWrite = cacheWrite
         self.cacheWrite1h = cacheWrite1h
         self.cacheRead = cacheRead
+        self.contextTokens = contextTokens
     }
 
     /// A tally's cost per token class. Cache-write tokens split into
@@ -122,9 +128,13 @@ public struct PricingTable: Codable, Sendable, Equatable {
         return nil
     }
 
-    /// A live table is due for a refresh after 24h; the bundled table always is.
+    /// A live table is due for a refresh after 24h; the bundled table always
+    /// is — and so is a disk cache from before context windows rode the
+    /// entries, so the CTX column starts populating one refresh tick after
+    /// an update instead of waiting out the cache's 24h.
     public func isStale(now: Date) -> Bool {
         source == .bundled || now.timeIntervalSince(fetchedAt) >= 24 * 3600
+            || rates.values.allSatisfy { $0.contextTokens == nil }
     }
 
     /// Feed snapshot from 2026-08-13, so costs render before the first
@@ -132,33 +142,33 @@ public struct PricingTable: Codable, Sendable, Equatable {
     public static let bundled = PricingTable(
         rates: [
             "claude-fable-5": ModelRates(
-                input: 1e-5, output: 5e-5, cacheWrite: 1.25e-5, cacheWrite1h: 2e-5, cacheRead: 1e-6),
+                input: 1e-5, output: 5e-5, cacheWrite: 1.25e-5, cacheWrite1h: 2e-5, cacheRead: 1e-6, contextTokens: 1_000_000),
             "claude-mythos-5": ModelRates(
-                input: 1e-5, output: 5e-5, cacheWrite: 1.25e-5, cacheWrite1h: 2e-5, cacheRead: 1e-6),
+                input: 1e-5, output: 5e-5, cacheWrite: 1.25e-5, cacheWrite1h: 2e-5, cacheRead: 1e-6, contextTokens: 1_000_000),
             "claude-opus-5": ModelRates(
-                input: 5e-6, output: 2.5e-5, cacheWrite: 6.25e-6, cacheWrite1h: 1e-5, cacheRead: 5e-7),
+                input: 5e-6, output: 2.5e-5, cacheWrite: 6.25e-6, cacheWrite1h: 1e-5, cacheRead: 5e-7, contextTokens: 1_000_000),
             "claude-opus-4-8": ModelRates(
-                input: 5e-6, output: 2.5e-5, cacheWrite: 6.25e-6, cacheWrite1h: 1e-5, cacheRead: 5e-7),
+                input: 5e-6, output: 2.5e-5, cacheWrite: 6.25e-6, cacheWrite1h: 1e-5, cacheRead: 5e-7, contextTokens: 1_000_000),
             "claude-opus-4-7": ModelRates(
-                input: 5e-6, output: 2.5e-5, cacheWrite: 6.25e-6, cacheWrite1h: 1e-5, cacheRead: 5e-7),
+                input: 5e-6, output: 2.5e-5, cacheWrite: 6.25e-6, cacheWrite1h: 1e-5, cacheRead: 5e-7, contextTokens: 1_000_000),
             "claude-opus-4-6": ModelRates(
-                input: 5e-6, output: 2.5e-5, cacheWrite: 6.25e-6, cacheWrite1h: 1e-5, cacheRead: 5e-7),
+                input: 5e-6, output: 2.5e-5, cacheWrite: 6.25e-6, cacheWrite1h: 1e-5, cacheRead: 5e-7, contextTokens: 1_000_000),
             "claude-opus-4-5": ModelRates(
-                input: 5e-6, output: 2.5e-5, cacheWrite: 6.25e-6, cacheWrite1h: 1e-5, cacheRead: 5e-7),
+                input: 5e-6, output: 2.5e-5, cacheWrite: 6.25e-6, cacheWrite1h: 1e-5, cacheRead: 5e-7, contextTokens: 200_000),
             "claude-opus-4-1": ModelRates(
-                input: 1.5e-5, output: 7.5e-5, cacheWrite: 1.875e-5, cacheWrite1h: 3e-5, cacheRead: 1.5e-6),
+                input: 1.5e-5, output: 7.5e-5, cacheWrite: 1.875e-5, cacheWrite1h: 3e-5, cacheRead: 1.5e-6, contextTokens: 200_000),
             "claude-opus-4": ModelRates(
                 input: 1.5e-5, output: 7.5e-5, cacheWrite: 1.875e-5, cacheWrite1h: 3e-5, cacheRead: 1.5e-6),
             "claude-sonnet-5": ModelRates(
-                input: 2e-6, output: 1e-5, cacheWrite: 2.5e-6, cacheWrite1h: 4e-6, cacheRead: 2e-7),
+                input: 2e-6, output: 1e-5, cacheWrite: 2.5e-6, cacheWrite1h: 4e-6, cacheRead: 2e-7, contextTokens: 1_000_000),
             "claude-sonnet-4-6": ModelRates(
-                input: 3e-6, output: 1.5e-5, cacheWrite: 3.75e-6, cacheWrite1h: 6e-6, cacheRead: 3e-7),
+                input: 3e-6, output: 1.5e-5, cacheWrite: 3.75e-6, cacheWrite1h: 6e-6, cacheRead: 3e-7, contextTokens: 1_000_000),
             "claude-sonnet-4-5": ModelRates(
-                input: 3e-6, output: 1.5e-5, cacheWrite: 3.75e-6, cacheWrite1h: 6e-6, cacheRead: 3e-7),
+                input: 3e-6, output: 1.5e-5, cacheWrite: 3.75e-6, cacheWrite1h: 6e-6, cacheRead: 3e-7, contextTokens: 200_000),
             "claude-sonnet-4": ModelRates(
                 input: 3e-6, output: 1.5e-5, cacheWrite: 3.75e-6, cacheWrite1h: 6e-6, cacheRead: 3e-7),
             "claude-haiku-4-5": ModelRates(
-                input: 1e-6, output: 5e-6, cacheWrite: 1.25e-6, cacheWrite1h: 2e-6, cacheRead: 1e-7),
+                input: 1e-6, output: 5e-6, cacheWrite: 1.25e-6, cacheWrite1h: 2e-6, cacheRead: 1e-7, contextTokens: 200_000),
         ],
         fetchedAt: .distantPast,
         source: .bundled)
@@ -280,7 +290,8 @@ public struct PricingFeedClient: Sendable {
                 input: input, output: output,
                 cacheWrite: entry.cacheCreationInputTokenCost,
                 cacheWrite1h: entry.cacheCreationInputTokenCostAbove1hr,
-                cacheRead: entry.cacheReadInputTokenCost)
+                cacheRead: entry.cacheReadInputTokenCost,
+                contextTokens: entry.maxInputTokens.map(Int.init))
         }
         guard !rates.isEmpty else { throw PricingFeedError.schema }
         return PricingTable(rates: rates, fetchedAt: now, source: .live)
@@ -298,6 +309,9 @@ public struct PricingFeedClient: Sendable {
         let cacheCreationInputTokenCost: Double?
         let cacheCreationInputTokenCostAbove1hr: Double?
         let cacheReadInputTokenCost: Double?
+        /// Decoded as Double so an entry writing `2e5` can't knock out its
+        /// whole pricing row — Lenient drops the entry on any field failure.
+        let maxInputTokens: Double?
 
         private enum CodingKeys: String, CodingKey {
             case litellmProvider = "litellm_provider"
@@ -306,6 +320,7 @@ public struct PricingFeedClient: Sendable {
             case cacheCreationInputTokenCost = "cache_creation_input_token_cost"
             case cacheCreationInputTokenCostAbove1hr = "cache_creation_input_token_cost_above_1hr"
             case cacheReadInputTokenCost = "cache_read_input_token_cost"
+            case maxInputTokens = "max_input_tokens"
         }
     }
 }

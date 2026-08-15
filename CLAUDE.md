@@ -146,7 +146,19 @@ the README rather than silently deviating.
   standard label ink in dark), and label stack CENTERED with the
   glyph on its own row (a corner glyph collided with the centered
   value on narrow tiles); the prompts tile wears the provider
-  accent — ❯ is the app's prompt color story.
+  accent — ❯ is the app's prompt color story. CTX COLUMN (v0.41.0):
+  call rows show tally.inputSide over ModelRates.contextTokens (the
+  feed's max_input_tokens; bundled mirrors the real feed — 1M for the
+  5-family + opus-4-6..8 + sonnet-4-6, 200K legacy, nil where the
+  feed has none) between OUTPUT and COST — "<1%" below one percent,
+  "—" only when nobody knows the window. THREE traps solved here,
+  don't regress them: max_input_tokens decodes as Double (an exotic
+  feed value must not knock out the entry's whole pricing row); a
+  disk pricing cache from BEFORE the field counts as stale
+  (isStale's allSatisfy-nil clause) so the column populates one
+  refresh tick after update, not 24h later; and the view falls back
+  to the bundled floor's window while that stale cache still serves.
+  The skeleton carries the matching bar.
   CODEX SESSIONS (v0.31.0): CodexActivitySource populates the same
   seam — one rollout file = one session (cache v2; SessionMeta stores
   title/cwd/cli_version/start/end/stretches, counts derived from
