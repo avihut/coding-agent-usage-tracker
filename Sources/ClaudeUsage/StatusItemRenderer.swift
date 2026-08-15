@@ -50,8 +50,9 @@ enum StatusItemRenderer {
     /// predicted outright) escalates the dot to the badge.
     static let badgeSeverity = 0.75
 
-    /// Anthropic terracotta (#D97757) — the app's identity mark.
-    static let claudeOrange = NSColor(srgbRed: 0.851, green: 0.467, blue: 0.341, alpha: 1)
+    /// The active provider's brand accent (Anthropic terracotta #D97757
+    /// while Claude is metered) — tints the glyph; charts derive from it.
+    static var accent: NSColor { ProviderStyle.accent }
 
     private static let bright = NSColor.white
     private static let dim = NSColor.white.withAlphaComponent(0.55)
@@ -156,7 +157,7 @@ enum StatusItemRenderer {
     }
 
     private static func compose(_ model: Model) -> [Run] {
-        var runs: [Run] = [.text("\(model.glyph) ", model.stale ? staleColor : claudeOrange, font)]
+        var runs: [Run] = [.text("\(model.glyph) ", model.stale ? staleColor : accent, font)]
         guard let segments = model.segments, !segments.isEmpty else {
             runs.append(.text("—", dim, font))
             return runs

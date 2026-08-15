@@ -94,6 +94,16 @@ struct UsageProviderTests {
         #expect(catalog.familyName("gemini-3-pro") == "gemini")
     }
 
+    @Test("each provider wears its own accent")
+    func providerAccents() {
+        let accents = [
+            ClaudeProvider().accent, CodexProvider().accent, GeminiProvider().accent,
+        ]
+        #expect(Set(accents.map { "\($0.red)-\($0.green)-\($0.blue)" }).count == 3)
+        // Claude keeps the terracotta the whole app was born with.
+        #expect(ClaudeProvider().accent == ProviderAccent(red: 0.851, green: 0.467, blue: 0.341))
+    }
+
     @Test("Claude provider identity: hosts, links, glyph, capabilities")
     func claudeProviderIdentity() {
         let provider = ClaudeProvider()

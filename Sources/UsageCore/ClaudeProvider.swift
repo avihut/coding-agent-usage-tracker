@@ -14,6 +14,8 @@ public struct ClaudeProvider: UsageProvider {
         planUpgrade: URL(string: "https://claude.ai/upgrade"),
         usageSettings: URL(string: "https://claude.ai/settings/usage"))
     public let menuBarGlyph = "✳︎"
+    /// Anthropic terracotta #D97757.
+    public let accent = ProviderAccent(red: 0.851, green: 0.467, blue: 0.341)
     public let networkDestinations = ["api.anthropic.com"]
     public let credentials: CredentialChain
     private let client: UsageClient

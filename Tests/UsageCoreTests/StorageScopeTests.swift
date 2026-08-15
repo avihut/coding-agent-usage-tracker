@@ -31,7 +31,7 @@ struct StorageScopeTests {
         #expect(fixture.read("claude/usage.json", in: fixture.caches) == "usage")
         #expect(fixture.read("history.json", in: fixture.support) == nil)
         #expect(fixture.read("usage.json", in: fixture.caches) == nil)
-        #expect(fixture.defaults.integer(forKey: "storageScopeVersion") == 1)
+        #expect(fixture.defaults.integer(forKey: "storageScopeVersion") == 2)
     }
 
     @Test("migration scopes the ceiling and meter popover keys")
@@ -83,7 +83,28 @@ struct StorageScopeTests {
         let fixture = try MigrationFixture()
         defer { fixture.tearDown() }
         fixture.migrate()
-        #expect(fixture.defaults.integer(forKey: "storageScopeVersion") == 1)
+        #expect(fixture.defaults.integer(forKey: "storageScopeVersion") == 2)
+    }
+
+    @Test("v2 scopes the color ledger — including for installs already at v1")
+    func ledgerScopedForV1Installs() throws {
+        let fixture = try MigrationFixture()
+        defer { fixture.tearDown() }
+        // A v0.26–0.28 install: file scoping done, ledger still unscoped.
+        fixture.defaults.set(1, forKey: "storageScopeVersion")
+        fixture.defaults.set(
+            ["hues": ["Fable": 0], "shades": ["Fable": ["claude-fable-5": 0]]],
+            forKey: "modelColorLedger")
+        // Old-path files must stay put — phase 1 must not re-run.
+        try fixture.write("history.json", in: fixture.support, contents: "post-v1")
+
+        fixture.migrate()
+
+        let scoped = fixture.defaults.dictionary(forKey: "claude.modelColorLedger")
+        #expect((scoped?["hues"] as? [String: Int]) == ["Fable": 0])
+        #expect(fixture.defaults.object(forKey: "modelColorLedger") == nil)
+        #expect(fixture.read("history.json", in: fixture.support) == "post-v1")
+        #expect(fixture.defaults.integer(forKey: "storageScopeVersion") == 2)
     }
 }
 

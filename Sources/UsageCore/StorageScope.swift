@@ -60,39 +60,49 @@ public enum StorageMigration {
         support: URL, caches: URL, providerID: String,
         defaults: UserDefaults = .standard
     ) {
-        guard defaults.integer(forKey: versionKey) < 1 else { return }
+        let version = defaults.integer(forKey: versionKey)
+        guard version < 2 else { return }
 
-        let files: [(URL, [String])] = [
-            (support, ["history.json", "activity-cache.json", "pricing.json"]),
-            (caches, ["usage.json"]),
-        ]
         var allMoved = true
-        for (root, names) in files {
-            for name in names {
-                let moved = moveVerified(
-                    from: root.appending(path: name),
-                    to: root.appending(path: providerID).appending(path: name))
-                allMoved = allMoved && moved
+        if version < 1 {
+            let files: [(URL, [String])] = [
+                (support, ["history.json", "activity-cache.json", "pricing.json"]),
+                (caches, ["usage.json"]),
+            ]
+            for (root, names) in files {
+                for name in names {
+                    let moved = moveVerified(
+                        from: root.appending(path: name),
+                        to: root.appending(path: providerID).appending(path: name))
+                    allMoved = allMoved && moved
+                }
+            }
+
+            moveKey(
+                from: "apiHourlyCeiling",
+                to: StorageScope.scopedKey("apiHourlyCeiling", providerID: providerID),
+                defaults: defaults)
+            for meterID in legacyMeterIDs {
+                for prefix in meterPrefPrefixes {
+                    moveKey(
+                        from: "\(prefix)\(meterID)",
+                        to: "\(prefix)\(providerID).\(meterID)",
+                        defaults: defaults)
+                }
             }
         }
 
+        // v2 (0.29.0): the model-color ledger became provider-scoped so
+        // every harness's heaviest family wears its own vendor accent.
         moveKey(
-            from: "apiHourlyCeiling",
-            to: StorageScope.scopedKey("apiHourlyCeiling", providerID: providerID),
+            from: "modelColorLedger",
+            to: StorageScope.scopedKey("modelColorLedger", providerID: providerID),
             defaults: defaults)
-        for meterID in legacyMeterIDs {
-            for prefix in meterPrefPrefixes {
-                moveKey(
-                    from: "\(prefix)\(meterID)",
-                    to: "\(prefix)\(providerID).\(meterID)",
-                    defaults: defaults)
-            }
-        }
 
         // A failed file move leaves the marker unset so the next launch
         // retries — already-moved files have no source left and skip.
         if allMoved {
-            defaults.set(1, forKey: versionKey)
+            defaults.set(2, forKey: versionKey)
         }
     }
 

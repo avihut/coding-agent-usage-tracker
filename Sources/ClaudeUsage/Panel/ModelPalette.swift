@@ -10,9 +10,16 @@ import UsageCore
 /// every chart asks here, so a model looks the same on every surface, this
 /// launch and the next.
 enum ModelPalette {
-    /// Family base hues, tuned to read on the panel's dark material.
-    static let colors: [Color] = [
-        Color(red: 0.851, green: 0.467, blue: 0.341),  // Claude orange #D97757
+    /// Family base hues, tuned to read on the panel's dark material. Slot
+    /// 0 is the ACTIVE provider's brand accent — the launch scan seeds
+    /// heaviest-first, so each harness's heaviest family wears its own
+    /// vendor color (terracotta for Claude, green for Codex, blue for
+    /// Gemini).
+    static var colors: [Color] {
+        [ProviderStyle.accentColor] + fixedHues
+    }
+
+    private static let fixedHues: [Color] = [
         Color(red: 0.420, green: 0.620, blue: 0.970),  // blue
         Color(red: 0.480, green: 0.780, blue: 0.420),  // green
         Color(red: 0.730, green: 0.550, blue: 0.950),  // purple
@@ -31,7 +38,12 @@ enum ModelPalette {
         (1.30, 0.50),
     ]
 
-    private static let storageKey = "modelColorLedger"
+    /// Provider-scoped: each harness keeps its own ledger, so every
+    /// provider's heaviest family lands on slot 0 — its vendor accent —
+    /// instead of whatever slots another vendor's families left free.
+    private static var storageKey: String {
+        "\(ProviderStyle.providerID).modelColorLedger"
+    }
 
     /// Colors for these models (and every model ever seen) from the
     /// persistent ledger, growing and saving it when new models appear.

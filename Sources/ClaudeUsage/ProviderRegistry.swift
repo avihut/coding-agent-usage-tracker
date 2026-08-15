@@ -55,9 +55,11 @@ final class ProviderRegistry {
         self.signals = signals
         self.activeID = Self.resolve(
             selection: selection, providers: providers, signals: signals)
-        // The catalog installs before any UI renders or scan runs — display
-        // names read it from everywhere.
-        ModelNames.catalog = provider(for: activeID).modelCatalog
+        // Catalog + style install before any UI renders or scan runs —
+        // display names and accent colors read them from everywhere.
+        let active = provider(for: activeID)
+        ModelNames.catalog = active.modelCatalog
+        ProviderStyle.install(active)
         scheduleDailyRedetect()
     }
 
@@ -111,7 +113,9 @@ final class ProviderRegistry {
         // outgoing store and shuts it down as part of adopting the new one.
         stores.removeValue(forKey: activeID)
         activeID = winner
-        ModelNames.catalog = provider(for: winner).modelCatalog
+        let active = provider(for: winner)
+        ModelNames.catalog = active.modelCatalog
+        ProviderStyle.install(active)
         onActiveChange?(store(for: winner), deferrable)
     }
 

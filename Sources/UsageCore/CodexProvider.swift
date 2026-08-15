@@ -16,6 +16,8 @@ public struct CodexProvider: UsageProvider {
         planUpgrade: URL(string: "https://openai.com/chatgpt/pricing"),
         usageSettings: nil)
     public let menuBarGlyph = "⬡"
+    /// OpenAI green #10A37F.
+    public let accent = ProviderAccent(red: 0.063, green: 0.639, blue: 0.498)
     public let networkDestinations: [String] = []
     public let credentials: CredentialChain
     let sessionsRoot: URL

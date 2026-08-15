@@ -17,6 +17,8 @@ public struct GeminiProvider: UsageProvider {
         planUpgrade: URL(string: "https://one.google.com/about/google-ai-plans"),
         usageSettings: nil)
     public let menuBarGlyph = "✦"
+    /// Gemini blue #4285F4.
+    public let accent = ProviderAccent(red: 0.259, green: 0.522, blue: 0.957)
     public let networkDestinations: [String] = []
     public let credentials: CredentialChain
     let tmpRoot: URL

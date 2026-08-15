@@ -198,7 +198,7 @@ struct UsageSettingsPane: View {
 
     private func cellColor(rate: Double, peak: Double) -> Color {
         guard peak > 0, rate > 0 else { return Color.gray.opacity(0.15) }
-        let orange = Color(nsColor: StatusItemRenderer.claudeOrange)
+        let orange = ProviderStyle.accentColor
         return orange.opacity(0.12 + 0.82 * rate / peak)
     }
 

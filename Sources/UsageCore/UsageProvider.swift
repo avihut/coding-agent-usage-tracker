@@ -24,6 +24,10 @@ public protocol UsageProvider: Sendable {
     /// The one-character mark drawn ahead of the menu bar digits — vendor
     /// identity ("✳︎" for Claude), not app branding.
     var menuBarGlyph: String { get }
+    /// The vendor's brand accent — tints the glyph, the heatmap ramp, and
+    /// the model palette's first hue. Vendor identity like the glyph; the
+    /// app's own branding (icon, name) stays out of the seam.
+    var accent: ProviderAccent { get }
     /// Every host this provider's usage fetches contact. The settings
     /// privacy card renders exactly this list (plus the app's own pricing
     /// feed host) — adding a destination is a spec §10 amendment, not a
@@ -95,6 +99,20 @@ public struct ProviderPreference: Sendable, Identifiable {
         self.defaultValue = defaultValue
         self.range = range
         self.step = step
+    }
+}
+
+/// A provider's brand accent as plain sRGB components — UsageCore stays
+/// UI-framework-free, so the app maps this into its own color types.
+public struct ProviderAccent: Sendable, Equatable {
+    public let red: Double
+    public let green: Double
+    public let blue: Double
+
+    public init(red: Double, green: Double, blue: Double) {
+        self.red = red
+        self.green = green
+        self.blue = blue
     }
 }
 

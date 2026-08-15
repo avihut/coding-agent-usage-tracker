@@ -71,6 +71,23 @@ the README rather than silently deviating.
   provider later = a new UsageProvider implementation + a spec §10
   amendment for its hosts (and for any local trees it reads); the engine,
   history, charts, and panel need zero changes.
+- PROVIDER ACCENTS (2026-08-15 v0.29.0, user-directed): the brand accent
+  is provider DATA like the glyph — `UsageProvider.accent:
+  ProviderAccent` (pure sRGB components; UsageCore stays UI-framework-
+  free): Claude terracotta #D97757, Codex OpenAI-green #10A37F, Gemini
+  blue #4285F4. App side: `ProviderStyle` facade (ProviderStyle.swift,
+  `nonisolated(unsafe)` statics accent+providerID, installed by
+  ProviderRegistry beside ModelNames.catalog — same written-only-on-
+  MainActor-before-UI-rebuilds contract). Derived surfaces: menu bar
+  glyph tint (StatusItemRenderer.accent — claudeOrange is GONE),
+  heatmap ramp + prompt-only wash + strip/ring fallbacks (HeatmapView),
+  trajectory/rhythm tints, and `ModelPalette.colors` slot 0. The color
+  LEDGER is now provider-scoped ("<id>.modelColorLedger",
+  StorageMigration v2 — marker "storageScopeVersion" counts phases) so
+  every harness's heaviest family wears its own vendor accent instead
+  of another vendor's leftover slot. SEMANTIC colors (warning orange,
+  critical red, severity ramp, cached badge) deliberately stay fixed —
+  only brand accents follow the harness.
 - GEMINI PROVIDER (2026-08-15 v0.28.0, thin and honest): `GeminiProvider`
   (UsageCore/GeminiProvider.swift) — local-files-only like Codex, but
   Google serves NO readable usage numbers, so the one meter (rank 0,

@@ -246,7 +246,7 @@ struct HeatmapView: View {
             HStack(spacing: 5) {
                 if let hoveredModel {
                     Circle()
-                        .fill(modelColors[hoveredModel] ?? Self.claudeOrange)
+                        .fill(modelColors[hoveredModel] ?? Self.accent)
                         .frame(width: 6, height: 6)
                 }
                 Text(footerStats)
@@ -553,7 +553,7 @@ struct HeatmapView: View {
                 angle: .value(dimension == .cost ? "Cost" : "Tokens", ringValue(row)),
                 innerRadius: .ratio(0.62),
                 angularInset: 1.5)
-                .foregroundStyle(modelColors[row.model] ?? Self.claudeOrange)
+                .foregroundStyle(modelColors[row.model] ?? Self.accent)
                 .opacity(hoveredModel == nil || hoveredModel == row.model ? 1 : 0.25)
                 .cornerRadius(2)
         }
@@ -949,7 +949,7 @@ struct HeatmapView: View {
             GeometryReader { geo in
                 VStack(spacing: 0) {
                     ForEach(segments, id: \.model) { segment in
-                        (modelColors[segment.model] ?? Self.claudeOrange)
+                        (modelColors[segment.model] ?? Self.accent)
                             .opacity(segmentOpacity(for: segment.model))
                             .frame(height: geo.size.height * segment.fraction)
                     }
@@ -1084,11 +1084,11 @@ struct HeatmapView: View {
     /// access so a panel left open across midnight doesn't mark yesterday.
     private static var today: Date { Calendar.current.startOfDay(for: Date()) }
 
-    private static let claudeOrange = Color(nsColor: StatusItemRenderer.claudeOrange)
+    private static var accent: Color { ProviderStyle.accentColor }
     private static let emptyColor = Color.gray.opacity(0.18)
     /// Days known only from prompt history — Claude Code already deleted the
     /// transcripts, so activity is certain but its magnitude isn't.
-    private static let promptOnlyColor = claudeOrange.opacity(0.15)
+    private static var promptOnlyColor: Color { accent.opacity(0.15) }
 
     private func color(for entry: DailyActivity?) -> Color {
         guard let entry, entry.tokens > 0 || entry.prompts > 0 else { return Self.emptyColor }
@@ -1098,14 +1098,14 @@ struct HeatmapView: View {
             let value = modelDayValue(entry, model: hoveredModel)
             guard value > 0 else { return Self.emptyColor }
             let maxValue = max(.leastNonzeroMagnitude, modelMaxValue(hoveredModel))
-            return ramp(modelColors[hoveredModel] ?? Self.claudeOrange,
+            return ramp(modelColors[hoveredModel] ?? Self.accent,
                         fraction: value / maxValue)
         }
         guard entry.tokens > 0 else { return Self.promptOnlyColor }
         let value = dayValue(entry)
         // Cost mode: a day whose models are all unpriced is worth nothing.
         guard value > 0 else { return Self.emptyColor }
-        return ramp(Self.claudeOrange, fraction: value / max(.leastNonzeroMagnitude, maxDayValue))
+        return ramp(Self.accent, fraction: value / max(.leastNonzeroMagnitude, maxDayValue))
     }
 
     private func ramp(_ base: Color, fraction: Double) -> Color {
@@ -1114,7 +1114,7 @@ struct HeatmapView: View {
     }
 
     private var legend: some View {
-        let base = hoveredModel.flatMap { modelColors[$0] } ?? Self.claudeOrange
+        let base = hoveredModel.flatMap { modelColors[$0] } ?? Self.accent
         return HStack(spacing: 2) {
             Text("less").font(.caption2).foregroundStyle(.tertiary)
             ForEach(0..<5, id: \.self) { level in

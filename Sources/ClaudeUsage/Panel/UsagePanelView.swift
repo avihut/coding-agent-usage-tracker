@@ -615,7 +615,7 @@ struct MeterHistoryView: View {
     /// The limit window is provider data on the meter; the 7-day fallback
     /// only covers a meter whose provider didn't say (Claude always does).
     private var window: TimeInterval { meter.limitWindow ?? 7 * 86400 }
-    private var orange: Color { Color(nsColor: StatusItemRenderer.claudeOrange) }
+    private var orange: Color { ProviderStyle.accentColor }
 
     /// A live future reset unlocks the Window span; without one (stale data,
     /// missing reset) the picker hides and the view stays sliding.
