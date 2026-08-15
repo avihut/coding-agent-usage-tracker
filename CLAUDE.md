@@ -200,14 +200,23 @@ the README rather than silently deviating.
   `pagesBack` + `hasOlder`; All shows everything and renders none): ‹
   enables while older activity exists, › while off page 0 — an
   unavailable direction keeps its reserved 17pt at zero opacity, because
-  page flips update the chart IN PLACE (user-specified: no slide, and the
-  chart must never resize between pages). The stats line prefixes the
-  visible range ("Jul 27 – Aug 2") when paged; panel close and period
-  switches reset to page 0. The 7D bars carry the typical-week overlay:
-  the weekly meter's `WeeklyProfile.weekdayShares()` stretched over the
-  displayed week's own total (dashed primary polyline + dots, Canvas
-  overlay, hit-testing off), so it works in tokens or cost mode and on
-  past pages; DIRECTLY under the bars (above the table) a caption either
+  page flips MORPH the chart IN PLACE (user-specified: no slide, the
+  chart must never resize between pages, and the animation is the SAME
+  `withAnimation(drillAnimation)` the Tokens↔Cost flip uses — bars glide,
+  cells re-tint). The morph rides on identity: the 7D bars/labels ForEach
+  by POSITION (`days.indices`), never by day — day identity tears the row
+  down and snaps; day numbers and bar value labels roll via
+  `.contentTransition(.numericText())`. Live-refresh and period-switch
+  rebuilds stay outside withAnimation on purpose (those snap). The stats
+  line prefixes the visible range ("Jul 27 – Aug 2") when paged; panel
+  close and period switches reset to page 0. The 7D bars carry the
+  typical-week overlay: the weekly meter's
+  `WeeklyProfile.weekdayShares()` stretched over the displayed week's own
+  total (dashed primary polyline + dots, hit-testing off) — built from
+  `TrendGeometry`, a Shape whose `animatableData` is an
+  `AnimatableVector` of per-day height fractions, NOT a Canvas (a Canvas
+  snaps to the finished frame; the Shape bends with the bars) — so it
+  works in tokens or cost mode and on past pages; DIRECTLY under the bars (above the table) a caption either
   legends the overlay or counts down ("Personalized forecast activates in
   9 days") — the same countdown shows concretely in Settings → Usage,
   falling back to the raw sample span before the profile object exists.

@@ -179,17 +179,20 @@ struct HeatmapView: View {
 
     /// Drill-down-style pager flanking the 7D/30D charts: ‹ steps a whole
     /// window into the past, › returns. Unlike the day drill's slide, the
-    /// chart updates IN PLACE — so an unavailable direction keeps its
-    /// reserved width at zero opacity rather than vanishing, and the chart
-    /// never changes size between pages. All shows everything and renders
-    /// no arrows at all.
+    /// chart morphs IN PLACE — bars glide to the new window's heights and
+    /// cells re-tint where they stand — so an unavailable direction keeps
+    /// its reserved width at zero opacity rather than vanishing, and the
+    /// chart never changes size between pages. All shows everything and
+    /// renders no arrows at all.
     @ViewBuilder
     private func periodStepArrow(direction: Int) -> some View {
         if period != .all {
             let available = direction < 0 ? layout.hasOlder : pageOffset > 0
             Button {
-                pageOffset += direction < 0 ? 1 : -1
-                rebuildLayout(for: period)
+                withAnimation(Self.drillAnimation) {
+                    pageOffset += direction < 0 ? 1 : -1
+                    rebuildLayout(for: period)
+                }
             } label: {
                 Image(systemName: direction < 0
                     ? "chevron.left.circle.fill" : "chevron.right.circle.fill")
@@ -794,16 +797,21 @@ struct HeatmapView: View {
     private var barChart: some View {
         let days = layout.weeks.flatMap { $0 }.compactMap { $0 }
         return VStack(spacing: 3) {
+            // Positional identity, not day identity: bar N is the same view
+            // on every page, so stepping windows animates each bar to its
+            // new height instead of tearing the row down and rebuilding it —
+            // that reuse is what the pager's withAnimation morphs through.
             HStack(alignment: .bottom, spacing: 4) {
-                ForEach(days, id: \.self) { day in
-                    bar(for: day)
+                ForEach(days.indices, id: \.self) { index in
+                    bar(for: days[index])
                 }
             }
             .frame(height: Self.barPlotHeight)
             .overlay { trendOverlay(days: days) }
             Rectangle().fill(.quaternary).frame(height: 1)
             HStack(spacing: 4) {
-                ForEach(days, id: \.self) { day in
+                ForEach(days.indices, id: \.self) { index in
+                    let day = days[index]
                     VStack(spacing: 0) {
                         Text(Self.weekdayFormatter.string(from: day))
                             .font(day == Self.today ? .caption2.bold() : .caption2)
@@ -813,6 +821,7 @@ struct HeatmapView: View {
                             .font(.caption2)
                             .foregroundStyle(day == Self.today
                                 ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tertiary))
+                            .contentTransition(.numericText())
                     }
                     .frame(maxWidth: .infinity)
                 }
@@ -854,6 +863,7 @@ struct HeatmapView: View {
                     Text(formatted(value))
                         .font(.system(size: 8).monospacedDigit())
                         .foregroundStyle(.secondary)
+                        .contentTransition(.numericText())
                         .fixedSize()
                         .padding(.bottom, barHeight(for: entry) + 2)
                 }
@@ -1080,8 +1090,11 @@ struct HeatmapView: View {
 /// the day would reach if the week followed the learned rhythm, connected by
 /// a dashed line. Geometry mirrors the bar row exactly — seven equal columns
 /// with the same 4-point spacing and the same value→height mapping — so dots
-/// land centered over their bars. Hit testing is off: hover and drill-down
-/// stay the bars' business.
+/// land centered over their bars. Built from animatable shapes, not a
+/// Canvas: paging between weeks (and flipping tokens↔cost) bends the line
+/// to the new values in the same gesture the bars glide with, where a
+/// Canvas would snap to the finished frame. Hit testing is off: hover and
+/// drill-down stay the bars' business.
 private struct TrendLine: View {
     let values: [Double]
     let maxValue: Double
@@ -1089,28 +1102,85 @@ private struct TrendLine: View {
     let usableHeight: CGFloat
 
     var body: some View {
-        Canvas { context, size in
-            guard values.count > 1, maxValue > 0 else { return }
-            let spacing: CGFloat = 4
-            let columnWidth = (size.width - spacing * CGFloat(values.count - 1))
-                / CGFloat(values.count)
-            let points = values.enumerated().map { index, value in
-                CGPoint(
-                    x: CGFloat(index) * (columnWidth + spacing) + columnWidth / 2,
-                    y: size.height - min(size.height, usableHeight * value / maxValue))
+        if values.count > 1, maxValue > 0 {
+            let fractions = AnimatableVector(values: values.map { $0 / maxValue })
+            ZStack {
+                TrendGeometry(fractions: fractions, usableHeight: usableHeight, form: .line)
+                    .stroke(
+                        Color.primary.opacity(0.4),
+                        style: StrokeStyle(lineWidth: 1, dash: [3, 2.5]))
+                TrendGeometry(fractions: fractions, usableHeight: usableHeight, form: .dots)
+                    .fill(Color.primary.opacity(0.55))
             }
-            var path = Path()
+            .allowsHitTesting(false)
+        }
+    }
+}
+
+/// The trend's polyline and dot markers as one parameterized Shape whose
+/// animatable data is the per-day height fractions — that's what lets
+/// SwiftUI interpolate the line between two weeks' values.
+private struct TrendGeometry: Shape {
+    enum Form { case line, dots }
+
+    var fractions: AnimatableVector
+    let usableHeight: CGFloat
+    let form: Form
+
+    var animatableData: AnimatableVector {
+        get { fractions }
+        set { fractions = newValue }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        let values = fractions.values
+        guard values.count > 1 else { return Path() }
+        let spacing: CGFloat = 4
+        let columnWidth = (rect.width - spacing * CGFloat(values.count - 1))
+            / CGFloat(values.count)
+        let points = values.enumerated().map { index, fraction in
+            CGPoint(
+                x: rect.minX + CGFloat(index) * (columnWidth + spacing) + columnWidth / 2,
+                y: rect.maxY - min(rect.height, usableHeight * CGFloat(fraction)))
+        }
+        var path = Path()
+        switch form {
+        case .line:
             path.move(to: points[0])
             for point in points.dropFirst() { path.addLine(to: point) }
-            context.stroke(
-                path, with: .color(.primary.opacity(0.4)),
-                style: StrokeStyle(lineWidth: 1, dash: [3, 2.5]))
+        case .dots:
             for point in points {
-                context.fill(
-                    Path(ellipseIn: CGRect(x: point.x - 1.5, y: point.y - 1.5, width: 3, height: 3)),
-                    with: .color(.primary.opacity(0.55)))
+                path.addEllipse(in: CGRect(
+                    x: point.x - 1.5, y: point.y - 1.5, width: 3, height: 3))
             }
         }
-        .allowsHitTesting(false)
+        return path
     }
+}
+
+/// `[Double]` with the vector arithmetic SwiftUI's interpolation needs.
+/// Mismatched lengths zero-pad so a mid-flight retarget never traps.
+private struct AnimatableVector: VectorArithmetic {
+    var values: [Double]
+
+    static var zero: AnimatableVector { AnimatableVector(values: []) }
+
+    static func + (lhs: Self, rhs: Self) -> Self { combined(lhs, rhs, +) }
+    static func - (lhs: Self, rhs: Self) -> Self { combined(lhs, rhs, -) }
+
+    private static func combined(
+        _ lhs: Self, _ rhs: Self, _ op: (Double, Double) -> Double
+    ) -> Self {
+        AnimatableVector(
+            values: (0..<max(lhs.values.count, rhs.values.count)).map { index in
+                op(index < lhs.values.count ? lhs.values[index] : 0,
+                   index < rhs.values.count ? rhs.values[index] : 0)
+            })
+    }
+
+    mutating func scale(by rhs: Double) {
+        for index in values.indices { values[index] *= rhs }
+    }
+
+    var magnitudeSquared: Double { values.reduce(0) { $0 + $1 * $1 } }
 }
