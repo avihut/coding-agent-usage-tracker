@@ -60,18 +60,20 @@ final class LoginItemState {
 }
 
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case general, apiCost
+    case general, usage, apiCost
 
     var id: String { rawValue }
     var title: String {
         switch self {
         case .general: "General"
+        case .usage: "Usage"
         case .apiCost: "API Cost"
         }
     }
     var icon: String {
         switch self {
         case .general: "gearshape"
+        case .usage: "chart.xyaxis.line"
         case .apiCost: "dollarsign.circle"
         }
     }
@@ -102,6 +104,7 @@ struct SettingsView: View {
         } detail: {
             switch section ?? .general {
             case .general: GeneralSettingsPane(store: store)
+            case .usage: UsageSettingsPane(store: store)
             case .apiCost: CostSettingsPane(store: store)
             }
         }
@@ -119,7 +122,8 @@ struct SettingsView: View {
 /// while its mark labels spanned the row) and mis-measure wrapped text in
 /// custom rows (the token-class grid overlapped its neighbors). A plain
 /// VStack card gives every row the full width and honest heights.
-private struct SettingsCard<Content: View>: View {
+/// Shared by every pane file, so internal rather than private.
+struct SettingsCard<Content: View>: View {
     let title: String
     let footer: String?
     @ViewBuilder let content: Content
@@ -149,7 +153,7 @@ private struct SettingsCard<Content: View>: View {
 }
 
 /// Scrollable stack of cards, capped at a readable measure and centered.
-private struct SettingsPaneScroll<Content: View>: View {
+struct SettingsPaneScroll<Content: View>: View {
     @ViewBuilder let content: Content
 
     init(@ViewBuilder content: () -> Content) {
@@ -167,7 +171,7 @@ private struct SettingsPaneScroll<Content: View>: View {
 }
 
 /// "Label ......... value" — the card version of LabeledContent.
-private func infoRow(_ label: String, _ value: String) -> some View {
+func infoRow(_ label: String, _ value: String) -> some View {
     HStack(alignment: .firstTextBaseline) {
         Text(label)
         Spacer(minLength: 16)
@@ -178,7 +182,7 @@ private func infoRow(_ label: String, _ value: String) -> some View {
     }
 }
 
-private func note(_ text: String) -> some View {
+func note(_ text: String) -> some View {
     Text(text)
         .font(.caption)
         .foregroundStyle(.secondary)

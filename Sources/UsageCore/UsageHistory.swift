@@ -15,15 +15,26 @@ public struct UsageSample: Codable, Sendable, Equatable {
     }
 }
 
-/// Persists sampled usage percentages so burn rates and the hover graph
-/// survive restarts. Stores percentages only — no tokens, no account data.
+/// Persists sampled usage percentages so burn rates, the hover graph, and
+/// the weekly rhythm profile survive restarts. Stores percentages only — no
+/// tokens, no account data. The recent week keeps every poll; older samples
+/// thin to one per 15 minutes, so two months of history stays a small file
+/// while still feeding the hour-of-week profile.
 public struct UsageHistory: Sendable {
-    let fileURL: URL
+    public let fileURL: URL
     let retention: TimeInterval
+    let denseWindow: TimeInterval
+    let thinnedResolution: TimeInterval
 
-    public init(directory: URL, retention: TimeInterval = 7 * 86400) {
+    public init(
+        directory: URL, retention: TimeInterval = 56 * 86400,
+        denseWindow: TimeInterval = 7 * 86400,
+        thinnedResolution: TimeInterval = 900
+    ) {
         self.fileURL = directory.appending(path: "history.json")
         self.retention = retention
+        self.denseWindow = denseWindow
+        self.thinnedResolution = thinnedResolution
     }
 
     public static func standard(bundleID: String) -> UsageHistory {
@@ -52,6 +63,9 @@ public struct UsageHistory: Sendable {
         samples.append(UsageSample(
             t: now, percents: percents, resets: resets.isEmpty ? nil : resets))
         samples.removeAll { now.timeIntervalSince($0.t) > retention }
+        samples = Self.thinned(
+            samples, olderThan: now.addingTimeInterval(-denseWindow),
+            resolution: thinnedResolution)
 
         do {
             try FileManager.default.createDirectory(
@@ -62,6 +76,30 @@ public struct UsageHistory: Sendable {
             // History is an enhancement; never let persistence break a refresh.
         }
         return samples
+    }
+
+    /// One sample per resolution bucket for everything older than the dense
+    /// boundary; the first in each bucket wins, so re-thinning stays stable
+    /// as samples age across the boundary. Output is chronological.
+    static func thinned(
+        _ samples: [UsageSample], olderThan boundary: Date, resolution: TimeInterval
+    ) -> [UsageSample] {
+        var kept: [UsageSample] = []
+        kept.reserveCapacity(samples.count)
+        var lastBucket = -Double.infinity
+        for sample in samples.sorted(by: { $0.t < $1.t }) {
+            if sample.t >= boundary {
+                kept.append(sample)
+            } else {
+                let bucket = (sample.t.timeIntervalSinceReferenceDate / resolution)
+                    .rounded(.down)
+                if bucket != lastBucket {
+                    kept.append(sample)
+                    lastBucket = bucket
+                }
+            }
+        }
+        return kept
     }
 }
 

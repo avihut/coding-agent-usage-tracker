@@ -38,6 +38,9 @@ public struct HeatmapLayout: Equatable, Sendable {
     /// denominator when the heatmap is filtered to one model, so a light
     /// model still shows its own usage pattern at full contrast.
     public let modelMaxTokens: [String: Int]
+    /// Whether any active day exists before this window — what enables the
+    /// back-paging arrow on the fixed-window periods.
+    public let hasOlder: Bool
 
     /// Longest span the "All" period renders. Not a retention policy: it
     /// stops one wild timestamp from expanding the grid to tens of thousands
@@ -46,12 +49,13 @@ public struct HeatmapLayout: Equatable, Sendable {
 
     public static let empty = HeatmapLayout(
         weeks: [], byDay: [:], maxTokens: 1, totalTokens: 0, activeDays: 0, monthMarks: [],
-        modelTotals: [:], modelMaxTokens: [:])
+        modelTotals: [:], modelMaxTokens: [:], hasOlder: false)
 
     public init(
         weeks: [[Date?]], byDay: [Date: DailyActivity],
         maxTokens: Int, totalTokens: Int, activeDays: Int, monthMarks: [MonthMark],
-        modelTotals: [String: TokenTally], modelMaxTokens: [String: Int]
+        modelTotals: [String: TokenTally], modelMaxTokens: [String: Int],
+        hasOlder: Bool
     ) {
         self.weeks = weeks
         self.byDay = byDay
@@ -61,14 +65,20 @@ public struct HeatmapLayout: Equatable, Sendable {
         self.monthMarks = monthMarks
         self.modelTotals = modelTotals
         self.modelMaxTokens = modelMaxTokens
+        self.hasOlder = hasOlder
     }
 
     public var isEmpty: Bool { activeDays == 0 }
 
-    /// - Parameter dayCount: trailing window in days; `nil` covers all activity.
+    /// - Parameters:
+    ///   - dayCount: trailing window in days; `nil` covers all activity.
+    ///   - pagesBack: whole windows to step into the past — page 1 of a 7-day
+    ///     window ends the day before page 0 begins. Ignored for `nil`
+    ///     dayCount (the All period already shows everything).
     public static func build(
         activity: [DailyActivity],
         dayCount: Int?,
+        pagesBack: Int = 0,
         calendar: Calendar = .current,
         now: Date = Date(),
         locale: Locale = .current
@@ -77,22 +87,24 @@ public struct HeatmapLayout: Equatable, Sendable {
         let active = activity.filter { $0.tokens > 0 || $0.prompts > 0 }
         let floorDay = calendar.date(
             byAdding: .day, value: -(maximumSpanInDays - 1), to: today) ?? today
+        let rangeEnd = calendar.date(
+            byAdding: .day, value: -pagesBack * (dayCount ?? 0), to: today) ?? today
 
         let requestedStart: Date
         if let dayCount {
-            requestedStart = calendar.date(byAdding: .day, value: -(dayCount - 1), to: today) ?? today
+            requestedStart = calendar.date(byAdding: .day, value: -(dayCount - 1), to: rangeEnd) ?? rangeEnd
         } else {
-            requestedStart = active.map { calendar.startOfDay(for: $0.day) }.min() ?? today
+            requestedStart = active.map { calendar.startOfDay(for: $0.day) }.min() ?? rangeEnd
         }
-        let rangeStart = min(max(requestedStart, floorDay), today)
+        let rangeStart = min(max(requestedStart, floorDay), rangeEnd)
 
-        let visible = active.filter { $0.day >= rangeStart && $0.day <= today }
+        let visible = active.filter { $0.day >= rangeStart && $0.day <= rangeEnd }
         let byDay = Dictionary(visible.map { ($0.day, $0) }, uniquingKeysWith: { first, _ in first })
 
         // GitHub layout: each column is one week, rows are weekdays.
         var cells = [Date?](repeating: nil, count: calendar.component(.weekday, from: rangeStart) - 1)
         var day = rangeStart
-        while day <= today {
+        while day <= rangeEnd {
             cells.append(day)
             day = calendar.date(byAdding: .day, value: 1, to: day) ?? day.addingTimeInterval(86400)
         }
@@ -118,13 +130,14 @@ public struct HeatmapLayout: Equatable, Sendable {
             totalTokens: visible.reduce(0) { $0 + $1.tokens },
             activeDays: byDay.count,
             monthMarks: monthMarks(
-                weeks: weeks, rangeStart: rangeStart, today: today,
+                weeks: weeks, rangeStart: rangeStart, rangeEnd: rangeEnd,
                 calendar: calendar, locale: locale),
-            modelTotals: modelTotals, modelMaxTokens: modelMaxTokens)
+            modelTotals: modelTotals, modelMaxTokens: modelMaxTokens,
+            hasOlder: active.contains { $0.day < rangeStart && $0.day >= floorDay })
     }
 
     private static func monthMarks(
-        weeks: [[Date?]], rangeStart: Date, today: Date,
+        weeks: [[Date?]], rangeStart: Date, rangeEnd: Date,
         calendar: Calendar, locale: Locale
     ) -> [MonthMark] {
         let formatter = DateFormatter()
@@ -134,7 +147,7 @@ public struct HeatmapLayout: Equatable, Sendable {
         formatter.dateFormat = "MMM"
 
         let spansYears = calendar.component(.year, from: rangeStart)
-            != calendar.component(.year, from: today)
+            != calendar.component(.year, from: rangeEnd)
         var marks: [MonthMark] = []
         var previousMonth = -1
         for (index, week) in weeks.enumerated() {

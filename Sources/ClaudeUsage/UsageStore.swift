@@ -20,6 +20,10 @@ final class UsageStore {
     private(set) var nextRefreshAt: Date?
     private(set) var samples: [UsageSample] = []
     private(set) var predictions: [String: UsagePrediction] = [:]
+    /// Each meter's learned hour-of-week rhythm, rebuilt from the sample
+    /// history alongside predictions. Present even before it's ready — the
+    /// readiness gate lives on the profile itself.
+    private(set) var profiles: [String: WeeklyProfile] = [:]
     private(set) var activity: [DailyActivity] = []
     /// Recent per-minute, per-model transcript usage; feeds the per-meter
     /// window breakdown in the panel.
@@ -260,16 +264,45 @@ final class UsageStore {
         scheduleNext()
     }
 
+    /// Rebuilds profiles and predictions off-main: walking two months of
+    /// samples per meter is a few tens of milliseconds — background work,
+    /// not click-handler work. Refreshes are single-flighted, so runs
+    /// can't interleave.
     private func recomputePredictions(for snapshot: Snapshot) {
         let now = Date()
-        var fresh: [String: UsagePrediction] = [:]
-        for meter in snapshot.meters {
-            if let prediction = PredictionEngine.predict(meter: meter, samples: samples, now: now) {
-                fresh[meter.label] = prediction
+        let samples = self.samples
+        let previous = self.predictions
+        let meters = snapshot.meters
+        Task.detached(priority: .utility) { [weak self] in
+            var profiles: [String: WeeklyProfile] = [:]
+            var fresh: [String: UsagePrediction] = [:]
+            for meter in meters {
+                let profile = WeeklyProfile.build(samples: samples, label: meter.label)
+                if let profile { profiles[meter.label] = profile }
+                if let prediction = PredictionEngine.predict(
+                    meter: meter, samples: samples, profile: profile,
+                    previous: previous[meter.label], now: now) {
+                    fresh[meter.label] = prediction
+                }
+            }
+            await MainActor.run { [profiles, fresh] in
+                guard let self else { return }
+                self.profiles = profiles
+                self.predictions = fresh
             }
         }
-        predictions = fresh
     }
+
+    /// The overall weekly meter's rhythm — the activity chart's typical-week
+    /// overlay and the settings insights read this one profile.
+    var weeklyProfile: WeeklyProfile? {
+        guard let meters = state.snapshot?.meters else { return nil }
+        let weekly = meters.first { $0.rank == 1 } ?? meters.first { $0.rank > 0 }
+        return weekly.flatMap { profiles[$0.label] }
+    }
+
+    /// Where the sample history lives on disk — the settings readout stats it.
+    var historyFileURL: URL { history.fileURL }
 
     func setActiveInterval(_ interval: TimeInterval) {
         let clamped = min(max(TriggerGate.floor, interval), AdaptiveCadence.maxActiveInterval)

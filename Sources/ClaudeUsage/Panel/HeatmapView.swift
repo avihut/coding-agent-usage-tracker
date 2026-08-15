@@ -10,6 +10,9 @@ import UsageCore
 struct HeatmapView: View {
     let activity: [DailyActivity]
     let pricing: PricingTable
+    /// The learned weekly rhythm behind the 7D chart's typical-week overlay;
+    /// nil until the app has recorded any sample history at all.
+    let weeklyProfile: WeeklyProfile?
 
     enum Period: String, CaseIterable, Identifiable {
         case week = "7D"
@@ -38,6 +41,9 @@ struct HeatmapView: View {
 
     @State private var period: Period = .month
     @State private var dimension: Dimension = .tokens
+    /// Whole windows stepped into the past on the fixed periods — 0 is the
+    /// current trailing window. Always 0 for All, which shows everything.
+    @State private var pageOffset = 0
     @State private var costIndex: CostIndex = .empty
     @State private var hoveredDay: Date?
     @State private var hoveredModel: String?
@@ -133,6 +139,11 @@ struct HeatmapView: View {
             outgoingStep = nil
             slideX = 0
             ringCostModel = nil
+            // Reopening always lands on the current window, like the drill.
+            if pageOffset != 0 {
+                pageOffset = 0
+                rebuildLayout(for: period)
+            }
         }
     }
 
@@ -159,11 +170,50 @@ struct HeatmapView: View {
         HStack(spacing: 6) {
             Text("Activity").font(.caption.bold())
             Spacer()
+            periodPager
             dimensionPicker
             SegmentedPicker(
                 title: "Period", selection: periodBinding,
                 options: Period.allCases.map { ($0.rawValue, $0) })
         }
+    }
+
+    /// Drill-down-style pager for the fixed windows: ‹ steps a whole 7- or
+    /// 30-day page into the past, › returns. Arrows appear only where a
+    /// page exists, matching the day drill-down; All shows everything and
+    /// pages nowhere.
+    @ViewBuilder
+    private var periodPager: some View {
+        if period != .all {
+            HStack(spacing: 2) {
+                if layout.hasOlder {
+                    pagerButton("chevron.left.circle.fill", help: "Earlier \(period.rawValue)") {
+                        pageOffset += 1
+                        rebuildLayout(for: period)
+                    }
+                }
+                if pageOffset > 0 {
+                    pagerButton("chevron.right.circle.fill", help: "Later \(period.rawValue)") {
+                        pageOffset -= 1
+                        rebuildLayout(for: period)
+                    }
+                }
+            }
+        }
+    }
+
+    private func pagerButton(
+        _ systemName: String, help: String, action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 13, weight: .semibold))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(.secondary)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
     }
 
     /// Shared by the period header and the day drill-down, so the
@@ -208,7 +258,36 @@ struct HeatmapView: View {
             ModelBreakdownGrid(
                 rows: summaryRows, colors: modelColors, pricing: pricing,
                 hoveredModel: $hoveredModel)
+            if period == .week {
+                weeklyTrendCaption
+            }
         }
+    }
+
+    /// Under the 7D table: the typical-week overlay's legend once the
+    /// profile is live, or how long until enough history exists to draw it.
+    private var weeklyTrendCaption: some View {
+        Group {
+            if let weeklyProfile, weeklyProfile.isReady {
+                Text("– – typical week · learned from your usage history")
+            } else {
+                let remaining = weeklyProfile?.remainingUntilReady
+                    ?? WeeklyProfile.activationSpan
+                Text("Weekly trend overlay activates in \(Self.readinessText(remaining)) — still learning your rhythm.")
+            }
+        }
+        .font(.caption2)
+        .foregroundStyle(.tertiary)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// "9 days" / "1 day" / "5 hours" — countdown granularity that matches
+    /// how slowly the history accumulates.
+    private static func readinessText(_ remaining: TimeInterval) -> String {
+        let days = Int((remaining / 86400).rounded(.up))
+        if days > 1 { return "\(days) days" }
+        let hours = max(1, Int((remaining / 3600).rounded(.up)))
+        return hours >= 24 ? "1 day" : "\(hours) hours"
     }
 
     /// "7.3B tokens · 24 active days" (or "≈ $6,860 · …" in cost mode) —
@@ -229,11 +308,29 @@ struct HeatmapView: View {
         case .tokens: "\(TokenFormat.compact(layout.totalTokens)) tokens"
         case .cost: "≈ \(UsageFormatting.money(costIndex.total))"
         }
-        return "\(value) · \(layout.activeDays) active days"
+        let base = "\(value) · \(layout.activeDays) active days"
+        // Paged into the past, the stats line owns saying WHICH window.
+        return rangeText.map { "\($0) · \(base)" } ?? base
     }
 
+    /// "Jul 27 – Aug 2" while paged off the current window; nil at page 0,
+    /// where "the last 7/30 days" needs no spelling out.
+    private var rangeText: String? {
+        guard pageOffset > 0 else { return nil }
+        let days = layout.weeks.flatMap { $0 }.compactMap { $0 }
+        guard let first = days.first, let last = days.last else { return nil }
+        return "\(Self.rangeFormatter.string(from: first)) – \(Self.rangeFormatter.string(from: last))"
+    }
+
+    private static let rangeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d"
+        return formatter
+    }()
+
     private func rebuildLayout(for period: Period) {
-        layout = HeatmapLayout.build(activity: activity, dayCount: period.dayCount)
+        layout = HeatmapLayout.build(
+            activity: activity, dayCount: period.dayCount, pagesBack: pageOffset)
         costIndex = CostIndex.build(days: layout.byDay, pricing: pricing)
     }
 
@@ -282,6 +379,7 @@ struct HeatmapView: View {
             get: { period },
             set: { newPeriod in
                 period = newPeriod
+                pageOffset = 0 // pages don't translate between window sizes
                 rebuildLayout(for: newPeriod)
             }
         )
@@ -707,6 +805,7 @@ struct HeatmapView: View {
                 }
             }
             .frame(height: Self.barPlotHeight)
+            .overlay { trendOverlay(days: days) }
             Rectangle().fill(.quaternary).frame(height: 1)
             HStack(spacing: 4) {
                 ForEach(days, id: \.self) { day in
@@ -722,6 +821,29 @@ struct HeatmapView: View {
                     }
                     .frame(maxWidth: .infinity)
                 }
+            }
+        }
+    }
+
+    /// The learned typical-week shape stretched over this week's own total —
+    /// "had these 7 days followed your rhythm, the bars would trace this
+    /// line." Shares come from the weekly meter's percent history, so the
+    /// overlay works in whatever dimension the bars currently show.
+    @ViewBuilder
+    private func trendOverlay(days: [Date]) -> some View {
+        if let weeklyProfile, weeklyProfile.isReady, days.count > 1 {
+            let shares = weeklyProfile.weekdayShares()
+            let calendar = Calendar.current
+            let total = days.reduce(0.0) { sum, day in
+                sum + (layout.byDay[day].map(dayValue) ?? 0)
+            }
+            if total > 0 {
+                TrendLine(
+                    values: days.map { day in
+                        shares[(calendar.component(.weekday, from: day) - 1) % 7] * total
+                    },
+                    maxValue: maxDayValue,
+                    usableHeight: Self.barPlotHeight - Self.barLabelHeadroom)
             }
         }
     }
@@ -956,5 +1078,44 @@ struct HeatmapView: View {
             }
             Text("more").font(.caption2).foregroundStyle(.tertiary)
         }
+    }
+}
+
+/// The typical-week polyline over the 7D bars: one dot per day at the height
+/// the day would reach if the week followed the learned rhythm, connected by
+/// a dashed line. Geometry mirrors the bar row exactly — seven equal columns
+/// with the same 4-point spacing and the same value→height mapping — so dots
+/// land centered over their bars. Hit testing is off: hover and drill-down
+/// stay the bars' business.
+private struct TrendLine: View {
+    let values: [Double]
+    let maxValue: Double
+    /// Bar-height scale: the plot height minus the value-label headroom.
+    let usableHeight: CGFloat
+
+    var body: some View {
+        Canvas { context, size in
+            guard values.count > 1, maxValue > 0 else { return }
+            let spacing: CGFloat = 4
+            let columnWidth = (size.width - spacing * CGFloat(values.count - 1))
+                / CGFloat(values.count)
+            let points = values.enumerated().map { index, value in
+                CGPoint(
+                    x: CGFloat(index) * (columnWidth + spacing) + columnWidth / 2,
+                    y: size.height - min(size.height, usableHeight * value / maxValue))
+            }
+            var path = Path()
+            path.move(to: points[0])
+            for point in points.dropFirst() { path.addLine(to: point) }
+            context.stroke(
+                path, with: .color(.primary.opacity(0.4)),
+                style: StrokeStyle(lineWidth: 1, dash: [3, 2.5]))
+            for point in points {
+                context.fill(
+                    Path(ellipseIn: CGRect(x: point.x - 1.5, y: point.y - 1.5, width: 3, height: 3)),
+                    with: .color(.primary.opacity(0.55)))
+            }
+        }
+        .allowsHitTesting(false)
     }
 }

@@ -16,9 +16,12 @@ struct HeatmapLayoutTests {
 
     static let now = day(2026, 8, 9)
 
-    static func build(_ activity: [DailyActivity], dayCount: Int?) -> HeatmapLayout {
+    static func build(
+        _ activity: [DailyActivity], dayCount: Int?, pagesBack: Int = 0
+    ) -> HeatmapLayout {
         HeatmapLayout.build(
-            activity: activity, dayCount: dayCount, calendar: utcCalendar(), now: now,
+            activity: activity, dayCount: dayCount, pagesBack: pagesBack,
+            calendar: utcCalendar(), now: now,
             locale: Locale(identifier: "en_US_POSIX"))
     }
 
@@ -67,6 +70,29 @@ struct HeatmapLayoutTests {
         #expect(days.count == 40) // Jul 1–31 + Aug 1–9
         #expect(layout.totalTokens == 600)
         #expect(layout.activeDays == 3)
+    }
+
+    @Test("paging back shifts the fixed window by whole pages")
+    func pagedWindow() {
+        let layout = Self.build(Self.sample, dayCount: 7, pagesBack: 1)
+        let days = Self.days(layout)
+
+        #expect(days.first == Self.day(2026, 7, 27))
+        #expect(days.last == Self.day(2026, 8, 2))
+        #expect(days.count == 7)
+        // Aug 5/6 sit in the later page, Jul 1 in an earlier one.
+        #expect(layout.isEmpty)
+        #expect(layout.hasOlder)
+    }
+
+    @Test("hasOlder tracks activity beyond the window start")
+    func hasOlderFlag() {
+        #expect(Self.build(Self.sample, dayCount: 7).hasOlder) // Jul 1 is out there
+        #expect(!Self.build(Self.sample, dayCount: nil).hasOlder) // All shows it all
+        // Five pages back (Jun 29 – Jul 5) reaches the oldest active day.
+        let far = Self.build(Self.sample, dayCount: 7, pagesBack: 5)
+        #expect(far.totalTokens == 500)
+        #expect(!far.hasOlder)
     }
 
     @Test("a wild timestamp cannot blow the grid past the span cap")

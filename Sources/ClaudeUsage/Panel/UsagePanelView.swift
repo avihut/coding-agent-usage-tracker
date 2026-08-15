@@ -30,7 +30,9 @@ struct UsagePanelView: View {
             content
             statusRow
             Divider()
-            HeatmapView(activity: store.activity, pricing: store.pricing)
+            HeatmapView(
+                activity: store.activity, pricing: store.pricing,
+                weeklyProfile: store.weeklyProfile)
             footer
         }
         .padding(14)

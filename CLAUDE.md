@@ -195,6 +195,17 @@ the README rather than silently deviating.
   heights/segments/labels, tooltips, stats line, drill ring) via
   `CostIndex` — per-day cost prebuilt next to the layout so render
   passes never price models; unpriced models drop out of cost mode.
+  The 7D and 30D periods page whole windows into the past with
+  drill-down-style ‹ › chevrons in the title row (`HeatmapLayout.build`
+  `pagesBack` + `hasOlder`; All shows everything and has none): ‹ appears
+  while older activity exists, › while off page 0, the stats line prefixes
+  the visible range ("Jul 27 – Aug 2") when paged, and panel close resets
+  to page 0. The 7D bars carry the typical-week overlay: the weekly
+  meter's `WeeklyProfile.weekdayShares()` stretched over the displayed
+  week's own total (dashed primary polyline + dots, Canvas overlay,
+  hit-testing off), so it works in tokens or cost mode and on past pages;
+  under the table a caption either legends the overlay or counts down
+  until the profile activates ("activates in 9 days").
 - Cost estimates: `PricingTable` (per-token `ModelRates`, exact-id then
   date-stripped lookup) from `PricingService` — disk-cached LiteLLM feed
   refreshed when >24h old (attempted at most hourly, piggybacked on usage
@@ -204,7 +215,15 @@ the README rather than silently deviating.
   created on first show, kept alive across closes, explicitly fronted
   because cooperative activation won't front a background app's window)
   navigates with a left sidebar (`NavigationSplitView`, toggle removed):
-  a General pane and an API Cost pane — pricing-feed status with a manual
+  General, Usage, and API Cost panes. The Usage pane
+  (UsageSettingsView.swift) surfaces the forecast engine's working —
+  per-meter recent rate, baseline + basis, pace factor, projection,
+  hysteresis state — plus the learned weekly-rhythm grid (7×6 heat cells,
+  claude-orange intensity) with busiest/quietest-day insights, sample-
+  history stats (count, span, thinning, on-disk size), and a plain-words
+  explainer; card scaffolding (`SettingsCard`/`SettingsPaneScroll`/
+  `infoRow`/`note`) is shared internal from SettingsView.swift. The API
+  Cost pane — pricing-feed status with a manual
   Refresh Now (`PricingService.refreshNow` — bypasses the daily staleness
   gate, same single allowed destination), the list rates behind the
   estimates, a Claude Code-specific cost explainer, and a what-if
@@ -230,17 +249,41 @@ the README rather than silently deviating.
   refresh token); it rides `Snapshot.plan` and renders under the panel
   title.
 - Predictions are one engine (`PredictionEngine` in UsageCore — the
-  consolidation of the old BurnRate/BurnEstimate pair): rate from persisted
-  percent samples (`UsageHistory` in App Support) using the monotonic tail
-  after the last drop (limit resets never produce bogus negative rates),
-  then a single `UsagePrediction` per meter — rate, projected-at-reset,
-  exhaustion date, verdict, a continuous `severity` (0 at the 85%
-  projection, ramping linearly to 1 where the reset-time projection
-  reaches the limit), caption text, and a chartable trajectory curve
-  clamped at 100 with a knee at the crossing. Every surface that talks
-  about the future reads it; never re-derive projections ad hoc.
-  Verdicts: red = exhausts before reset at current rate, yellow =
-  projected ≥85% at reset, green otherwise. PRESENTATION (2026-08-14):
+  consolidation of the old BurnRate/BurnEstimate pair): the recent rate is
+  a least-squares slope over persisted percent samples (`UsageHistory` in
+  App Support), fit to the monotonic tail after the last drop (limit
+  resets never produce bogus negative rates; the fit — not an endpoint
+  secant — keeps one integer-quantized step from spiking it), measured
+  over 45 min for the session meter and 4 h for weeklies. DAMPED BLEND
+  (2026-08-15, v0.24.0): for windows ≥1 day the projection is NOT linear —
+  the recent rate's excess over a baseline decays with `burstDecayHours`
+  (τ = 1 h, closed form τ(1−e^(−h/τ))), so a hot session charges the
+  forecast about one hour of itself while the baseline carries the rest of
+  the horizon; the session meter deliberately stays pure-linear
+  (`minimumWindowForBaseline` — at 5 h scale the burst IS the signal and
+  damping would under-warn). The baseline is the learned `WeeklyProfile`
+  once ≥14 days of history exist (42 buckets = 7 weekdays × 4-hour blocks,
+  local time, Sunday-absolute indexing; consumption between sample pairs
+  attributed uniformly across spanned blocks; pairs skipped on percent
+  drop, moved reset, or gaps >48 h; bucket rates shrunk toward the global
+  mean by `priorHours` = 8 of pseudo-observation; scaled at predict time
+  by a pace factor (actual+5)/(expected+5) clamped 0.25–4), else the
+  window's own average pace (percent ÷ elapsed, needs ≥30 min). Each
+  `UsagePrediction` carries rate, baseline rate, pace factor, `basis`
+  (recentOnly/windowAverage/weeklyProfile), projected-at-reset, exhaustion
+  date (bisected on the curved trajectory), verdict + `rawVerdict`
+  (two-refresh hysteresis: the displayed verdict flips only when two
+  consecutive raw readings agree — `previous` prediction feeds forward
+  through UsageStore), continuous `severity` (0 at the 85% projection,
+  ramping to 1 at the limit), caption text, and a chartable curve (48
+  samples, bends from burst slope to baseline slope, clamped at 100 with a
+  knee). Profiles + predictions rebuild per refresh OFF-MAIN
+  (`recomputePredictions` detached task). `UsageHistory` retains 56 days:
+  the recent 7 at full poll resolution, older thinned to one sample per
+  15 min (first-per-bucket, stable as samples age across the boundary).
+  Every surface that talks about the future reads the one engine; never
+  re-derive projections ad hoc. Verdicts: red = crossing before reset,
+  yellow = projected ≥85% at reset, green otherwise. PRESENTATION (2026-08-14):
   on-track forecasts are silent — no caption; a predicted crossing
   appends "runs out in 1h 05m" / "runs out Sat 14:00"
   (`UsageFormatting.exhaustText`, sharing resetText's `eventPhrase`
