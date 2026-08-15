@@ -117,7 +117,14 @@ the README rather than silently deviating.
   the sidebar by the subagents' spend is a bug class, and
   subagentRollup's rowTokens == summary.totalTokens assertion is its
   regression test. Freshness rides FSEvents → scanActivity (1/min
-  throttle) → DetailKey{id, end} re-fires the parse.
+  throttle) → DetailKey{id, end} re-fires the parse. SKELETON
+  (v0.34.0): a selection SWITCH clears stale detail synchronously in
+  the .task (the previous session's content must never linger as a
+  frozen pane) and shows a skeleton whose header + ModelBreakdownGrid
+  are REAL — the sidebar summary already knows them — with pulsing
+  bars only for chart + rows (Pulsing honors Reduce Motion); a
+  same-id re-fire keeps content and swaps silently, and hover state
+  resets only on id change.
   CODEX SESSIONS (v0.31.0): CodexActivitySource populates the same
   seam — one rollout file = one session (cache v2; SessionMeta stores
   title/cwd/cli_version/start/end/stretches, counts derived from

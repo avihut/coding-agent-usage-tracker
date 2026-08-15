@@ -130,6 +130,44 @@ private func plural(_ count: Int, _ noun: String) -> String {
     "\(count) \(noun)\(count == 1 ? "" : "s")"
 }
 
+// MARK: - Skeleton primitives
+
+/// One placeholder bar, matched to the text heights it stands in for. An
+/// accent bar suggests a prompt row.
+private struct SkeletonBar: View {
+    var width: CGFloat?
+    var height: CGFloat = 9
+    var accent = false
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 3, style: .continuous)
+            .fill(accent
+                ? ProviderStyle.accentColor.opacity(0.14)
+                : Color.primary.opacity(0.07))
+            .frame(width: width, height: height)
+    }
+}
+
+/// A gentle breathing pulse over skeleton content — the "still working"
+/// signal. Honors Reduce Motion by standing still.
+private struct Pulsing<Content: View>: View {
+    @ViewBuilder var content: Content
+
+    @State private var dimmed = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        content
+            .opacity(dimmed ? 0.45 : 1)
+            .onAppear {
+                guard !reduceMotion else { return }
+                withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
+                    dimmed = true
+                }
+            }
+    }
+}
+
 // MARK: - Sidebar row
 
 /// One session's nutrition card: title + cost, place + when, models + counts.
@@ -253,15 +291,24 @@ private struct SessionDetailPane: View {
                         "\(store.provider.agentName)'s own retention removed this "
                         + "session's transcript; its numbers left with it."))
             } else {
-                ProgressView("Reading transcript…")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                skeleton
             }
         }
         .task(id: DetailKey(id: summary.id, end: summary.end)) {
+            // A different session's content must not linger while its parse
+            // runs — clear synchronously so the skeleton shows at once. A
+            // same-id re-fire (live session, scan moved `end`) keeps the
+            // current content and swaps silently when the fresh parse lands.
+            if detail?.summary.id != summary.id {
+                detail = nil
+                ledger = []
+                chartModel = .empty
+                hoveredRow = nil
+                flashRow = nil
+                vanished = false
+            }
             let result = await store.sessionDetail(id: summary.id)
             if Task.isCancelled { return }
-            hoveredRow = nil
-            flashRow = nil
             if let result {
                 let entries = SessionLedger.runningCost(rows: result.rows, pricing: store.pricing)
                 ledger = entries
@@ -318,6 +365,81 @@ private struct SessionDetailPane: View {
                 }
             }
         }
+    }
+
+    // MARK: Skeleton
+
+    /// The loading state while a selection's parse runs. Everything the
+    /// sidebar summary already knows renders REAL and instantly — title,
+    /// meta grid, per-model totals — and only what the parse owes (chart,
+    /// message rows) shows as pulsing placeholders, so a switch never reads
+    /// as frozen.
+    private var skeleton: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header(summary)
+                .padding(.horizontal, 18)
+                .padding(.top, 14)
+            ModelBreakdownGrid(
+                rows: WindowTokens.rows(from: summary.models),
+                colors: colors,
+                pricing: store.pricing,
+                hoveredModel: $hoveredModel)
+                .padding(.horizontal, 18)
+                .padding(.top, 10)
+            if summary.apiCalls > 0 {
+                Pulsing { skeletonChart }
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 8)
+            }
+            Divider()
+            columnHeader
+            Divider()
+            Pulsing { skeletonRows }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var skeletonChart: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                SkeletonBar(width: 110, height: 14)
+                Spacer()
+                SkeletonBar(width: 48, height: 12)
+            }
+            .frame(height: 18)
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(Color.primary.opacity(0.05))
+                .frame(height: 140)
+        }
+    }
+
+    private var skeletonRows: some View {
+        let widths: [CGFloat] = [340, 220, 420, 180, 300, 260]
+        return VStack(spacing: 0) {
+            ForEach(0..<14, id: \.self) { index in
+                HStack(spacing: 8) {
+                    SkeletonBar(width: 30)
+                        .frame(width: Column.time, alignment: .leading)
+                    SkeletonBar(
+                        width: widths[index % widths.count],
+                        accent: index % widths.count == 1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    SkeletonBar(width: 36)
+                        .frame(width: Column.tokens, alignment: .trailing)
+                    SkeletonBar(width: 36)
+                        .frame(width: Column.tokens, alignment: .trailing)
+                    SkeletonBar(width: 30)
+                        .frame(width: Column.output, alignment: .trailing)
+                    SkeletonBar(width: 38)
+                        .frame(width: Column.cost, alignment: .trailing)
+                    SkeletonBar(width: 42)
+                        .frame(width: Column.running, alignment: .trailing)
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 4.5)
+            }
+        }
+        .padding(.vertical, 4)
     }
 
     /// Chart click → the list centers the clicked message and flashes it,
