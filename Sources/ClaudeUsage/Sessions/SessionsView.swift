@@ -525,7 +525,6 @@ private struct SessionDetailPane: View {
                                 lit: hoveredRow == row.id || costRow == row.id,
                                 flashing: flashRow == row.id)
                                 .equatable()
-                                .frame(height: Column.rowHeight)
                                 .id(row.id)
                         }
                     }
@@ -570,7 +569,18 @@ private struct SessionDetailPane: View {
                 guard let id = rowID(at: point.y, count: rows.count),
                       hasCostPopover(rows[id])
                 else { return }
-                costRow = id
+                // A genuinely open popover absorbs the outside click to
+                // dismiss itself, so a tap landing here with costRow == id
+                // means AppKit closed the popover WITHOUT writing false back
+                // through the binding (deactivation does that). A same-value
+                // write would be transactionless — cycle through nil so the
+                // re-present is a real state change.
+                if costRow == id {
+                    costRow = nil
+                    Task { @MainActor in costRow = id }
+                } else {
+                    costRow = id
+                }
             }
             .pointerStyle(hoveredHasCost ? .link : .default)
     }
@@ -584,25 +594,27 @@ private struct SessionDetailPane: View {
     }
 
     /// The table's single popover host: an invisible proxy positioned over
-    /// the open row (same fixed-height math as the hit layer), existing only
-    /// while a cost popover is up — the panel's one-popover lesson applied
-    /// to a thousand-row list.
-    @ViewBuilder private func costPopoverProxy(rows: [SessionEvent]) -> some View {
-        if let open = costRow, rows.indices.contains(open) {
-            Color.clear
-                .frame(maxWidth: .infinity)
-                .frame(height: Column.rowHeight)
-                .offset(y: 4 + CGFloat(open) * Column.rowHeight)
-                .allowsHitTesting(false)
-                .popover(
-                    isPresented: Binding(
-                        get: { costRow != nil },
-                        set: { if !$0 { costRow = nil } }),
-                    arrowEdge: .bottom
-                ) {
+    /// the open row (same fixed-height math as the hit layer) — the panel's
+    /// one-popover lesson applied to a thousand-row list. The proxy exists
+    /// ALWAYS, not just while open: macOS silently drops a popover whose
+    /// anchor view was inserted in the same transaction that presented it.
+    private func costPopoverProxy(rows: [SessionEvent]) -> some View {
+        let open = costRow.flatMap { rows.indices.contains($0) ? $0 : nil }
+        return Color.clear
+            .frame(maxWidth: .infinity)
+            .frame(height: Column.rowHeight)
+            .offset(y: 4 + CGFloat(open ?? 0) * Column.rowHeight)
+            .allowsHitTesting(false)
+            .popover(
+                isPresented: Binding(
+                    get: { open != nil },
+                    set: { if !$0 { costRow = nil } }),
+                arrowEdge: .bottom
+            ) {
+                if let open {
                     rowCostPopover(rows[open])
                 }
-        }
+            }
     }
 
     /// The CTX column's string, resolved pane-side so the row view stays a
@@ -1001,6 +1013,10 @@ private struct MessageRow: View, Equatable {
             }
         }
         .padding(.horizontal, 18)
+        // The row sizes ITSELF to the fixed pitch before painting its
+        // background — sized from outside, the highlight would hug the
+        // shorter text and leave dark slivers between lit neighbors.
+        .frame(height: Column.rowHeight)
         .opacity(row.subagent ? 0.7 : 1)
         .background(background)
     }

@@ -212,8 +212,17 @@ the README rather than silently deviating.
   ordinals — v0.53.0 guarantees), with `listHoverRow` ownership
   mirroring chartHoverRow; (3) ONE popover host: `costPopoverProxy`,
   an invisible row-sized proxy offset to the open row (same height
-  math), existing only while open. Don't reintroduce per-row
-  interactive modifiers in any long lazy list.
+  math). v0.61.1 hard-won corollaries: the proxy exists ALWAYS, not
+  just while open — macOS silently drops a popover whose anchor view
+  was inserted in the same transaction that presented it; and the tap
+  handler cycles costRow through nil when re-clicking the open row —
+  AppKit dismissals (app deactivation) don't write false back through
+  the binding, so a same-value @State write would present nothing.
+  (4) `MessageRow` sizes ITSELF to `Column.rowHeight` (frame INSIDE
+  the row view, before .background) — framed from outside, the
+  background hugs the shorter text and dark slivers open between
+  adjacent lit rows. Don't reintroduce per-row interactive modifiers
+  in any long lazy list.
   (Panel/) turns a two-finger horizontal trackpad swipe into ONE
   arrow-equivalent step (threshold 55pt, fired once per gesture phase
   cycle, momentum/mouse-wheel events never step). Mechanism is a
