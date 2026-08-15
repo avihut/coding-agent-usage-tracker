@@ -427,6 +427,22 @@ public enum SessionShortlist {
         let rows = Array(sessions.lazy.filter { $0.kind == .interactive }.prefix(limit))
         return (rows, sessions.count > rows.count)
     }
+
+    /// The strip scoped to a heatmap-navigated period: sessions whose span
+    /// overlaps `interval` (half-open — a session that merely touches the
+    /// period's first midnight from before doesn't count). Same rules as the
+    /// default strip otherwise: interactive rows, `hasMore` covering both the
+    /// cap and hidden background runs. Nil interval IS the default strip.
+    public static func build(
+        _ sessions: [SessionSummary], in interval: DateInterval?, limit: Int = limit
+    ) -> (rows: [SessionSummary], hasMore: Bool) {
+        guard let interval else { return build(sessions, limit: limit) }
+        let inPeriod = sessions.filter {
+            $0.end >= interval.start && $0.start < interval.end
+        }
+        let rows = Array(inPeriod.lazy.filter { $0.kind == .interactive }.prefix(limit))
+        return (rows, inPeriod.count > rows.count)
+    }
 }
 
 /// Day sections for the sessions sidebar. Pure and calendar-injected so the

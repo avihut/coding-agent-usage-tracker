@@ -15,6 +15,10 @@ struct HeatmapView: View {
     let weeklyProfile: WeeklyProfile?
     /// Names whose traces these are ("Claude Code") in the empty state.
     let agentName: String
+    /// Where the user has navigated: nil on the current default window, the
+    /// visible span while paged into the past, the single day while drilled
+    /// in. The panel scopes its Sessions strip by it.
+    @Binding var focus: DateInterval?
 
     enum Period: String, CaseIterable, Identifiable {
         case week = "7D"
@@ -137,7 +141,10 @@ struct HeatmapView: View {
             // A rebuild can drop the drilled day (aged out of the window);
             // pop back rather than point at nothing.
             if selectedDay != nil, selectedEntry == nil { selectedDay = nil }
+            publishFocus()
         }
+        .onChange(of: selectedDay) { publishFocus() }
+        .onChange(of: pageOffset) { publishFocus() }
         // Closing the panel pops any drill-down (no animation — offscreen):
         // reopening should always land on the period totals. The panel's
         // hosting view is created once and never leaves the hierarchy on
@@ -360,6 +367,29 @@ struct HeatmapView: View {
         formatter.dateFormat = "MMM d"
         return formatter
     }()
+
+    /// Reports the navigated span to the panel. Deliberately derived in one
+    /// place from the three navigation states rather than set at each
+    /// mutation site — the close-reset and layout rebuilds then can't drift.
+    private func publishFocus() {
+        let updated: DateInterval?
+        if let day = selectedDay {
+            let next = Calendar.current.date(byAdding: .day, value: 1, to: day)
+                ?? day.addingTimeInterval(86400)
+            updated = DateInterval(start: day, end: next)
+        } else if pageOffset > 0 {
+            let days = layout.weeks.flatMap { $0 }.compactMap { $0 }
+            if let first = days.first, let last = days.last,
+               let end = Calendar.current.date(byAdding: .day, value: 1, to: last) {
+                updated = DateInterval(start: first, end: end)
+            } else {
+                updated = nil
+            }
+        } else {
+            updated = nil
+        }
+        if focus != updated { focus = updated }
+    }
 
     private func rebuildLayout(for period: Period) {
         layout = HeatmapLayout.build(

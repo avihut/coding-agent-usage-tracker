@@ -356,4 +356,40 @@ struct SessionShortlistTests {
         #expect(shortlist.rows.isEmpty)
         #expect(!shortlist.hasMore)
     }
+
+    @Test("a focus interval keeps overlapping sessions, half-open at its end")
+    func focused() {
+        let sessions = [
+            // Ends after the window — but starts inside it (end − 600s
+            // lands at 23:55): overlaps.
+            SessionDayGroupTests.summary(id: "spans-out", end: "2026-08-10T00:05:00.000Z"),
+            SessionDayGroupTests.summary(id: "inside", end: "2026-08-09T12:00:00.000Z"),
+            // Background inside the window: hidden from rows, counted in more.
+            SessionDayGroupTests.summary(
+                id: "bg", end: "2026-08-09T11:00:00.000Z", kind: .background),
+            // Ends exactly AT the window start (started before): the end
+            // touches the boundary instant, which the half-open rule keeps.
+            SessionDayGroupTests.summary(id: "at-start", end: "2026-08-09T00:00:00.000Z"),
+            // Ends the day before: out.
+            SessionDayGroupTests.summary(id: "before", end: "2026-08-08T20:00:00.000Z"),
+        ]
+        let day = DateInterval(
+            start: FlexibleISO8601.date(from: "2026-08-09T00:00:00.000Z")!,
+            end: FlexibleISO8601.date(from: "2026-08-10T00:00:00.000Z")!)
+        let shortlist = SessionShortlist.build(sessions, in: day)
+        #expect(shortlist.rows.map { $0.id } == ["spans-out", "inside", "at-start"])
+        #expect(shortlist.hasMore)
+    }
+
+    @Test("a nil focus is exactly the default strip")
+    func nilFocus() {
+        let sessions = [
+            SessionDayGroupTests.summary(id: "b", end: "2026-08-16T07:00:00.000Z"),
+            SessionDayGroupTests.summary(id: "a", end: "2026-08-16T06:00:00.000Z"),
+        ]
+        let focused = SessionShortlist.build(sessions, in: nil)
+        let plain = SessionShortlist.build(sessions)
+        #expect(focused.rows.map { $0.id } == plain.rows.map { $0.id })
+        #expect(focused.hasMore == plain.hasMore)
+    }
 }
