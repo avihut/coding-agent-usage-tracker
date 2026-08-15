@@ -1269,11 +1269,11 @@ struct MeterHistoryView: View {
         // A frame of several days labels its axis with day names at the
         // day boundaries — dates mean less than weekdays at that zoom.
         // Beyond ~a week the names would repeat, so the month scale keeps
-        // the default date ticks; within a day, the default hour ticks.
-        // When the forecast crosses the limit, the crossing's timestamp
-        // joins the axis row in red — always on — and any base tick whose
-        // label it would overlap steps aside (the Y axis projection's
-        // eclipse rule, applied to time).
+        // the default date ticks; under two days, explicit whole-hour
+        // clock ticks. When the forecast crosses the limit, the crossing's
+        // timestamp joins the axis row in red — always on — and any base
+        // tick whose label it would overlap steps aside (the Y axis
+        // projection's eclipse rule, applied to time).
         .chartXAxis {
             let length = end.timeIntervalSince(start)
             if length >= 48 * 3600, length <= 8 * 86400 {
@@ -1286,9 +1286,11 @@ struct MeterHistoryView: View {
                         }
                     }
                 }
-            } else if exhaustDate != nil, length < 48 * 3600 {
-                // Automatic ticks can't be eclipsed, so the crossing's
-                // presence switches this frame to explicit hour marks.
+            } else if length < 48 * 3600 {
+                // Always explicit at this zoom: automatic marks can't be
+                // eclipsed by the crossing label, and once the window spans
+                // midnight they grow date-bearing labels ("16 Aug at 00")
+                // that collide. Whole-hour ticks stay clock-only.
                 AxisMarks(values: hourTicks) { value in
                     AxisGridLine()
                     AxisValueLabel {
@@ -1441,7 +1443,8 @@ struct MeterHistoryView: View {
     }
 
     /// Whole-hour X ticks for sub-two-day frames, strided to land a handful
-    /// of labels. Only rendered while a crossing needs the eclipse rule.
+    /// of labels — clock-only, so a window spanning midnight never grows
+    /// the wide date labels the automatic marks would use.
     private var hourTicks: [Date] {
         let (start, end) = domain
         let length = end.timeIntervalSince(start)
