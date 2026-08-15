@@ -198,6 +198,21 @@ the README rather than silently deviating.
   DayTally), title = scrubbed first user_message, kind always
   .interactive (rollouts carry no headless marker), detail rows from
   user_message + token_count deltas. Gemini stays sessionless.
+- SYNC DIGEST (2026-08-16 v0.51.0, axis-1 prep, membership-gated):
+  `SyncDigest.swift` (UsageCore) is the FROZEN CloudKit schema —
+  digest types + `SyncDigestBuilder` + `SyncRecordName`, pure, Codable,
+  zero CloudKit imports. Design and rationale live in docs/SYNC.md
+  (zone-per-device writer-owns-zone merge model, archive semantics,
+  encryptedValues-everything, additive-only evolution); the spec §10
+  amendment there is a DRAFT, not in force — no transport code exists
+  and none ships until the paid Apple Developer membership lands and
+  the amendment is signed off. Record names and privacy invariants
+  (no full paths, no preview fields, no dollars in encoded bytes) are
+  pinned by SyncDigestTests; treat both as one-way doors — production
+  CloudKit schemas are additive-only. `usage-cli sync-digest` prints
+  this machine's digest (read-only cache use, zero network, no
+  Keychain). Dollars never sync: viewers price tallies with their own
+  feed.
 - CHART BEHAVIOR CONTRACT (2026-08-15 v0.32.0, user-directed standing
   rule): any surface that plots a running/cumulative series over an
   event list renders `RunningBreakdownChart`

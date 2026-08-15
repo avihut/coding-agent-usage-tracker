@@ -9,12 +9,20 @@ import UsageCore
 /// the sessions browser's data layer, verifiable headless. It READS the app's
 /// warm scan cache but never writes it (`persistCache: false`): the app stays
 /// the sole cache writer, so a CLI run can't race or clobber a live scan.
+///
+/// `usage-cli sync-digest [--provider <id>]` prints the CloudKit sync digest
+/// this machine would publish (docs/SYNC.md) — same read-only cache rules,
+/// zero network.
 @main
 struct UsageCLI {
     static func main() async {
         let arguments = CommandLine.arguments
         if arguments.contains("sessions") {
             runSessions(providerID: value(after: "--provider", in: arguments))
+            return
+        }
+        if arguments.contains("sync-digest") {
+            runSyncDigest(providerID: value(after: "--provider", in: arguments))
             return
         }
 
@@ -119,6 +127,71 @@ struct UsageCLI {
                 + "\(TokenFormat.compact(session.totalTokens).padding(toLength: 7, withPad: " ", startingAt: 0))"
                 + "\(badge)  \(session.title)\n"
             FileHandle.standardOutput.write(Data(line.utf8))
+        }
+    }
+
+    // MARK: - sync-digest mode
+
+    /// Prints the sync digest (docs/SYNC.md) this machine WOULD publish, as
+    /// pretty JSON — the inspection hatch for a schema that must be right
+    /// before it ever deploys. Local-only by design: warm scan cache (never
+    /// written), history.jsonl, and the app's cached usage snapshot replayed
+    /// through the provider. No network, no credentials, no Keychain prompt —
+    /// so `planLabel` (credential metadata) prints null here even though the
+    /// app will publish it.
+    private static func runSyncDigest(providerID: String?) {
+        let stored = UserDefaults.standard.string(forKey: "activeProviderID")
+        let chosen = providerID ?? (stored == "auto" ? nil : stored) ?? "claude"
+        let bundleID = "com.avihu.ClaudeUsage"
+        guard chosen == "claude" else {
+            die("sync-digest is not wired for '\(chosen)' in the CLI yet", code: 11)
+        }
+        let support = StorageScope.supportDirectory(bundleID: bundleID, providerID: chosen)
+        let caches = StorageScope.cachesDirectory(bundleID: bundleID, providerID: chosen)
+
+        let root = FileManager.default.homeDirectoryForCurrentUser
+            .appending(path: ".claude/projects")
+        let scan = TranscriptScanner(root: root, cacheDirectory: support)
+            .scan(persistCache: false)
+        let daily = ActivityMerge.merge(
+            transcripts: scan.daily, prompts: PromptHistoryScanner.standard().scan())
+
+        var meterSnapshot: MeterSnapshotDigest?
+        if let cached = UsageCache(directory: caches).load(),
+           let snapshot = try? ClaudeProvider().snapshot(
+               fromRawUsage: cached.body, fetchedAt: cached.fetchedAt,
+               plan: nil, thresholds: .standard) {
+            meterSnapshot = MeterSnapshotDigest(
+                capturedAt: cached.fetchedAt, planLabel: nil, meters: snapshot.meters)
+        }
+
+        // "preview": the real per-install device id is minted by the app when
+        // transport ships; this digest is for reading, not publishing.
+        let digest = SyncDigestBuilder.build(
+            device: DeviceDigest(
+                deviceID: "preview",
+                name: Host.current().localizedName ?? "This Mac",
+                providerID: chosen,
+                accountLabel: nil,
+                appVersion: AppIdentity.version,
+                timeZone: TimeZone.current.identifier,
+                capturedAt: Date()),
+            daily: daily,
+            sessions: scan.sessions,
+            meters: meterSnapshot,
+            calendar: .current)
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        do {
+            let data = try encoder.encode(digest)
+            note("digest: \(digest.days.count) days, \(digest.sessions.count) sessions, "
+                + "meters \(meterSnapshot == nil ? "absent" : "present"), \(data.count) bytes")
+            FileHandle.standardOutput.write(data)
+            FileHandle.standardOutput.write(Data("\n".utf8))
+        } catch {
+            die("digest failed to encode: \(type(of: error))", code: 12)
         }
     }
 
