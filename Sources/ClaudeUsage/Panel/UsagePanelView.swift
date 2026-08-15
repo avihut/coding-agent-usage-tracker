@@ -284,13 +284,14 @@ struct UsagePanelView: View {
     @ViewBuilder private var sessionsSection: some View {
         let shortlist = SessionShortlist.build(store.sessions)
         if store.providesSessions, !shortlist.rows.isEmpty || shortlist.hasMore {
+            let colors = shortlistColors
             Divider()
             VStack(alignment: .leading, spacing: 2) {
                 Text("Sessions")
                     .font(.caption.bold())
                     .padding(.bottom, 2)
                 ForEach(shortlist.rows) { session in
-                    shortlistRow(session)
+                    shortlistRow(session, colors: colors)
                 }
                 if shortlist.hasMore {
                     Button {
@@ -309,40 +310,36 @@ struct UsagePanelView: View {
         }
     }
 
-    /// One session as a single line: title, day-aware stamp, est. cost —
-    /// the sidebar card's essentials without its place/dots/counts body.
-    private func shortlistRow(_ session: SessionSummary) -> some View {
-        let cost = SessionsView.cost(of: session, pricing: store.pricing)
-        return HStack(spacing: 8) {
-            Text(session.title)
-                .lineLimit(1)
-            Spacer(minLength: 8)
-            Text(UsageFormatting.updatedStamp(session.end, now: Date()))
-                .foregroundStyle(.tertiary)
-                .monospacedDigit()
-            // The sidebar's cost rule: an all-unpriced session reads "—",
-            // never a false $0.
-            Text(cost.unpricedModels > 0 && cost.dollars == 0
-                ? "—" : UsageFormatting.money(cost.dollars))
-                .fontWeight(.semibold)
-                .monospacedDigit()
-        }
-        .font(.caption)
-        .padding(.horizontal, 4)
-        .padding(.vertical, 3)
-        .background(
-            RoundedRectangle(cornerRadius: 4)
-                .fill(Color.primary.opacity(hoveredSession == session.id ? 0.07 : 0)))
-        .contentShape(Rectangle())
-        .onHover { inside in
-            if inside {
-                hoveredSession = session.id
-            } else if hoveredSession == session.id {
-                hoveredSession = nil
+    /// The same palette input as the sessions window — the union over every
+    /// session's models — so a model's dot color matches across surfaces.
+    private var shortlistColors: [String: Color] {
+        var models: Set<String> = []
+        for session in store.sessions { models.formUnion(session.models.keys) }
+        return ModelPalette.assignment(for: models.sorted())
+    }
+
+    /// One shortlist entry: the sidebar's full session card, wrapped in the
+    /// panel's hover/click chrome.
+    private func shortlistRow(_ session: SessionSummary, colors: [String: Color]) -> some View {
+        SessionRow(
+            session: session,
+            cost: SessionsView.cost(of: session, pricing: store.pricing),
+            colors: colors)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(
+                RoundedRectangle(cornerRadius: 5)
+                    .fill(Color.primary.opacity(hoveredSession == session.id ? 0.07 : 0)))
+            .contentShape(Rectangle())
+            .onHover { inside in
+                if inside {
+                    hoveredSession = session.id
+                } else if hoveredSession == session.id {
+                    hoveredSession = nil
+                }
             }
-        }
-        .pointerStyle(.link)
-        .onTapGesture { onOpenSession(session.id) }
+            .pointerStyle(.link)
+            .onTapGesture { onOpenSession(session.id) }
     }
 
     private func statusLine(now: Date) -> Text {

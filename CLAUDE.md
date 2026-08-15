@@ -179,8 +179,11 @@ the README rather than silently deviating.
   below the activity heatmap — SessionShortlist.build (UsageCore):
   newest ≤3 INTERACTIVE sessions (background never listed), hasMore
   true when the cap or the background filter hid anything, which
-  shows the "Show more…" button (plain onOpenSessions). Rows are
-  single lines (title · updatedStamp · sidebar cost rule) with the
+  shows the "Show more…" button (plain onOpenSessions). Rows are the
+  sidebar's FULL SessionRow card (v0.47.0 user-directed; SessionRow
+  is internal, not private, exactly so both surfaces render one
+  component and can't drift; palette = the same all-sessions union
+  the window computes, so dots match across surfaces) wrapped in the
   grid's hover/link idiom; clicking calls onOpenSession(id) →
   StatusItemController.showSessions(selecting:) →
   SessionsWindowController.show(selecting:) → SessionsNavigator

@@ -306,7 +306,10 @@ private struct Pulsing<Content: View>: View {
 // MARK: - Sidebar row
 
 /// One session's nutrition card: title + cost, place + when, models + counts.
-private struct SessionRow: View {
+/// One session's "nutrition card". Internal, not private: the panel's
+/// shortlist presents the exact same card, so the two surfaces can never
+/// drift apart.
+struct SessionRow: View {
     let session: SessionSummary
     let cost: (dollars: Double, unpricedModels: Int)
     let colors: [String: Color]
