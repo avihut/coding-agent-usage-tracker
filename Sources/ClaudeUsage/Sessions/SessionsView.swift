@@ -390,6 +390,9 @@ private struct SessionDetailPane: View {
     /// The row a chart click just jumped to; its flash fades right back out.
     @State private var flashRow: Int?
     @State private var measure: SessionChartMeasure = .cost
+    /// The chart's context-size overlay — a display preference, so it
+    /// survives selection switches and relaunches.
+    @AppStorage("sessionsShowContext") private var showContext = false
 
     private struct DetailKey: Equatable {
         let id: String
@@ -429,7 +432,12 @@ private struct SessionDetailPane: View {
             if let result {
                 let entries = SessionLedger.runningCost(rows: result.rows, pricing: store.pricing)
                 ledger = entries
-                chartModel = SessionChartModel.build(rows: result.rows, ledger: entries)
+                let windows = Dictionary(uniqueKeysWithValues:
+                    result.summary.models.keys.compactMap { model in
+                        contextWindow(for: model).map { (model, $0) }
+                    })
+                chartModel = SessionChartModel.build(
+                    rows: result.rows, ledger: entries, windows: windows)
                 // An all-unpriced session (Codex before the pricing feed) has
                 // no cost curve to draw — fall to tokens. A priced session
                 // keeps whatever measure the user last picked.
@@ -466,6 +474,7 @@ private struct SessionDetailPane: View {
                     measure: $measure,
                     hoveredRow: $hoveredRow,
                     hoveredModel: $hoveredModel,
+                    showContext: $showContext,
                     onSelectRow: { row in jump(to: row, proxy: proxy) })
                     .padding(.horizontal, 18)
                     .padding(.vertical, 8)
@@ -828,15 +837,20 @@ private struct SessionDetailPane: View {
         ledger.indices.contains(row.id) ? ledger[row.id] : nil
     }
 
+    /// The model's context window: the live pricing table first; a disk
+    /// cache written before windows rode the feed has none, so the bundled
+    /// floor answers until the next live fetch. Feeds both the CTX column
+    /// and the chart's context overlay.
+    private func contextWindow(for model: String) -> Int? {
+        store.pricing.rates(for: model)?.contextTokens
+            ?? PricingTable.bundled.rates(for: model)?.contextTokens
+    }
+
     /// The call's context footprint as a share of the model's window: the
     /// INPUT column (everything the model read) over the pricing feed's
-    /// max_input_tokens. A disk cache written before windows rode the feed
-    /// has none — the bundled floor answers until the next live fetch.
-    /// "—" only when nobody knows the window.
+    /// max_input_tokens. "—" only when nobody knows the window.
     private func contextPercent(model: String, tally: TokenTally) -> String {
-        guard let window = store.pricing.rates(for: model)?.contextTokens
-            ?? PricingTable.bundled.rates(for: model)?.contextTokens,
-            window > 0
+        guard let window = contextWindow(for: model), window > 0
         else { return "—" }
         let percent = Double(tally.inputSide) / Double(window) * 100
         if percent > 0, percent < 1 { return "<1%" }

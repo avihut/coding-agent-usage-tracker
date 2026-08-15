@@ -256,23 +256,30 @@ public struct SessionChartModel: Sendable, Equatable {
     /// chart's reset idiom (same semantic: a window reset), never as prompt
     /// lines.
     public let compactionRows: [Int]
+    /// Each call's context footprint as a fraction of ITS model's window
+    /// (inputSide / max_input_tokens), carried forward through non-call rows
+    /// so any index answers "how full was the context here". Empty when no
+    /// call's window is known — the overlay then has nothing honest to draw.
+    public let contextFraction: [Double]
     public let sections: [Section]
 
     public init(
         runningCost: [Double], runningTokens: [Double], models: [ModelSeries],
-        promptRows: [Int], compactionRows: [Int], sections: [Section]
+        promptRows: [Int], compactionRows: [Int], contextFraction: [Double],
+        sections: [Section]
     ) {
         self.runningCost = runningCost
         self.runningTokens = runningTokens
         self.models = models
         self.promptRows = promptRows
         self.compactionRows = compactionRows
+        self.contextFraction = contextFraction
         self.sections = sections
     }
 
     public static let empty = SessionChartModel(
         runningCost: [], runningTokens: [], models: [], promptRows: [],
-        compactionRows: [], sections: [])
+        compactionRows: [], contextFraction: [], sections: [])
 
     public func running(_ measure: SessionChartMeasure) -> [Double] {
         measure == .cost ? runningCost : runningTokens
@@ -284,9 +291,11 @@ public struct SessionChartModel: Sendable, Equatable {
 
     /// Builds from the detail rows and their index-aligned ledger. A ledger of
     /// the wrong length (never produced by `SessionLedger`) yields `.empty`
-    /// rather than misaligned curves.
+    /// rather than misaligned curves. `windows` maps model ids to their
+    /// context windows (the pricing feed's max_input_tokens) — models absent
+    /// from it simply don't move the context curve.
     public static func build(
-        rows: [SessionEvent], ledger: [SessionLedger.Entry]
+        rows: [SessionEvent], ledger: [SessionLedger.Entry], windows: [String: Int] = [:]
     ) -> SessionChartModel {
         guard rows.count == ledger.count, !rows.isEmpty else { return .empty }
         var runningCost: [Double] = []
@@ -296,6 +305,10 @@ public struct SessionChartModel: Sendable, Equatable {
         var tokens = 0
         var promptRows: [Int] = []
         var compactionRows: [Int] = []
+        var contextFraction: [Double] = []
+        contextFraction.reserveCapacity(rows.count)
+        var contextNow = 0.0
+        var contextKnown = false
         // A model is priced iff its call rows carry ledger increments; rates
         // are per-model constants, so one row answers for all of them.
         var priced: [String: Bool] = [:]
@@ -303,11 +316,16 @@ public struct SessionChartModel: Sendable, Equatable {
             if case .apiCall(let model, let tally, _) = row.kind {
                 tokens += tally.total
                 priced[model] = priced[model] ?? (ledger[index].incremental != nil)
+                if let window = windows[model], window > 0 {
+                    contextNow = Double(tally.inputSide) / Double(window)
+                    contextKnown = true
+                }
             }
             if case .prompt = row.kind { promptRows.append(index) }
             if case .compaction = row.kind { compactionRows.append(index) }
             runningCost.append(ledger[index].running)
             runningTokens.append(Double(tokens))
+            contextFraction.append(contextNow)
         }
         var modelCost: [String: [Double]] = [:]
         var modelTokens: [String: [Double]] = [:]
@@ -353,7 +371,8 @@ public struct SessionChartModel: Sendable, Equatable {
         }
         return SessionChartModel(
             runningCost: runningCost, runningTokens: runningTokens, models: models,
-            promptRows: promptRows, compactionRows: compactionRows, sections: sections)
+            promptRows: promptRows, compactionRows: compactionRows,
+            contextFraction: contextKnown ? contextFraction : [], sections: sections)
     }
 }
 

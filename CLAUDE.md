@@ -193,7 +193,15 @@ the README rather than silently deviating.
   time — sections stay visible across idle gaps and hover maps 1:1 to
   rows; marks thin (240 total / 120 per model) but hover reads FULL
   arrays; (7) the chart endpoint MUST equal the surface's headline
-  total (see RECONCILIATION). Hover/annotation idioms
+  total (see RECONCILIATION); (8) a CTX button-toggle (v0.42.0,
+  @AppStorage "sessionsShowContext", rendered only when
+  SessionChartModel.contextFraction is non-empty) overlays each
+  call's context share — inputSide / its OWN model's window, built
+  from a windows map passed to build(), carry-forward, EMPTY (not
+  all-zero) when no window is known — as a dashed secondary curve
+  scaled to the plot ceiling (full context = data ceiling, honest in
+  both measures), "context N%" at the tip, hover readout appending
+  "· ctx N%"; a gauge, never a model color. Hover/annotation idioms
   (onContinuousHover plot-frame math, .fit(to: .plot) overflow, hover
   cleared on exit) stay consistent with the meter popover chart.
   is provider DATA like the glyph — `UsageProvider.accent:

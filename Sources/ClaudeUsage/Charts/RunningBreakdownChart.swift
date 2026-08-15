@@ -31,6 +31,9 @@ struct RunningBreakdownChart: View {
     @Binding var measure: SessionChartMeasure
     @Binding var hoveredRow: Int?
     @Binding var hoveredModel: String?
+    /// Overlays the context-size curve (each call's window share) when on.
+    /// The toggle only renders when the model carries context data at all.
+    @Binding var showContext: Bool
     var onSelectRow: (Int) -> Void
 
     /// The row this chart's own hover last claimed. Leaving the chart clears
@@ -68,11 +71,20 @@ struct RunningBreakdownChart: View {
 
     // MARK: - Header
 
+    private var hasContext: Bool { !model.contextFraction.isEmpty }
+
     private var header: some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             SegmentedPicker(
                 title: "Measure", selection: $measure,
                 options: [("Cost", SessionChartMeasure.cost), ("Tokens", .tokens)])
+            if hasContext {
+                Toggle("CTX", isOn: $showContext)
+                    .toggleStyle(.button)
+                    .controlSize(.mini)
+                    .font(.caption2.weight(.semibold))
+                    .help("Overlay each call's context size as a share of its model's window")
+            }
             Text(readoutText)
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(
@@ -103,7 +115,12 @@ struct RunningBreakdownChart: View {
                let values = series.values(measure) {
                 return "\(ModelNames.display(hoveredModel)) · \(stamp) · \(format(values[row]))"
             }
-            return "\(stamp) · \(format(totals[row]))"
+            var line = "\(stamp) · \(format(totals[row]))"
+            if showContext, model.contextFraction.indices.contains(row),
+               model.contextFraction[row] > 0 {
+                line += " · ctx \(Int((model.contextFraction[row] * 100).rounded()))%"
+            }
+            return line
         }
         return "Hover the graph — click to jump to a message"
     }
@@ -172,6 +189,36 @@ struct RunningBreakdownChart: View {
                 .foregroundStyle(accent.opacity(hoveredModel == nil ? 1 : 0.3))
                 .lineStyle(StrokeStyle(lineWidth: 1.5))
                 .interpolationMethod(.monotone)
+            }
+            // The context overlay: each call's window share, scaled to the
+            // plot ceiling (full context = data ceiling) so it reads in both
+            // measures. A sawtooth by nature — it climbs within a stretch
+            // and falls where the context reset. Dashed neutral, never a
+            // model color: it's a gauge, not a spend series.
+            if showContext, hasContext {
+                ForEach(totalIndices, id: \.self) { index in
+                    LineMark(
+                        x: .value("Message", Double(index)),
+                        y: .value("Value", model.contextFraction[index] * ceiling),
+                        series: .value("Series", "context"))
+                    .foregroundStyle(Color.secondary.opacity(0.8))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                    .interpolationMethod(.monotone)
+                }
+                if let tip = model.contextFraction.last {
+                    PointMark(
+                        x: .value("Message", Double(count - 1)),
+                        y: .value("Value", tip * ceiling))
+                    .symbolSize(0)
+                    .annotation(
+                        position: .top, alignment: .center, spacing: 2,
+                        overflowResolution: .init(x: .fit(to: .plot), y: .disabled)
+                    ) {
+                        Text("context \(Int((tip * 100).rounded()))%")
+                            .font(.system(size: 8, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
             // Every prompt stands as a vertical line — where the user steered.
             // Dense sessions fade them toward texture instead of clutter.

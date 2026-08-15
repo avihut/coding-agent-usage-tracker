@@ -185,6 +185,26 @@ struct SessionChartModelTests {
         #expect(model.section(containing: 7) == model.sections[1])
     }
 
+    @Test("context fractions: per-call window share, carried through gaps")
+    func contextSeries() {
+        let rows = Self.rows()
+        let ledger = SessionLedger.runningCost(rows: rows, pricing: Self.pricing)
+        let model = SessionChartModel.build(
+            rows: rows, ledger: ledger,
+            windows: ["claude-fable-5": 10_000, "mystery-model": 5_000])
+        // inputSide: fable 1000 → 0.1, fable 2000 → 0.2, mystery 500 → 0.1,
+        // fable 3000 → 0.3; non-call rows carry the last value forward.
+        #expect(model.contextFraction == [0, 0.1, 0.1, 0.2, 0.1, 0.1, 0.3, 0.3])
+        // A model with no known window carries forward instead of dropping
+        // the curve to a false zero.
+        let partial = SessionChartModel.build(
+            rows: rows, ledger: ledger, windows: ["claude-fable-5": 10_000])
+        #expect(partial.contextFraction[4] == 0.2)
+        // No windows at all → no context data, not an all-zero line.
+        let none = SessionChartModel.build(rows: rows, ledger: ledger)
+        #expect(none.contextFraction.isEmpty)
+    }
+
     @Test("headless sessions chart without prompts or sections")
     func headless() {
         let rows = [Self.rows()[1]].map {
