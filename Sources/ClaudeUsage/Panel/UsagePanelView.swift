@@ -1599,7 +1599,9 @@ struct MeterHistoryView: View {
     /// through a reset — curves then fall back to busiest-model scaling
     /// and the axis stays percent.
     private func percentPerToken(rows: [ModelTokenUsage]) -> Double? {
-        if effectiveSpan == .sliding { return slidingPercentPerToken }
+        if effectiveSpan == .sliding {
+            return slidingPercentPerToken ?? frameGainsPercentPerToken(rows: rows)
+        }
         let total = WindowTokens.total(rows).total
         guard total > 0, let first = points.first, let last = points.last else { return nil }
         let delta = Double(last.percent - first.percent)
@@ -1622,6 +1624,25 @@ struct MeterHistoryView: View {
         let total = WindowTokens.total(scoped).total
         guard total > 0 else { return nil }
         return Double(percent) / Double(total)
+    }
+
+    /// Fallback anchor for frames the live window can't price: a young 5h
+    /// window whose local tokens haven't landed yet (the activity scan is
+    /// ~1/min behind the transcript), usage spent on another surface, a
+    /// percent still at 0, or an expired meter with no live reset at all.
+    /// The percent GAINED across the visible frame — drops at resets
+    /// excluded, so a sawtooth doesn't cancel itself — over the tokens
+    /// spent in it. Coarser than the live-window anchor, but it keeps the
+    /// axis speaking tokens whenever the frame holds any growth at all;
+    /// nil only when even that is missing.
+    private func frameGainsPercentPerToken(rows: [ModelTokenUsage]) -> Double? {
+        let total = WindowTokens.total(rows).total
+        guard total > 0 else { return nil }
+        let series = points
+        let gains = zip(series, series.dropFirst())
+            .reduce(0) { $0 + max(0, $1.1.percent - $1.0.percent) }
+        guard gains >= 1 else { return nil }
+        return Double(gains) / Double(total)
     }
 
     /// Layered labels: when the focused model's name and the now label
