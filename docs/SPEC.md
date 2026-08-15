@@ -285,6 +285,12 @@ Non-negotiable; flag rather than work around:
   read, no credentials are used, and the provider adds zero network
   destinations. Harness auto-detection stats session-file mtimes under the
   same tree, read-only.
+- Gemini provider (amendment 2026-08-15): reads `~/.gemini/tmp` strictly
+  read-only — the prompt log (`logs.json`, decoding only timestamps and
+  entry types; message text is never materialized) and chat session
+  headers. `oauth_creds.json` and `google_accounts.json` are never read;
+  zero network destinations. Its one meter is a LOCAL prompt count against
+  a user-assumed daily cap — Google serves no readable usage numbers.
 - The token is never logged, persisted, or included in an error surface.
 - No sandbox entitlement, and no request for entitlements we don't need.
 - Don't install or register anything (login items, launch agents) without asking me

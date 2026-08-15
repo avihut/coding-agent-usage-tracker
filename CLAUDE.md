@@ -71,6 +71,27 @@ the README rather than silently deviating.
   provider later = a new UsageProvider implementation + a spec §10
   amendment for its hosts (and for any local trees it reads); the engine,
   history, charts, and panel need zero changes.
+- GEMINI PROVIDER (2026-08-15 v0.28.0, thin and honest): `GeminiProvider`
+  (UsageCore/GeminiProvider.swift) — local-files-only like Codex, but
+  Google serves NO readable usage numbers, so the one meter (rank 0,
+  "Daily · counted locally", limitWindow 24h, reset next midnight
+  America/Los_Angeles) is a LOCAL count of today's prompts vs an assumed
+  cap: UserDefaults "gemini.dailyRequestCap" (default 1000 free /
+  1500 AI Pro / 2000 Ultra), surfaced via the NEW generic
+  `UsageProvider.preferences: [ProviderPreference]` (protocol-extension
+  default []; Settings renders a stepper card per preference and nudges
+  a manual refresh on change — the seam rule holds, no vendor names in
+  the app layer). Traces: `~/.gemini/tmp/<hash>/logs.json` (decode ONLY
+  timestamp+type — message text never materialized, spec §10 amendment)
+  + `chats/session-*.jsonl` headers; session days stand in only where
+  the log has no entries (never double-count). No token data exists →
+  scanTranscripts returns empty and prompt days paint the faint
+  heatmap cells; fetchedAt = count time (a zero count is FRESH info —
+  unlike Codex this meter is never stale). `PricingFeedSelector` gained
+  `normalizeKey` (gemini feed keys are "gemini/"-route-prefixed;
+  stripped so transcript ids match). SlidingFrame default tier: ≤6h →
+  .h5, ≤24h → .h24, else .d7. oauth_creds.json/google_accounts.json
+  never read.
 - CODEX PROVIDER (2026-08-15 v0.27.0, first non-Claude harness):
   `CodexProvider` (UsageCore/CodexProvider.swift) is LOCAL-FILES-ONLY —
   zero network destinations, zero credentials (`StaticCredentialSource`

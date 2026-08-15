@@ -62,6 +62,40 @@ public protocol UsageProvider: Sendable {
     var bundledRates: PricingTable { get }
     /// This provider's slice of the shared pricing feed.
     var pricingSelector: PricingFeedSelector { get }
+    /// Provider-declared numeric preferences the settings screen renders
+    /// generically — display assumptions like Gemini's daily cap, never
+    /// secrets. Empty by default.
+    var preferences: [ProviderPreference] { get }
+}
+
+extension UsageProvider {
+    public var preferences: [ProviderPreference] { [] }
+}
+
+/// One provider-declared numeric preference. `key` is the full UserDefaults
+/// key, already provider-scoped by convention ("gemini.dailyRequestCap");
+/// the provider reads it itself wherever the value matters.
+public struct ProviderPreference: Sendable, Identifiable {
+    public let key: String
+    public let title: String
+    public let note: String
+    public let defaultValue: Int
+    public let range: ClosedRange<Int>
+    public let step: Int
+
+    public var id: String { key }
+
+    public init(
+        key: String, title: String, note: String,
+        defaultValue: Int, range: ClosedRange<Int>, step: Int
+    ) {
+        self.key = key
+        self.title = title
+        self.note = note
+        self.defaultValue = defaultValue
+        self.range = range
+        self.step = step
+    }
 }
 
 /// Product pages a provider can point the UI at.

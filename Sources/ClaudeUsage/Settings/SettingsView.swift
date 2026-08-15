@@ -196,6 +196,47 @@ func note(_ text: String) -> some View {
 
 // MARK: - General
 
+/// One provider-declared numeric preference (UsageProvider.preferences),
+/// written straight through to its UserDefaults key; the change nudges a
+/// manual refresh so a derived meter re-reads the assumption instantly.
+private struct ProviderPreferenceRow: View {
+    let preference: ProviderPreference
+    let onChange: () -> Void
+    @State private var value: Int
+
+    init(preference: ProviderPreference, onChange: @escaping () -> Void) {
+        self.preference = preference
+        self.onChange = onChange
+        let stored = UserDefaults.standard.integer(forKey: preference.key)
+        _value = State(initialValue: stored > 0 ? stored : preference.defaultValue)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(preference.title)
+                Spacer()
+                Text("\(value)")
+                    .font(.callout.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                Stepper("", value: valueBinding, in: preference.range, step: preference.step)
+                    .labelsHidden()
+            }
+            note(preference.note)
+        }
+    }
+
+    private var valueBinding: Binding<Int> {
+        Binding(
+            get: { value },
+            set: { newValue in
+                value = newValue
+                UserDefaults.standard.set(newValue, forKey: preference.key)
+                onChange()
+            })
+    }
+}
+
 private struct GeneralSettingsPane: View {
     var store: UsageStore
     var registry: ProviderRegistry
@@ -254,6 +295,15 @@ private struct GeneralSettingsPane: View {
                     infoRow(harnessName(signal.id), signalText(signal))
                 }
                 note("Automatic follows whichever agent actually ran on this Mac recently — scored on session files, since background daemons touch state files long after real use stops. One harness is metered at a time; switching re-reads everything from the other harness's own data.")
+            }
+            if !store.provider.preferences.isEmpty {
+                SettingsCard(store.provider.agentName) {
+                    ForEach(store.provider.preferences) { preference in
+                        ProviderPreferenceRow(preference: preference) {
+                            store.refresh(.manual)
+                        }
+                    }
+                }
             }
             SettingsCard("Refresh") {
                 VStack(alignment: .leading, spacing: 4) {

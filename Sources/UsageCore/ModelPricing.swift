@@ -171,9 +171,16 @@ public struct PricingFeedSelector: Sendable {
     /// Keep this feed entry? `key` is the feed's model id, `litellmProvider`
     /// its `litellm_provider` tag (nil when the entry omits it).
     public let includes: @Sendable (_ key: String, _ litellmProvider: String?) -> Bool
+    /// Feed key → the id the agent's transcripts use ("gemini/gemini-3-pro"
+    /// → "gemini-3-pro"). Identity for vendors whose keys already match.
+    public let normalizeKey: @Sendable (String) -> String
 
-    public init(includes: @escaping @Sendable (String, String?) -> Bool) {
+    public init(
+        includes: @escaping @Sendable (String, String?) -> Bool,
+        normalizeKey: @escaping @Sendable (String) -> String = { $0 }
+    ) {
         self.includes = includes
+        self.normalizeKey = normalizeKey
     }
 
     public static let claude = PricingFeedSelector { key, provider in
@@ -185,6 +192,14 @@ public struct PricingFeedSelector: Sendable {
     public static let openAI = PricingFeedSelector { key, provider in
         provider == "openai" && !key.contains("/")
     }
+
+    /// Gemini's feed keys are route-prefixed ("gemini/gemini-3-pro") while
+    /// transcripts use the bare id — strip the route.
+    public static let gemini = PricingFeedSelector(
+        includes: { _, provider in provider == "gemini" },
+        normalizeKey: { key in
+            key.hasPrefix("gemini/") ? String(key.dropFirst("gemini/".count)) : key
+        })
 }
 
 public enum PricingFeedError: Error, Sendable {
@@ -261,7 +276,7 @@ public struct PricingFeedClient: Sendable {
                   let input = entry.inputCostPerToken,
                   let output = entry.outputCostPerToken
             else { continue }
-            rates[key] = ModelRates(
+            rates[selector.normalizeKey(key)] = ModelRates(
                 input: input, output: output,
                 cacheWrite: entry.cacheCreationInputTokenCost,
                 cacheWrite1h: entry.cacheCreationInputTokenCostAbove1hr,

@@ -563,8 +563,17 @@ struct MeterHistoryView: View {
         _span = AppStorage(
             wrappedValue: .sliding, "meterPopoverSpan-\(providerID).\(meter.id)")
         _slidingFrame = AppStorage(
-            wrappedValue: (meter.limitWindow ?? .infinity) <= 6 * 3600 ? .h5 : .d7,
+            wrappedValue: Self.defaultFrame(limitWindow: meter.limitWindow),
             "meterSlidingFrame-\(providerID).\(meter.id)")
+    }
+
+    /// A meter's native scale picks its default frame: 5h windows read at
+    /// 5h, daily windows at 24h, weekly at 7d.
+    private static func defaultFrame(limitWindow: TimeInterval?) -> SlidingFrame {
+        let window = limitWindow ?? .infinity
+        if window <= 6 * 3600 { return .h5 }
+        if window <= 24 * 3600 { return .h24 }
+        return .d7
     }
 
     private static let chartWidth: CGFloat = 300
