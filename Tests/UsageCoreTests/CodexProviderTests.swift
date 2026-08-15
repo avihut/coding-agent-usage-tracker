@@ -186,6 +186,71 @@ struct CodexProviderTests {
         #expect(rescan.timeline == scan.timeline)
     }
 
+    private static func sessionMetaLine(stamp: String, cwd: String) -> String {
+        """
+        {"timestamp":"\(stamp)","type":"session_meta","payload":{"id":"x","cwd":"\(cwd)",\
+        "cli_version":"0.44.0","originator":"codex_cli_rs","source":"cli"}}
+        """
+    }
+
+    private static func promptLine(stamp: String, text: String) -> String {
+        """
+        {"timestamp":"\(stamp)","type":"event_msg","payload":{"type":"user_message",\
+        "message":"\(text)","images":null}}
+        """
+    }
+
+    @Test("rollouts list as sessions: one file one session, derived counts, detail rows")
+    func sessions() throws {
+        let fixture = try CodexFixture()
+        defer { fixture.tearDown() }
+        let reset = Int(Date().timeIntervalSince1970) + 3600
+        try fixture.writeRollout(
+            "2026/08/15/rollout-b.jsonl",
+            lines: [
+                Self.sessionMetaLine(stamp: "2026-08-15T10:00:00.000Z", cwd: "/Users/dev/tool"),
+                Self.turnContextLine(stamp: "2026-08-15T10:00:05.000Z", model: "gpt-5.2-codex"),
+                Self.promptLine(stamp: "2026-08-15T10:00:10.000Z", text: "port the scanner"),
+                Self.tokenCountLine(
+                    stamp: "2026-08-15T10:00:30.000Z", primaryPercent: 1, primaryReset: reset,
+                    secondaryPercent: 1, secondaryReset: reset),
+                Self.tokenCountLine(
+                    stamp: "2026-08-15T10:20:30.000Z", primaryPercent: 2, primaryReset: reset,
+                    secondaryPercent: 2, secondaryReset: reset),
+            ])
+        let source = CodexActivitySource(
+            root: fixture.root, cacheDirectory: fixture.cacheDirectory)
+
+        let sessions = source.scanTranscripts(now: Date()).sessions
+        #expect(sessions.count == 1)
+        let s = try #require(sessions.first)
+        #expect(s.id == "rollout-b")
+        #expect(s.title == "port the scanner")
+        #expect(s.projectPath == "/Users/dev/tool")
+        #expect(s.agentVersion == "0.44.0")
+        #expect(s.kind == .interactive)
+        #expect(s.prompts == 1)
+        #expect(s.apiCalls == 2)
+        #expect(s.models["gpt-5.2-codex"]?.total == 2400)
+        #expect(s.start == FlexibleISO8601.date(from: "2026-08-15T10:00:10.000Z"))
+        #expect(s.end == FlexibleISO8601.date(from: "2026-08-15T10:20:30.000Z"))
+        // Two active minutes 20 min apart — beyond grace, so two 60s
+        // stretches, never a stitched span.
+        #expect(s.activeSeconds == TimeInterval(120))
+
+        let detail = try #require(source.sessionDetail(id: "rollout-b"))
+        #expect(detail.rows.count == 3)
+        #expect(detail.rows[0].kind == .prompt(preview: "port the scanner"))
+        if case .apiCall(let model, let tally, _) = detail.rows[1].kind {
+            #expect(model == "gpt-5.2-codex")
+            #expect(tally.total == 1200)
+        } else {
+            Issue.record("expected a call row")
+        }
+        #expect(detail.summary.apiCalls == 2)
+        #expect(source.sessionDetail(id: "rollout-nope") == nil)
+    }
+
     @Test("provider identity: local-only, credential-free, retention-free")
     func providerIdentity() throws {
         let provider = CodexProvider()

@@ -113,18 +113,20 @@ struct UsageProviderTests {
         let claude = ClaudeProvider().makeLocalActivity(cacheDirectory: temp)
         #expect(claude?.providesSessions == true)
 
-        // Codex and Gemini ride the protocol defaults untouched: no session
-        // capability, empty session lists.
-        let codex = CodexProvider(sessionsRoot: temp.appending(path: "codex"))
-            .makeLocalActivity(cacheDirectory: temp)
-        let gemini = GeminiProvider(tmpRoot: temp.appending(path: "gemini"))
-            .makeLocalActivity(cacheDirectory: temp)
-        for source in [codex, gemini] {
-            let source = try #require(source)
-            #expect(source.providesSessions == false)
-            #expect(source.sessionDetail(id: "anything") == nil)
-            #expect(source.scanTranscripts(now: Date()).sessions.isEmpty)
-        }
+        // Codex reconstructs sessions from rollouts (v0.31.0); an empty root
+        // still yields an empty list and nil details, never an error.
+        let codex = try #require(CodexProvider(sessionsRoot: temp.appending(path: "codex"))
+            .makeLocalActivity(cacheDirectory: temp.appending(path: "codex-cache")))
+        #expect(codex.providesSessions == true)
+        #expect(codex.sessionDetail(id: "anything") == nil)
+        #expect(codex.scanTranscripts(now: Date()).sessions.isEmpty)
+
+        // Gemini rides the protocol defaults untouched: sessionless.
+        let gemini = try #require(GeminiProvider(tmpRoot: temp.appending(path: "gemini"))
+            .makeLocalActivity(cacheDirectory: temp))
+        #expect(gemini.providesSessions == false)
+        #expect(gemini.sessionDetail(id: "anything") == nil)
+        #expect(gemini.scanTranscripts(now: Date()).sessions.isEmpty)
     }
 
     @Test("Claude provider identity: hosts, links, glyph, capabilities")

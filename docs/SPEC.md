@@ -284,7 +284,11 @@ Non-negotiable; flag rather than work around:
   usage and the server's rate-limit snapshots. `~/.codex/auth.json` is never
   read, no credentials are used, and the provider adds zero network
   destinations. Harness auto-detection stats session-file mtimes under the
-  same tree, read-only.
+  same tree, read-only. Sessions (v0.31.0): each rollout file lists as one
+  session in the sessions browser under the same materialization contract —
+  the scrubbed first-prompt preview (as the session title), cwd, CLI
+  version, and activity stretches persist only in the app's own scoped
+  cache; full message text never persists.
 - Gemini provider (amendment 2026-08-15): reads `~/.gemini/tmp` strictly
   read-only — the prompt log (`logs.json`, decoding only timestamps and
   entry types; message text is never materialized) and chat session

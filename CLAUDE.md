@@ -108,6 +108,12 @@ the README rather than silently deviating.
   (default SHOW, user decision; no parent attribution — verified no
   linkage exists in hook transcripts). `--sessions` launch hatch.
   Spec §10 amendment lists exactly what the cache may materialize.
+  CODEX SESSIONS (v0.31.0): CodexActivitySource populates the same
+  seam — one rollout file = one session (cache v2; SessionMeta stores
+  title/cwd/cli_version/start/end/stretches, counts derived from
+  DayTally), title = scrubbed first user_message, kind always
+  .interactive (rollouts carry no headless marker), detail rows from
+  user_message + token_count deltas. Gemini stays sessionless.
 - PROVIDER ACCENTS (2026-08-15 v0.29.0, user-directed): the brand accent
   is provider DATA like the glyph — `UsageProvider.accent:
   ProviderAccent` (pure sRGB components; UsageCore stays UI-framework-

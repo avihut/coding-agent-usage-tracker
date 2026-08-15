@@ -303,7 +303,9 @@ private struct SessionDetailPane: View {
                 GridRow {
                     metaCell("Repository", path(summary.projectPath))
                     metaCell("Branch", summary.gitBranch ?? "—")
-                    metaCell("Session", String(summary.id.prefix(8)), mono: true)
+                    // The id's tail: rollout stems share their whole prefix,
+                    // and a uuid's last block is as unique as its first.
+                    metaCell("Session", String(summary.id.suffix(8)), mono: true)
                 }
                 GridRow {
                     metaCell("Started", started(summary))
