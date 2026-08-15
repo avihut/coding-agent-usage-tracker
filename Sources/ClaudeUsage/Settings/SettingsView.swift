@@ -357,7 +357,10 @@ private struct GeneralSettingsPane: View {
                     "Network destinations",
                     (store.provider.networkDestinations + ["raw.githubusercontent.com"])
                         .joined(separator: " · "))
-                note("Usage comes from \(store.provider.serviceName)'s own usage endpoint; activity and tokens from this Mac's local \(store.provider.agentName) transcripts, read-only. No analytics, no telemetry.")
+                note(
+                    store.isLocalProvider
+                        ? "Everything comes from this Mac's local \(store.provider.agentName) session files, read-only — including the limit percentages \(store.provider.agentName) itself records. Nothing is fetched from \(store.provider.serviceName). No analytics, no telemetry."
+                        : "Usage comes from \(store.provider.serviceName)'s own usage endpoint; activity and tokens from this Mac's local \(store.provider.agentName) transcripts, read-only. No analytics, no telemetry.")
             }
         }
         .onAppear {

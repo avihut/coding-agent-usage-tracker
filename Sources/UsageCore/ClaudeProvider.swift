@@ -45,6 +45,8 @@ public struct ClaudeProvider: UsageProvider {
     public var modelCatalog: ModelCatalog { .claude }
 
     public var bundledRates: PricingTable { .bundled }
+
+    public var pricingSelector: PricingFeedSelector { .claude }
 }
 
 /// Claude Code's on-disk traces: JSONL transcripts under ~/.claude/projects

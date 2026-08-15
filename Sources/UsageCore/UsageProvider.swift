@@ -60,6 +60,8 @@ public protocol UsageProvider: Sendable {
     /// Offline pricing floor for this provider's models — the table used
     /// until (and beneath) the live feed.
     var bundledRates: PricingTable { get }
+    /// This provider's slice of the shared pricing feed.
+    var pricingSelector: PricingFeedSelector { get }
 }
 
 /// Product pages a provider can point the UI at.

@@ -12,6 +12,10 @@ public enum UsageClientError: Error, Sendable {
     case network(URLError)
     /// 2xx but the body doesn't decode — the undocumented schema moved.
     case schema
+    /// A local-files provider found no session artifacts to read usage
+    /// from — the agent never ran on this machine (or its traces were
+    /// cleaned). Not retried: nothing changes until the agent runs.
+    case noLocalData
 }
 
 /// One call against the usage endpoint. No retry policy, no UI, no state.

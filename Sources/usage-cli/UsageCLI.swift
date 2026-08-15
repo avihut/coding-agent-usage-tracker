@@ -54,6 +54,8 @@ struct UsageCLI {
             die("network failure: \(urlError.code)", code: 6)
         case .schema:
             die("unexpected API response — the undocumented schema may have changed", code: 8)
+        case .noLocalData:
+            die("no local session files found for this provider", code: 10)
         }
     }
 

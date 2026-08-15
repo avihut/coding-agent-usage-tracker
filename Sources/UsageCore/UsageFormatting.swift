@@ -43,7 +43,7 @@ public enum UsageFormatting {
                 tag: "W", percent: weekly?.percent, level: weekly?.level ?? .normal,
                 severity: severity(weekly)),
             MenuBarSegment(
-                tag: scopedTag(for: topScoped?.label),
+                tag: scopedTag(for: topScoped),
                 percent: scoped.compactMap(\.percent).max(),
                 level: scoped.map(\.level).max() ?? .normal,
                 severity: scoped.compactMap { severity($0) }.max()
@@ -51,10 +51,11 @@ public enum UsageFormatting {
         ]
     }
 
-    /// "Weekly · Fable" → "F"; any other label → its first letter.
-    static func scopedTag(for label: String?) -> String {
-        guard let label else { return "M" }
-        let name = label.hasPrefix("Weekly · ") ? String(label.dropFirst("Weekly · ".count)) : label
+    /// The scoped meter's one-letter menu bar tag, from its model name as
+    /// DATA (`scopedModelName`) — never parsed out of the display label.
+    static func scopedTag(for meter: Meter?) -> String {
+        guard let meter else { return "M" }
+        let name = meter.scopedModelName ?? meter.label
         return name.first.map { String($0).uppercased() } ?? "M"
     }
 
@@ -169,6 +170,25 @@ public enum UsageFormatting {
     }
 
     /// "09:45" — for "Updated …" and "cached …" annotations.
+    /// The status line's "Updated …" stamp, day-aware: bare clock today,
+    /// weekday-qualified within a week, date-qualified beyond — a local
+    /// provider's data is only as fresh as the agent's last session, and a
+    /// bare "14:32" from three days ago would read as today.
+    public static func updatedStamp(
+        _ date: Date, now: Date, calendar: Calendar = .current,
+        timeZone: TimeZone = .current, locale: Locale = .current
+    ) -> String {
+        if calendar.isDate(date, inSameDayAs: now) {
+            return clockTime(date, timeZone: timeZone)
+        }
+        let formatter = DateFormatter()
+        formatter.timeZone = timeZone
+        formatter.locale = locale
+        formatter.dateFormat =
+            now.timeIntervalSince(date) < 7 * 86400 ? "EEE HH:mm" : "MMM d HH:mm"
+        return formatter.string(from: date)
+    }
+
     public static func clockTime(_ date: Date, timeZone: TimeZone = .current) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")

@@ -71,6 +71,35 @@ the README rather than silently deviating.
   provider later = a new UsageProvider implementation + a spec §10
   amendment for its hosts (and for any local trees it reads); the engine,
   history, charts, and panel need zero changes.
+- CODEX PROVIDER (2026-08-15 v0.27.0, first non-Claude harness):
+  `CodexProvider` (UsageCore/CodexProvider.swift) is LOCAL-FILES-ONLY —
+  zero network destinations, zero credentials (`StaticCredentialSource`
+  returns an empty token so UsageService stays byte-identical;
+  `~/.codex/auth.json` is NEVER read, spec §10 amendment). Meters come
+  from the newest `token_count` event's `rate_limits` in
+  `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` (primary=session 300min,
+  secondary=weekly 10080min, used_percent + resets_at epoch-seconds;
+  walk newest-first past local-model sessions whose limits are empty;
+  ALL fields optional — the schema drifted between Feb/May 2026 CLIs).
+  Aging rule: resets_at < now ⇒ the window rolled ⇒ 0% and no reset
+  shown. `Snapshot.fetchedAt` = the event's own timestamp, and the
+  status line's stamp is day-aware (`UsageFormatting.updatedStamp`) so
+  stale local data reads honestly. Activity: `CodexActivitySource` maps
+  `last_token_usage` deltas + the active `turn_context.model` →
+  TokenSlots/DailyActivity (input = input−cached, cacheRead = cached,
+  output includes reasoning, cacheCreation 0 — OpenAI bills no
+  cache-write class; `total = input+output` arithmetic-verified);
+  per-file mtime/size parse cache, version 1, in the provider's scoped
+  dir. LOCAL-PROVIDER GATING: `networkDestinations.isEmpty` ⇒ no
+  RequestLedger recording, no API gauge, no budget lockout, manual
+  refresh bypasses the TriggerGate (a disk rescan needs no rationing).
+  New `noLocalData` case on BOTH UsageClientError and UsageError ("No
+  local <agent> sessions found yet") — without it a sessionless local
+  provider rendered as "Network unavailable". Pricing: providers declare
+  a `PricingFeedSelector` slice of the LiteLLM feed (claude=anthropic,
+  codex=bare openai keys); codex ships an EMPTY bundled table (live feed
+  or "—", never stale hardcoded guesses). `scopedTag` now reads
+  `scopedModelName` as data (the last label-parsing claude-ism).
 - MULTI-PROVIDER REGISTRY (2026-08-15 v0.26.0): `ProviderRegistry`
   (app layer) is now the one place a vendor is chosen — it lists every
   bundled provider (Claude only so far), detects the actively-used

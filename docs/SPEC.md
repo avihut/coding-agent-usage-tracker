@@ -270,9 +270,21 @@ updated, Refresh, and the settings link.
 
 Non-negotiable; flag rather than work around:
 
-- No writes to the Keychain, ever. No reads or use of the refresh token.
-- No network destination other than `api.anthropic.com`. No analytics, no crash
-  reporting, no telemetry.
+- No writes to the Keychain, ever. No reads or use of the refresh token — for
+  ANY provider's credential store.
+- Network destinations, exhaustively: `api.anthropic.com` (the Claude
+  provider's usage endpoint) and `raw.githubusercontent.com` (the LiteLLM
+  pricing feed — plain GET, no credentials attached; amendment 2026-08-13).
+  No analytics, no crash reporting, no telemetry.
+- Adding a provider = a new `UsageProvider` implementation plus an amendment
+  here naming its hosts and any local trees it reads. The settings privacy
+  card renders exactly the active provider's hosts plus the pricing feed's.
+- Codex provider (amendment 2026-08-15): reads `~/.codex/sessions` strictly
+  read-only — the rollout JSONLs where Codex itself records per-turn token
+  usage and the server's rate-limit snapshots. `~/.codex/auth.json` is never
+  read, no credentials are used, and the provider adds zero network
+  destinations. Harness auto-detection stats session-file mtimes under the
+  same tree, read-only.
 - The token is never logged, persisted, or included in an error surface.
 - No sandbox entitlement, and no request for entitlements we don't need.
 - Don't install or register anything (login items, launch agents) without asking me

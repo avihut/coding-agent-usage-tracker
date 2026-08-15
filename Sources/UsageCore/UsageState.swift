@@ -12,6 +12,7 @@ public enum UsageError: Error, Sendable, Equatable {
     case http(Int)
     case network
     case schema
+    case noLocalData
 
     /// `agent` names whichever local agent owns the credentials ("Claude
     /// Code") — the taxonomy itself is provider-neutral.
@@ -25,6 +26,7 @@ public enum UsageError: Error, Sendable, Equatable {
         case .http(let code): "Usage endpoint returned HTTP \(code)"
         case .network: "Network unavailable"
         case .schema: "Unexpected API response"
+        case .noLocalData: "No local \(agent) sessions found yet"
         }
     }
 
@@ -35,6 +37,7 @@ public enum UsageError: Error, Sendable, Equatable {
         case .signInExpired: "Open \(agent) once; it refreshes the token automatically."
         case .rateLimited: "The API asked for a pause. Checks back off and resume on their own."
         case .schema: "The undocumented API may have changed shape."
+        case .noLocalData: "Run \(agent) once on this Mac — usage is read from its session files."
         case .http, .network, .credentialsUnreadable: nil
         }
     }
@@ -54,6 +57,7 @@ public enum UsageError: Error, Sendable, Equatable {
         case .http(let code): .http(code)
         case .network: .network
         case .schema: .schema
+        case .noLocalData: .noLocalData
         }
     }
 }

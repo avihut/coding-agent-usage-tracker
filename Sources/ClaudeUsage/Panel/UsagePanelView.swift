@@ -197,7 +197,7 @@ struct UsagePanelView: View {
                 // A red button is soft-disabled: the click surfaces WHY
                 // instead of spending a request that risks the lockout the
                 // color warns about. Hover already tells; click insists.
-                if store.apiBudget(now: Date()).fraction >= 1 {
+                if !store.isLocalProvider, store.apiBudget(now: Date()).fraction >= 1 {
                     showRefreshBlocked = true
                 } else {
                     store.refresh(.manual)
@@ -268,7 +268,10 @@ struct UsagePanelView: View {
     private func statusLine(now: Date) -> Text {
         var parts: [Text] = []
         if let fetchedAt = store.state.snapshot?.fetchedAt {
-            let stamp = UsageFormatting.clockTime(fetchedAt)
+            // Day-aware: a local provider's data is only as fresh as the
+            // agent's last session, and a bare clock time would lie about
+            // a days-old stamp.
+            let stamp = UsageFormatting.updatedStamp(fetchedAt, now: now)
             // The stale badge lives here now that there's no header for it.
             parts.append(
                 store.state.isStale
@@ -283,8 +286,11 @@ struct UsagePanelView: View {
         let pace = store.paceMultiplier(now: now)
         if pace > 1 { parts.append(Text("idle ×\(pace)")) }
         // Surface the API budget only once it's half spent — quiet otherwise.
-        let budget = store.apiBudget(now: now)
-        if budget.fraction >= 0.5 { parts.append(Text("API \(budget.used)/\(budget.ceiling)h")) }
+        // Local providers have no budget: nothing is requested from anyone.
+        if !store.isLocalProvider {
+            let budget = store.apiBudget(now: now)
+            if budget.fraction >= 0.5 { parts.append(Text("API \(budget.used)/\(budget.ceiling)h")) }
+        }
         guard var line = parts.first else { return Text("") }
         for part in parts.dropFirst() { line = line + Text(" · ") + part }
         return line
@@ -293,6 +299,7 @@ struct UsagePanelView: View {
     /// Orange once the hour's requests reach 80% of the estimated budget,
     /// red at or past it — the warning lives on the button that spends it.
     private var refreshPressureStyle: AnyShapeStyle {
+        guard !store.isLocalProvider else { return AnyShapeStyle(.tint) }
         let fraction = store.apiBudget(now: Date()).fraction
         if fraction >= 1 { return AnyShapeStyle(.red) }
         if fraction >= 0.8 { return AnyShapeStyle(.orange) }
@@ -302,6 +309,9 @@ struct UsagePanelView: View {
     /// Tiered with `refreshPressureStyle` — whatever color the button
     /// wears, hovering it says why.
     private var refreshHelp: String {
+        if store.isLocalProvider {
+            return "Refresh now — re-reads \(store.provider.agentName)'s local session files"
+        }
         let budget = store.apiBudget(now: Date())
         if budget.fraction >= 1 {
             return "This hour's ~\(budget.ceiling)-request API budget is spent"

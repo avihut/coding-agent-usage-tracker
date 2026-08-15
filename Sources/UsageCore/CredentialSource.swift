@@ -34,6 +34,22 @@ extension Credential: CustomStringConvertible, CustomDebugStringConvertible {
     public var debugDescription: String { description }
 }
 
+/// For providers that read no credentials at all (local-files-only): always
+/// succeeds with an empty token so the service pipeline stays uniform — the
+/// provider's fetch ignores the token, and the signed-out error path simply
+/// never fires.
+public struct StaticCredentialSource: CredentialSource {
+    public let name: String
+
+    public init(name: String) {
+        self.name = name
+    }
+
+    public func readCredential() throws -> Credential {
+        Credential(accessToken: "", sourceName: name)
+    }
+}
+
 public enum CredentialError: Error, Sendable {
     /// The source has no credentials at all (file missing, Keychain item absent).
     case notFound

@@ -61,6 +61,10 @@ final class UsageStore {
     /// True once `shutdown()` ran — a retired store (the registry switched
     /// providers) must never reschedule, rescan, or render again.
     private(set) var isShutDown = false
+    /// A provider with no network destinations reads usage from local files:
+    /// no request ledger to fill, no API budget to render, and a manual
+    /// refresh is just a disk rescan the trigger gate needn't ration.
+    var isLocalProvider: Bool { provider.networkDestinations.isEmpty }
 
     init(provider: any UsageProvider = ClaudeProvider(), service: UsageService? = nil) {
         let bundleID = Bundle.main.bundleIdentifier ?? "com.avihu.ClaudeUsage"
@@ -72,7 +76,8 @@ final class UsageStore {
             ?? UsageService(provider: provider, cache: UsageCache(directory: caches))
         self.history = UsageHistory(directory: support)
         self.pricingService = PricingService(
-            cacheDirectory: support, fallback: provider.bundledRates)
+            cacheDirectory: support, fallback: provider.bundledRates,
+            selector: provider.pricingSelector)
         self.pricing = pricingService.current()
         let stored = UserDefaults.standard.double(forKey: Self.intervalKey)
         // Stored 60s choices predate the 180s floor — clamp, don't honor.
@@ -123,14 +128,17 @@ final class UsageStore {
             ensureScheduled(now: now)
             return
         }
-        guard !isRefreshing, gate.shouldAllow(at: now) else {
+        let bypassGate = reason == .manual && isLocalProvider
+        guard !isRefreshing, bypassGate || gate.shouldAllow(at: now) else {
             // Scheduling is one-shot: a denied trigger must still leave a
             // live timer behind, or the cadence dies here.
             ensureScheduled(now: now)
             return
         }
         isRefreshing = true
-        ledger.recordRequest(at: now)
+        if !isLocalProvider {
+            ledger.recordRequest(at: now)
+        }
         Task {
             let previous = state.snapshot
             let newState = await service.refresh(thresholds: Self.currentThresholds())

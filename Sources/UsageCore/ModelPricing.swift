@@ -164,6 +164,29 @@ public struct PricingTable: Codable, Sendable, Equatable {
         source: .bundled)
 }
 
+/// Which slice of the mixed-provider feed a provider's pricing table keeps.
+/// The feed mirrors every vendor's list prices; each provider declares its
+/// own filter so a Codex table never fills with Claude rates and vice versa.
+public struct PricingFeedSelector: Sendable {
+    /// Keep this feed entry? `key` is the feed's model id, `litellmProvider`
+    /// its `litellm_provider` tag (nil when the entry omits it).
+    public let includes: @Sendable (_ key: String, _ litellmProvider: String?) -> Bool
+
+    public init(includes: @escaping @Sendable (String, String?) -> Bool) {
+        self.includes = includes
+    }
+
+    public static let claude = PricingFeedSelector { key, provider in
+        key.hasPrefix("claude") && provider == "anthropic"
+    }
+
+    /// Route-prefixed duplicates ("openai/gpt-…") are skipped — the bare
+    /// keys are the canonical ids the agent's transcripts use.
+    public static let openAI = PricingFeedSelector { key, provider in
+        provider == "openai" && !key.contains("/")
+    }
+}
+
 public enum PricingFeedError: Error, Sendable {
     case network(URLError)
     case http(Int)
@@ -200,7 +223,9 @@ public struct PricingFeedClient: Sendable {
         }
     }
 
-    public func fetch(now: Date = Date()) async throws -> PricingTable {
+    public func fetch(
+        now: Date = Date(), selector: PricingFeedSelector = .claude
+    ) async throws -> PricingTable {
         var request = URLRequest(url: Self.endpoint)
         request.httpMethod = "GET"
         request.setValue(AppIdentity.userAgent, forHTTPHeaderField: "User-Agent")
@@ -218,20 +243,21 @@ public struct PricingFeedClient: Sendable {
         guard (200...299).contains(http.statusCode) else {
             throw PricingFeedError.http(http.statusCode)
         }
-        return try Self.decode(feed: data, now: now)
+        return try Self.decode(feed: data, now: now, selector: selector)
     }
 
     /// The feed is a huge mixed-provider dictionary; entries that don't decode
     /// are skipped rather than failing the whole table.
-    static func decode(feed: Data, now: Date) throws -> PricingTable {
+    static func decode(
+        feed: Data, now: Date, selector: PricingFeedSelector = .claude
+    ) throws -> PricingTable {
         guard let entries = try? JSONDecoder().decode([String: Lenient<FeedEntry>].self, from: feed)
         else { throw PricingFeedError.schema }
 
         var rates: [String: ModelRates] = [:]
         for (key, lenient) in entries {
-            guard key.hasPrefix("claude"),
-                  let entry = lenient.value,
-                  entry.litellmProvider == "anthropic",
+            guard let entry = lenient.value,
+                  selector.includes(key, entry.litellmProvider),
                   let input = entry.inputCostPerToken,
                   let output = entry.outputCostPerToken
             else { continue }
@@ -277,14 +303,17 @@ public struct PricingService: Sendable {
     let fileURL: URL
     /// The provider's offline floor, used until the feed has been cached.
     let fallback: PricingTable
+    /// The provider's slice of the mixed-vendor feed.
+    let selector: PricingFeedSelector
 
     public init(
         client: PricingFeedClient = PricingFeedClient(), cacheDirectory: URL,
-        fallback: PricingTable = .bundled
+        fallback: PricingTable = .bundled, selector: PricingFeedSelector = .claude
     ) {
         self.client = client
         self.fileURL = cacheDirectory.appending(path: "pricing.json")
         self.fallback = fallback
+        self.selector = selector
     }
 
     /// Best table available without touching the network.
@@ -300,7 +329,7 @@ public struct PricingService: Sendable {
     /// nothing changed (still fresh, or the fetch failed).
     public func refreshIfStale(now: Date = Date()) async -> PricingTable? {
         guard current().isStale(now: now) else { return nil }
-        guard let table = try? await client.fetch(now: now) else { return nil }
+        guard let table = try? await client.fetch(now: now, selector: selector) else { return nil }
         save(table)
         return table
     }
@@ -309,7 +338,7 @@ public struct PricingService: Sendable {
     /// automatic path stays daily) and throws so the button can say why it
     /// failed. Still the same single allowed destination, nothing attached.
     public func refreshNow(now: Date = Date()) async throws -> PricingTable {
-        let table = try await client.fetch(now: now)
+        let table = try await client.fetch(now: now, selector: selector)
         save(table)
         return table
     }

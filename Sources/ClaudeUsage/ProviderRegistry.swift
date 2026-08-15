@@ -42,7 +42,7 @@ final class ProviderRegistry {
     /// `launchOverride` is the `--provider <id>` verification hatch: it
     /// wins for this launch without touching the persisted choice.
     init(bundleID: String, launchOverride: String? = nil) {
-        let providers: [any UsageProvider] = [ClaudeProvider()]
+        let providers: [any UsageProvider] = [ClaudeProvider(), CodexProvider()]
         self.providers = providers
         self.bundleID = bundleID
         let stored = UserDefaults.standard.string(forKey: Self.selectionKey) ?? Self.automatic
