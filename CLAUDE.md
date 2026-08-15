@@ -198,6 +198,22 @@ the README rather than silently deviating.
   DayTally), title = scrubbed first user_message, kind always
   .interactive (rollouts carry no headless marker), detail rows from
   user_message + token_count deltas. Gemini stays sessionless.
+- WINDOW LEDGER (2026-08-16 v0.55.0, user-directed: past weeks must be
+  auditable "including seeing if the limit was reached"): `WindowLedger`
+  (UsageCore) records each CLOSED limit window's outcome —
+  `WindowOutcome{meterID,label,end,start?,lastPercent,peakPercent,
+  recordedAt}`, id = meterID|end-epoch. Detection is OBSERVATIONAL:
+  `closedWindows(previous:current:samples:now:)` fires when a meter's
+  reset stamp rolls FORWARD between consecutive snapshots (previous may
+  be the cached one — still an observation); windows that come and go
+  while the app is off stay unrecorded, never guessed. peakPercent =
+  max(in-window samples by LABEL — the UsageSample key — floored at
+  lastPercent); `reachedLimit` = an observed 100, false means "not seen
+  hitting it". Store closes out BEFORE history.append (samples as they
+  stood while the window ran), persists provider-scoped
+  `window-ledger.json` (append, id-dedup, kept indefinitely — tiny),
+  publishes `store.windowOutcomes`. Consumer: the 7D week audit view
+  (v0.57.0).
 - SYNC DIGEST (2026-08-16 v0.51.0, axis-1 prep, membership-gated):
   `SyncDigest.swift` (UsageCore) is the FROZEN CloudKit schema —
   digest types + `SyncDigestBuilder` + `SyncRecordName`, pure, Codable,

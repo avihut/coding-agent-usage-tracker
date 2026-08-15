@@ -19,6 +19,9 @@ final class UsageStore {
     private(set) var activeInterval: TimeInterval
     private(set) var nextRefreshAt: Date?
     private(set) var samples: [UsageSample] = []
+    /// Closed limit-window outcomes, oldest first — the audit views' record
+    /// of what past windows reached (kept indefinitely, tiny).
+    private(set) var windowOutcomes: [WindowOutcome] = []
     private(set) var predictions: [String: UsagePrediction] = [:]
     /// Each meter's learned hour-of-week rhythm, rebuilt from the sample
     /// history alongside predictions. Present even before it's ready — the
@@ -45,6 +48,7 @@ final class UsageStore {
     let localActivity: (any LocalActivitySource)?
     private let service: UsageService
     private let history: UsageHistory
+    private let windowLedger: WindowLedger
     private let pricingService: PricingService
     private var gate = TriggerGate()
     private let scheduler = Scheduler()
@@ -85,6 +89,7 @@ final class UsageStore {
         self.service = service
             ?? UsageService(provider: provider, cache: UsageCache(directory: caches))
         self.history = UsageHistory(directory: support)
+        self.windowLedger = WindowLedger(directory: support)
         self.pricingService = PricingService(
             cacheDirectory: support, fallback: provider.bundledRates,
             selector: provider.pricingSelector)
@@ -99,6 +104,7 @@ final class UsageStore {
         self.ledger = RequestLedger(
             ceiling: storedCeiling > 0 ? storedCeiling : RequestLedger.defaultCeiling)
         self.samples = history.load()
+        self.windowOutcomes = windowLedger.load()
 
         scheduler.onTrigger = { [weak self] reason in
             self?.refresh(reason)
@@ -157,6 +163,19 @@ final class UsageStore {
             noteOutcome(newState, previous: previous)
             scheduleNext()
             if case .live(let snapshot) = newState {
+                // Close-out first, against the samples as they stood while
+                // the old window ran; the roll is detected by comparing the
+                // last snapshot (live or cached — both are observations)
+                // with this one.
+                if let previousMeters = previous?.meters {
+                    let closed = WindowLedger.closedWindows(
+                        previous: previousMeters, current: snapshot.meters,
+                        samples: samples, now: Date())
+                    if !closed.isEmpty {
+                        windowOutcomes = windowLedger.record(
+                            closed, existing: windowOutcomes)
+                    }
+                }
                 samples = history.append(snapshot, existing: samples)
                 recomputePredictions(for: snapshot)
             }
