@@ -145,10 +145,10 @@ private enum StatTint {
 }
 
 /// One dashboard stat: the whole tile wears a light wash of its color
-/// under a slightly stronger frame of the same tint, the bare glyph sits
-/// in the top-right corner, and the number + noun center. Tiles stretch —
-/// each takes an equal share of the row, so the grid fills the header at
-/// any width.
+/// under a slightly stronger frame of the same tint, and the tinted
+/// glyph, number, and noun stack centered — the glyph gets its own row
+/// so no width can collide it with the value. Tiles stretch — each takes
+/// an equal share of the row, so the grid fills the header at any width.
 private struct StatTile: View {
     let symbol: String
     let tint: Color
@@ -166,25 +166,23 @@ private struct StatTile: View {
         }))
 
     var body: some View {
-        VStack(spacing: 1) {
-            Text(value)
-                .font(.system(size: 20, weight: .bold).monospacedDigit())
-                .foregroundStyle(Self.valueColor)
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+        VStack(spacing: 7) {
+            Image(systemName: symbol)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(tint)
+            VStack(spacing: 1) {
+                Text(value)
+                    .font(.system(size: 20, weight: .bold).monospacedDigit())
+                    .foregroundStyle(Self.valueColor)
+                Text(label)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
         }
         .frame(maxWidth: .infinity)
-        .padding(.top, 16)
-        .padding(.bottom, 10)
+        .padding(.vertical, 12)
         .padding(.horizontal, 8)
-        .overlay(alignment: .topTrailing) {
-            Image(systemName: symbol)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(tint)
-                .padding(9)
-        }
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(tint.opacity(0.1)))
