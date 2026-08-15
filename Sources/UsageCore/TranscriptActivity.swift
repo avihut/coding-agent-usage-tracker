@@ -496,6 +496,7 @@ public struct TranscriptScanner: Sendable {
         let kind: SessionKind =
             (mainMeta.entrypoint == nil || mainMeta.entrypoint == "cli")
             ? .interactive : .background
+        let stretches = unionIntervals(metas.flatMap(\.stretches))
         return SessionSummary(
             id: id,
             title: mainMeta.title ?? mainMeta.firstPrompt ?? String(id.prefix(8)),
@@ -505,36 +506,39 @@ public struct TranscriptScanner: Sendable {
             kind: kind,
             start: start,
             end: end,
-            activeSeconds: unionSeconds(metas.flatMap(\.stretches)),
+            activeSeconds: stretches.reduce(0) { $0 + $1.duration },
             prompts: prompts,
             apiCalls: apiCalls,
             toolCalls: metas.reduce(0) { $0 + $1.toolCalls },
             subagentCount: parts.count,
             compactions: metas.reduce(0) { $0 + $1.compactions },
-            models: models)
+            models: models,
+            stretches: stretches)
     }
 
-    /// Total covered time of possibly-overlapping stretches. A sweep-union,
-    /// NOT a stitch over the concatenation — subagents run concurrently with
-    /// their parent, and summing (or stitching, which requires
-    /// non-overlapping input) would double-count parallel bursts.
-    private static func unionSeconds(_ stretches: [DateInterval]) -> TimeInterval {
-        guard !stretches.isEmpty else { return 0 }
+    /// Merges possibly-overlapping stretches into chronological disjoint
+    /// runs. A sweep-union, NOT a stitch over the concatenation — subagents
+    /// run concurrently with their parent, and summing (or stitching, which
+    /// requires non-overlapping input) would double-count parallel bursts.
+    /// The merged list is both the card's `activeSeconds` (summed) and the
+    /// audit strip's nubs.
+    private static func unionIntervals(_ stretches: [DateInterval]) -> [DateInterval] {
+        guard !stretches.isEmpty else { return [] }
         let sorted = stretches.sorted { $0.start < $1.start }
-        var total: TimeInterval = 0
+        var merged: [DateInterval] = []
         var runStart = sorted[0].start
         var runEnd = sorted[0].end
         for stretch in sorted.dropFirst() {
             if stretch.start <= runEnd {
                 if stretch.end > runEnd { runEnd = stretch.end }
             } else {
-                total += runEnd.timeIntervalSince(runStart)
+                merged.append(DateInterval(start: runStart, end: runEnd))
                 runStart = stretch.start
                 runEnd = stretch.end
             }
         }
-        total += runEnd.timeIntervalSince(runStart)
-        return total
+        merged.append(DateInterval(start: runStart, end: runEnd))
+        return merged
     }
 
     private struct SlotKey: Hashable {

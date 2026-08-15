@@ -212,8 +212,22 @@ the README rather than silently deviating.
   hitting it". Store closes out BEFORE history.append (samples as they
   stood while the window ran), persists provider-scoped
   `window-ledger.json` (append, id-dedup, kept indefinitely — tiny),
-  publishes `store.windowOutcomes`. Consumer: the 7D week audit view
-  (v0.57.0).
+  publishes `store.windowOutcomes`. Consumers: the AUDIT VIEWS
+  (v0.58.0) — `AuditWindow.build` (UsageCore, tested) assembles a
+  historical span the way the meter popover assembles its live window
+  (label-scoped percent series entering at height, ResetCliffs pairs
+  with currentReset nil, session-stretch nubs clipped+merged, in-span
+  outcomes) and `AuditWindowChart` (Charts/) renders it read-only
+  (percent line, dashed cliffs, floor strip, hover crosshair,
+  fixed-height verdict caption). Two toggles, both `auditToggle` icon
+  buttons (no room for a third segmented control at 360pt):
+  @AppStorage dayDetailStyle ring↔24h-timeline in the drill-down
+  (session meter), weekChartStyle bars↔window on 7D (weekly meter,
+  page-aware span). Toggles hide when the rank's meter or its
+  limitWindow is unknown. Data degrades honestly: percent ≈56d
+  (samples), nubs while transcripts live (SessionSummary now carries
+  its merged `stretches` — scanner unionIntervals feeds both
+  activeSeconds and the nubs), outcomes forever from v0.55.0.
 - SYNC DIGEST (2026-08-16 v0.51.0, axis-1 prep, membership-gated):
   `SyncDigest.swift` (UsageCore) is the FROZEN CloudKit schema —
   digest types + `SyncDigestBuilder` + `SyncRecordName`, pure, Codable,

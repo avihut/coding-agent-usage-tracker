@@ -7,6 +7,13 @@ import UsageCore
 /// prompt history. Clicking a day pushes into a per-day drill-down (model
 /// ring + that day's breakdown); the model rows double as a hover legend
 /// that filters the chart to one model.
+/// Which meter an audit surface renders: the label keys the samples and
+/// ledger; the window length places legacy cliffs.
+struct AuditMeterInfo: Equatable {
+    let label: String
+    let window: TimeInterval
+}
+
 struct HeatmapView: View {
     let activity: [DailyActivity]
     let pricing: PricingTable
@@ -19,6 +26,15 @@ struct HeatmapView: View {
     /// visible span while paged into the past, the single day while drilled
     /// in. The panel scopes its Sessions strip by it.
     @Binding var focus: DateInterval?
+    /// Audit inputs: percent samples, sessions (their stretches draw the
+    /// nubs), and the closed-window ledger. The meter infos say which label
+    /// and window length each audit surface reads; a nil info hides that
+    /// surface's toggle.
+    let samples: [UsageSample]
+    let sessions: [SessionSummary]
+    let windowOutcomes: [WindowOutcome]
+    let sessionAuditMeter: AuditMeterInfo?
+    let weeklyAuditMeter: AuditMeterInfo?
 
     enum Period: String, CaseIterable, Identifiable {
         case week = "7D"
@@ -47,6 +63,10 @@ struct HeatmapView: View {
 
     @State private var period: Period = .month
     @State private var dimension: Dimension = .tokens
+    /// Audit-view toggles, persisted: the day drill-down's ring↔timeline and
+    /// the 7D chart's bars↔window presentations.
+    @AppStorage("dayDetailStyle") private var dayStyleRaw = "totals"
+    @AppStorage("weekChartStyle") private var weekStyleRaw = "bars"
     /// Whole windows stepped into the past on the fixed periods — 0 is the
     /// current trailing window. Always 0 for All, which shows everything.
     @State private var pageOffset = 0
@@ -203,11 +223,37 @@ struct HeatmapView: View {
         HStack(spacing: 6) {
             Text("Activity").font(.caption.bold())
             Spacer()
+            if period == .week, weeklyAuditMeter != nil {
+                auditToggle(
+                    isOn: weekStyleRaw == "window",
+                    help: weekStyleRaw == "window"
+                        ? "Show daily bars"
+                        : "Show this week as its limit-window timeline"
+                ) {
+                    weekStyleRaw = weekStyleRaw == "window" ? "bars" : "window"
+                }
+            }
             dimensionPicker
             SegmentedPicker(
                 title: "Period", selection: periodBinding,
                 options: Period.allCases.map { ($0.rawValue, $0) })
         }
+    }
+
+    /// One-icon toggle into the audit timeline — a third segmented control
+    /// would not fit the 360pt header rows.
+    private func auditToggle(
+        isOn: Bool, help: String, flip: @escaping () -> Void
+    ) -> some View {
+        Button(action: flip) {
+            Image(systemName: "chart.xyaxis.line")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(isOn ? AnyShapeStyle(Self.accent) : AnyShapeStyle(.secondary))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .pointerStyle(.link)
+        .help(help)
     }
 
     /// Drill-down-style pager flanking the 7D/30D charts: ‹ steps a whole
@@ -545,6 +591,16 @@ struct HeatmapView: View {
                 }
                 .buttonStyle(.plain)
                 Spacer()
+                if sessionAuditMeter != nil {
+                    auditToggle(
+                        isOn: dayStyleRaw == "timeline",
+                        help: dayStyleRaw == "timeline"
+                            ? "Show the day's totals ring"
+                            : "Show the day as a 24h limit-window timeline"
+                    ) {
+                        dayStyleRaw = dayStyleRaw == "timeline" ? "totals" : "timeline"
+                    }
+                }
                 dimensionPicker
             }
             // The day's detail slides sideways between days while the
@@ -592,7 +648,14 @@ struct HeatmapView: View {
         _ entry: DailyActivity, rows: [ModelTokenUsage], live: Bool = true
     ) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            if rows.isEmpty {
+            if dayStyleRaw == "timeline", let meter = sessionAuditMeter {
+                dayAuditChart(entry, meter: meter)
+                if !rows.isEmpty {
+                    ModelBreakdownGrid(
+                        rows: rows, colors: modelColors, pricing: pricing,
+                        hoveredModel: $hoveredModel)
+                }
+            } else if rows.isEmpty {
                 Text(Self.emptyDayNote(entry))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -606,6 +669,24 @@ struct HeatmapView: View {
                     hoveredModel: $hoveredModel)
             }
         }
+    }
+
+    /// The drilled day as a 24h session-meter timeline: its 5h windows'
+    /// percent sawtooth, reset cliffs, and session nubs — the day replayed
+    /// in the limit-window vocabulary. Sized to the ring zone so the toggle
+    /// and day-stepping never move the arrows.
+    private func dayAuditChart(_ entry: DailyActivity, meter: AuditMeterInfo) -> some View {
+        let start = entry.day
+        let end = Calendar.current.date(byAdding: .day, value: 1, to: start)
+            ?? start.addingTimeInterval(86400)
+        let span = DateInterval(start: start, end: end)
+        return AuditWindowChart(
+            model: AuditWindow.build(
+                domain: span, meterLabel: meter.label, window: meter.window,
+                samples: samples, sessions: sessions, outcomes: windowOutcomes),
+            domain: span,
+            accent: Self.accent,
+            plotHeight: 114)
     }
 
     /// Donut of the day's tokens per model in the legend's colors; the center
@@ -729,7 +810,12 @@ struct HeatmapView: View {
     private var chart: some View {
         Group {
             switch period {
-            case .week: barChart
+            case .week:
+                if weekStyleRaw == "window", let meter = weeklyAuditMeter {
+                    weekAuditChart(meter)
+                } else {
+                    barChart
+                }
             case .month: calendarGrid
             case .all: grid
             }
@@ -901,6 +987,24 @@ struct HeatmapView: View {
     private static let barPlotHeight: CGFloat = 76
     /// Space above the tallest bar for its value label.
     private static let barLabelHeadroom: CGFloat = 12
+
+    /// The shown week as its weekly limit-window timeline — page-aware (the
+    /// audited span is whatever seven days the pager shows), sized to sit
+    /// where the bars sit so the toggle never moves the layout below.
+    private func weekAuditChart(_ meter: AuditMeterInfo) -> some View {
+        let cells = layout.weeks.flatMap { $0 }.compactMap { $0 }
+        let start = cells.first ?? Self.today
+        let end = Calendar.current.date(byAdding: .day, value: 1, to: cells.last ?? start)
+            ?? start
+        let span = DateInterval(start: start, end: end)
+        return AuditWindowChart(
+            model: AuditWindow.build(
+                domain: span, meterLabel: meter.label, window: meter.window,
+                samples: samples, sessions: sessions, outcomes: windowOutcomes),
+            domain: span,
+            accent: Self.accent,
+            plotHeight: 88)
+    }
 
     private var barChart: some View {
         let days = layout.weeks.flatMap { $0 }.compactMap { $0 }

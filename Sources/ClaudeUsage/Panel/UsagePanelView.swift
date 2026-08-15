@@ -49,7 +49,12 @@ struct UsagePanelView: View {
                         activity: store.activity, pricing: store.pricing,
                         weeklyProfile: store.weeklyProfile,
                         agentName: store.provider.agentName,
-                        focus: $activityFocus)
+                        focus: $activityFocus,
+                        samples: store.samples,
+                        sessions: store.sessions,
+                        windowOutcomes: store.windowOutcomes,
+                        sessionAuditMeter: auditMeter(rank: 0),
+                        weeklyAuditMeter: auditMeter(rank: 1))
                     sessionsSection
                 }
                 .padding(.horizontal, 14)
@@ -363,6 +368,16 @@ struct UsagePanelView: View {
                 }
             }
         }
+    }
+
+    /// The meter the audit surfaces read at this rank (0 session, 1 weekly):
+    /// its label keys the samples/ledger; a meter without a known window
+    /// length can't place cliffs, so it offers no audit.
+    private func auditMeter(rank: Int) -> AuditMeterInfo? {
+        guard let meter = store.state.snapshot?.meters.first(where: { $0.rank == rank }),
+              let window = meter.limitWindow
+        else { return nil }
+        return AuditMeterInfo(label: meter.label, window: window)
     }
 
     /// "Aug 5" for a drilled day, "Jul 27 – Aug 2" for a paged window — the

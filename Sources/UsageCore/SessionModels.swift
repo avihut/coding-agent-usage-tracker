@@ -30,6 +30,11 @@ public struct SessionSummary: Sendable, Equatable, Identifiable {
     /// and its subagents — honest working time, not wall span (a session left
     /// open overnight doesn't claim the night).
     public let activeSeconds: TimeInterval
+    /// The merged (non-overlapping, chronological) stretches behind
+    /// `activeSeconds` — what audit strips draw as session nubs for days the
+    /// minute timeline no longer retains. Empty for providers that only
+    /// carry the total.
+    public let stretches: [DateInterval]
     public let prompts: Int
     public let apiCalls: Int
     public let toolCalls: Int
@@ -44,7 +49,8 @@ public struct SessionSummary: Sendable, Equatable, Identifiable {
         id: String, title: String, projectPath: String?, gitBranch: String?,
         agentVersion: String?, kind: SessionKind, start: Date, end: Date,
         activeSeconds: TimeInterval, prompts: Int, apiCalls: Int, toolCalls: Int,
-        subagentCount: Int, compactions: Int, models: [String: TokenTally]
+        subagentCount: Int, compactions: Int, models: [String: TokenTally],
+        stretches: [DateInterval] = []
     ) {
         self.id = id
         self.title = title
@@ -61,6 +67,7 @@ public struct SessionSummary: Sendable, Equatable, Identifiable {
         self.subagentCount = subagentCount
         self.compactions = compactions
         self.models = models
+        self.stretches = stretches
     }
 }
 
