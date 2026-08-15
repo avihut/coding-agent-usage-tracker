@@ -518,7 +518,10 @@ struct HeatmapView: View {
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
-            .frame(height: rows.isEmpty ? 48 : 132)
+            // Always the ring zone's height: stepping across quiet days must
+            // not contract the popover or move the arrow out from under the
+            // cursor mid-click-streak.
+            .frame(height: 132)
         }
     }
 
@@ -593,7 +596,9 @@ struct HeatmapView: View {
                 Text(Self.emptyDayNote(entry))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 48)
+                    // Ring-zone height, like the arrows: an empty day holds
+                    // the same silhouette as a full one.
+                    .frame(maxWidth: .infinity, minHeight: 132)
             } else {
                 dayRing(rows: rows, entry: entry, live: live)
                 ModelBreakdownGrid(
