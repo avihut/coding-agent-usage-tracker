@@ -377,7 +377,8 @@ struct MeterRow: View {
     /// "resets in 3h 20m" — joined by "runs out in 1h 05m" ONLY when the
     /// forecast actually crosses the limit, in resetText's own tiers. An
     /// on-track forecast stays silent; the bar's tint carries the risk.
-    /// Before enough samples exist the burn slot says it's measuring.
+    /// No placeholder while the rate is still forming — measuring is the
+    /// permanent background state, not news.
     private var captionLine: Text {
         var parts: [Text] = []
         if let resetsAt = meter.resetsAt {
@@ -389,8 +390,6 @@ struct MeterRow: View {
             parts.append(
                 Text(UsageFormatting.exhaustText(exhaust, now: Date()))
                     .foregroundStyle(riskColor(severity: prediction.severity) ?? .orange))
-        } else if prediction == nil, meter.percent != nil, !stale {
-            parts.append(Text("measuring rate…").foregroundStyle(.tertiary))
         }
         guard var line = parts.first else { return Text("") }
         for part in parts.dropFirst() {
