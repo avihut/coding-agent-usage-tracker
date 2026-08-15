@@ -158,7 +158,23 @@ the README rather than silently deviating.
   (isStale's allSatisfy-nil clause) so the column populates one
   refresh tick after update, not 24h later; and the view falls back
   to the bundled floor's window while that stale cache still serves.
-  The skeleton carries the matching bar.
+  The skeleton carries the matching bar. ROW COST POPOVERS (v0.43.0):
+  call and prompt rows click open (pointerStyle .link; the hover tint
+  holds while open, the grid's held-lit idiom). A call row opens
+  CostMathView with its own model+tally — IDENTICAL to clicking a
+  model row. A prompt row opens the totals-card ModelBreakdownGrid
+  scoped to its span (SessionSpanTally in UsageCore: promptRange =
+  prompt through the row before the next prompt or session end;
+  models/calls clamp stale ranges so a live re-parse can't trap),
+  headed by the ❯ preview + "N API calls through the next prompt/the
+  session's end"; the grid's model rows keep their own CostMathView
+  click-through (nested popover) and its hoveredModel binding is the
+  pane's real one, so hovering models in the popover focuses the
+  chart behind — popover onDisappear clears it so a dismissal
+  mid-hover can't leave the chart stuck focused. Command/compaction
+  rows have no cost story and don't open. Fixed popover width (344)
+  because a Text's ideal width is its unwrapped width — natural
+  sizing would let a long preview blow the popover out.
   CODEX SESSIONS (v0.31.0): CodexActivitySource populates the same
   seam — one rollout file = one session (cache v2; SessionMeta stores
   title/cwd/cli_version/start/end/stretches, counts derived from

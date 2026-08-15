@@ -225,6 +225,51 @@ struct SessionChartModelTests {
     }
 }
 
+@Suite("SessionSpanTally")
+struct SessionSpanTallyTests {
+    @Test("a prompt owns rows up to the next prompt; the last runs to the end")
+    func ranges() {
+        let rows = SessionChartModelTests.rows()
+        #expect(SessionSpanTally.promptRange(at: 2, rows: rows) == 2..<5)
+        #expect(SessionSpanTally.promptRange(at: 5, rows: rows) == 5..<8)
+    }
+
+    @Test("per-model sums and call counts over a span")
+    func tallies() {
+        let rows = SessionChartModelTests.rows()
+        let first = SessionSpanTally.models(rows: rows, in: 2..<5)
+        #expect(first == [
+            "claude-fable-5": TokenTally(input: 2000, output: 200),
+            "mystery-model": TokenTally(input: 500, output: 50),
+        ])
+        #expect(SessionSpanTally.calls(rows: rows, in: 2..<5) == 2)
+        // The final span prices its one call; the compaction marker adds
+        // nothing.
+        let last = SessionSpanTally.models(rows: rows, in: 5..<8)
+        #expect(last == ["claude-fable-5": TokenTally(input: 3000, output: 300)])
+        #expect(SessionSpanTally.calls(rows: rows, in: 5..<8) == 1)
+        // Same-model calls fold into one sum across the whole session.
+        let all = SessionSpanTally.models(rows: rows, in: 0..<8)
+        #expect(all["claude-fable-5"] == TokenTally(input: 6000, output: 600))
+        #expect(SessionSpanTally.calls(rows: rows, in: 0..<8) == 4)
+    }
+
+    @Test("empty spans and stale indices stay harmless")
+    func degenerate() {
+        let rows = SessionChartModelTests.rows()
+        // A prompt as the final row owns nothing but itself.
+        let tail = [SessionEvent(id: 0, t: rows[0].t, kind: .prompt(preview: "p"))]
+        #expect(SessionSpanTally.promptRange(at: 0, rows: tail) == 0..<1)
+        #expect(SessionSpanTally.models(rows: tail, in: 0..<1).isEmpty)
+        #expect(SessionSpanTally.calls(rows: tail, in: 0..<1) == 0)
+        // Indices beyond the rows (they shrank under a live re-parse) clamp
+        // instead of trapping.
+        #expect(SessionSpanTally.promptRange(at: 12, rows: rows) == 12..<12)
+        #expect(SessionSpanTally.models(rows: rows, in: 12..<12).isEmpty)
+        #expect(SessionSpanTally.calls(rows: rows, in: 12..<12) == 0)
+    }
+}
+
 @Suite("SessionDayGroup")
 struct SessionDayGroupTests {
     static func utcCalendar() -> Calendar {

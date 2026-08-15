@@ -389,6 +389,8 @@ private struct SessionDetailPane: View {
     @State private var hoveredRow: Int?
     /// The row a chart click just jumped to; its flash fades right back out.
     @State private var flashRow: Int?
+    /// The row whose cost popover is open; its hover tint holds while it is.
+    @State private var costRow: Int?
     @State private var measure: SessionChartMeasure = .cost
     /// The chart's context-size overlay — a display preference, so it
     /// survives selection switches and relaunches.
@@ -425,6 +427,7 @@ private struct SessionDetailPane: View {
                 chartModel = .empty
                 hoveredRow = nil
                 flashRow = nil
+                costRow = nil
                 vanished = false
             }
             let result = await store.sessionDetail(id: summary.id)
@@ -777,6 +780,7 @@ private struct SessionDetailPane: View {
         .padding(.vertical, 2.5)
         .opacity(row.subagent ? 0.7 : 1)
         .background(rowBackground(row))
+        .contentShape(Rectangle())
         .onHover { inside in
             if inside {
                 hoveredRow = row.id
@@ -784,6 +788,72 @@ private struct SessionDetailPane: View {
                 hoveredRow = nil
             }
         }
+        .pointerStyle(hasCostPopover(row) ? .link : .default)
+        .onTapGesture { if hasCostPopover(row) { costRow = row.id } }
+        .popover(
+            isPresented: Binding(
+                get: { costRow == row.id },
+                set: { if !$0 { costRow = nil } }),
+            arrowEdge: .bottom
+        ) {
+            rowCostPopover(row)
+        }
+    }
+
+    /// Which rows carry a cost story: calls price themselves, prompts price
+    /// their span. Command and compaction markers have nothing to open.
+    private func hasCostPopover(_ row: SessionEvent) -> Bool {
+        switch row.kind {
+        case .apiCall, .prompt: true
+        case .command, .compaction: false
+        }
+    }
+
+    /// The row-click cost popover — the same math the model rows open. A call
+    /// row prices itself; a prompt row presents the totals-card grid scoped to
+    /// everything the prompt set in motion, and that grid's model rows keep
+    /// their own cost-math click-through.
+    @ViewBuilder private func rowCostPopover(_ row: SessionEvent) -> some View {
+        switch row.kind {
+        case .apiCall(let model, let tally, _):
+            CostMathView(
+                row: ModelTokenUsage(model: model, tally: tally),
+                rates: store.pricing.rates(for: model))
+        case .prompt(let preview):
+            promptSpanPopover(row: row, preview: preview)
+        case .command, .compaction:
+            EmptyView()
+        }
+    }
+
+    private func promptSpanPopover(row: SessionEvent, preview: String) -> some View {
+        let rows = detail?.rows ?? []
+        let range = SessionSpanTally.promptRange(at: row.id, rows: rows)
+        let models = SessionSpanTally.models(rows: rows, in: range)
+        let calls = SessionSpanTally.calls(rows: rows, in: range)
+        let reach = range.upperBound == rows.count ? "the session's end" : "the next prompt"
+        return VStack(alignment: .leading, spacing: 6) {
+            (Text("❯ ").foregroundStyle(ProviderStyle.accentColor).bold() + Text(preview))
+                .font(.callout)
+                .lineLimit(2)
+            Text(calls == 0
+                ? "No API calls before \(reach)."
+                : "\(calls) API \(noun(calls, "call")) through \(reach)")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+            if !models.isEmpty {
+                ModelBreakdownGrid(
+                    rows: WindowTokens.rows(from: models),
+                    colors: colors,
+                    pricing: store.pricing,
+                    hoveredModel: $hoveredModel)
+            }
+        }
+        .padding(12)
+        .frame(width: 344, alignment: .leading)
+        // A dismissal mid-hover would otherwise leave the chart focused on
+        // whichever model row the cursor was over when the popover closed.
+        .onDisappear { hoveredModel = nil }
     }
 
     private func callColumns(
@@ -859,8 +929,9 @@ private struct SessionDetailPane: View {
 
     /// Layered row grounds: prompts keep their standing tint, the hovered
     /// prompt's whole section echoes the chart's lit stretch, the hovered
-    /// row itself sits on top, and a chart-click flash outshines them all
-    /// while it fades.
+    /// row itself sits on top (and holds while its cost popover is open, so
+    /// the popover keeps pointing at a marked row), and a chart-click flash
+    /// outshines them all while it fades.
     @ViewBuilder private func rowBackground(_ row: SessionEvent) -> some View {
         ZStack {
             if case .prompt = row.kind {
@@ -869,7 +940,7 @@ private struct SessionDetailPane: View {
             if hoveredSectionRange?.contains(row.id) == true {
                 Color.primary.opacity(0.045)
             }
-            if hoveredRow == row.id {
+            if hoveredRow == row.id || costRow == row.id {
                 Color.primary.opacity(0.07)
             }
             if flashRow == row.id {

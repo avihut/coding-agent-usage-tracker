@@ -186,6 +186,43 @@ public enum SessionLedger {
     }
 }
 
+/// The scope behind a row click in the session detail: a call row prices
+/// itself, while a prompt row owns every row that follows it up to the next
+/// prompt — its popover prices that whole span per model.
+public enum SessionSpanTally {
+    /// Rows the prompt at `index` owns: itself through the row before the
+    /// next prompt, or the session's end when none follows. A stale index
+    /// (rows shrank under a live re-parse) yields an empty range, never a
+    /// trap.
+    public static func promptRange(at index: Int, rows: [SessionEvent]) -> Range<Int> {
+        guard index < rows.count else { return index..<index }
+        for later in (index + 1)..<rows.count {
+            if case .prompt = rows[later].kind { return index..<later }
+        }
+        return index..<rows.count
+    }
+
+    /// Per-model token sums over the API-call rows in `range`. The range is
+    /// clamped to the rows, so callers holding a stale one stay safe.
+    public static func models(rows: [SessionEvent], in range: Range<Int>) -> [String: TokenTally] {
+        var byModel: [String: TokenTally] = [:]
+        for row in rows[range.clamped(to: rows.startIndex..<rows.endIndex)] {
+            if case .apiCall(let model, let tally, _) = row.kind {
+                var sum = byModel[model] ?? TokenTally()
+                sum.add(tally)
+                byModel[model] = sum
+            }
+        }
+        return byModel
+    }
+
+    /// API-call rows inside `range` — the popover's honest scope caption.
+    public static func calls(rows: [SessionEvent], in range: Range<Int>) -> Int {
+        rows[range.clamped(to: rows.startIndex..<rows.endIndex)]
+            .count { if case .apiCall = $0.kind { true } else { false } }
+    }
+}
+
 /// The two ways a session breakdown chart can measure its series. Cost is the
 /// priced running total; tokens count every call (unpriced models included).
 public enum SessionChartMeasure: String, CaseIterable, Sendable, Equatable {

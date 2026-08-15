@@ -4,6 +4,6 @@ import Foundation
 /// never impersonates Claude Code or the Claude app.
 public enum AppIdentity {
     public static let name = "claude-usage-menubar"
-    public static let version = "0.42.0"
+    public static let version = "0.43.0"
     public static let userAgent = "\(name)/\(version)"
 }
