@@ -84,9 +84,9 @@ struct RunningBreakdownChart: View {
                         viewportStart: scrollX / fullLength,
                         viewportWidth: length / fullLength,
                         accent: accent
-                    ) { fraction in
-                        let target = fraction * fullLength - length / 2
-                        scrollX = min(max(target, 0), fullLength - length)
+                    ) { startFraction in
+                        scrollX = min(
+                            max(startFraction * fullLength, 0), fullLength - length)
                     }
                     .frame(height: 20)
                     .transition(.opacity)
@@ -544,20 +544,31 @@ struct RunningBreakdownChart: View {
 }
 
 /// The whole session compressed into a strip above the zoomed chart: the
-/// total curve as a hairline, a viewport box marking how much is visible and
-/// where, and scrubbing — drag anywhere to move the viewport there.
+/// total curve as a hairline and a viewport box marking how much is visible
+/// and where. Grab semantics, like a scrollbar thumb: pressing anywhere
+/// GRABS the viewport where it currently sits and dragging scrubs it
+/// relatively — it never teleports to the pointer, and a plain click moves
+/// nothing. Hover lights the strip and shows the open hand; scrubbing, the
+/// closed one.
 private struct ChartMinimap: View {
     let values: [Double]
     /// Viewport geometry as fractions of the whole session.
     let viewportStart: Double
     let viewportWidth: Double
     let accent: Color
-    /// Reports the dragged position (0...1); the chart recenters there.
+    /// Reports the dragged viewport START fraction (unclamped); the chart
+    /// clamps against its own length and applies.
     var onScrub: (Double) -> Void
+
+    @State private var hovering = false
+    /// The viewport's start fraction captured at grab; non-nil while
+    /// scrubbing — it anchors the relative drag and closes the hand cursor.
+    @State private var grabbedStart: Double?
 
     var body: some View {
         GeometryReader { geo in
             let width = geo.size.width
+            let lit = hovering || grabbedStart != nil
             let boxWidth = max(viewportWidth * width, 14)
             let boxX = min(max(viewportStart * width, 0), max(width - boxWidth, 0))
             ZStack(alignment: .topLeading) {
@@ -574,24 +585,34 @@ private struct ChartMinimap: View {
                             path.addLine(to: CGPoint(x: x, y: y))
                         }
                     }
-                    context.stroke(path, with: .color(accent.opacity(0.5)), lineWidth: 1)
+                    context.stroke(
+                        path, with: .color(accent.opacity(lit ? 0.65 : 0.5)),
+                        lineWidth: 1)
                 }
                 RoundedRectangle(cornerRadius: 3)
-                    .fill(accent.opacity(0.12))
+                    .fill(accent.opacity(lit ? 0.2 : 0.12))
                     .overlay(
                         RoundedRectangle(cornerRadius: 3)
-                            .strokeBorder(accent.opacity(0.6), lineWidth: 1))
+                            .strokeBorder(accent.opacity(lit ? 0.9 : 0.6), lineWidth: 1))
                     .frame(width: boxWidth)
                     .offset(x: boxX)
             }
             .contentShape(Rectangle())
+            .onHover { hovering = $0 }
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { drag in
                         guard width > 0 else { return }
-                        onScrub(min(max(drag.location.x / width, 0), 1))
-                    })
+                        let anchor = grabbedStart ?? viewportStart
+                        if grabbedStart == nil { grabbedStart = viewportStart }
+                        onScrub(anchor + drag.translation.width / width)
+                    }
+                    .onEnded { _ in grabbedStart = nil })
         }
-        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 3))
+        .pointerStyle(grabbedStart != nil ? .grabActive : .grabIdle)
+        .background(
+            Color.primary.opacity(hovering || grabbedStart != nil ? 0.08 : 0.04),
+            in: RoundedRectangle(cornerRadius: 3))
+        .animation(.easeOut(duration: 0.12), value: hovering)
     }
 }
