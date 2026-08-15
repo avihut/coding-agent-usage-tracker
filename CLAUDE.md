@@ -36,7 +36,7 @@ the README rather than silently deviating.
   identity (serviceName/agentName/menuBarGlyph/links/networkDestinations),
   `credentials: CredentialChain`, `fetchRawUsage`, `snapshot(fromRawUsage:)`
   (bytes → normalized `Snapshot`; the cache stores raw bytes and replays
-  them through the provider), `makeLocalActivity(bundleID:)` (protocol
+  them through the provider), `makeLocalActivity(cacheDirectory:)` (protocol
   `LocalActivitySource`: watchDirectories/displayPath/scanTranscripts/
   scanPromptDays/diskUsage — read-only by contract), `agentSettings`
   (protocol `AgentSettingsStore`: the ONE sanctioned retention write),
@@ -53,22 +53,54 @@ the README rather than silently deviating.
   URLs, no ~/.claude paths, no "Claude Code" strings (views read
   `store.provider.*`; error text takes `agent:`), no model-id parsing
   (`ModelNames` is a facade over the installed catalog —
-  `nonisolated(unsafe)` static set once at launch in ClaudeUsageApp,
-  defaulting to `.claude` as the bundled provider). `Meter` carries what
+  `nonisolated(unsafe)` static written ONLY on MainActor by
+  ProviderRegistry while re-binding the active provider, at launch and
+  on a Metering switch, always before dependent UI rebuilds; defaults
+  to `.claude` as the bundled provider). `Meter` carries what
   used to be rank heuristics as DATA: `limitWindow` (5h/7d),
   `rateWindow` (45min/4h via `defaultRateWindow` tiering ≤6h),
   `forcesWarning` (severity floor — `Snapshot.rebuilt` re-levels meters
   in place, no payload retained), `scopedModelName` (no UI label
   parsing). `PredictionEngine.window(forRank:)`/`windowLength(forRank:)`
   are GONE — predict reads the meter; nil limitWindow = pure-linear.
-  Exactly one provider per app instance (a seam for adopting other
+  Exactly one provider ACTIVE at a time (a seam for adopting other
   agents, not concurrent metering); UsageStore takes it at init and the
   ✳︎/name/links flow from it. App/product branding (app name "Claude
   Usage", bundle id, repo name, accent orange) is deliberately NOT behind
   the seam — renaming is a product decision, not plumbing. Adding a
   provider later = a new UsageProvider implementation + a spec §10
-  amendment for its hosts; the engine, history, charts, and panel need
-  zero changes.
+  amendment for its hosts (and for any local trees it reads); the engine,
+  history, charts, and panel need zero changes.
+- MULTI-PROVIDER REGISTRY (2026-08-15 v0.26.0): `ProviderRegistry`
+  (app layer) is now the one place a vendor is chosen — it lists every
+  bundled provider (Claude only so far), detects the actively-used
+  harness, and owns the ACTIVE provider's UsageStore; switching retires
+  the old store. Detection = `HarnessDetector` (UsageCore): scores
+  SESSION-ARTIFACT mtimes only under each provider's watchDirectories
+  (count modified ≤14d, tie-break newest, walk capped at 2000 stats) —
+  never state/config mtimes, which background daemons touch for months
+  after real use stops. Resolution: UserDefaults "activeProviderID"
+  ("auto" default) > detection > bundled-first order; `--provider <id>`
+  launch hatch forces one run without persisting; daily auto re-detect
+  defers its switch until the panel closes. Metering pickers live in the
+  panel ⋯ menu (hidden while only one harness is present) and Settings →
+  General (with per-harness signal rows). Storage is PROVIDER-SCOPED via
+  `StorageScope` (UsageCore): all four artifacts (usage.json,
+  history.json, activity-cache.json, pricing.json) live under
+  `<base>/<bundleID>/<providerID>/`, vendor-fact defaults keys are
+  prefixed (`claude.apiHourlyCeiling`), and the two per-meter popover
+  @AppStorage keys carry the provider id — accounts later = one more
+  path component in StorageScope, nowhere else. Meter labels key
+  history/predictions INSIDE those files, which is only safe because no
+  two providers share a directory. `StorageMigration` (one-time,
+  copy-verify-delete, marker "storageScopeVersion", runs FIRST in
+  applicationDidFinishLaunching) moved the pre-0.26 singletons into
+  claude/. Switch teardown lessons: UsageStore.shutdown() +
+  Scheduler.stop() (the didWake observer and NWPathMonitor leak without
+  them), SettingsWindowController.close() before dropping it (never
+  dealloc a visible NSWindow), and observeState()'s re-arm carries a
+  store-identity guard (a stale observation landing post-switch would
+  otherwise double-register tracking).
 - One refresh pipeline, one entry point: `UsageStore.refresh(reason:)` owns
   single-flighting, the 60-second minimum interval, and 429-backoff
   enforcement for every trigger (timer, wake, network-restore, manual,

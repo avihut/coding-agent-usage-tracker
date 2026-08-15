@@ -37,12 +37,6 @@ public struct UsageHistory: Sendable {
         self.thinnedResolution = thinnedResolution
     }
 
-    public static func standard(bundleID: String) -> UsageHistory {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? FileManager.default.temporaryDirectory
-        return UsageHistory(directory: base.appending(path: bundleID))
-    }
-
     public func load() -> [UsageSample] {
         guard let data = try? Data(contentsOf: fileURL),
               let samples = try? JSONDecoder().decode([UsageSample].self, from: data)

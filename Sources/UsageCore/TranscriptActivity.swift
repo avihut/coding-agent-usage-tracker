@@ -57,15 +57,6 @@ public struct TranscriptScanner: Sendable {
         self.calendar = calendar
     }
 
-    public static func standard(bundleID: String) -> TranscriptScanner {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? FileManager.default.temporaryDirectory
-        return TranscriptScanner(
-            root: FileManager.default.homeDirectoryForCurrentUser.appending(path: ".claude/projects"),
-            cacheDirectory: base.appending(path: bundleID)
-        )
-    }
-
     /// The panel's windows need at most 7 days back; a day of slack absorbs
     /// clock skew. Trimming to this bound is what keeps minute-granularity
     /// slots from growing the cache without limit.

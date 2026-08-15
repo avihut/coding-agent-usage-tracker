@@ -36,8 +36,8 @@ public struct ClaudeProvider: UsageProvider {
             from: response, fetchedAt: fetchedAt, plan: plan, thresholds: thresholds)
     }
 
-    public func makeLocalActivity(bundleID: String) -> (any LocalActivitySource)? {
-        ClaudeActivitySource(bundleID: bundleID)
+    public func makeLocalActivity(cacheDirectory: URL) -> (any LocalActivitySource)? {
+        ClaudeActivitySource(cacheDirectory: cacheDirectory)
     }
 
     public var agentSettings: (any AgentSettingsStore)? { ClaudeCodeSettings.standard() }
@@ -55,11 +55,12 @@ public struct ClaudeActivitySource: LocalActivitySource {
     private let prompts: PromptHistoryScanner
     private let root: URL
 
-    public init(bundleID: String) {
-        self.transcripts = .standard(bundleID: bundleID)
-        self.prompts = .standard()
-        self.root = FileManager.default.homeDirectoryForCurrentUser
+    public init(cacheDirectory: URL) {
+        let root = FileManager.default.homeDirectoryForCurrentUser
             .appending(path: ".claude/projects")
+        self.transcripts = TranscriptScanner(root: root, cacheDirectory: cacheDirectory)
+        self.prompts = .standard()
+        self.root = root
     }
 
     public var watchDirectories: [URL] { [root] }

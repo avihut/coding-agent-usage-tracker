@@ -12,26 +12,26 @@ import UsageCore
 /// main panel.
 @MainActor
 final class StatusItemController: NSResponder {
-    private let store: UsageStore
+    private let registry: ProviderRegistry
+    private var store: UsageStore
     private let statusItem: NSStatusItem
     private let popover = NSPopover()
     private let hoverPopover = NSPopover()
     private var hoverTask: Task<Void, Never>?
     private var outsideClickMonitor: Any?
     private var resignActiveObserver: NSObjectProtocol?
-    private lazy var settingsController = SettingsWindowController(store: store)
+    private var settingsController: SettingsWindowController?
+    /// A deferrable provider switch (daily auto re-detection) parked while
+    /// the panel is open; applied the moment it closes.
+    private var pendingStore: UsageStore?
 
-    init(store: UsageStore) {
-        self.store = store
+    init(registry: ProviderRegistry) {
+        self.registry = registry
+        self.store = registry.activeStore
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
 
-        let host = NSHostingController(
-            rootView: UsagePanelView(store: store, onOpenSettings: { [weak self] in
-                self?.showSettings()
-            }))
-        host.sizingOptions = .preferredContentSize
-        popover.contentViewController = host
+        popover.contentViewController = makePanelHost()
         popover.behavior = .transient
         popover.delegate = self
 
@@ -47,6 +47,15 @@ final class StatusItemController: NSResponder {
                 owner: self, userInfo: nil))
         }
 
+        registry.onActiveChange = { [weak self] newStore, deferrable in
+            guard let self else { return }
+            if deferrable, self.popover.isShown {
+                self.pendingStore = newStore
+            } else {
+                self.adopt(newStore)
+            }
+        }
+
         observeState()
         render()
     }
@@ -56,13 +65,46 @@ final class StatusItemController: NSResponder {
         fatalError("not instantiated from a nib")
     }
 
+    private func makePanelHost() -> NSHostingController<UsagePanelView> {
+        let host = NSHostingController(
+            rootView: UsagePanelView(
+                store: store, registry: registry,
+                onOpenSettings: { [weak self] in
+                    self?.showSettings()
+                }))
+        host.sizingOptions = .preferredContentSize
+        return host
+    }
+
+    /// Re-binds every surface to a new active store and retires the old
+    /// one. The registry already installed the new provider's model catalog
+    /// before calling here, so the rebuilt views name models correctly.
+    private func adopt(_ newStore: UsageStore) {
+        guard newStore !== store else { return }
+        hoverTask?.cancel()
+        if hoverPopover.isShown { hoverPopover.performClose(nil) }
+        if popover.isShown { popover.performClose(nil) }
+        settingsController?.close()
+        settingsController = nil
+        let outgoing = store
+        store = newStore
+        outgoing.shutdown()
+        popover.contentViewController = makePanelHost()
+        observeState()
+        render()
+    }
+
     private func observeState() {
+        // Tracking is one-shot and re-arms itself; the identity guard keeps
+        // a stale registration (the retired store's last change landing
+        // after an adopt) from re-arming against the new store twice.
+        let observed = store
         withObservationTracking {
-            _ = store.state
-            _ = store.predictions
+            _ = observed.state
+            _ = observed.predictions
         } onChange: {
             Task { @MainActor [weak self] in
-                guard let self else { return }
+                guard let self, self.store === observed else { return }
                 self.render()
                 self.observeState()
             }
@@ -104,7 +146,8 @@ final class StatusItemController: NSResponder {
                 meter: meter, samples: self.store.samples,
                 timeline: self.store.tokenTimeline, pricing: self.store.pricing,
                 prediction: self.store.predictions[meter.label],
-                agentName: self.store.provider.agentName))
+                agentName: self.store.provider.agentName,
+                providerID: self.store.provider.id))
             host.sizingOptions = .preferredContentSize
             self.hoverPopover.contentViewController = host
             self.hoverPopover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
@@ -150,7 +193,10 @@ final class StatusItemController: NSResponder {
     /// matters on the first show (the hatch always launches fresh).
     func showSettings(pane: SettingsSection = .general) {
         if popover.isShown { popover.performClose(nil) }
-        settingsController.show(pane: pane)
+        if settingsController == nil {
+            settingsController = SettingsWindowController(store: store, registry: registry)
+        }
+        settingsController?.show(pane: pane)
     }
 
     // MARK: - Outside-interaction dismissal
@@ -195,6 +241,10 @@ extension StatusItemController: NSPopoverDelegate {
     func popoverDidClose(_ notification: Notification) {
         endDismissMonitoring()
         NotificationCenter.default.post(name: .panelDidClose, object: nil)
+        if let pendingStore {
+            self.pendingStore = nil
+            adopt(pendingStore)
+        }
     }
 }
 

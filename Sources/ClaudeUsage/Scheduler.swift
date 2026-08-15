@@ -47,6 +47,22 @@ final class Scheduler {
         pathMonitor = monitor
     }
 
+    /// Tears the event sources down — the wake observer would otherwise be
+    /// retained by NotificationCenter forever and the path monitor would
+    /// keep its queue alive. Called when the registry retires this
+    /// scheduler's store.
+    func stop() {
+        timer?.invalidate()
+        timer = nil
+        if let wakeObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver)
+        }
+        wakeObserver = nil
+        pathMonitor?.cancel()
+        pathMonitor = nil
+        onTrigger = nil
+    }
+
     /// Replaces the pending fire with one `delay` seconds out.
     func schedule(after delay: TimeInterval) {
         timer?.invalidate()

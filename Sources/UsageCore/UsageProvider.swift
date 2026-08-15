@@ -47,8 +47,10 @@ public protocol UsageProvider: Sendable {
     /// The agent's on-disk traces, created once and retained (scanners keep
     /// warm caches). Nil when the agent leaves nothing scannable — the
     /// activity section then shows its empty state and cadence relies on
-    /// percentages moving.
-    func makeLocalActivity(bundleID: String) -> (any LocalActivitySource)?
+    /// percentages moving. `cacheDirectory` is this provider's scoped
+    /// Application Support directory (`StorageScope`), where the scanner
+    /// keeps its parse cache.
+    func makeLocalActivity(cacheDirectory: URL) -> (any LocalActivitySource)?
     /// The agent's own settings file, for the retention card; nil hides the
     /// card entirely.
     var agentSettings: (any AgentSettingsStore)? { get }

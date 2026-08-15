@@ -4,6 +4,9 @@ import UsageCore
 
 struct UsagePanelView: View {
     var store: UsageStore
+    /// Drives the ⋯ menu's Metering picker; the panel itself is rebuilt by
+    /// the status item whenever the active provider changes.
+    var registry: ProviderRegistry
     /// Wired by StatusItemController: closes the panel, opens the window.
     let onOpenSettings: () -> Void
     /// Coordinate space the row-frame preferences are measured in — the same
@@ -48,7 +51,8 @@ struct UsagePanelView: View {
                 meter: meter, samples: store.samples,
                 timeline: store.tokenTimeline, pricing: store.pricing,
                 prediction: store.predictions[meter.label],
-                agentName: store.provider.agentName)
+                agentName: store.provider.agentName,
+                providerID: store.provider.id)
                 .onHover { inside in
                     hoveringPopover = inside
                     if !inside { scheduleHideIfLeft() }
@@ -229,6 +233,16 @@ struct UsagePanelView: View {
                         Text(UsageFormatting.duration(seconds)).tag(seconds)
                     }
                 }
+                // Hidden while only one harness exists on this machine —
+                // a picker with a single real row is noise.
+                if registry.presentChoices.count > 1 {
+                    Picker("Metering", selection: meteringSelection) {
+                        Text(registry.automaticLabel).tag(ProviderRegistry.automatic)
+                        ForEach(registry.presentChoices) { choice in
+                            Text(choice.name).tag(choice.id)
+                        }
+                    }
+                }
                 Toggle("Launch at login", isOn: SettingsBindings.launchAtLogin())
                 Divider()
                 Button("Settings…") { onOpenSettings() }
@@ -243,6 +257,12 @@ struct UsagePanelView: View {
             .menuIndicator(.hidden)
             .fixedSize()
         }
+    }
+
+    private var meteringSelection: Binding<String> {
+        Binding(
+            get: { registry.selection },
+            set: { registry.select($0) })
     }
 
     private func statusLine(now: Date) -> Text {
@@ -520,7 +540,7 @@ struct MeterHistoryView: View {
     init(
         meter: Meter, samples: [UsageSample], timeline: [TokenSlot],
         pricing: PricingTable, prediction: UsagePrediction?,
-        agentName: String
+        agentName: String, providerID: String
     ) {
         self.meter = meter
         self.samples = samples
@@ -528,10 +548,13 @@ struct MeterHistoryView: View {
         self.pricing = pricing
         self.prediction = prediction
         self.agentName = agentName
-        _span = AppStorage(wrappedValue: .sliding, "meterPopoverSpan-\(meter.id)")
+        // Meter.id is positional within one provider's snapshot — the
+        // provider prefix keeps two harnesses' "0-session" prefs apart.
+        _span = AppStorage(
+            wrappedValue: .sliding, "meterPopoverSpan-\(providerID).\(meter.id)")
         _slidingFrame = AppStorage(
             wrappedValue: (meter.limitWindow ?? .infinity) <= 6 * 3600 ? .h5 : .d7,
-            "meterSlidingFrame-\(meter.id)")
+            "meterSlidingFrame-\(providerID).\(meter.id)")
     }
 
     private static let chartWidth: CGFloat = 300

@@ -101,6 +101,8 @@ struct UsageProviderTests {
         #expect(provider.links.planUpgrade?.host() == "claude.ai")
         #expect(provider.menuBarGlyph == "✳︎")
         #expect(provider.agentSettings != nil)
-        #expect(provider.makeLocalActivity(bundleID: "test.bundle") != nil)
+        #expect(
+            provider.makeLocalActivity(
+                cacheDirectory: FileManager.default.temporaryDirectory) != nil)
     }
 }

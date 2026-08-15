@@ -129,10 +129,11 @@ public enum WindowTokens {
 /// the code in plumbing.
 public enum ModelNames {
     /// The active provider's catalog. Defaults to the provider this build
-    /// bundles (Claude) so names read right even before wiring; the app
-    /// still installs its provider's catalog exactly once at launch, before
-    /// any UI renders or scan runs — reads afterward see an effectively
-    /// immutable value, which is what makes the unsafe opt-out honest.
+    /// bundles (Claude) so names read right even before wiring. The app
+    /// writes this only on the main actor and only while re-binding the
+    /// active provider — at launch and inside a registry switch, both
+    /// before any dependent UI (re)builds — so every render observes one
+    /// settled value, which is what makes the unsafe opt-out honest.
     nonisolated(unsafe) public static var catalog: ModelCatalog = .claude
 
     public static func display(_ id: String) -> String {

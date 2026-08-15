@@ -84,11 +84,16 @@ enum SettingsSection: String, CaseIterable, Identifiable {
 /// comes from, how the estimate is computed, and a what-if playground).
 struct SettingsView: View {
     var store: UsageStore
+    var registry: ProviderRegistry
 
     @State private var section: SettingsSection?
 
-    init(store: UsageStore, initialSection: SettingsSection = .general) {
+    init(
+        store: UsageStore, registry: ProviderRegistry,
+        initialSection: SettingsSection = .general
+    ) {
         self.store = store
+        self.registry = registry
         _section = State(initialValue: initialSection)
     }
 
@@ -103,7 +108,7 @@ struct SettingsView: View {
             .navigationSplitViewColumnWidth(min: 150, ideal: 170, max: 220)
         } detail: {
             switch section ?? .general {
-            case .general: GeneralSettingsPane(store: store)
+            case .general: GeneralSettingsPane(store: store, registry: registry)
             case .usage: UsageSettingsPane(store: store)
             case .apiCost: CostSettingsPane(store: store)
             }
@@ -193,6 +198,7 @@ func note(_ text: String) -> some View {
 
 private struct GeneralSettingsPane: View {
     var store: UsageStore
+    var registry: ProviderRegistry
     /// Idle tolerance for the popover activity strips.
     @AppStorage(ActivityGrace.storageKey)
     private var graceSeconds = ActivityGrace.defaultSeconds
@@ -209,8 +215,46 @@ private struct GeneralSettingsPane: View {
     @State private var warningPercent = Thresholds.standard.warningPercent
     @State private var criticalPercent = Thresholds.standard.criticalPercent
 
+    private var meteringSelection: Binding<String> {
+        Binding(
+            get: { registry.selection },
+            set: { registry.select($0) })
+    }
+
+    private func harnessName(_ id: String) -> String {
+        registry.presentChoices.first { $0.id == id }?.name ?? id
+    }
+
+    private func signalText(_ signal: HarnessSignal) -> String {
+        if signal.recentFiles > 0 {
+            return "\(signal.recentFiles) session files in the last 14 days"
+        }
+        if let newest = signal.newestActivity {
+            return "quiet — last active \(newest.formatted(date: .abbreviated, time: .omitted))"
+        }
+        return "no sessions found"
+    }
+
     var body: some View {
         SettingsPaneScroll {
+            SettingsCard("Metering") {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Harness")
+                    Spacer()
+                    Picker("Harness", selection: meteringSelection) {
+                        Text(registry.automaticLabel).tag(ProviderRegistry.automatic)
+                        ForEach(registry.presentChoices) { choice in
+                            Text(choice.name).tag(choice.id)
+                        }
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                }
+                ForEach(registry.signals.filter(\.present), id: \.id) { signal in
+                    infoRow(harnessName(signal.id), signalText(signal))
+                }
+                note("Automatic follows whichever agent actually ran on this Mac recently — scored on session files, since background daemons touch state files long after real use stops. One harness is metered at a time; switching re-reads everything from the other harness's own data.")
+            }
             SettingsCard("Refresh") {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(alignment: .firstTextBaseline) {

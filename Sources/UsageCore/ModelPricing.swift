@@ -287,15 +287,6 @@ public struct PricingService: Sendable {
         self.fallback = fallback
     }
 
-    public static func standard(
-        bundleID: String, fallback: PricingTable = .bundled
-    ) -> PricingService {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? FileManager.default.temporaryDirectory
-        return PricingService(
-            cacheDirectory: base.appending(path: bundleID), fallback: fallback)
-    }
-
     /// Best table available without touching the network.
     public func current() -> PricingTable {
         guard let data = try? Data(contentsOf: fileURL),

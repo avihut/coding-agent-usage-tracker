@@ -23,10 +23,6 @@ public struct UsageService: Sendable {
         self.retryDelay = retryDelay
     }
 
-    public static func standard(provider: any UsageProvider, bundleID: String) -> UsageService {
-        UsageService(provider: provider, cache: .standard(bundleID: bundleID))
-    }
-
     public func refresh(thresholds: Thresholds = .standard) async -> DisplayState {
         // The token is re-read every cycle (the agent rotates it) and lives
         // only in this frame for the duration of one request (spec §5).

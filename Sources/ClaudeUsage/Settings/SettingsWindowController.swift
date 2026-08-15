@@ -8,16 +8,26 @@ import SwiftUI
 @MainActor
 final class SettingsWindowController {
     private let store: UsageStore
+    private let registry: ProviderRegistry
     private var window: NSWindow?
 
-    init(store: UsageStore) {
+    init(store: UsageStore, registry: ProviderRegistry) {
         self.store = store
+        self.registry = registry
+    }
+
+    /// Closes and drops the window. Called when the registry retires this
+    /// controller's store — releasing a visible NSWindow out from under
+    /// AppKit is not an option, so the switch closes it first.
+    func close() {
+        window?.close()
+        window = nil
     }
 
     func show(pane: SettingsSection = .general) {
         if window == nil {
             let host = NSHostingController(
-                rootView: SettingsView(store: store, initialSection: pane))
+                rootView: SettingsView(store: store, registry: registry, initialSection: pane))
             let window = NSWindow(contentViewController: host)
             window.title = "Claude Usage Settings"
             window.styleMask = [.titled, .closable, .miniaturizable, .resizable]

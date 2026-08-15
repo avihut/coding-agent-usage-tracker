@@ -53,24 +53,34 @@ final class UsageStore {
 
     static let defaultInterval: TimeInterval = 300
     private static let intervalKey = "refreshIntervalSeconds"
-    private static let ceilingKey = "apiHourlyCeiling"
     static let warningThresholdKey = "warningThresholdPercent"
     static let criticalThresholdKey = "criticalThresholdPercent"
+    /// The learned endpoint budget is a fact about THIS provider's API, so
+    /// its defaults key carries the provider id ("claude.apiHourlyCeiling").
+    private let ceilingKey: String
+    /// True once `shutdown()` ran — a retired store (the registry switched
+    /// providers) must never reschedule, rescan, or render again.
+    private(set) var isShutDown = false
 
     init(provider: any UsageProvider = ClaudeProvider(), service: UsageService? = nil) {
         let bundleID = Bundle.main.bundleIdentifier ?? "com.avihu.ClaudeUsage"
+        let support = StorageScope.supportDirectory(bundleID: bundleID, providerID: provider.id)
+        let caches = StorageScope.cachesDirectory(bundleID: bundleID, providerID: provider.id)
         self.provider = provider
-        self.localActivity = provider.makeLocalActivity(bundleID: bundleID)
-        self.service = service ?? .standard(provider: provider, bundleID: bundleID)
-        self.history = .standard(bundleID: bundleID)
-        self.pricingService = .standard(bundleID: bundleID, fallback: provider.bundledRates)
+        self.localActivity = provider.makeLocalActivity(cacheDirectory: support)
+        self.service = service
+            ?? UsageService(provider: provider, cache: UsageCache(directory: caches))
+        self.history = UsageHistory(directory: support)
+        self.pricingService = PricingService(
+            cacheDirectory: support, fallback: provider.bundledRates)
         self.pricing = pricingService.current()
         let stored = UserDefaults.standard.double(forKey: Self.intervalKey)
         // Stored 60s choices predate the 180s floor — clamp, don't honor.
         let interval = stored >= 60 ? max(TriggerGate.floor, stored) : Self.defaultInterval
         self.activeInterval = interval
         self.cadence = AdaptiveCadence(activeInterval: interval, now: Date())
-        let storedCeiling = UserDefaults.standard.integer(forKey: Self.ceilingKey)
+        self.ceilingKey = StorageScope.scopedKey("apiHourlyCeiling", providerID: provider.id)
+        let storedCeiling = UserDefaults.standard.integer(forKey: ceilingKey)
         self.ledger = RequestLedger(
             ceiling: storedCeiling > 0 ? storedCeiling : RequestLedger.defaultCeiling)
         self.samples = history.load()
@@ -92,7 +102,20 @@ final class UsageStore {
         scanActivity()
     }
 
+    /// Retires this store: stops the scheduler's event sources and the
+    /// FSEvents watcher so a replaced provider's store leaks nothing. An
+    /// in-flight refresh may still land — the flag keeps its completion
+    /// from rescheduling.
+    func shutdown() {
+        guard !isShutDown else { return }
+        isShutDown = true
+        scheduler.stop()
+        watcher = nil
+        nextRefreshAt = nil
+    }
+
     func refresh(_ reason: RefreshReason) {
+        guard !isShutDown else { return }
         let now = Date()
         // Automatic triggers sit out an active 429 backoff. A human clicking
         // refresh may try early — another 429 just extends the backoff.
@@ -215,7 +238,7 @@ final class UsageStore {
     /// at most once a minute. A provider without local traces has nothing
     /// to scan — the activity section shows its empty state.
     func scanActivity(force: Bool = false) {
-        guard let source = localActivity else { return }
+        guard !isShutDown, let source = localActivity else { return }
         if !force, let last = lastActivityScan, Date().timeIntervalSince(last) < 60 { return }
         lastActivityScan = Date()
         Task.detached(priority: .utility) { [weak self] in
@@ -250,7 +273,7 @@ final class UsageStore {
             cadence.noteRateLimited(retryAfter: retryAfter, at: now)
             // The 429 just showed us the window's real budget — remember it.
             ledger.noteRateLimited(at: now)
-            UserDefaults.standard.set(ledger.ceiling, forKey: Self.ceilingKey)
+            UserDefaults.standard.set(ledger.ceiling, forKey: ceilingKey)
         } else if case .live(let snapshot) = newState {
             cadence.noteSuccess(
                 usageAdvanced: UsageMovement.advanced(from: previous, to: snapshot), at: now)
@@ -258,6 +281,7 @@ final class UsageStore {
     }
 
     private func scheduleNext() {
+        guard !isShutDown else { return }
         scheduler.schedule(after: cadence.interval(now: Date()))
         nextRefreshAt = scheduler.nextFireDate
     }

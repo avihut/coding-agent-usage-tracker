@@ -15,12 +15,6 @@ public struct UsageCache: Sendable {
         self.fileURL = directory.appending(path: "usage.json")
     }
 
-    public static func standard(bundleID: String) -> UsageCache {
-        let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
-            ?? FileManager.default.temporaryDirectory
-        return UsageCache(directory: base.appending(path: bundleID))
-    }
-
     public func save(body: Data, fetchedAt: Date) {
         do {
             try FileManager.default.createDirectory(
