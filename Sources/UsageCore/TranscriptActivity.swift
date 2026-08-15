@@ -337,32 +337,61 @@ public struct TranscriptScanner: Sendable {
             daily: daily, timeline: timeline, sessions: Self.mergeSessions(files: files))
     }
 
-    /// Full parse of one listed session: fresh main-file rows + summary, with
-    /// subagent counters folded in from the cache (≤ one scan interval stale
-    /// — the next scan repairs it). Nil when the id is unknown, the
-    /// transcript left the disk, or the surrounding task was cancelled.
-    /// Synchronous and slow on multi-MB files — call off-main.
+    /// Full parse of one listed session — the main file AND its subagent
+    /// files, all fresh from disk (no cache involved, so nothing here can lag
+    /// the sidebar's numbers). Subagent API calls join the rows flagged and
+    /// time-interleaved: the running ledger must reach the session's whole
+    /// spend, or the chart trails the card by exactly the subagents' cost.
+    /// Nil when the id is unknown, the transcript left the disk, or the
+    /// surrounding task was cancelled.
+    /// Synchronous and slow on multi-MB sessions — call off-main.
     public func sessionDetail(id: String) -> SessionDetail? {
-        let cache = loadCache()
-        let mainSuffix = "/\(id).jsonl"
-        let cachedPath = cache.files.keys.first {
-            $0.hasSuffix(mainSuffix) && !$0.contains("/subagents/")
-        }
-        let url = cachedPath.map { URL(fileURLWithPath: $0) } ?? findTranscript(id: id)
-        guard let url, FileManager.default.fileExists(atPath: url.path) else { return nil }
+        guard let url = findTranscript(id: id) else { return nil }
         guard let parsed = parseFile(url, collectRows: true) else { return nil }
-
         let mainEntry = FileEntry(
             mtime: 0, size: 0, days: parsed.days, slots: [], session: parsed.session)
-        let partsMarker = "/\(id)/subagents/"
-        let parts = cache.files.compactMap { path, entry in
-            path.contains(partsMarker) ? entry : nil
+
+        // (source, ordinal) breaks timestamp ties deterministically: main
+        // rows first, then parts in stable path order, each in file order.
+        struct PendingRow {
+            let t: Date
+            let kind: SessionEvent.Kind
+            let subagent: Bool
+            let source: Int
+            let ordinal: Int
         }
-        guard let summary = Self.buildSummary(id: id, main: mainEntry, parts: parts)
+        var pending = parsed.rows.map {
+            PendingRow(t: $0.t, kind: $0.kind, subagent: false, source: 0, ordinal: $0.id)
+        }
+        var truncated = parsed.truncated
+        var partEntries: [FileEntry] = []
+        for (index, partURL) in subagentFiles(of: url, id: id).enumerated() {
+            if Task.isCancelled { return nil }
+            guard let part = parseFile(partURL, collectRows: true) else {
+                if Task.isCancelled { return nil }
+                continue
+            }
+            partEntries.append(FileEntry(
+                mtime: 0, size: 0, days: part.days, slots: [], session: part.session))
+            truncated = truncated || part.truncated
+            for row in part.rows {
+                pending.append(PendingRow(
+                    t: row.t, kind: row.kind, subagent: true,
+                    source: index + 1, ordinal: row.id))
+            }
+        }
+        guard let summary = Self.buildSummary(id: id, main: mainEntry, parts: partEntries)
         else { return nil }
 
-        var rows = parsed.rows
-        if parsed.truncated {
+        pending.sort { ($0.t, $0.source, $0.ordinal) < ($1.t, $1.source, $1.ordinal) }
+        if pending.count > Self.detailRowCap {
+            pending.removeLast(pending.count - Self.detailRowCap)
+            truncated = true
+        }
+        var rows = pending.enumerated().map { index, row in
+            SessionEvent(id: index, t: row.t, kind: row.kind, subagent: row.subagent)
+        }
+        if truncated {
             rows.append(SessionEvent(
                 id: rows.count, t: summary.end,
                 kind: .command(name: "… breakdown truncated")))
@@ -370,10 +399,28 @@ public struct TranscriptScanner: Sendable {
         return SessionDetail(summary: summary, rows: rows)
     }
 
-    /// Cold-cache fallback: the transcript lives one level under a project
-    /// directory, so ~80 stats find it without a tree walk.
+    /// The session's subagent transcripts on disk right now, in stable path
+    /// order. Empty when the directory doesn't exist.
+    private func subagentFiles(of mainURL: URL, id: String) -> [URL] {
+        let directory = mainURL.deletingLastPathComponent()
+            .appending(path: "\(id)/subagents")
+        guard let enumerator = FileManager.default.enumerator(
+            at: directory, includingPropertiesForKeys: nil)
+        else { return [] }
+        var files: [URL] = []
+        while let item = enumerator.nextObject() as? URL {
+            if item.pathExtension == "jsonl" { files.append(item) }
+        }
+        return files.sorted { $0.path < $1.path }
+    }
+
+    /// The transcript lives one level under a project directory, so ~80
+    /// stats find it without a tree walk (cheaper than decoding the cache
+    /// for its path keys).
     private func findTranscript(id: String) -> URL? {
         let fileManager = FileManager.default
+        let direct = root.appending(path: "\(id).jsonl")
+        if fileManager.fileExists(atPath: direct.path) { return direct }
         guard let projects = try? fileManager.contentsOfDirectory(
             at: root, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])
         else { return nil }

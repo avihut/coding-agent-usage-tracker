@@ -108,13 +108,51 @@ the README rather than silently deviating.
   (default SHOW, user decision; no parent attribution — verified no
   linkage exists in hook transcripts). `--sessions` launch hatch.
   Spec §10 amendment lists exactly what the cache may materialize.
+  RECONCILIATION (v0.32.0, user-reported $630-vs-$610 discrepancy):
+  sessionDetail parses the main file AND every `<id>/subagents/**` file
+  fresh from disk — NO cache read at all (the ≤60s-stale rollup died
+  with it); subagent API calls join the rows time-interleaved, carrying
+  `SessionEvent.subagent` (dimmed "· subagent" rows), so the detail
+  ledger reaches the card's total EXACTLY. The chart endpoint trailing
+  the sidebar by the subagents' spend is a bug class, and
+  subagentRollup's rowTokens == summary.totalTokens assertion is its
+  regression test. Freshness rides FSEvents → scanActivity (1/min
+  throttle) → DetailKey{id, end} re-fires the parse.
   CODEX SESSIONS (v0.31.0): CodexActivitySource populates the same
   seam — one rollout file = one session (cache v2; SessionMeta stores
   title/cwd/cli_version/start/end/stretches, counts derived from
   DayTally), title = scrubbed first user_message, kind always
   .interactive (rollouts carry no headless marker), detail rows from
   user_message + token_count deltas. Gemini stays sessionless.
-- PROVIDER ACCENTS (2026-08-15 v0.29.0, user-directed): the brand accent
+- CHART BEHAVIOR CONTRACT (2026-08-15 v0.32.0, user-directed standing
+  rule): any surface that plots a running/cumulative series over an
+  event list renders `RunningBreakdownChart`
+  (Sources/ClaudeUsage/Charts/) fed by a core `SessionChartModel`
+  (per-row carry-forward cumulative arrays for O(1) hover lookup;
+  per-model series with cost NIL for unpriced models — never a flat $0
+  line; promptRows; prompt-to-prompt Sections with per-measure
+  subtotals). These behaviors are the contract — future graphs of this
+  shape ship them by construction, not by reimplementation:
+  (1) Cost/Tokens SegmentedPicker + series total in the header, no
+  title copy; (2) vertical marker lines at every prompt with ~4pt snap;
+  snapping (or hovering that prompt's list row) lights the whole
+  section by CURTAINING everything outside it (windowBackgroundColor
+  0.5 — the meter-popover idiom: the highlight is everything else
+  dimming), section subtotal annotated in the headroom band; (3) plain
+  hover = quaternary crosshair + dot + a fixed-height readout line that
+  never reflows, mirrored onto the list through ONE shared hoveredRow
+  binding (both directions — list rows hover too); (4) per-model
+  overlay curves in ModelPalette colors; curve-proximity focus (8pt
+  grab) meets the breakdown grid's row hover in the shared hoveredModel
+  binding — focused curve drawn last, peers dim to 0.15, name at tip;
+  (5) click → onSelectRow → ScrollViewReader scrollTo(.center) + an
+  accent flash that eases out; (6) the x-axis is EVENT ORDINAL, not
+  time — sections stay visible across idle gaps and hover maps 1:1 to
+  rows; marks thin (240 total / 120 per model) but hover reads FULL
+  arrays; (7) the chart endpoint MUST equal the surface's headline
+  total (see RECONCILIATION). Hover/annotation idioms
+  (onContinuousHover plot-frame math, .fit(to: .plot) overflow, hover
+  cleared on exit) stay consistent with the meter popover chart.
   is provider DATA like the glyph — `UsageProvider.accent:
   ProviderAccent` (pure sRGB components; UsageCore stays UI-framework-
   free): Claude terracotta #D97757, Codex OpenAI-green #10A37F, Gemini

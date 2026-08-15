@@ -226,8 +226,15 @@ private struct SessionDetailPane: View {
 
     @State private var detail: SessionDetail?
     @State private var ledger: [SessionLedger.Entry] = []
+    @State private var chartModel: SessionChartModel = .empty
     @State private var vanished = false
     @State private var hoveredModel: String?
+    /// One hover truth for chart and list — either surface writes it, both
+    /// render it (crosshair there, row highlight here).
+    @State private var hoveredRow: Int?
+    /// The row a chart click just jumped to; its flash fades right back out.
+    @State private var flashRow: Int?
+    @State private var measure: SessionChartMeasure = .cost
 
     private struct DetailKey: Equatable {
         let id: String
@@ -253,43 +260,75 @@ private struct SessionDetailPane: View {
         .task(id: DetailKey(id: summary.id, end: summary.end)) {
             let result = await store.sessionDetail(id: summary.id)
             if Task.isCancelled { return }
+            hoveredRow = nil
+            flashRow = nil
             if let result {
-                ledger = SessionLedger.runningCost(rows: result.rows, pricing: store.pricing)
+                let entries = SessionLedger.runningCost(rows: result.rows, pricing: store.pricing)
+                ledger = entries
+                chartModel = SessionChartModel.build(rows: result.rows, ledger: entries)
+                // An all-unpriced session (Codex before the pricing feed) has
+                // no cost curve to draw — fall to tokens. A priced session
+                // keeps whatever measure the user last picked.
+                if (chartModel.runningCost.last ?? 0) <= 0 { measure = .tokens }
                 detail = result
                 vanished = false
             } else {
                 detail = nil
                 ledger = []
+                chartModel = .empty
                 vanished = true
             }
         }
     }
 
     private func loaded(_ detail: SessionDetail) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            header(detail.summary)
-                .padding(.horizontal, 18)
-                .padding(.top, 14)
-            ModelBreakdownGrid(
-                rows: WindowTokens.rows(from: detail.summary.models),
-                colors: colors,
-                pricing: store.pricing,
-                hoveredModel: $hoveredModel)
-                .padding(.horizontal, 18)
-                .padding(.top, 10)
-            sparkline
-                .padding(.horizontal, 18)
-                .padding(.vertical, 8)
-            Divider()
-            columnHeader
-            Divider()
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    ForEach(detail.rows) { row in
-                        messageRow(row)
+        ScrollViewReader { proxy in
+            VStack(alignment: .leading, spacing: 0) {
+                header(detail.summary)
+                    .padding(.horizontal, 18)
+                    .padding(.top, 14)
+                ModelBreakdownGrid(
+                    rows: WindowTokens.rows(from: detail.summary.models),
+                    colors: colors,
+                    pricing: store.pricing,
+                    hoveredModel: $hoveredModel)
+                    .padding(.horizontal, 18)
+                    .padding(.top, 10)
+                RunningBreakdownChart(
+                    model: chartModel,
+                    rows: detail.rows,
+                    colors: colors,
+                    measure: $measure,
+                    hoveredRow: $hoveredRow,
+                    hoveredModel: $hoveredModel,
+                    onSelectRow: { row in jump(to: row, proxy: proxy) })
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 8)
+                Divider()
+                columnHeader
+                Divider()
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(detail.rows) { row in
+                            messageRow(row)
+                                .id(row.id)
+                        }
                     }
+                    .padding(.vertical, 4)
                 }
-                .padding(.vertical, 4)
+            }
+        }
+    }
+
+    /// Chart click → the list centers the clicked message and flashes it,
+    /// the flash easing back out on its own.
+    private func jump(to row: Int, proxy: ScrollViewProxy) {
+        withAnimation(.easeInOut(duration: 0.25)) { proxy.scrollTo(row, anchor: .center) }
+        flashRow = row
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            withAnimation(.easeOut(duration: 0.9)) {
+                if flashRow == row { flashRow = nil }
             }
         }
     }
@@ -366,58 +405,6 @@ private struct SessionDetailPane: View {
         return parts.joined(separator: " · ")
     }
 
-    // MARK: Running-cost sparkline
-
-    private var sparkPoints: [(t: Date, running: Double)] {
-        guard let rows = detail?.rows, !rows.isEmpty, ledger.count == rows.count
-        else { return [] }
-        var points: [(Date, Double)] = []
-        for (index, row) in rows.enumerated()
-        where ledger[index].incremental != nil {
-            points.append((row.t, ledger[index].running))
-        }
-        guard points.count > 200 else { return points }
-        let stride = Double(points.count) / 200
-        var thinned = (0..<200).map { points[Int(Double($0) * stride)] }
-        thinned.append(points[points.count - 1])
-        return thinned
-    }
-
-    @ViewBuilder private var sparkline: some View {
-        let points = sparkPoints
-        if points.count > 1, let last = points.last {
-            HStack(spacing: 10) {
-                Text("RUNNING COST")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-                Chart(Array(points.enumerated()), id: \.offset) { _, point in
-                    AreaMark(
-                        x: .value("Time", point.t),
-                        y: .value("Cost", point.running))
-                        .foregroundStyle(
-                            .linearGradient(
-                                colors: [
-                                    ProviderStyle.accentColor.opacity(0.28),
-                                    ProviderStyle.accentColor.opacity(0.02),
-                                ],
-                                startPoint: .top, endPoint: .bottom))
-                    LineMark(
-                        x: .value("Time", point.t),
-                        y: .value("Cost", point.running))
-                        .foregroundStyle(ProviderStyle.accentColor)
-                        .lineStyle(StrokeStyle(lineWidth: 1.5))
-                }
-                .chartXAxis(.hidden)
-                .chartYAxis(.hidden)
-                .frame(height: 44)
-                Text(UsageFormatting.money(last.running))
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(ProviderStyle.accentColor)
-                    .monospacedDigit()
-            }
-        }
-    }
-
     // MARK: Message rows
 
     private var columnHeader: some View {
@@ -475,7 +462,15 @@ private struct SessionDetailPane: View {
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 2.5)
+        .opacity(row.subagent ? 0.7 : 1)
         .background(rowBackground(row))
+        .onHover { inside in
+            if inside {
+                hoveredRow = row.id
+            } else if hoveredRow == row.id {
+                hoveredRow = nil
+            }
+        }
     }
 
     private func callColumns(
@@ -490,6 +485,11 @@ private struct SessionDetailPane: View {
                     .font(.caption.weight(.semibold))
                 if toolUses > 0 {
                     Text("· \(toolUses) tool\(toolUses > 1 ? "s" : "")")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+                if row.subagent {
+                    Text("· subagent")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }
@@ -521,11 +521,33 @@ private struct SessionDetailPane: View {
         ledger.indices.contains(row.id) ? ledger[row.id] : nil
     }
 
+    /// Layered row grounds: prompts keep their standing tint, the hovered
+    /// prompt's whole section echoes the chart's lit stretch, the hovered
+    /// row itself sits on top, and a chart-click flash outshines them all
+    /// while it fades.
     @ViewBuilder private func rowBackground(_ row: SessionEvent) -> some View {
-        if case .prompt = row.kind {
-            ProviderStyle.accentColor.opacity(0.06)
-        } else {
-            Color.clear
+        ZStack {
+            if case .prompt = row.kind {
+                ProviderStyle.accentColor.opacity(0.06)
+            }
+            if hoveredSectionRange?.contains(row.id) == true {
+                Color.primary.opacity(0.045)
+            }
+            if hoveredRow == row.id {
+                Color.primary.opacity(0.07)
+            }
+            if flashRow == row.id {
+                ProviderStyle.accentColor.opacity(0.3)
+            }
         }
+    }
+
+    /// The prompt-to-prompt stretch lit while a prompt row is hovered on
+    /// either surface — the list-side echo of the chart's curtained section.
+    private var hoveredSectionRange: Range<Int>? {
+        guard let hoveredRow, let rows = detail?.rows, rows.indices.contains(hoveredRow),
+              case .prompt = rows[hoveredRow].kind
+        else { return nil }
+        return chartModel.sections.first { $0.promptRow == hoveredRow }?.range
     }
 }

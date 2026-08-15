@@ -318,7 +318,7 @@ struct SessionDetailTests {
         }
     }
 
-    @Test("a warm cache folds subagent counters into the refreshed summary")
+    @Test("subagent calls join the rows flagged and time-interleaved")
     func subagentRollup() throws {
         let fixture = try SessionFixture()
         defer { fixture.tearDown() }
@@ -330,22 +330,36 @@ struct SessionDetailTests {
         let detail = try #require(fixture.scanner.sessionDetail(id: "S"))
         #expect(detail.summary.apiCalls == 4)
         #expect(detail.summary.subagentCount == 2)
-        // Subagent activity folds into counters, never into rows.
-        #expect(detail.rows.count == 5)
+        #expect(detail.rows.count == 7)
+        #expect(detail.rows.prefix(5).allSatisfy { !$0.subagent })
+        #expect(detail.rows[5].subagent)
+        #expect(detail.rows[5].t == at("2026-08-01T10:04:00.000Z"))
+        #expect(detail.rows[5].kind == .apiCall(
+            model: "claude-haiku-4-5",
+            tally: TokenTally(input: 10, output: 5), toolUses: 1))
+        #expect(detail.rows[6].subagent)
+        // The reconciliation contract: the rows' spend reaches the summary's
+        // — the chart must never trail the card by the subagents' share.
+        let rowTokens = detail.rows.reduce(0) { sum, row in
+            if case .apiCall(_, let tally, _) = row.kind { return sum + tally.total }
+            return sum
+        }
+        #expect(rowTokens == detail.summary.totalTokens)
     }
 
-    @Test("a cold cache still resolves the transcript by directory walk")
+    @Test("no cache needed: main and subagents resolve by directory walk")
     func coldCache() throws {
         let fixture = try SessionFixture()
         defer { fixture.tearDown() }
         try fixture.write("S.jsonl", mainTranscript)
         try fixture.write("S/subagents/agent-a.jsonl", subagentA)
 
-        // No scan has run: the main file is found by walking project dirs;
-        // subagent counters are unknown until a scan populates the cache.
+        // No scan has run: the detail parse reads disk truth directly, so
+        // the subagent's call is present all the same.
         let detail = try #require(fixture.scanner.sessionDetail(id: "S"))
-        #expect(detail.summary.apiCalls == 2)
-        #expect(detail.summary.subagentCount == 0)
+        #expect(detail.summary.apiCalls == 3)
+        #expect(detail.summary.subagentCount == 1)
+        #expect(detail.rows.count == 6)
     }
 
     @Test("unknown ids and deleted transcripts return nil")
