@@ -255,6 +255,7 @@ struct UsagePanelView: View {
                 Divider()
                 if store.providesSessions {
                     Button("Sessions…") { onOpenSessions() }
+                        .keyboardShortcut("1", modifiers: .command)
                 }
                 Button("Settings…") { onOpenSettings() }
                     .keyboardShortcut(",", modifiers: .command)
