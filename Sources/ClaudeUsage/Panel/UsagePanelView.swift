@@ -38,21 +38,30 @@ struct UsagePanelView: View {
     @State private var activityFocus: DateInterval?
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                errorBlock
-                content
-                statusRow
-                Divider()
-                HeatmapView(
-                    activity: store.activity, pricing: store.pricing,
-                    weeklyProfile: store.weeklyProfile,
-                    agentName: store.provider.agentName,
-                    focus: $activityFocus)
-                sessionsSection
-                footer
+        VStack(alignment: .leading, spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    errorBlock
+                    content
+                    statusRow
+                    Divider()
+                    HeatmapView(
+                        activity: store.activity, pricing: store.pricing,
+                        weeklyProfile: store.weeklyProfile,
+                        agentName: store.provider.agentName,
+                        focus: $activityFocus)
+                    sessionsSection
+                }
+                .padding(.horizontal, 14)
+                .padding(.top, 14)
+                .padding(.bottom, 10)
             }
-            .padding(14)
+            // Content that fits must feel static — no rubber-band stretch
+            // on a panel that has nothing to scroll.
+            .scrollBounceBehavior(.basedOnSize)
+            // The footer lives OUTSIDE the scroll: the version and its
+            // buttons stay put at any scroll position.
+            footer
         }
         // Wide enough that the breakdown grid never truncates model names.
         .frame(width: 360)
@@ -210,6 +219,9 @@ struct UsagePanelView: View {
         }
     }
 
+    /// Pinned below the scroll area (v0.56.0): its divider runs full-bleed
+    /// as the bar's structural edge, and the row carries its own padding —
+    /// the scrolled content's 14pt inset no longer wraps it.
     @ViewBuilder private var footer: some View {
         Divider()
         HStack(spacing: 12) {
@@ -292,6 +304,9 @@ struct UsagePanelView: View {
             .menuIndicator(.hidden)
             .fixedSize()
         }
+        .padding(.horizontal, 14)
+        .padding(.top, 8)
+        .padding(.bottom, 10)
     }
 
     private var meteringSelection: Binding<String> {
