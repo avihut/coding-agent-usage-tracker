@@ -44,6 +44,10 @@ struct HeatmapView: View {
     /// Whole windows stepped into the past on the fixed periods — 0 is the
     /// current trailing window. Always 0 for All, which shows everything.
     @State private var pageOffset = 0
+    /// Bumped only by the pager arrows — the value that scopes the page-morph
+    /// animation to the chart row. Live refreshes, period switches, and the
+    /// close-reset leave it alone, so those rebuilds snap.
+    @State private var pageTick = 0
     @State private var costIndex: CostIndex = .empty
     @State private var hoveredDay: Date?
     @State private var hoveredModel: String?
@@ -86,7 +90,12 @@ struct HeatmapView: View {
 
     var body: some View {
         Group {
-            if layout.isEmpty {
+            // The bare fallback ONLY when there is nothing to navigate to:
+            // page 0, no activity in the window, none older. A paged-to
+            // empty window must keep periodContent — arrows included —
+            // because swapping to this view stranded the user with no way
+            // back (and collapsed the section's height mid-animation).
+            if pageOffset == 0, layout.isEmpty, !layout.hasOlder {
                 VStack(alignment: .leading, spacing: 8) {
                     titleRow
                     Text("No local Claude Code activity found")
@@ -189,10 +198,9 @@ struct HeatmapView: View {
         if period != .all {
             let available = direction < 0 ? layout.hasOlder : pageOffset > 0
             Button {
-                withAnimation(Self.drillAnimation) {
-                    pageOffset += direction < 0 ? 1 : -1
-                    rebuildLayout(for: period)
-                }
+                pageTick += 1
+                pageOffset += direction < 0 ? 1 : -1
+                rebuildLayout(for: period)
             } label: {
                 Image(systemName: direction < 0
                     ? "chevron.left.circle.fill" : "chevron.right.circle.fill")
@@ -252,12 +260,33 @@ struct HeatmapView: View {
                 chart
                 periodStepArrow(direction: 1)
             }
+            // The page morph is scoped HERE — value-keyed, not withAnimation
+            // around the state change: the summary grid below has a
+            // different row count per window and must step discretely, so
+            // the popover resizes once, natively, instead of chasing an
+            // animated height per frame (the drill-down lesson). Chart
+            // heights themselves are page-invariant: the bars sit in a
+            // fixed frame and the 30D calendar pads to six week rows.
+            .animation(Self.drillAnimation, value: pageTick)
             if period == .week {
                 weeklyTrendCaption
             }
             ModelBreakdownGrid(
                 rows: summaryRows, colors: modelColors, pricing: pricing,
                 hoveredModel: $hoveredModel)
+        }
+    }
+
+    /// Centered over an empty window's chart. The chart itself still renders
+    /// at full height — date labels, empty stubs/cells, working pager arrows —
+    /// so paging onto a quiet week neither traps the user nor moves a single
+    /// pixel of layout; this note just says why there's nothing to see.
+    @ViewBuilder
+    private var emptyWindowNote: some View {
+        if layout.activeDays == 0 {
+            Text("No activity in this window")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -732,6 +761,10 @@ struct HeatmapView: View {
 
     private static let calendarRowHeight: CGFloat = 16
     private static let monthGutterWidth: CGFloat = 34
+    /// A 30-day window spans 5 week rows or 6 depending on the weekday it
+    /// starts on; the grid always reserves 6 so paging never changes the
+    /// chart's height.
+    private static let monthRowCount = 6
 
     /// Weeks as full-width rows: seven weekday columns stretch across the
     /// panel, and months are named in a side gutter where they begin.
@@ -757,7 +790,14 @@ struct HeatmapView: View {
                     }
                 }
             }
+            ForEach(
+                layout.weeks.count..<max(layout.weeks.count, Self.monthRowCount),
+                id: \.self
+            ) { _ in
+                Color.clear.frame(height: Self.calendarRowHeight)
+            }
         }
+        .overlay { emptyWindowNote }
     }
 
     private func monthGutterLabel(_ label: String?) -> some View {
@@ -800,7 +840,7 @@ struct HeatmapView: View {
             // Positional identity, not day identity: bar N is the same view
             // on every page, so stepping windows animates each bar to its
             // new height instead of tearing the row down and rebuilding it —
-            // that reuse is what the pager's withAnimation morphs through.
+            // that reuse is what the pager's scoped animation morphs through.
             HStack(alignment: .bottom, spacing: 4) {
                 ForEach(days.indices, id: \.self) { index in
                     bar(for: days[index])
@@ -808,6 +848,7 @@ struct HeatmapView: View {
             }
             .frame(height: Self.barPlotHeight)
             .overlay { trendOverlay(days: days) }
+            .overlay { emptyWindowNote }
             Rectangle().fill(.quaternary).frame(height: 1)
             HStack(spacing: 4) {
                 ForEach(days.indices, id: \.self) { index in

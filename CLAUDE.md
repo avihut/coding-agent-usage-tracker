@@ -200,16 +200,31 @@ the README rather than silently deviating.
   `pagesBack` + `hasOlder`; All shows everything and renders none): ‹
   enables while older activity exists, › while off page 0 — an
   unavailable direction keeps its reserved 17pt at zero opacity, because
-  page flips MORPH the chart IN PLACE (user-specified: no slide, the
-  chart must never resize between pages, and the animation is the SAME
-  `withAnimation(drillAnimation)` the Tokens↔Cost flip uses — bars glide,
-  cells re-tint). The morph rides on identity: the 7D bars/labels ForEach
-  by POSITION (`days.indices`), never by day — day identity tears the row
-  down and snaps; day numbers and bar value labels roll via
-  `.contentTransition(.numericText())`. Live-refresh and period-switch
-  rebuilds stay outside withAnimation on purpose (those snap). The stats
-  line prefixes the visible range ("Jul 27 – Aug 2") when paged; panel
-  close and period switches reset to page 0. The 7D bars carry the
+  page flips MORPH the chart IN PLACE (user-specified: no slide, and the
+  same feel as the Tokens↔Cost flip — bars glide, cells re-tint). The
+  morph rides on identity: the 7D bars/labels ForEach by POSITION
+  (`days.indices`), never by day — day identity tears the row down and
+  snaps; day numbers and bar value labels roll via
+  `.contentTransition(.numericText())`. The animation is SCOPED, not
+  withAnimation around the state change: `.animation(drillAnimation,
+  value: pageTick)` on the arrow-chart-arrow HStack only, where pageTick
+  is bumped solely by the arrows — because everything outside (the
+  summary grid's row count differs per window) must step DISCRETELY so
+  the popover resizes once natively instead of chasing an animated
+  height per frame (user: height jumps = janky; same lesson as the
+  drill). Chart heights are page-invariant by construction: bars sit in
+  a fixed frame and the 30D calendar pads to a constant 6 week rows
+  (`monthRowCount`; a 30-day span needs 5 or 6 depending on start
+  weekday). Empty windows NEVER swap the section away: the bare
+  "No local Claude Code activity found" view renders only at page 0 with
+  layout.isEmpty and !hasOlder (nothing to navigate to) — otherwise an
+  empty page keeps the full chart (date labels, stubs, arrows; layout
+  builds all date cells regardless of activity) with a centered
+  "No activity in this window" overlay, so paging onto a quiet week
+  never strands the user (it used to drop the arrows entirely).
+  Live-refresh and period-switch rebuilds leave pageTick alone (those
+  snap). The stats line prefixes the visible range ("Jul 27 – Aug 2")
+  when paged; panel close and period switches reset to page 0. The 7D bars carry the
   typical-week overlay: the weekly meter's
   `WeeklyProfile.weekdayShares()` stretched over the displayed week's own
   total (dashed primary polyline + dots, hit-testing off) — built from
