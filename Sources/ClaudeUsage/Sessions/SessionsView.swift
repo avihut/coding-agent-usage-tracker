@@ -133,7 +133,11 @@ private func plural(_ count: Int, _ noun: String) -> String {
 // MARK: - Skeleton primitives
 
 /// One placeholder bar, matched to the text heights it stands in for. An
-/// accent bar suggests a prompt row.
+/// accent bar suggests a prompt row. `width` is a CAP, never a constant —
+/// the text a bar stands in for truncates under pressure, so the bar must
+/// compress the same way. A fixed width would give the skeleton a larger
+/// minimum than the loaded content and make the split view breathe on
+/// every selection change.
 private struct SkeletonBar: View {
     var width: CGFloat?
     var height: CGFloat = 9
@@ -144,7 +148,8 @@ private struct SkeletonBar: View {
             .fill(accent
                 ? ProviderStyle.accentColor.opacity(0.14)
                 : Color.primary.opacity(0.07))
-            .frame(width: width, height: height)
+            .frame(height: height)
+            .frame(maxWidth: width, alignment: .leading)
     }
 }
 
@@ -373,7 +378,8 @@ private struct SessionDetailPane: View {
     /// sidebar summary already knows renders REAL and instantly — title,
     /// meta grid, per-model totals — and only what the parse owes (chart,
     /// message rows) shows as pulsing placeholders, so a switch never reads
-    /// as frozen.
+    /// as frozen. Structure mirrors `loaded` exactly — same shells, same
+    /// width behavior — so the swap moves nothing but the placeholders.
     private var skeleton: some View {
         VStack(alignment: .leading, spacing: 0) {
             header(summary)
@@ -394,8 +400,14 @@ private struct SessionDetailPane: View {
             Divider()
             columnHeader
             Divider()
-            Pulsing { skeletonRows }
-            Spacer(minLength: 0)
+            // The same ScrollView shell as the loaded list: a vertical
+            // scroll view absorbs its content's width instead of imposing
+            // it, so the placeholder rows can never push the pane wider
+            // than the rows they stand in for.
+            ScrollView {
+                Pulsing { skeletonRows }
+            }
+            .scrollDisabled(true)
         }
     }
 

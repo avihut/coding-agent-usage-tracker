@@ -124,7 +124,12 @@ the README rather than silently deviating.
   are REAL — the sidebar summary already knows them — with pulsing
   bars only for chart + rows (Pulsing honors Reduce Motion); a
   same-id re-fire keeps content and swaps silently, and hover state
-  resets only on id change.
+  resets only on id change. The skeleton must be width-neutral
+  (v0.35.0): SkeletonBar widths are CAPS (maxWidth), never fixed
+  frames, and the placeholder rows live inside the same ScrollView
+  shell as the loaded list — a skeleton whose minimum width exceeds
+  the loaded content's makes the split view widen on every selection
+  and snap back when the parse lands.
   CODEX SESSIONS (v0.31.0): CodexActivitySource populates the same
   seam — one rollout file = one session (cache v2; SessionMeta stores
   title/cwd/cli_version/start/end/stretches, counts derived from
