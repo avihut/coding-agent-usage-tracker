@@ -254,7 +254,11 @@ struct HeatmapView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                 Spacer(minLength: 8)
-                legend
+                // The less→more ramp explains calendar-cell tinting; the 7D
+                // bars say magnitude with height, so there it's just noise.
+                if period != .week {
+                    legend
+                }
             }
             .frame(height: 14)
             HStack(spacing: 3) {
