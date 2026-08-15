@@ -165,8 +165,23 @@ struct HeatmapView: View {
         }
     }
 
+    /// The drilled day's entry — synthesized empty for a quiet day still
+    /// inside the shown span, so stepping renders every calendar day
+    /// honestly instead of skipping the silent ones. Nil only when the day
+    /// left the span entirely (aged out), which pops the drill.
     private var selectedEntry: DailyActivity? {
-        selectedDay.flatMap { layout.byDay[$0] }
+        guard let day = selectedDay else { return nil }
+        if let entry = layout.byDay[day] { return entry }
+        guard spanContains(day) else { return nil }
+        return DailyActivity(day: day, tokens: 0, messages: 0)
+    }
+
+    /// Whether the shown period's cell range covers `day` — the layout
+    /// builds every date cell, so its first and last bound the span.
+    private func spanContains(_ day: Date) -> Bool {
+        let cells = layout.weeks.flatMap { $0 }.compactMap { $0 }
+        guard let first = cells.first, let last = cells.last else { return false }
+        return day >= first && day <= last
     }
 
     /// The period's models, heaviest first — the row order of the summary
@@ -455,20 +470,21 @@ struct HeatmapView: View {
     /// container height (and with it the popover window) never animates
     /// per frame.
     private func drill(into day: Date) {
-        guard layout.byDay[day] != nil else { return }
+        guard spanContains(day) else { return }
         hoveredModel = nil
         hoveredDay = nil
         selectedDay = day
     }
 
-    /// The adjacent drillable day on one side within the shown period —
-    /// nil at the edge, which hides that arrow.
+    /// The adjacent CALENDAR day within the shown period — quiet days step
+    /// through with an empty state rather than being skipped (they used to
+    /// walk only byDay's keys, silently jumping the gaps). Nil at the span's
+    /// edge, which hides that arrow.
     private func neighborDay(of day: Date, direction: Int) -> Date? {
-        let days = layout.byDay.keys.sorted()
-        guard let index = days.firstIndex(of: day) else { return nil }
-        let target = index + direction
-        guard days.indices.contains(target) else { return nil }
-        return days[target]
+        guard let target = Calendar.current.date(byAdding: .day, value: direction, to: day),
+              spanContains(target)
+        else { return nil }
+        return target
     }
 
     /// Flanks the ring flush at the container edge, vertically centered on
@@ -556,14 +572,25 @@ struct HeatmapView: View {
         }
     }
 
+    /// Why a day's ring zone is empty, honestly tiered: swept transcripts
+    /// (prompt-only), a genuinely silent day (steppable now, not skipped),
+    /// or token data without model attribution.
+    private static func emptyDayNote(_ entry: DailyActivity) -> String {
+        if entry.prompts > 0 && entry.tokens == 0 {
+            return "\(entry.prompts) prompts · no token data — the transcripts were already cleaned up"
+        }
+        if entry.tokens == 0 && entry.messages == 0 {
+            return "No activity on this day"
+        }
+        return "No per-model data for this day"
+    }
+
     private func dayDetail(
         _ entry: DailyActivity, rows: [ModelTokenUsage], live: Bool = true
     ) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             if rows.isEmpty {
-                Text(entry.prompts > 0 && entry.tokens == 0
-                    ? "\(entry.prompts) prompts · no token data — the transcripts were already cleaned up"
-                    : "No per-model data for this day")
+                Text(Self.emptyDayNote(entry))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 48)
