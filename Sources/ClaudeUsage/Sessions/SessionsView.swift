@@ -8,6 +8,7 @@ import UsageCore
 struct SessionsView: View {
     var store: UsageStore
     var registry: ProviderRegistry
+    var navigator: SessionsNavigator
 
     @State private var selectedID: String?
     /// User decision: background runs are visible by default, badged and
@@ -55,21 +56,28 @@ struct SessionsView: View {
 
     private func sidebar(colors: [String: Color]) -> some View {
         VStack(spacing: 0) {
-            List(selection: $selectedID) {
-                ForEach(SessionDayGroup.build(visibleSessions, calendar: .current)) { group in
-                    Section(Self.dayLabel(group.day)) {
-                        ForEach(group.sessions) { session in
-                            SessionRow(
-                                session: session,
-                                cost: Self.cost(of: session, pricing: store.pricing),
-                                colors: colors
-                            )
-                            .tag(session.id)
+            ScrollViewReader { proxy in
+                List(selection: $selectedID) {
+                    ForEach(SessionDayGroup.build(visibleSessions, calendar: .current)) { group in
+                        Section(Self.dayLabel(group.day)) {
+                            ForEach(group.sessions) { session in
+                                SessionRow(
+                                    session: session,
+                                    cost: Self.cost(of: session, pricing: store.pricing),
+                                    colors: colors
+                                )
+                                .tag(session.id)
+                            }
                         }
                     }
                 }
+                .listStyle(.sidebar)
+                // Both halves of the navigator contract: onAppear catches a
+                // request set before the window's first render (fresh window),
+                // onChange catches retargeting while it's already open.
+                .onAppear { applyNavigation(proxy) }
+                .onChange(of: navigator.requested) { applyNavigation(proxy) }
             }
-            .listStyle(.sidebar)
             Divider()
             HStack {
                 Toggle("Show background runs", isOn: $showBackground)
@@ -85,6 +93,16 @@ struct SessionsView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 7)
         }
+    }
+
+    /// Applies a pending outside selection request: land the sidebar on the
+    /// session and consume the request. The shortlist only offers interactive
+    /// sessions, which the background filter never hides.
+    private func applyNavigation(_ proxy: ScrollViewProxy) {
+        guard let id = navigator.requested else { return }
+        selectedID = id
+        proxy.scrollTo(id, anchor: .center)
+        navigator.requested = nil
     }
 
     private var emptyState: some View {

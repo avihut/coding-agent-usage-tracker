@@ -175,6 +175,20 @@ the README rather than silently deviating.
   rows have no cost story and don't open. Fixed popover width (344)
   because a Text's ideal width is its unwrapped width — natural
   sizing would let a long preview blow the popover out.
+  PANEL SHORTLIST (v0.45.0): the panel shows a "Sessions" strip
+  below the activity heatmap — SessionShortlist.build (UsageCore):
+  newest ≤3 INTERACTIVE sessions (background never listed), hasMore
+  true when the cap or the background filter hid anything, which
+  shows the "Show more…" button (plain onOpenSessions). Rows are
+  single lines (title · updatedStamp · sidebar cost rule) with the
+  grid's hover/link idiom; clicking calls onOpenSession(id) →
+  StatusItemController.showSessions(selecting:) →
+  SessionsWindowController.show(selecting:) → SessionsNavigator
+  (@Observable, consume-once `requested`) → SessionsView applies it
+  in BOTH .onAppear (request set before a fresh window's first
+  render) and .onChange (retarget while open), selecting + scrolling
+  the sidebar then clearing the request. The section gates on
+  store.providesSessions.
   CODEX SESSIONS (v0.31.0): CodexActivitySource populates the same
   seam — one rollout file = one session (cache v2; SessionMeta stores
   title/cwd/cli_version/start/end/stretches, counts derived from

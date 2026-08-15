@@ -413,6 +413,22 @@ public struct SessionChartModel: Sendable, Equatable {
     }
 }
 
+/// The panel's recent-sessions strip: the newest interactive sessions,
+/// capped, with an honest "there's more" signal that covers both the cap
+/// and every background run the strip hides.
+public enum SessionShortlist {
+    public static let limit = 3
+
+    /// `sessions` arrives end-descending (the scan's contract), so the
+    /// first interactive entries are the latest ones.
+    public static func build(
+        _ sessions: [SessionSummary], limit: Int = limit
+    ) -> (rows: [SessionSummary], hasMore: Bool) {
+        let rows = Array(sessions.lazy.filter { $0.kind == .interactive }.prefix(limit))
+        return (rows, sessions.count > rows.count)
+    }
+}
+
 /// Day sections for the sessions sidebar. Pure and calendar-injected so the
 /// grouping is testable (the app target has no tests).
 public enum SessionDayGroup {

@@ -11,6 +11,9 @@ struct UsagePanelView: View {
     let onOpenSettings: () -> Void
     /// Same shape for the Sessions window.
     let onOpenSessions: () -> Void
+    /// The shortlist's click-through: opens the Sessions window landed on
+    /// the clicked session.
+    let onOpenSession: (String) -> Void
     /// Coordinate space the row-frame preferences are measured in — the same
     /// view the shared popover attaches to, so its anchor rects line up.
     static let panelSpace = "usage-panel"
@@ -28,6 +31,8 @@ struct UsagePanelView: View {
     /// Clicking the red (budget-spent) reload button opens its explanation
     /// instead of refreshing.
     @State private var showRefreshBlocked = false
+    /// The shortlist row under the cursor, if any.
+    @State private var hoveredSession: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -39,6 +44,7 @@ struct UsagePanelView: View {
                 activity: store.activity, pricing: store.pricing,
                 weeklyProfile: store.weeklyProfile,
                 agentName: store.provider.agentName)
+            sessionsSection
             footer
         }
         .padding(14)
@@ -268,6 +274,73 @@ struct UsagePanelView: View {
         Binding(
             get: { registry.selection },
             set: { registry.select($0) })
+    }
+
+    /// The last few interactive sessions, one quiet line each — a shortcut
+    /// into the Sessions browser. Background runs stay out of the strip;
+    /// "Show more" covers them and anything past the cap.
+    @ViewBuilder private var sessionsSection: some View {
+        let shortlist = SessionShortlist.build(store.sessions)
+        if store.providesSessions, !shortlist.rows.isEmpty || shortlist.hasMore {
+            Divider()
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Sessions")
+                    .font(.caption.bold())
+                    .padding(.bottom, 2)
+                ForEach(shortlist.rows) { session in
+                    shortlistRow(session)
+                }
+                if shortlist.hasMore {
+                    Button {
+                        onOpenSessions()
+                    } label: {
+                        Text("Show more…")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .pointerStyle(.link)
+                    .padding(.horizontal, 4)
+                    .padding(.top, 2)
+                }
+            }
+        }
+    }
+
+    /// One session as a single line: title, day-aware stamp, est. cost —
+    /// the sidebar card's essentials without its place/dots/counts body.
+    private func shortlistRow(_ session: SessionSummary) -> some View {
+        let cost = SessionsView.cost(of: session, pricing: store.pricing)
+        return HStack(spacing: 8) {
+            Text(session.title)
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            Text(UsageFormatting.updatedStamp(session.end, now: Date()))
+                .foregroundStyle(.tertiary)
+                .monospacedDigit()
+            // The sidebar's cost rule: an all-unpriced session reads "—",
+            // never a false $0.
+            Text(cost.unpricedModels > 0 && cost.dollars == 0
+                ? "—" : UsageFormatting.money(cost.dollars))
+                .fontWeight(.semibold)
+                .monospacedDigit()
+        }
+        .font(.caption)
+        .padding(.horizontal, 4)
+        .padding(.vertical, 3)
+        .background(
+            RoundedRectangle(cornerRadius: 4)
+                .fill(Color.primary.opacity(hoveredSession == session.id ? 0.07 : 0)))
+        .contentShape(Rectangle())
+        .onHover { inside in
+            if inside {
+                hoveredSession = session.id
+            } else if hoveredSession == session.id {
+                hoveredSession = nil
+            }
+        }
+        .pointerStyle(.link)
+        .onTapGesture { onOpenSession(session.id) }
     }
 
     private func statusLine(now: Date) -> Text {

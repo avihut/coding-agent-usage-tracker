@@ -1,6 +1,15 @@
 import AppKit
 import SwiftUI
 
+/// Carries "open to this session" requests from outside surfaces (the
+/// panel's shortlist) into the sidebar. Consume-once: the view applies the
+/// id to its selection and clears it — a plain init parameter couldn't
+/// retarget a window that's already open.
+@MainActor @Observable
+final class SessionsNavigator {
+    var requested: String?
+}
+
 /// Owns the one Sessions window. Same contract as SettingsWindowController:
 /// an LSUIElement app gets no scene wiring for free, so the window is created
 /// on first show, kept alive across closes, and explicitly fronted —
@@ -10,6 +19,7 @@ import SwiftUI
 final class SessionsWindowController {
     private let store: UsageStore
     private let registry: ProviderRegistry
+    private let navigator = SessionsNavigator()
     private var window: NSWindow?
 
     init(store: UsageStore, registry: ProviderRegistry) {
@@ -25,10 +35,10 @@ final class SessionsWindowController {
         window = nil
     }
 
-    func show() {
+    func show(selecting sessionID: String? = nil) {
         if window == nil {
             let host = NSHostingController(
-                rootView: SessionsView(store: store, registry: registry))
+                rootView: SessionsView(store: store, registry: registry, navigator: navigator))
             let window = NSWindow(contentViewController: host)
             window.title = "Sessions"
             window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
@@ -39,6 +49,7 @@ final class SessionsWindowController {
             window.setFrameAutosaveName("ClaudeUsageSessions")
             self.window = window
         }
+        if let sessionID { navigator.requested = sessionID }
         // The sidebar should be at most seconds stale when the user looks.
         store.scanActivity(force: true)
         // Dock tile + Cmd+Tab entry ride window visibility; the policy must

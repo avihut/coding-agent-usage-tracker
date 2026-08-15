@@ -75,6 +75,9 @@ final class StatusItemController: NSResponder {
                 },
                 onOpenSessions: { [weak self] in
                     self?.showSessions()
+                },
+                onOpenSession: { [weak self] id in
+                    self?.showSessions(selecting: id)
                 }))
         host.sizingOptions = .preferredContentSize
         return host
@@ -207,13 +210,14 @@ final class StatusItemController: NSResponder {
         settingsController?.show(pane: pane)
     }
 
-    /// Opens the Sessions window; also the `--sessions` launch hatch.
-    func showSessions() {
+    /// Opens the Sessions window; also the `--sessions` launch hatch. A
+    /// session id (the panel shortlist's click) lands the sidebar on it.
+    func showSessions(selecting sessionID: String? = nil) {
         if popover.isShown { popover.performClose(nil) }
         if sessionsController == nil {
             sessionsController = SessionsWindowController(store: store, registry: registry)
         }
-        sessionsController?.show()
+        sessionsController?.show(selecting: sessionID)
     }
 
     // MARK: - Outside-interaction dismissal

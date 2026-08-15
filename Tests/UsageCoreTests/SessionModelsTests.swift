@@ -278,11 +278,13 @@ struct SessionDayGroupTests {
         return calendar
     }
 
-    static func summary(id: String, end: String) -> SessionSummary {
+    static func summary(
+        id: String, end: String, kind: SessionKind = .interactive
+    ) -> SessionSummary {
         let endDate = FlexibleISO8601.date(from: end)!
         return SessionSummary(
             id: id, title: id, projectPath: nil, gitBranch: nil, agentVersion: nil,
-            kind: .interactive, start: endDate.addingTimeInterval(-600), end: endDate,
+            kind: kind, start: endDate.addingTimeInterval(-600), end: endDate,
             activeSeconds: 600, prompts: 1, apiCalls: 1, toolCalls: 0,
             subagentCount: 0, compactions: 0, models: [:])
     }
@@ -305,5 +307,53 @@ struct SessionDayGroupTests {
     @Test("empty input yields no groups")
     func empty() {
         #expect(SessionDayGroup.build([], calendar: Self.utcCalendar()).isEmpty)
+    }
+}
+
+@Suite("SessionShortlist")
+struct SessionShortlistTests {
+    @Test("caps at the limit, newest first, interactive only")
+    func caps() {
+        let sessions = [
+            SessionDayGroupTests.summary(id: "e", end: "2026-08-16T10:00:00.000Z"),
+            SessionDayGroupTests.summary(
+                id: "d", end: "2026-08-16T09:00:00.000Z", kind: .background),
+            SessionDayGroupTests.summary(id: "c", end: "2026-08-16T08:00:00.000Z"),
+            SessionDayGroupTests.summary(id: "b", end: "2026-08-16T07:00:00.000Z"),
+            SessionDayGroupTests.summary(id: "a", end: "2026-08-16T06:00:00.000Z"),
+        ]
+        let shortlist = SessionShortlist.build(sessions)
+        #expect(shortlist.rows.map { $0.id } == ["e", "c", "b"])
+        #expect(shortlist.hasMore)
+    }
+
+    @Test("exactly the limit of interactive sessions needs no more-button")
+    func exact() {
+        let sessions = [
+            SessionDayGroupTests.summary(id: "c", end: "2026-08-16T08:00:00.000Z"),
+            SessionDayGroupTests.summary(id: "b", end: "2026-08-16T07:00:00.000Z"),
+            SessionDayGroupTests.summary(id: "a", end: "2026-08-16T06:00:00.000Z"),
+        ]
+        let shortlist = SessionShortlist.build(sessions)
+        #expect(shortlist.rows.count == 3)
+        #expect(!shortlist.hasMore)
+    }
+
+    @Test("background-only history: empty strip, but more points at it")
+    func backgroundOnly() {
+        let sessions = [
+            SessionDayGroupTests.summary(
+                id: "a", end: "2026-08-16T06:00:00.000Z", kind: .background),
+        ]
+        let shortlist = SessionShortlist.build(sessions)
+        #expect(shortlist.rows.isEmpty)
+        #expect(shortlist.hasMore)
+    }
+
+    @Test("no sessions: nothing to show, nothing more")
+    func empty() {
+        let shortlist = SessionShortlist.build([])
+        #expect(shortlist.rows.isEmpty)
+        #expect(!shortlist.hasMore)
     }
 }
