@@ -13,6 +13,8 @@ struct HeatmapView: View {
     /// The learned weekly rhythm behind the 7D chart's typical-week overlay;
     /// nil until the app has recorded any sample history at all.
     let weeklyProfile: WeeklyProfile?
+    /// Names whose traces these are ("Claude Code") in the empty state.
+    let agentName: String
 
     enum Period: String, CaseIterable, Identifiable {
         case week = "7D"
@@ -98,7 +100,7 @@ struct HeatmapView: View {
             if pageOffset == 0, layout.isEmpty, !layout.hasOlder {
                 VStack(alignment: .leading, spacing: 8) {
                     titleRow
-                    Text("No local Claude Code activity found")
+                    Text("No local \(agentName) activity found")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }

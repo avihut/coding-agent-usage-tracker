@@ -2,38 +2,38 @@ import Foundation
 
 /// The whole refresh pipeline: fresh token read → one fetch (with a single
 /// transport-only retry) → decode → cache. Returns a renderable state in
-/// every failure mode. No UI, no shared state, fully testable.
+/// every failure mode. Provider-agnostic: the injected `UsageProvider` owns
+/// where credentials live, how the fetch speaks, and how bytes become a
+/// snapshot — this type owns only the orchestration. No UI, no shared state,
+/// fully testable.
 public struct UsageService: Sendable {
-    let credentials: CredentialChain
-    let client: UsageClient
+    let provider: any UsageProvider
     let cache: UsageCache
     /// Delay before the one transport retry (spec §6). Injectable so tests
     /// don't sleep.
     let retryDelay: Duration
 
     public init(
-        credentials: CredentialChain,
-        client: UsageClient,
+        provider: any UsageProvider,
         cache: UsageCache,
         retryDelay: Duration = .seconds(2)
     ) {
-        self.credentials = credentials
-        self.client = client
+        self.provider = provider
         self.cache = cache
         self.retryDelay = retryDelay
     }
 
-    public static func standard(bundleID: String) -> UsageService {
-        UsageService(credentials: .standard, client: UsageClient(), cache: .standard(bundleID: bundleID))
+    public static func standard(provider: any UsageProvider, bundleID: String) -> UsageService {
+        UsageService(provider: provider, cache: .standard(bundleID: bundleID))
     }
 
     public func refresh(thresholds: Thresholds = .standard) async -> DisplayState {
-        // The token is re-read every cycle (Claude Code rotates it) and lives
+        // The token is re-read every cycle (the agent rotates it) and lives
         // only in this frame for the duration of one request (spec §5).
         let token: String
         let plan: PlanInfo
         do {
-            let credential = try credentials.readCredential()
+            let credential = try provider.credentials.readCredential()
             token = credential.accessToken
             plan = credential.plan
         } catch let error as CredentialError {
@@ -51,11 +51,13 @@ public struct UsageService: Sendable {
             return fallback(.network, thresholds: thresholds)
         }
 
-        guard let response = try? UsageResponse.decode(from: body) else {
+        let fetchedAt = Date()
+        guard let snapshot = try? provider.snapshot(
+            fromRawUsage: body, fetchedAt: fetchedAt, plan: plan, thresholds: thresholds)
+        else {
             return fallback(.schema, thresholds: thresholds)
         }
-        let snapshot = Snapshot(response: response, fetchedAt: Date(), plan: plan, thresholds: thresholds)
-        cache.save(body: body, fetchedAt: snapshot.fetchedAt)
+        cache.save(body: body, fetchedAt: fetchedAt)
         return .live(snapshot)
     }
 
@@ -63,20 +65,19 @@ public struct UsageService: Sendable {
     /// and this runs unattended against an undocumented endpoint (spec §6).
     private func fetchWithOneRetry(token: String) async throws -> Data {
         do {
-            return try await client.fetchRawUsage(accessToken: token)
+            return try await provider.fetchRawUsage(accessToken: token)
         } catch let error as UsageClientError {
             guard case .network = error else { throw error }
             try? await Task.sleep(for: retryDelay)
-            return try await client.fetchRawUsage(accessToken: token)
+            return try await provider.fetchRawUsage(accessToken: token)
         }
     }
 
     private func fallback(_ error: UsageError, thresholds: Thresholds) -> DisplayState {
         guard let (body, fetchedAt) = cache.load(),
-              let response = try? UsageResponse.decode(from: body)
+              let snapshot = try? provider.snapshot(
+                  fromRawUsage: body, fetchedAt: fetchedAt, plan: nil, thresholds: thresholds)
         else { return .unavailable(error) }
-        return .cached(
-            Snapshot(response: response, fetchedAt: fetchedAt, thresholds: thresholds),
-            error: error)
+        return .cached(snapshot, error: error)
     }
 }

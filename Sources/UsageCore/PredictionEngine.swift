@@ -99,20 +99,11 @@ public enum PredictionEngine {
     /// Sampling resolution of a damped trajectory between now and reset.
     static let curveSampleCount = 48
 
-    /// Sampling window per meter rank: sessions move fast, weeklies slowly.
-    public static func window(forRank rank: Int) -> TimeInterval {
-        rank == 0 ? 45 * 60 : 4 * 3600
-    }
-
-    /// The limit window's full length by meter rank: the 5-hour session,
-    /// otherwise the 7-day weeklies.
-    public static func windowLength(forRank rank: Int) -> TimeInterval {
-        rank == 0 ? 5 * 3600 : 7 * 86400
-    }
-
     /// The one entry point surfaces use: nil when the meter has no percent
     /// or the samples can't support a rate yet. `previous` feeds the verdict
     /// smoothing; `profile` supplies the weekly-rhythm baseline when ready.
+    /// Window shapes come from the meter itself — provider data, not rank
+    /// heuristics; an unknown limit window keeps the meter pure-linear.
     public static func predict(
         meter: Meter, samples: [UsageSample], profile: WeeklyProfile? = nil,
         previous: UsagePrediction? = nil, now: Date
@@ -120,11 +111,11 @@ public enum PredictionEngine {
         guard let percent = meter.percent,
               let rate = ratePerHour(
                   samples: samples, label: meter.label,
-                  window: window(forRank: meter.rank), now: now)
+                  window: meter.rateWindow, now: now)
         else { return nil }
         return prediction(
             percent: percent, resetsAt: meter.resetsAt, ratePerHour: rate,
-            windowLength: windowLength(forRank: meter.rank),
+            windowLength: meter.limitWindow ?? 0,
             profile: profile, previous: previous, now: now)
     }
 

@@ -11,7 +11,7 @@ struct UsageHistoryTests {
         let history = UsageHistory(directory: directory, retention: 3600)
         let now = Date()
         let response = try UsageResponse.decode(from: loadFixture("real-2026-08-07"))
-        let snapshot = Snapshot(response: response, fetchedAt: now)
+        let snapshot = makeSnapshot(response: response, fetchedAt: now)
 
         let stale = UsageSample(t: now.addingTimeInterval(-7200), percents: ["Session (5h)": 3])
         let updated = history.append(snapshot, existing: [stale], now: now)
@@ -32,7 +32,7 @@ struct UsageHistoryTests {
             denseWindow: 3600, thinnedResolution: 1800)
         let now = Date(timeIntervalSinceReferenceDate: 900_000)
         let response = try UsageResponse.decode(from: loadFixture("real-2026-08-07"))
-        let snapshot = Snapshot(response: response, fetchedAt: now)
+        let snapshot = makeSnapshot(response: response, fetchedAt: now)
 
         let existing = [892_800.0, 894_600, 896_100, 896_400].map {
             UsageSample(

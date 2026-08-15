@@ -43,7 +43,7 @@ struct UsageServiceTests {
         StubURLProtocol.register(token: token) { _ in throw URLError(.notConnectedToInternet) }
         let state = await makeService(token: token, cache: temporaryCache()).refresh()
         #expect(state == .unavailable(.network))
-        #expect(state.error?.shortText.isEmpty == false)
+        #expect(state.error?.shortText(agent: "Claude Code").isEmpty == false)
     }
 
     @Test("missing credentials surface as noCredentials without any request")

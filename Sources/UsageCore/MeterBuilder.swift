@@ -35,7 +35,60 @@ public struct Meter: Sendable, Equatable, Identifiable {
     public let percent: Int?
     public let resetsAt: Date?
     public let level: DisplayLevel
+    /// Normalized semantics, not provider vocabulary: 0 = the fast
+    /// session-style limit, 1 = the overall long window, 2 = scoped/other.
+    /// Ordering and menu-bar slotting key on this.
     public let rank: Int
+    /// Full length of the limit window (Claude: the session's 5 hours, a
+    /// weekly's 7 days) — provider data, not a rank heuristic. Nil when the
+    /// provider doesn't know; prediction then stays pure-linear.
+    public let limitWindow: TimeInterval?
+    /// How far back the burn-rate fit reaches for this meter.
+    public let rateWindow: TimeInterval
+    /// The API flagged this limit non-normal — floors the level at warning
+    /// under any thresholds.
+    public let forcesWarning: Bool
+    /// For scoped limits: the model this meter covers, as the provider
+    /// displays it ("Fable"). Data, so no UI ever parses it out of `label`.
+    public let scopedModelName: String?
+
+    public init(
+        id: String, label: String, percent: Int?, resetsAt: Date?,
+        level: DisplayLevel, rank: Int,
+        limitWindow: TimeInterval? = nil, rateWindow: TimeInterval? = nil,
+        forcesWarning: Bool = false, scopedModelName: String? = nil
+    ) {
+        self.id = id
+        self.label = label
+        self.percent = percent
+        self.resetsAt = resetsAt
+        self.level = level
+        self.rank = rank
+        self.limitWindow = limitWindow
+        self.rateWindow = rateWindow ?? Self.defaultRateWindow(limitWindow: limitWindow)
+        self.forcesWarning = forcesWarning
+        self.scopedModelName = scopedModelName
+    }
+
+    /// Short windows move fast and need a tight fit; long ones should
+    /// average across sittings: 45 minutes for windows up to ~6 hours,
+    /// 4 hours beyond (and when the window is unknown). Providers inherit
+    /// this unless they know better.
+    public static func defaultRateWindow(limitWindow: TimeInterval?) -> TimeInterval {
+        guard let limitWindow, limitWindow <= 6 * 3600 else { return 4 * 3600 }
+        return 45 * 60
+    }
+
+    /// The same meter re-classified under different thresholds — what lets a
+    /// threshold edit re-color the panel without re-fetching.
+    public func releveled(thresholds: Thresholds) -> Meter {
+        Meter(
+            id: id, label: label, percent: percent, resetsAt: resetsAt,
+            level: MeterBuilder.level(
+                percent: percent, forcesWarning: forcesWarning, thresholds: thresholds),
+            rank: rank, limitWindow: limitWindow, rateWindow: rateWindow,
+            forcesWarning: forcesWarning, scopedModelName: scopedModelName)
+    }
 }
 
 /// What the menu bar item renders: `✳︎ session·weeklyAll·scopedMax%`.
@@ -65,7 +118,10 @@ public struct SpendLine: Sendable, Equatable {
     }
 }
 
-/// Pure transformation: decoded response → ordered view models. No UI, no I/O.
+/// Pure transformation: Anthropic's decoded response → normalized view
+/// models. This is the Claude provider's adapter — the ONE place its limit
+/// vocabulary ("session", "weekly_all") and window shapes (5h, 7d) become
+/// `Meter` data. No UI, no I/O.
 public enum MeterBuilder {
     public static func meters(
         from response: UsageResponse, thresholds: Thresholds = .standard
@@ -75,6 +131,18 @@ public enum MeterBuilder {
             .map { index, limit in meter(from: limit, index: index, thresholds: thresholds) }
             .sorted { ($0.rank, $0.orderInResponse) < ($1.rank, $1.orderInResponse) }
             .map(\.meter)
+    }
+
+    /// The full normalized snapshot for one fetched payload.
+    public static func snapshot(
+        from response: UsageResponse, fetchedAt: Date, plan: PlanInfo? = nil,
+        thresholds: Thresholds = .standard
+    ) -> Snapshot {
+        Snapshot(
+            meters: meters(from: response, thresholds: thresholds),
+            spendLine: spendLine(from: response),
+            fetchedAt: fetchedAt,
+            plan: plan)
     }
 
     public static func menuBarSummary(from meters: [Meter]) -> MenuBarSummary {
@@ -104,39 +172,49 @@ public enum MeterBuilder {
     private static func meter(
         from limit: UsageLimit, index: Int, thresholds: Thresholds
     ) -> (meter: Meter, rank: Int, orderInResponse: Int) {
-        let (label, rank) = labelAndRank(for: limit)
+        let shape = shape(for: limit)
         let percent = limit.percent.map { max(0, min(100, Int($0.rounded()))) }
+        let forcesWarning = limit.severity != nil && limit.severity != "normal"
         let meter = Meter(
             id: "\(index)-\(limit.kind ?? "unknown")",
-            label: label,
+            label: shape.label,
             percent: percent,
             resetsAt: limit.resetsAt,
-            level: level(percent: percent, severity: limit.severity, thresholds: thresholds),
-            rank: rank
+            level: level(percent: percent, forcesWarning: forcesWarning, thresholds: thresholds),
+            rank: shape.rank,
+            limitWindow: shape.limitWindow,
+            forcesWarning: forcesWarning,
+            scopedModelName: shape.scopedModel
         )
-        return (meter, rank, index)
+        return (meter, shape.rank, index)
     }
 
-    private static func labelAndRank(for limit: UsageLimit) -> (String, Int) {
+    /// Claude's limit vocabulary, translated once: kind → label, rank, and
+    /// the window length the prediction engine works in.
+    private static func shape(
+        for limit: UsageLimit
+    ) -> (label: String, rank: Int, limitWindow: TimeInterval?, scopedModel: String?) {
         switch limit.kind {
         case "session":
-            return ("Session (5h)", 0)
+            return ("Session (5h)", 0, 5 * 3600, nil)
         case "weekly_all":
-            return ("Weekly · all models", 1)
+            return ("Weekly · all models", 1, 7 * 86400, nil)
         case "weekly_scoped":
             let model = limit.scope?.model?.displayName ?? "scoped"
-            return ("Weekly · \(model)", 2)
+            return ("Weekly · \(model)", 2, 7 * 86400, model)
         case let other?:
-            return (titleCased(other), 2)
+            return (titleCased(other), 2, nil, nil)
         case nil:
-            return ("Unknown limit", 2)
+            return ("Unknown limit", 2, nil, nil)
         }
     }
 
-    private static func level(
-        percent: Int?, severity: String?, thresholds: Thresholds
+    /// Percent thresholds, floored at warning when the API itself flagged
+    /// the limit. Public because re-leveling on threshold edits reuses it.
+    public static func level(
+        percent: Int?, forcesWarning: Bool, thresholds: Thresholds
     ) -> DisplayLevel {
-        let forced: DisplayLevel = (severity != nil && severity != "normal") ? .warning : .normal
+        let forced: DisplayLevel = forcesWarning ? .warning : .normal
         guard let percent else { return forced }
         let byPercent: DisplayLevel =
             percent >= thresholds.criticalPercent ? .critical

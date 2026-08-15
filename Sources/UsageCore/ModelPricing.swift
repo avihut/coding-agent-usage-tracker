@@ -275,16 +275,25 @@ public struct PricingFeedClient: Sendable {
 public struct PricingService: Sendable {
     let client: PricingFeedClient
     let fileURL: URL
+    /// The provider's offline floor, used until the feed has been cached.
+    let fallback: PricingTable
 
-    public init(client: PricingFeedClient = PricingFeedClient(), cacheDirectory: URL) {
+    public init(
+        client: PricingFeedClient = PricingFeedClient(), cacheDirectory: URL,
+        fallback: PricingTable = .bundled
+    ) {
         self.client = client
         self.fileURL = cacheDirectory.appending(path: "pricing.json")
+        self.fallback = fallback
     }
 
-    public static func standard(bundleID: String) -> PricingService {
+    public static func standard(
+        bundleID: String, fallback: PricingTable = .bundled
+    ) -> PricingService {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
-        return PricingService(cacheDirectory: base.appending(path: bundleID))
+        return PricingService(
+            cacheDirectory: base.appending(path: bundleID), fallback: fallback)
     }
 
     /// Best table available without touching the network.
@@ -292,7 +301,7 @@ public struct PricingService: Sendable {
         guard let data = try? Data(contentsOf: fileURL),
               let table = try? JSONDecoder().decode(PricingTable.self, from: data),
               !table.rates.isEmpty
-        else { return .bundled }
+        else { return fallback }
         return table
     }
 

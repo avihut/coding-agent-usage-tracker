@@ -31,6 +31,44 @@ the README rather than silently deviating.
 
 - `UsageCore` is a library with zero AppKit/SwiftUI imports; all logic is
   headlessly testable. The app layer is a pure function of store state.
+- PROVIDER SEAM (2026-08-15 v0.25.0, user-directed decoupling): everything
+  vendor-specific sits behind `UsageProvider` (UsageProvider.swift) —
+  identity (serviceName/agentName/menuBarGlyph/links/networkDestinations),
+  `credentials: CredentialChain`, `fetchRawUsage`, `snapshot(fromRawUsage:)`
+  (bytes → normalized `Snapshot`; the cache stores raw bytes and replays
+  them through the provider), `makeLocalActivity(bundleID:)` (protocol
+  `LocalActivitySource`: watchDirectories/displayPath/scanTranscripts/
+  scanPromptDays/diskUsage — read-only by contract), `agentSettings`
+  (protocol `AgentSettingsStore`: the ONE sanctioned retention write),
+  `modelCatalog` (`ModelCatalog` closures: displayName/familyName/
+  familyRank), `bundledRates`. `ClaudeProvider` (ClaudeProvider.swift) is
+  the only implementation and owns every Claude fact: the OAuth endpoint
+  (via UsageClient), keychain/file credential chain, ~/.claude paths
+  (ClaudeActivitySource), cleanupPeriodDays (ClaudeCodeSettings
+  conformance), claude-id grammar + Fable/Mythos>Opus>Sonnet>Haiku tier
+  ladder, claude.ai links, the ✳︎ glyph, the bundled rate table.
+  `MeterBuilder` is the Claude adapter proper — the ONE place its limit
+  vocabulary ("session"/"weekly_all"/"weekly_scoped") becomes normalized
+  meters. NOTHING outside those files may name a vendor: no claude.ai
+  URLs, no ~/.claude paths, no "Claude Code" strings (views read
+  `store.provider.*`; error text takes `agent:`), no model-id parsing
+  (`ModelNames` is a facade over the installed catalog —
+  `nonisolated(unsafe)` static set once at launch in ClaudeUsageApp,
+  defaulting to `.claude` as the bundled provider). `Meter` carries what
+  used to be rank heuristics as DATA: `limitWindow` (5h/7d),
+  `rateWindow` (45min/4h via `defaultRateWindow` tiering ≤6h),
+  `forcesWarning` (severity floor — `Snapshot.rebuilt` re-levels meters
+  in place, no payload retained), `scopedModelName` (no UI label
+  parsing). `PredictionEngine.window(forRank:)`/`windowLength(forRank:)`
+  are GONE — predict reads the meter; nil limitWindow = pure-linear.
+  Exactly one provider per app instance (a seam for adopting other
+  agents, not concurrent metering); UsageStore takes it at init and the
+  ✳︎/name/links flow from it. App/product branding (app name "Claude
+  Usage", bundle id, repo name, accent orange) is deliberately NOT behind
+  the seam — renaming is a product decision, not plumbing. Adding a
+  provider later = a new UsageProvider implementation + a spec §10
+  amendment for its hosts; the engine, history, charts, and panel need
+  zero changes.
 - One refresh pipeline, one entry point: `UsageStore.refresh(reason:)` owns
   single-flighting, the 60-second minimum interval, and 429-backoff
   enforcement for every trigger (timer, wake, network-restore, manual,
@@ -42,8 +80,8 @@ the README rather than silently deviating.
   (3 min–2 h, `RefreshIntervalScale`: magnetic marks at the presets, clean
   rounding between them); the panel's ⋯ menu keeps the 3/5/15 quick picks
   plus the current in-between value so its picker never shows empty. Evidence of use snaps it back: FSEvents on
-  `~/.claude/projects` (`ClaudeActivityWatcher` — observational only, never
-  reads paths) is the push signal for Claude Code; percentages rising between
+  the provider's watch directories (`AgentActivityWatcher` — observational
+  only, never reads paths) is the push signal for the agent; percentages rising between
   polls (`UsageMovement` — rises and fresh-window usage count, drops are
   resets) is the pull signal that catches Claude app/web use. A push signal
   also polls immediately when the shown data is older than the active

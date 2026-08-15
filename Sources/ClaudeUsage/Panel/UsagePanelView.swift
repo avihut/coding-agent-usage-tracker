@@ -32,7 +32,8 @@ struct UsagePanelView: View {
             Divider()
             HeatmapView(
                 activity: store.activity, pricing: store.pricing,
-                weeklyProfile: store.weeklyProfile)
+                weeklyProfile: store.weeklyProfile,
+                agentName: store.provider.agentName)
             footer
         }
         .padding(14)
@@ -46,7 +47,8 @@ struct UsagePanelView: View {
             MeterHistoryView(
                 meter: meter, samples: store.samples,
                 timeline: store.tokenTimeline, pricing: store.pricing,
-                prediction: store.predictions[meter.label])
+                prediction: store.predictions[meter.label],
+                agentName: store.provider.agentName)
                 .onHover { inside in
                     hoveringPopover = inside
                     if !inside { scheduleHideIfLeft() }
@@ -94,10 +96,10 @@ struct UsagePanelView: View {
     @ViewBuilder private var errorBlock: some View {
         if let error = store.state.error {
             VStack(alignment: .leading, spacing: 2) {
-                Text(error.shortText)
+                Text(error.shortText(agent: store.provider.agentName))
                     .font(.caption)
                     .foregroundStyle(store.state.snapshot == nil ? AnyShapeStyle(.red) : AnyShapeStyle(.secondary))
-                if let hint = error.hint {
+                if let hint = error.hint(agent: store.provider.agentName) {
                     Text(hint).font(.caption2).foregroundStyle(.secondary)
                 }
             }
@@ -119,17 +121,24 @@ struct UsagePanelView: View {
                 if let plan = store.state.snapshot?.plan?.displayLabel {
                     // A working link dressed as a plain caption: Link's tint
                     // shouted over the header, so the hand cursor and help
-                    // tag carry the affordance instead of color.
-                    Button {
-                        NSWorkspace.shared.open(URL(string: "https://claude.ai/upgrade")!)
-                    } label: {
+                    // tag carry the affordance instead of color. Providers
+                    // without an upgrade page get the caption, no link.
+                    if let upgrade = store.provider.links.planUpgrade {
+                        Button {
+                            NSWorkspace.shared.open(upgrade)
+                        } label: {
+                            Text(plan)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .pointerStyle(.link)
+                        .help("Choose your plan on \(upgrade.host() ?? store.provider.serviceName)")
+                    } else {
                         Text(plan)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-                    .buttonStyle(.plain)
-                    .pointerStyle(.link)
-                    .help("Choose your plan on claude.ai")
                 }
             }
         }
@@ -204,10 +213,12 @@ struct UsagePanelView: View {
                     .padding(10)
             }
 
-            Link(destination: URL(string: "https://claude.ai/settings/usage")!) {
-                Image(systemName: "arrow.up.right.square")
+            if let usageSettings = store.provider.links.usageSettings {
+                Link(destination: usageSettings) {
+                    Image(systemName: "arrow.up.right.square")
+                }
+                .help("Open \(usageSettings.host() ?? store.provider.serviceName) usage settings")
             }
-            .help("Open claude.ai usage settings")
 
             Menu {
                 Picker("Refresh when active", selection: SettingsBindings.interval(store)) {
@@ -442,6 +453,8 @@ struct MeterHistoryView: View {
     let timeline: [TokenSlot]
     let pricing: PricingTable
     let prediction: UsagePrediction?
+    /// Names whose local sessions feed the breakdown, in the footer note.
+    let agentName: String
 
     /// One-word span choices: a trailing window ending now, or the limit
     /// window itself, start to reset.
@@ -506,16 +519,19 @@ struct MeterHistoryView: View {
 
     init(
         meter: Meter, samples: [UsageSample], timeline: [TokenSlot],
-        pricing: PricingTable, prediction: UsagePrediction?
+        pricing: PricingTable, prediction: UsagePrediction?,
+        agentName: String
     ) {
         self.meter = meter
         self.samples = samples
         self.timeline = timeline
         self.pricing = pricing
         self.prediction = prediction
+        self.agentName = agentName
         _span = AppStorage(wrappedValue: .sliding, "meterPopoverSpan-\(meter.id)")
         _slidingFrame = AppStorage(
-            wrappedValue: meter.rank == 0 ? .h5 : .d7, "meterSlidingFrame-\(meter.id)")
+            wrappedValue: (meter.limitWindow ?? .infinity) <= 6 * 3600 ? .h5 : .d7,
+            "meterSlidingFrame-\(meter.id)")
     }
 
     private static let chartWidth: CGFloat = 300
@@ -554,7 +570,9 @@ struct MeterHistoryView: View {
         return formatter
     }()
 
-    private var window: TimeInterval { meter.rank == 0 ? 5 * 3600 : 7 * 86400 }
+    /// The limit window is provider data on the meter; the 7-day fallback
+    /// only covers a meter whose provider didn't say (Claude always does).
+    private var window: TimeInterval { meter.limitWindow ?? 7 * 86400 }
     private var orange: Color { Color(nsColor: StatusItemRenderer.claudeOrange) }
 
     /// A live future reset unlocks the Window span; without one (stale data,
@@ -575,7 +593,9 @@ struct MeterHistoryView: View {
 
     private var spanLabel: String {
         switch effectiveSpan {
-        case .window: meter.rank == 0 ? "this session" : "this week"
+        case .window:
+            meter.rank == 0 ? "this session"
+                : window >= 6 * 86400 ? "this week" : "this window"
         case .sliding: slidingFrame.label
         }
     }
@@ -776,7 +796,7 @@ struct MeterHistoryView: View {
                     rows: sessionRows(base: rows), colors: colors, pricing: pricing,
                     hoveredModel: $focusedModel)
             }
-            Text("Local Claude Code sessions on this Mac only.")
+            Text("Local \(agentName) sessions on this Mac only.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }
@@ -1732,10 +1752,8 @@ struct MeterHistoryView: View {
         return parts.joined(separator: " · ")
     }
 
-    /// "Weekly · Fable" → "Fable": a scoped meter's breakdown shows only its
-    /// own model's usage, never the whole timeline.
-    private var scopeName: String? {
-        guard meter.rank == 2, meter.label.hasPrefix("Weekly · ") else { return nil }
-        return String(meter.label.dropFirst("Weekly · ".count))
-    }
+    /// A scoped meter's breakdown shows only its own model's usage, never
+    /// the whole timeline. The model name is meter data from the provider —
+    /// no label parsing.
+    private var scopeName: String? { meter.scopedModelName }
 }

@@ -13,12 +13,14 @@ public enum UsageError: Error, Sendable, Equatable {
     case network
     case schema
 
-    public var shortText: String {
+    /// `agent` names whichever local agent owns the credentials ("Claude
+    /// Code") — the taxonomy itself is provider-neutral.
+    public func shortText(agent: String) -> String {
         switch self {
-        case .noCredentials: "No Claude Code sign-in found"
+        case .noCredentials: "No \(agent) sign-in found"
         case .keychainDenied: "Keychain access denied"
         case .credentialsUnreadable: "Stored credentials unreadable"
-        case .signInExpired: "Sign-in expired — open Claude Code"
+        case .signInExpired: "Sign-in expired — open \(agent)"
         case .rateLimited: "Rate limited — checks paused"
         case .http(let code): "Usage endpoint returned HTTP \(code)"
         case .network: "Network unavailable"
@@ -26,11 +28,11 @@ public enum UsageError: Error, Sendable, Equatable {
         }
     }
 
-    public var hint: String? {
+    public func hint(agent: String) -> String? {
         switch self {
-        case .noCredentials: "Sign in to Claude Code, then refresh."
+        case .noCredentials: "Sign in to \(agent), then refresh."
         case .keychainDenied: "Approve the Keychain prompt on the next refresh — \"Always Allow\" stops future prompts."
-        case .signInExpired: "Open Claude Code once; it refreshes the token automatically."
+        case .signInExpired: "Open \(agent) once; it refreshes the token automatically."
         case .rateLimited: "The API asked for a pause. Checks back off and resume on their own."
         case .schema: "The undocumented API may have changed shape."
         case .http, .network, .credentialsUnreadable: nil
@@ -56,7 +58,9 @@ public enum UsageError: Error, Sendable, Equatable {
     }
 }
 
-/// One decoded usage snapshot, ready to render.
+/// One normalized usage snapshot, ready to render. Providers assemble it
+/// from whatever their payload looks like; nothing downstream sees provider
+/// schemas.
 public struct Snapshot: Sendable, Equatable {
     public let meters: [Meter]
     public let summary: MenuBarSummary
@@ -64,26 +68,25 @@ public struct Snapshot: Sendable, Equatable {
     public let fetchedAt: Date
     /// From the credentials read for this fetch; nil on cache-served states.
     public let plan: PlanInfo?
-    /// Retained so a threshold edit can re-classify levels in place instead
-    /// of waiting out the poll interval.
-    public let response: UsageResponse
 
     public init(
-        response: UsageResponse, fetchedAt: Date, plan: PlanInfo? = nil,
-        thresholds: Thresholds = .standard
+        meters: [Meter], spendLine: SpendLine? = nil, fetchedAt: Date,
+        plan: PlanInfo? = nil
     ) {
-        let meters = MeterBuilder.meters(from: response, thresholds: thresholds)
         self.meters = meters
         self.summary = MeterBuilder.menuBarSummary(from: meters)
-        self.spendLine = MeterBuilder.spendLine(from: response)
+        self.spendLine = spendLine
         self.fetchedAt = fetchedAt
         self.plan = plan
-        self.response = response
     }
 
-    /// The same snapshot re-classified under different thresholds.
+    /// The same snapshot re-classified under different thresholds — meters
+    /// carry everything leveling needs, so no payload is retained or
+    /// re-decoded.
     public func rebuilt(thresholds: Thresholds) -> Snapshot {
-        Snapshot(response: response, fetchedAt: fetchedAt, plan: plan, thresholds: thresholds)
+        Snapshot(
+            meters: meters.map { $0.releveled(thresholds: thresholds) },
+            spendLine: spendLine, fetchedAt: fetchedAt, plan: plan)
     }
 }
 

@@ -166,7 +166,7 @@ struct UsageMovementTests {
     private let day = Date(timeIntervalSince1970: 1_755_000_000)
 
     private func snapshot(_ limits: [UsageLimit]) -> Snapshot {
-        Snapshot(response: UsageResponse(limits: limits, spend: nil), fetchedAt: day)
+        makeSnapshot(response: UsageResponse(limits: limits, spend: nil), fetchedAt: day)
     }
 
     private func limit(_ kind: String, _ percent: Double?, resetsAt: Date? = nil) -> UsageLimit {

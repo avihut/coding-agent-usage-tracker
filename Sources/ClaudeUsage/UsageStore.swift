@@ -34,16 +34,20 @@ final class UsageStore {
     /// Last manual pricing-refresh failure; cleared on the next attempt.
     private(set) var pricingRefreshError: String?
 
+    /// The one metered service this instance tracks. Everything
+    /// vendor-specific — endpoints, paths, names, links — flows from here.
+    let provider: any UsageProvider
+    /// The agent's on-disk traces, created once (scanners keep warm caches);
+    /// nil when the provider's agent leaves nothing to scan.
+    let localActivity: (any LocalActivitySource)?
     private let service: UsageService
     private let history: UsageHistory
-    private let scanner: TranscriptScanner
-    private let promptScanner: PromptHistoryScanner
     private let pricingService: PricingService
     private var gate = TriggerGate()
     private let scheduler = Scheduler()
     private var cadence: AdaptiveCadence
     private var ledger: RequestLedger
-    private var watcher: ClaudeActivityWatcher?
+    private var watcher: AgentActivityWatcher?
     private var lastActivityScan: Date?
     private var lastPricingAttempt: Date?
 
@@ -53,13 +57,13 @@ final class UsageStore {
     static let warningThresholdKey = "warningThresholdPercent"
     static let criticalThresholdKey = "criticalThresholdPercent"
 
-    init(service: UsageService? = nil) {
+    init(provider: any UsageProvider = ClaudeProvider(), service: UsageService? = nil) {
         let bundleID = Bundle.main.bundleIdentifier ?? "com.avihu.ClaudeUsage"
-        self.service = service ?? .standard(bundleID: bundleID)
+        self.provider = provider
+        self.localActivity = provider.makeLocalActivity(bundleID: bundleID)
+        self.service = service ?? .standard(provider: provider, bundleID: bundleID)
         self.history = .standard(bundleID: bundleID)
-        self.scanner = .standard(bundleID: bundleID)
-        self.promptScanner = .standard()
-        self.pricingService = .standard(bundleID: bundleID)
+        self.pricingService = .standard(bundleID: bundleID, fallback: provider.bundledRates)
         self.pricing = pricingService.current()
         let stored = UserDefaults.standard.double(forKey: Self.intervalKey)
         // Stored 60s choices predate the 180s floor — clamp, don't honor.
@@ -75,15 +79,14 @@ final class UsageStore {
             self?.refresh(reason)
         }
         scheduler.start()
-        // Claude Code writing a transcript is the push signal that Claude is
-        // in use. When the directory doesn't exist (Claude Code never ran on
-        // this machine) the pull signal — percentages moving between polls —
-        // still drives the cadence.
-        watcher = ClaudeActivityWatcher(
-            directory: FileManager.default.homeDirectoryForCurrentUser
-                .appending(path: ".claude/projects")
+        // The agent writing a transcript is the push signal that the service
+        // is in use. When its directories don't exist (the agent never ran
+        // on this machine) the pull signal — percentages moving between
+        // polls — still drives the cadence.
+        watcher = AgentActivityWatcher(
+            directories: localActivity?.watchDirectories ?? []
         ) { [weak self] in
-            self?.noteLocalClaudeActivity()
+            self?.noteLocalAgentActivity()
         }
         refresh(.launch)
         scanActivity()
@@ -181,12 +184,12 @@ final class UsageStore {
         }
     }
 
-    /// The FSEvents watcher saw Claude Code write a transcript: snap the
+    /// The FSEvents watcher saw the agent write a transcript: snap the
     /// cadence back to the active pace, and fetch now whenever the displayed
     /// data is older than that pace, so re-engaging always catches the meters
     /// up promptly — even when a background agent session kept the evidence
     /// warm the whole time.
-    func noteLocalClaudeActivity() {
+    func noteLocalAgentActivity() {
         let now = Date()
         cadence.noteActivity(at: now)
         scanActivity() // transcripts changed; the heatmap follows (1/min throttle)
@@ -208,17 +211,17 @@ final class UsageStore {
         cadence.isBackingOff(now: now) ? 1 : cadence.multiplier(now: now)
     }
 
-    /// Re-scans local transcripts + prompt history for the heatmap, at most
-    /// once a minute.
+    /// Re-scans the agent's transcripts + prompt history for the heatmap,
+    /// at most once a minute. A provider without local traces has nothing
+    /// to scan — the activity section shows its empty state.
     func scanActivity(force: Bool = false) {
+        guard let source = localActivity else { return }
         if !force, let last = lastActivityScan, Date().timeIntervalSince(last) < 60 { return }
         lastActivityScan = Date()
-        let scanner = scanner
-        let promptScanner = promptScanner
         Task.detached(priority: .utility) { [weak self] in
-            let scan = scanner.scan()
+            let scan = source.scanTranscripts(now: Date())
             let activity = ActivityMerge.merge(
-                transcripts: scan.daily, prompts: promptScanner.scan())
+                transcripts: scan.daily, prompts: source.scanPromptDays())
             await MainActor.run {
                 self?.activity = activity
                 self?.tokenTimeline = scan.timeline

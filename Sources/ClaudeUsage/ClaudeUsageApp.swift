@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UsageCore
 
 @main
 struct ClaudeUsageApp: App {
@@ -16,7 +17,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var controller: StatusItemController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        controller = StatusItemController(store: UsageStore())
+        // The one place a vendor is chosen. The catalog installs before any
+        // UI renders or scan runs — display names read it from everywhere.
+        let provider = ClaudeProvider()
+        ModelNames.catalog = provider.modelCatalog
+        controller = StatusItemController(store: UsageStore(provider: provider))
         // Verification hatch: `ClaudeUsage --settings [--pane-cost]` opens
         // the settings window straight away, since the ⋯ menu can't be
         // scripted — and AX row selection can't drive the sidebar either.

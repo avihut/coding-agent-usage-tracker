@@ -90,7 +90,8 @@ struct UsageSettingsPane: View {
     }
 
     private func rateWindowLabel(_ meter: Meter) -> String {
-        meter.rank == 0 ? "last 45 min" : "last 4 h"
+        let minutes = Int((meter.rateWindow / 60).rounded())
+        return minutes < 60 ? "last \(minutes) min" : "last \(minutes / 60) h"
     }
 
     private func baselineLabel(_ prediction: UsagePrediction) -> String {

@@ -145,7 +145,7 @@ struct CostPlaygroundView: View {
     private func finalContextText(_ outcome: CostSimulator.Outcome) -> String {
         var text = "Final context: \(TokenFormat.compact(outcome.finalContext)) tokens."
         if outcome.finalContext > 150_000 {
-            text += " Claude Code would auto-compact before it grew this large."
+            text += " An agent session would auto-compact before it grew this large."
         }
         return text
     }

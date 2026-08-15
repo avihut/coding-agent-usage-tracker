@@ -123,26 +123,29 @@ public enum WindowTokens {
     }
 }
 
-/// Friendly names for raw model ids, without a registry to maintain:
-/// "claude-fable-5" → "Fable 5", "claude-haiku-4-5-20251001" → "Haiku 4.5",
-/// "claude-3-5-sonnet-20241022" → "Sonnet 3.5".
+/// Friendly names for raw model ids — a facade over the active provider's
+/// `ModelCatalog`, because display names are read from dozens of call sites
+/// (grids, charts, pickers) where threading a provider through would drown
+/// the code in plumbing.
 public enum ModelNames {
+    /// The active provider's catalog. Defaults to the provider this build
+    /// bundles (Claude) so names read right even before wiring; the app
+    /// still installs its provider's catalog exactly once at launch, before
+    /// any UI renders or scan runs — reads afterward see an effectively
+    /// immutable value, which is what makes the unsafe opt-out honest.
+    nonisolated(unsafe) public static var catalog: ModelCatalog = .claude
+
     public static func display(_ id: String) -> String {
-        guard id.hasPrefix("claude-") else { return id == "unknown" ? "Other" : id }
-        var tokens = id.dropFirst("claude-".count).lowercased().split(separator: "-").map(String.init)
-        // Trailing 8-digit component is a release date, not a version.
-        if let last = tokens.last, last.count == 8, last.allSatisfy(\.isNumber) {
-            tokens.removeLast()
-        }
-        let words = tokens.filter { !$0.allSatisfy(\.isNumber) }
-        let numbers = tokens.filter { $0.allSatisfy(\.isNumber) }
-        let name = words.map(\.capitalized).joined(separator: " ")
-        let version = numbers.joined(separator: ".")
-        switch (name.isEmpty, version.isEmpty) {
-        case (false, false): return "\(name) \(version)"
-        case (false, true): return name
-        case (true, false): return "Claude \(version)"
-        case (true, true): return id
-        }
+        catalog.displayName(id)
+    }
+
+    /// "claude-opus-4-8" → "Opus". Also the model-color ledger's family key.
+    public static func family(_ id: String) -> String {
+        catalog.familyName(id)
+    }
+
+    /// Capability-tier position of a family name; smaller sorts first.
+    public static func familyRank(_ family: String) -> Int {
+        catalog.familyRank(family)
     }
 }

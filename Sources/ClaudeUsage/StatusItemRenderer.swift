@@ -20,18 +20,22 @@ enum StatusItemRenderer {
     struct Model: Equatable {
         let segments: [MenuBarSegment]?
         let stale: Bool
+        /// The provider's mark ahead of the digits.
+        let glyph: String
     }
 
     static func model(
-        for state: DisplayState, predictions: [String: UsagePrediction] = [:]
+        for state: DisplayState, predictions: [String: UsagePrediction] = [:],
+        glyph: String = "✳︎"
     ) -> Model {
         guard let snapshot = state.snapshot else {
-            return Model(segments: nil, stale: true)
+            return Model(segments: nil, stale: true, glyph: glyph)
         }
         return Model(
             segments: UsageFormatting.menuBarSegments(
                 from: snapshot.meters, predictions: predictions),
-            stale: state.isStale
+            stale: state.isStale,
+            glyph: glyph
         )
     }
 
@@ -152,7 +156,7 @@ enum StatusItemRenderer {
     }
 
     private static func compose(_ model: Model) -> [Run] {
-        var runs: [Run] = [.text("✳︎ ", model.stale ? staleColor : claudeOrange, font)]
+        var runs: [Run] = [.text("\(model.glyph) ", model.stale ? staleColor : claudeOrange, font)]
         guard let segments = model.segments, !segments.isEmpty else {
             runs.append(.text("—", dim, font))
             return runs

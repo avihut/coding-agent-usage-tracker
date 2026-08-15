@@ -100,9 +100,20 @@ func makeService(
     cache: UsageCache
 ) -> UsageService {
     UsageService(
-        credentials: CredentialChain(sources: [StubCredentialSource(result: credential ?? .success(token))]),
-        client: stubbedClient(),
+        provider: ClaudeProvider(
+            credentials: CredentialChain(
+                sources: [StubCredentialSource(result: credential ?? .success(token))]),
+            client: stubbedClient()),
         cache: cache,
         retryDelay: .zero
     )
+}
+
+/// A snapshot built the way the Claude provider builds one — the shorthand
+/// most suites want when they just need "a decoded snapshot of this fixture".
+func makeSnapshot(
+    response: UsageResponse, fetchedAt: Date = Date(),
+    thresholds: Thresholds = .standard
+) -> Snapshot {
+    MeterBuilder.snapshot(from: response, fetchedAt: fetchedAt, thresholds: thresholds)
 }

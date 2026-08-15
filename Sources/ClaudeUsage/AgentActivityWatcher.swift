@@ -1,24 +1,28 @@
 import CoreServices
 import Foundation
 
-/// Push signal that Claude is in use on this machine: FSEvents on Claude
-/// Code's transcript tree (`~/.claude/projects`), which gets written the
-/// moment a session does anything. Strictly observational — nothing under
-/// `~/.claude` is opened, read, or written here; FSEvents only reports that
-/// paths changed (spec §10 still holds: the scanners do the reading,
-/// read-only).
-final class ClaudeActivityWatcher {
+/// Push signal that the agent is in use on this machine: FSEvents on the
+/// provider's trace directories (Claude Code's `~/.claude/projects`), which
+/// get written the moment a session does anything. Strictly observational —
+/// nothing inside them is opened, read, or written here; FSEvents only
+/// reports that paths changed (spec §10 still holds: the scanners do the
+/// reading, read-only).
+final class AgentActivityWatcher {
     private let stream: FSEventStreamRef
 
     /// `onActivity` is delivered on the main queue. `kFSEventStreamCreateFlagNoDefer`
     /// makes the first event after quiet arrive immediately — that's the
     /// re-engagement moment the store wants to react to — while bursts within
-    /// `latency` seconds coalesce into one callback.
+    /// `latency` seconds coalesce into one callback. Directories that don't
+    /// exist yet (the agent never ran here) are skipped; nil when none exist.
     @MainActor
-    init?(directory: URL, latency: TimeInterval = 10, onActivity: @escaping @MainActor @Sendable () -> Void) {
-        var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: directory.path, isDirectory: &isDirectory),
-              isDirectory.boolValue else { return nil }
+    init?(directories: [URL], latency: TimeInterval = 10, onActivity: @escaping @MainActor @Sendable () -> Void) {
+        let existing = directories.filter { directory in
+            var isDirectory: ObjCBool = false
+            return FileManager.default.fileExists(
+                atPath: directory.path, isDirectory: &isDirectory) && isDirectory.boolValue
+        }
+        guard !existing.isEmpty else { return nil }
 
         // The stream holds the box at +1 (passRetained); FSEventStreamInvalidate
         // calls the release callback exactly once, balancing it.
@@ -40,7 +44,7 @@ final class ClaudeActivityWatcher {
                 Unmanaged<CallbackBox>.fromOpaque(info).takeUnretainedValue().fire()
             },
             &context,
-            [directory.path] as CFArray,
+            existing.map(\.path) as CFArray,
             FSEventStreamEventId(kFSEventStreamEventIdSinceNow),
             latency,
             FSEventStreamCreateFlags(kFSEventStreamCreateFlagNoDefer))

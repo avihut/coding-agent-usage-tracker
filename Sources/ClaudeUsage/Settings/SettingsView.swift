@@ -198,7 +198,8 @@ private struct GeneralSettingsPane: View {
     private var graceSeconds = ActivityGrace.defaultSeconds
     /// Claude Code's own transcript retention, mirrored from — and
     /// written back to — ~/.claude/settings.json.
-    @State private var retentionDays = ClaudeCodeSettings.defaultDays
+    // Placeholder until onAppear mirrors the agent's own stored value.
+    @State private var retentionDays = 30
     @State private var retentionWriteFailed = false
     /// What the transcripts weigh on disk, measured once per appearance
     /// off the main thread.
@@ -225,7 +226,7 @@ private struct GeneralSettingsPane: View {
                         position: RefreshIntervalScale.position(of:),
                         value: RefreshIntervalScale.value(at:))
                 }
-                note("The pace while Claude is in use — the slider snaps to the marked stops, or lands anywhere between. Quiet stretches slow polling down on their own (to one poll per hour, or your chosen pace when that's slower) and fresh activity snaps it back. Nothing polls faster than once per 3 minutes — the usage endpoint rate-limits harder polling.")
+                note("The pace while the agent is in use — the slider snaps to the marked stops, or lands anywhere between. Quiet stretches slow polling down on their own (to one poll per hour, or your chosen pace when that's slower) and fresh activity snaps it back. Nothing polls faster than once per 3 minutes — the usage endpoint rate-limits harder polling.")
             }
             SettingsCard("Thresholds") {
                 VStack(alignment: .leading, spacing: 4) {
@@ -266,37 +267,39 @@ private struct GeneralSettingsPane: View {
                         value: ActivityGraceScale.value(at:),
                         label: { $0 == 0 ? "off" : UsageFormatting.duration($0) })
                 }
-                note("The activity strips under the popover charts bridge idle gaps shorter than this — Claude waiting while you read or type a reply still counts as the same working session. Slide to off to mark only the moments Claude itself was producing tokens.")
+                note("The activity strips under the popover charts bridge idle gaps shorter than this — the agent waiting while you read or type a reply still counts as the same working session. Slide to off to mark only the moments it was producing tokens.")
             }
-            SettingsCard("Claude Code") {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text("Transcript retention")
-                        Spacer()
-                        Picker("Transcript retention", selection: retentionBinding) {
-                            ForEach(retentionChoices, id: \.self) { days in
-                                Text(retentionLabel(days)).tag(days)
+            if let agentSettings = store.provider.agentSettings {
+                SettingsCard(store.provider.agentName) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text("Transcript retention")
+                            Spacer()
+                            Picker("Transcript retention", selection: retentionBinding) {
+                                ForEach(retentionChoices, id: \.self) { days in
+                                    Text(retentionLabel(days)).tag(days)
+                                }
                             }
+                            .labelsHidden()
+                            .fixedSize()
                         }
-                        .labelsHidden()
-                        .fixedSize()
+                        if retentionWriteFailed {
+                            Text("Couldn't update \(agentSettings.displayPath) — its current content didn't parse, so it was left untouched.")
+                                .font(.caption2)
+                                .foregroundStyle(.red)
+                        }
+                        if let diskUsage {
+                            Divider()
+                            infoRow(
+                                "On disk now",
+                                "\(Self.byteText(diskUsage.bytes)) · \(diskUsage.days) days of transcripts")
+                            infoRow(
+                                "Projected at \(retentionLabel(retentionDays))",
+                                "≈ \(Self.byteText(diskUsage.projectedBytes(forDays: retentionDays)))")
+                        }
                     }
-                    if retentionWriteFailed {
-                        Text("Couldn't update ~/.claude/settings.json — its current content didn't parse, so it was left untouched.")
-                            .font(.caption2)
-                            .foregroundStyle(.red)
-                    }
-                    if let diskUsage {
-                        Divider()
-                        infoRow(
-                            "On disk now",
-                            "\(Self.byteText(diskUsage.bytes)) · \(diskUsage.days) days of transcripts")
-                        infoRow(
-                            "Projected at \(retentionLabel(retentionDays))",
-                            "≈ \(Self.byteText(diskUsage.projectedBytes(forDays: retentionDays)))")
-                    }
+                    note("How long \(store.provider.agentName) keeps local transcripts (its \(agentSettings.retentionKeyName) setting — this control reads and writes \(agentSettings.displayPath) directly, the app's one write there). The heatmap and per-model history come from those transcripts, so longer retention keeps more history — and more disk: the projection scales what today's holdings weigh per day to the chosen window. Takes effect when \(store.provider.agentName) next runs.")
                 }
-                note("How long Claude Code keeps local transcripts (its cleanupPeriodDays setting — this control reads and writes ~/.claude/settings.json directly, the app's one write there). The heatmap and per-model history come from those transcripts, so longer retention keeps more history — and more disk: the projection scales what today's holdings weigh per day to the chosen window. Takes effect when Claude Code next runs.")
             }
             SettingsCard("Startup") {
                 Toggle("Launch at login", isOn: SettingsBindings.launchAtLogin())
@@ -306,8 +309,11 @@ private struct GeneralSettingsPane: View {
             SettingsCard("About") {
                 infoRow("Version", "v\(AppIdentity.version)")
                 Divider()
-                infoRow("Network destinations", "api.anthropic.com · raw.githubusercontent.com")
-                note("Usage comes from the same endpoint the Claude app's own Usage screen reads; activity and tokens from this Mac's local Claude Code transcripts, read-only. No analytics, no telemetry.")
+                infoRow(
+                    "Network destinations",
+                    (store.provider.networkDestinations + ["raw.githubusercontent.com"])
+                        .joined(separator: " · "))
+                note("Usage comes from \(store.provider.serviceName)'s own usage endpoint; activity and tokens from this Mac's local \(store.provider.agentName) transcripts, read-only. No analytics, no telemetry.")
             }
         }
         .onAppear {
@@ -315,13 +321,15 @@ private struct GeneralSettingsPane: View {
             let thresholds = UsageStore.currentThresholds()
             warningPercent = thresholds.warningPercent
             criticalPercent = thresholds.criticalPercent
-            retentionDays = ClaudeCodeSettings.standard().readCleanupPeriodDays()
-                ?? ClaudeCodeSettings.defaultDays
-            let root = FileManager.default.homeDirectoryForCurrentUser
-                .appending(path: ".claude/projects")
-            Task.detached(priority: .utility) {
-                let usage = TranscriptDiskUsage.measure(root: root)
-                await MainActor.run { diskUsage = usage }
+            if let agentSettings = store.provider.agentSettings {
+                retentionDays = agentSettings.readRetentionDays()
+                    ?? agentSettings.defaultRetentionDays
+            }
+            if let source = store.localActivity {
+                Task.detached(priority: .utility) {
+                    let usage = source.diskUsage(now: Date())
+                    await MainActor.run { diskUsage = usage }
+                }
             }
         }
     }
@@ -364,15 +372,16 @@ private struct GeneralSettingsPane: View {
         store.thresholdsChanged()
     }
 
-    /// Selection writes straight through to settings.json — binding-set,
-    /// not onChange, so the onAppear mirror never triggers a write.
+    /// Selection writes straight through to the agent's settings file —
+    /// binding-set, not onChange, so the onAppear mirror never triggers a
+    /// write.
     private var retentionBinding: Binding<Int> {
         Binding(
             get: { retentionDays },
             set: { days in
                 retentionDays = days
                 retentionWriteFailed =
-                    !ClaudeCodeSettings.standard().writeCleanupPeriodDays(days)
+                    !(store.provider.agentSettings?.writeRetentionDays(days) ?? false)
             })
     }
 
@@ -416,13 +425,15 @@ private struct CostSettingsPane: View {
     private var pricingDataCard: some View {
         SettingsCard(
             "Pricing data",
-            footer: "Anthropic publishes no pricing API, so list prices come from LiteLLM's community-maintained feed on raw.githubusercontent.com — a plain fetch with nothing about you attached, refreshed daily on its own."
+            footer: "No official pricing API exists, so list prices come from LiteLLM's community-maintained feed on raw.githubusercontent.com — a plain fetch with nothing about you attached, refreshed daily on its own."
         ) {
             infoRow("Source", sourceLabel)
             Divider()
             infoRow("Fetched", fetchedLabel)
             Divider()
-            infoRow("Models priced", "\(store.pricing.rates.count) Claude models")
+            infoRow(
+                "Models priced",
+                "\(store.pricing.rates.count) \(store.provider.serviceName) models")
             HStack(spacing: 8) {
                 Button("Refresh Now") { store.refreshPricingNow() }
                     .disabled(store.isRefreshingPricing)
@@ -543,7 +554,7 @@ private struct CostSettingsPane: View {
         SettingsCard("How the estimate works") {
             explainer(
                 "Four counters, straight from the transcripts",
-                "Claude Code keeps a JSONL transcript of every session under ~/.claude/projects, and each API response in it records four token counts. This app reads them — read-only, deduplicated per request, attributed per model and day — and multiplies by the list rates above. Nothing leaves this Mac.")
+                "\(store.provider.agentName) keeps a transcript of every session\(store.localActivity.map { " under \($0.displayPath)" } ?? ""), and each API response in it records four token counts. This app reads them — read-only, deduplicated per request, attributed per model and day — and multiplies by the list rates above. Nothing leaves this Mac.")
             tokenClassRows
             explainer(
                 "One prompt is many requests",
@@ -553,7 +564,7 @@ private struct CostSettingsPane: View {
                 "Each request re-reads the conversation so far, so a session's tokens scale with context size × request count — roughly the square of its length. A one-line question in a session that's been open all day still re-reads the whole day. Compaction or /clear resets the curve; a break longer than the cache TTL (an hour on a subscription, five minutes on API keys) means the next request re-writes the whole context at the write rate.")
             explainer(
                 "Honest caveats",
-                "These are counterfactuals — what the same usage would have billed at API list prices. A subscription doesn't bill per token, so read it as a value gauge, not an invoice. Output includes extended thinking you never see. Background housekeeping (session summaries for resume, usage checks) logs tokens too. And only local Claude Code sessions on this Mac are visible — claude.ai and other devices aren't.")
+                "These are counterfactuals — what the same usage would have billed at API list prices. A subscription doesn't bill per token, so read it as a value gauge, not an invoice. Output includes extended thinking you never see. Background housekeeping (session summaries for resume, usage checks) logs tokens too. And only local \(store.provider.agentName) sessions on this Mac are visible — web sessions and other devices aren't.")
         }
     }
 
@@ -628,7 +639,8 @@ private struct CostSettingsPane: View {
             CostPlaygroundView(
                 pricing: store.pricing,
                 families: families,
-                initialModel: families.first?.models.first ?? "claude-fable-5")
+                initialModel: families.first?.models.first
+                    ?? store.pricing.rates.keys.sorted().first ?? "")
         }
     }
 
@@ -676,20 +688,14 @@ struct ModelFamily: Identifiable, Equatable {
             }
     }
 
-    /// Larger models first — the tier ladder the product names imply.
+    /// Larger models first — the tier ladder from the provider's catalog.
     private static func sizeRank(_ family: String) -> Int {
-        switch family.lowercased() {
-        case "fable", "mythos": 0
-        case "opus": 1
-        case "sonnet": 2
-        case "haiku": 3
-        default: 4
-        }
+        ModelNames.familyRank(family)
     }
 
     /// "claude-opus-4-8" → "Opus". Also the model-color ledger's family key.
     static func familyName(_ id: String) -> String {
-        ModelNames.display(id).split(separator: " ").first.map(String.init) ?? id
+        ModelNames.family(id)
     }
 
     private static func versionDescending(_ a: String, _ b: String) -> Bool {

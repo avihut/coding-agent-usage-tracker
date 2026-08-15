@@ -133,7 +133,8 @@ struct PredictionEngineTests {
     func predictEndToEnd() {
         let meter = Meter(
             id: "0-session", label: "Session (5h)", percent: 20,
-            resetsAt: now.addingTimeInterval(3 * 3600), level: .normal, rank: 0)
+            resetsAt: now.addingTimeInterval(3 * 3600), level: .normal, rank: 0,
+            limitWindow: 5 * 3600)
         let samples = [sample(60, 10, now: now), sample(30, 15, now: now), sample(0, 20, now: now)]
         let prediction = PredictionEngine.predict(meter: meter, samples: samples, now: now)
         #expect(prediction?.verdict == .green)
@@ -269,7 +270,8 @@ struct PredictionEngineTests {
 
         let meter = Meter(
             id: "1-weekly_all", label: "Weekly · all models", percent: 30,
-            resetsAt: t.addingTimeInterval(2 * 86400), level: .normal, rank: 1)
+            resetsAt: t.addingTimeInterval(2 * 86400), level: .normal, rank: 1,
+            limitWindow: 7 * 86400)
         let prediction = PredictionEngine.predict(
             meter: meter, samples: samples, profile: profile, now: t)
         #expect(prediction != nil)

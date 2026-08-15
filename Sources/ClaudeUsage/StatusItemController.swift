@@ -71,7 +71,9 @@ final class StatusItemController: NSResponder {
 
     private func render() {
         guard let button = statusItem.button else { return }
-        let model = StatusItemRenderer.model(for: store.state, predictions: store.predictions)
+        let model = StatusItemRenderer.model(
+            for: store.state, predictions: store.predictions,
+            glyph: store.provider.menuBarGlyph)
         // Drawn as literal pixels, not attributedTitle: the dot and badge
         // are filled geometry no attributed string can carry. Fixed colors
         // keep the image immune to the appearance-context lies a tinted
@@ -101,7 +103,8 @@ final class StatusItemController: NSResponder {
             let host = NSHostingController(rootView: MeterHistoryView(
                 meter: meter, samples: self.store.samples,
                 timeline: self.store.tokenTimeline, pricing: self.store.pricing,
-                prediction: self.store.predictions[meter.label]))
+                prediction: self.store.predictions[meter.label],
+                agentName: self.store.provider.agentName))
             host.sizingOptions = .preferredContentSize
             self.hoverPopover.contentViewController = host
             self.hoverPopover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)

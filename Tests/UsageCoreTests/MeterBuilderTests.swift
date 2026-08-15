@@ -62,7 +62,7 @@ struct MeterBuilderTests {
         let meters = MeterBuilder.meters(
             from: response, thresholds: Thresholds(warningPercent: 30, criticalPercent: 50))
         #expect(meters.map(\.level) == [.normal, .warning, .critical])
-        let rebuilt = Snapshot(response: response, fetchedAt: Date())
+        let rebuilt = makeSnapshot(response: response)
             .rebuilt(thresholds: Thresholds(warningPercent: 30, criticalPercent: 50))
         #expect(rebuilt.meters.map(\.level) == [.normal, .warning, .critical])
     }
