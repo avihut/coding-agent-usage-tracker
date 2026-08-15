@@ -170,7 +170,6 @@ struct HeatmapView: View {
         HStack(spacing: 6) {
             Text("Activity").font(.caption.bold())
             Spacer()
-            periodPager
             dimensionPicker
             SegmentedPicker(
                 title: "Period", selection: periodBinding,
@@ -178,42 +177,33 @@ struct HeatmapView: View {
         }
     }
 
-    /// Drill-down-style pager for the fixed windows: ‹ steps a whole 7- or
-    /// 30-day page into the past, › returns. Arrows appear only where a
-    /// page exists, matching the day drill-down; All shows everything and
-    /// pages nowhere.
+    /// Drill-down-style pager flanking the 7D/30D charts: ‹ steps a whole
+    /// window into the past, › returns. Unlike the day drill's slide, the
+    /// chart updates IN PLACE — so an unavailable direction keeps its
+    /// reserved width at zero opacity rather than vanishing, and the chart
+    /// never changes size between pages. All shows everything and renders
+    /// no arrows at all.
     @ViewBuilder
-    private var periodPager: some View {
+    private func periodStepArrow(direction: Int) -> some View {
         if period != .all {
-            HStack(spacing: 2) {
-                if layout.hasOlder {
-                    pagerButton("chevron.left.circle.fill", help: "Earlier \(period.rawValue)") {
-                        pageOffset += 1
-                        rebuildLayout(for: period)
-                    }
-                }
-                if pageOffset > 0 {
-                    pagerButton("chevron.right.circle.fill", help: "Later \(period.rawValue)") {
-                        pageOffset -= 1
-                        rebuildLayout(for: period)
-                    }
-                }
+            let available = direction < 0 ? layout.hasOlder : pageOffset > 0
+            Button {
+                pageOffset += direction < 0 ? 1 : -1
+                rebuildLayout(for: period)
+            } label: {
+                Image(systemName: direction < 0
+                    ? "chevron.left.circle.fill" : "chevron.right.circle.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(.secondary)
+                    .contentShape(Circle())
             }
+            .buttonStyle(.plain)
+            .frame(width: 17)
+            .opacity(available ? 1 : 0)
+            .disabled(!available)
+            .help(direction < 0 ? "Earlier \(period.rawValue)" : "Later \(period.rawValue)")
         }
-    }
-
-    private func pagerButton(
-        _ systemName: String, help: String, action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: 13, weight: .semibold))
-                .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(.secondary)
-                .contentShape(Circle())
-        }
-        .buttonStyle(.plain)
-        .help(help)
     }
 
     /// Shared by the period header and the day drill-down, so the
@@ -254,18 +244,22 @@ struct HeatmapView: View {
                 legend
             }
             .frame(height: 14)
-            chart
-            ModelBreakdownGrid(
-                rows: summaryRows, colors: modelColors, pricing: pricing,
-                hoveredModel: $hoveredModel)
+            HStack(spacing: 3) {
+                periodStepArrow(direction: -1)
+                chart
+                periodStepArrow(direction: 1)
+            }
             if period == .week {
                 weeklyTrendCaption
             }
+            ModelBreakdownGrid(
+                rows: summaryRows, colors: modelColors, pricing: pricing,
+                hoveredModel: $hoveredModel)
         }
     }
 
-    /// Under the 7D table: the typical-week overlay's legend once the
-    /// profile is live, or how long until enough history exists to draw it.
+    /// Right under the 7D bars: the typical-week overlay's legend once the
+    /// profile is live, or how long until the personalized forecast exists.
     private var weeklyTrendCaption: some View {
         Group {
             if let weeklyProfile, weeklyProfile.isReady {
@@ -273,7 +267,7 @@ struct HeatmapView: View {
             } else {
                 let remaining = weeklyProfile?.remainingUntilReady
                     ?? WeeklyProfile.activationSpan
-                Text("Weekly trend overlay activates in \(Self.readinessText(remaining)) — still learning your rhythm.")
+                Text("Personalized forecast activates in \(Self.readinessText(remaining)) — learning your weekly rhythm.")
             }
         }
         .font(.caption2)
@@ -287,7 +281,8 @@ struct HeatmapView: View {
         let days = Int((remaining / 86400).rounded(.up))
         if days > 1 { return "\(days) days" }
         let hours = max(1, Int((remaining / 3600).rounded(.up)))
-        return hours >= 24 ? "1 day" : "\(hours) hours"
+        if hours >= 24 { return "1 day" }
+        return hours == 1 ? "1 hour" : "\(hours) hours"
     }
 
     /// "7.3B tokens · 24 active days" (or "≈ $6,860 · …" in cost mode) —

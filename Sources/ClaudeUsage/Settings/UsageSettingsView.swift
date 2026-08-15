@@ -130,24 +130,31 @@ struct UsageSettingsPane: View {
             "Weekly rhythm",
             footer: "Learned from this app's own sample history (not transcripts): consumption between polls, attributed to 4-hour blocks of the week. It becomes the forecast baseline and the 7D chart's typical-week overlay once two full weeks exist."
         ) {
-            if let profile = store.weeklyProfile {
-                if profile.isReady {
-                    rhythmGrid(profile)
-                    Divider()
-                    rhythmInsights(profile)
-                } else {
-                    let collected = profile.historySpan
-                    infoRow(
-                        "History collected",
-                        "\(daysText(collected)) of \(daysText(WeeklyProfile.activationSpan))")
-                    ProgressView(value: min(1, collected / WeeklyProfile.activationSpan))
-                        .controlSize(.small)
-                    note("Activates in \(daysText(profile.remainingUntilReady)) — until then forecasts lean on each window's own average pace.")
-                }
+            if let profile = store.weeklyProfile, profile.isReady {
+                rhythmGrid(profile)
+                Divider()
+                rhythmInsights(profile)
             } else {
-                note("Collecting history — the rhythm builds from usage samples recorded while the app runs, and activates after \(daysText(WeeklyProfile.activationSpan)) of them.")
+                // Concrete countdown from day one: the profile's own span
+                // once it exists, the raw sample span before that.
+                let collected = store.weeklyProfile?.historySpan ?? sampleSpan
+                let remaining = max(0, WeeklyProfile.activationSpan - collected)
+                infoRow(
+                    "History collected",
+                    "\(daysText(collected)) of \(daysText(WeeklyProfile.activationSpan))")
+                ProgressView(value: min(1, collected / WeeklyProfile.activationSpan))
+                    .controlSize(.small)
+                note("Personalized forecast activates in \(daysText(remaining)) — until then forecasts lean on each window's own average pace.")
             }
         }
+    }
+
+    /// Oldest-to-newest span of the stored samples — the readiness clock
+    /// before the profile itself has been built.
+    private var sampleSpan: TimeInterval {
+        guard let first = store.samples.first?.t, let last = store.samples.last?.t
+        else { return 0 }
+        return last.timeIntervalSince(first)
     }
 
     /// 7 weekday columns × six 4-hour rows, intensity = typical burn rate.
@@ -246,7 +253,8 @@ struct UsageSettingsPane: View {
         let days = interval / 86400
         if days >= 1.5 { return "\(Int(days.rounded())) days" }
         if days >= 0.75 { return "1 day" }
-        return "\(max(1, Int((interval / 3600).rounded()))) hours"
+        let hours = Int((interval / 3600).rounded())
+        return hours == 1 ? "1 hour" : "\(hours) hours"
     }
 
     // MARK: - Explainer

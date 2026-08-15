@@ -196,16 +196,21 @@ the README rather than silently deviating.
   `CostIndex` — per-day cost prebuilt next to the layout so render
   passes never price models; unpriced models drop out of cost mode.
   The 7D and 30D periods page whole windows into the past with
-  drill-down-style ‹ › chevrons in the title row (`HeatmapLayout.build`
-  `pagesBack` + `hasOlder`; All shows everything and has none): ‹ appears
-  while older activity exists, › while off page 0, the stats line prefixes
-  the visible range ("Jul 27 – Aug 2") when paged, and panel close resets
-  to page 0. The 7D bars carry the typical-week overlay: the weekly
-  meter's `WeeklyProfile.weekdayShares()` stretched over the displayed
-  week's own total (dashed primary polyline + dots, Canvas overlay,
-  hit-testing off), so it works in tokens or cost mode and on past pages;
-  under the table a caption either legends the overlay or counts down
-  until the profile activates ("activates in 9 days").
+  drill-down-style ‹ › chevrons FLANKING the chart (`HeatmapLayout.build`
+  `pagesBack` + `hasOlder`; All shows everything and renders none): ‹
+  enables while older activity exists, › while off page 0 — an
+  unavailable direction keeps its reserved 17pt at zero opacity, because
+  page flips update the chart IN PLACE (user-specified: no slide, and the
+  chart must never resize between pages). The stats line prefixes the
+  visible range ("Jul 27 – Aug 2") when paged; panel close and period
+  switches reset to page 0. The 7D bars carry the typical-week overlay:
+  the weekly meter's `WeeklyProfile.weekdayShares()` stretched over the
+  displayed week's own total (dashed primary polyline + dots, Canvas
+  overlay, hit-testing off), so it works in tokens or cost mode and on
+  past pages; DIRECTLY under the bars (above the table) a caption either
+  legends the overlay or counts down ("Personalized forecast activates in
+  9 days") — the same countdown shows concretely in Settings → Usage,
+  falling back to the raw sample span before the profile object exists.
 - Cost estimates: `PricingTable` (per-token `ModelRates`, exact-id then
   date-stripped lookup) from `PricingService` — disk-cached LiteLLM feed
   refreshed when >24h old (attempted at most hourly, piggybacked on usage
