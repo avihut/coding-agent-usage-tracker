@@ -586,14 +586,20 @@ private struct ChartMinimap: View {
                         }
                     }
                     context.stroke(
-                        path, with: .color(accent.opacity(lit ? 0.65 : 0.5)),
-                        lineWidth: 1)
+                        path, with: .color(accent.opacity(0.5)), lineWidth: 1)
                 }
+                // The highlight lives on the GRABBER alone — hovering
+                // anywhere on the strip lights the box you'd be grabbing
+                // (its frame goes full primary: white in dark mode), while
+                // the track and hairline hold still.
                 RoundedRectangle(cornerRadius: 3)
-                    .fill(accent.opacity(lit ? 0.2 : 0.12))
+                    .fill(accent.opacity(lit ? 0.22 : 0.12))
                     .overlay(
                         RoundedRectangle(cornerRadius: 3)
-                            .strokeBorder(accent.opacity(lit ? 0.9 : 0.6), lineWidth: 1))
+                            .strokeBorder(
+                                lit ? AnyShapeStyle(.primary)
+                                    : AnyShapeStyle(accent.opacity(0.6)),
+                                lineWidth: 1))
                     .frame(width: boxWidth)
                     .offset(x: boxX)
             }
@@ -610,9 +616,7 @@ private struct ChartMinimap: View {
                     .onEnded { _ in grabbedStart = nil })
         }
         .pointerStyle(grabbedStart != nil ? .grabActive : .grabIdle)
-        .background(
-            Color.primary.opacity(hovering || grabbedStart != nil ? 0.08 : 0.04),
-            in: RoundedRectangle(cornerRadius: 3))
+        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 3))
         .animation(.easeOut(duration: 0.12), value: hovering)
     }
 }
