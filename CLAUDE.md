@@ -139,10 +139,13 @@ the README rather than silently deviating.
   never "—"), (3) six StatTiles in an HStack of equal maxWidth:
   .infinity shares — the grid must always FILL the header width and
   stretch with resizes (user-directed; that's why it's an HStack, not
-  an adaptive LazyVGrid, which wraps 5+1 under squeeze). Tile glyphs
-  use the System Settings idiom (white symbol on muted tinted square,
-  StatTint); the prompts tile wears the provider accent — ❯ is the
-  app's prompt color story.
+  an adaptive LazyVGrid, which wraps 5+1 under squeeze). Tile styling
+  (v0.38.0, user-directed): the WHOLE tile wears a light wash of its
+  StatTint (fill 0.1) under a slightly stronger frame (0.3) of the
+  same tint, the bare tinted glyph sits top-right, and the value
+  (20pt bold, a touch lighter than standard label ink in dark) +
+  label are CENTERED; the prompts tile wears the provider accent — ❯
+  is the app's prompt color story.
   CODEX SESSIONS (v0.31.0): CodexActivitySource populates the same
   seam — one rollout file = one session (cache v2; SessionMeta stores
   title/cwd/cli_version/start/end/stretches, counts derived from

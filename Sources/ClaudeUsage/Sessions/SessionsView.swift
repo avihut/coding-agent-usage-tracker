@@ -132,10 +132,10 @@ private func plural(_ count: Int, _ noun: String) -> String {
 
 // MARK: - Dashboard header primitives
 
-/// Muted System Settings-style tints for the stat tile glyphs — one hue
-/// per stat, desaturated enough to sit quietly in both appearances. The
-/// prompts tile uses the provider accent instead: ❯ is already the app's
-/// prompt color story.
+/// Muted hues for the stat tiles — each tile wears its color as a light
+/// wash, a slightly stronger frame, and a corner glyph, desaturated enough
+/// to sit quietly in both appearances. The prompts tile uses the provider
+/// accent instead: ❯ is already the app's prompt color story.
 private enum StatTint {
     static let api = Color(red: 0.31, green: 0.50, blue: 0.79)
     static let tools = Color(red: 0.56, green: 0.41, blue: 0.77)
@@ -144,42 +144,53 @@ private enum StatTint {
     static let tokens = Color(red: 0.39, green: 0.44, blue: 0.54)
 }
 
-/// One dashboard stat: a tinted rounded-square glyph (the System Settings
-/// icon idiom) over a big number and its noun. Tiles stretch — each takes
-/// an equal share of the row, so the grid fills the header at any width.
+/// One dashboard stat: the whole tile wears a light wash of its color
+/// under a slightly stronger frame of the same tint, the bare glyph sits
+/// in the top-right corner, and the number + noun center. Tiles stretch —
+/// each takes an equal share of the row, so the grid fills the header at
+/// any width.
 private struct StatTile: View {
     let symbol: String
     let tint: Color
     let value: String
     let label: String
 
+    /// The KPI number wants a touch more light than the standard label's
+    /// 85%-white dark-mode ink; light mode keeps the standard label.
+    private static let valueColor = Color(nsColor: NSColor(
+        name: nil,
+        dynamicProvider: { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                ? NSColor(white: 1, alpha: 0.96)
+                : .labelColor
+        }))
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(tint)
-                .frame(width: 22, height: 22)
-                .overlay(
-                    Image(systemName: symbol)
-                        .font(.system(size: 10.5, weight: .semibold))
-                        .foregroundStyle(.white))
-            VStack(alignment: .leading, spacing: 1) {
-                Text(value)
-                    .font(.system(size: 17, weight: .semibold).monospacedDigit())
-                Text(label)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
+        VStack(spacing: 1) {
+            Text(value)
+                .font(.system(size: 20, weight: .bold).monospacedDigit())
+                .foregroundStyle(Self.valueColor)
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 11)
-        .padding(.vertical, 9)
+        .frame(maxWidth: .infinity)
+        .padding(.top, 16)
+        .padding(.bottom, 10)
+        .padding(.horizontal, 8)
+        .overlay(alignment: .topTrailing) {
+            Image(systemName: symbol)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(tint)
+                .padding(9)
+        }
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(.quinary))
+                .fill(tint.opacity(0.1)))
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(.quaternary, lineWidth: 1))
+                .strokeBorder(tint.opacity(0.3), lineWidth: 1))
     }
 }
 
