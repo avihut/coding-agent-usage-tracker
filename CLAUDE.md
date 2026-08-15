@@ -626,7 +626,17 @@ the README rather than silently deviating.
 
 ## macOS app practices
 
-- `LSUIElement` in `Support/Info.plist`; no Dock icon.
+- `LSUIElement` in `Support/Info.plist` sets the LAUNCH state: no Dock icon,
+  no Cmd+Tab. DockPresence (v0.44.0) overrides it at runtime: while any
+  hosted window (Sessions, Settings) is open the app is a `.regular` app
+  (Dock tile, Cmd+Tab, SwiftUI's default main menu), dropping back to
+  `.accessory` when the last closes. One process-wide holder keyed by
+  visible-window identity — per-window flips would yank the Dock tile when
+  one of two open windows closes. It takes each hosted window's DELEGATE
+  seat (free today; if a window ever needs its own delegate, DockPresence
+  must move to willClose notifications). Window controllers call
+  `DockPresence.shared.adopt(window)` on every show, BEFORE `NSApp
+  .activate()` so the menu bar rides along.
 - Any binary that reads the Keychain must be signed with the stable identity
   via `scripts/sign.sh` BEFORE its first run (default identity
   `Apple Development: Avihu Turzion`, override with `CODESIGN_IDENTITY`).

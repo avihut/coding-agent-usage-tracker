@@ -41,6 +41,9 @@ final class SessionsWindowController {
         }
         // The sidebar should be at most seconds stale when the user looks.
         store.scanActivity(force: true)
+        // Dock tile + Cmd+Tab entry ride window visibility; the policy must
+        // flip before activation so the menu bar comes along.
+        if let window { DockPresence.shared.adopt(window) }
         NSApp.activate()
         window?.makeKeyAndOrderFront(nil)
         // Activation is cooperative and may be declined; regardless-front
