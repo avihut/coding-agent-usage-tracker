@@ -129,7 +129,20 @@ the README rather than silently deviating.
   frames, and the placeholder rows live inside the same ScrollView
   shell as the loaded list — a skeleton whose minimum width exceeds
   the loaded content's makes the split view widen on every selection
-  and snap back when the parse lands.
+  and snap back when the parse lands. DASHBOARD HEADER (v0.37.0,
+  user-approved mock): three bands, all derived from the sidebar
+  summary so the skeleton renders the whole header real — (1) title +
+  cost KPI top-right (ModelBreakdownGrid's centered headline is
+  suppressed via showsHeadline: false; the number appears ONCE), (2)
+  icon context strip (FlowLayout of SF-Symbol chips: folder / branch /
+  calendar / timer / terminal / number; empty facts omit their chip,
+  never "—"), (3) six StatTiles in an HStack of equal maxWidth:
+  .infinity shares — the grid must always FILL the header width and
+  stretch with resizes (user-directed; that's why it's an HStack, not
+  an adaptive LazyVGrid, which wraps 5+1 under squeeze). Tile glyphs
+  use the System Settings idiom (white symbol on muted tinted square,
+  StatTint); the prompts tile wears the provider accent — ❯ is the
+  app's prompt color story.
   CODEX SESSIONS (v0.31.0): CodexActivitySource populates the same
   seam — one rollout file = one session (cache v2; SessionMeta stores
   title/cwd/cli_version/start/end/stretches, counts derived from

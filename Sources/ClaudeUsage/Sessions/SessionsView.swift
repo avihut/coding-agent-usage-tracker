@@ -130,6 +130,103 @@ private func plural(_ count: Int, _ noun: String) -> String {
     "\(count) \(noun)\(count == 1 ? "" : "s")"
 }
 
+// MARK: - Dashboard header primitives
+
+/// Muted System Settings-style tints for the stat tile glyphs — one hue
+/// per stat, desaturated enough to sit quietly in both appearances. The
+/// prompts tile uses the provider accent instead: ❯ is already the app's
+/// prompt color story.
+private enum StatTint {
+    static let api = Color(red: 0.31, green: 0.50, blue: 0.79)
+    static let tools = Color(red: 0.56, green: 0.41, blue: 0.77)
+    static let agents = Color(red: 0.25, green: 0.62, blue: 0.50)
+    static let compactions = Color(red: 0.74, green: 0.58, blue: 0.25)
+    static let tokens = Color(red: 0.39, green: 0.44, blue: 0.54)
+}
+
+/// One dashboard stat: a tinted rounded-square glyph (the System Settings
+/// icon idiom) over a big number and its noun. Tiles stretch — each takes
+/// an equal share of the row, so the grid fills the header at any width.
+private struct StatTile: View {
+    let symbol: String
+    let tint: Color
+    let value: String
+    let label: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(tint)
+                .frame(width: 22, height: 22)
+                .overlay(
+                    Image(systemName: symbol)
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .foregroundStyle(.white))
+            VStack(alignment: .leading, spacing: 1) {
+                Text(value)
+                    .font(.system(size: 17, weight: .semibold).monospacedDigit())
+                Text(label)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 11)
+        .padding(.vertical, 9)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(.quinary))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(.quaternary, lineWidth: 1))
+    }
+}
+
+/// Wraps subviews into left-aligned rows the way text wraps words — the
+/// context strip's chips flow to the pane's width instead of imposing one.
+private struct FlowLayout: Layout {
+    var hSpacing: CGFloat = 16
+    var vSpacing: CGFloat = 5
+
+    func sizeThatFits(
+        proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+    ) -> CGSize {
+        arrange(in: proposal.width ?? .infinity, subviews: subviews).size
+    }
+
+    func placeSubviews(
+        in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+    ) {
+        let slots = arrange(in: bounds.width, subviews: subviews).slots
+        for (subview, slot) in zip(subviews, slots) {
+            subview.place(
+                at: CGPoint(x: bounds.minX + slot.x, y: bounds.minY + slot.y),
+                proposal: .unspecified)
+        }
+    }
+
+    private func arrange(
+        in width: CGFloat, subviews: Subviews
+    ) -> (size: CGSize, slots: [CGPoint]) {
+        var slots: [CGPoint] = []
+        var x: CGFloat = 0, y: CGFloat = 0, rowHeight: CGFloat = 0, maxX: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > 0, x + size.width > width {
+                x = 0
+                y += rowHeight + vSpacing
+                rowHeight = 0
+            }
+            slots.append(CGPoint(x: x, y: y))
+            rowHeight = max(rowHeight, size.height)
+            maxX = max(maxX, x + size.width)
+            x += size.width + hSpacing
+        }
+        return (CGSize(width: maxX, height: y + rowHeight), slots)
+    }
+}
+
 // MARK: - Skeleton primitives
 
 /// One placeholder bar, matched to the text heights it stands in for. An
@@ -343,6 +440,7 @@ private struct SessionDetailPane: View {
                     rows: WindowTokens.rows(from: detail.summary.models),
                     colors: colors,
                     pricing: store.pricing,
+                    showsHeadline: false,
                     hoveredModel: $hoveredModel)
                     .padding(.horizontal, 18)
                     .padding(.top, 10)
@@ -389,6 +487,7 @@ private struct SessionDetailPane: View {
                 rows: WindowTokens.rows(from: summary.models),
                 colors: colors,
                 pricing: store.pricing,
+                showsHeadline: false,
                 hoveredModel: $hoveredModel)
                 .padding(.horizontal, 18)
                 .padding(.top, 10)
@@ -467,46 +566,109 @@ private struct SessionDetailPane: View {
         }
     }
 
+    /// The dashboard header: identity row with the cost KPI top-right, an
+    /// icon-led context strip (the glyph is the label), and a full-width
+    /// row of stat tiles that stretch equally with the pane. Everything
+    /// here derives from the sidebar summary, so the skeleton renders the
+    /// whole header real.
     private func header(_ summary: SessionSummary) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(summary.title)
-                .font(.title3.weight(.semibold))
-                .lineLimit(2)
-            Grid(alignment: .leading, horizontalSpacing: 22, verticalSpacing: 6) {
-                GridRow {
-                    metaCell("Repository", path(summary.projectPath))
-                    metaCell("Branch", summary.gitBranch ?? "—")
-                    // The id's tail: rollout stems share their whole prefix,
-                    // and a uuid's last block is as unique as its first.
-                    metaCell("Session", String(summary.id.suffix(8)), mono: true)
-                }
-                GridRow {
-                    metaCell("Started", started(summary))
-                    metaCell("Active", active(summary))
-                    metaCell(
-                        "Agent",
-                        summary.agentVersion.map { "\(store.provider.agentName) \($0)" }
-                            ?? store.provider.agentName)
-                }
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 16) {
+                Text(summary.title)
+                    .font(.title3.weight(.semibold))
+                    .lineLimit(2)
+                Spacer(minLength: 12)
+                costKPI(summary)
             }
-            Text(counters(summary))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
+            contextStrip(summary)
+            statTiles(summary)
         }
     }
 
-    private func metaCell(_ label: String, _ value: String, mono: Bool = false) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(label.uppercased())
-                .font(.caption2.weight(.semibold))
+    /// The headline number the centered block used to carry, promoted to
+    /// dashboard gravity: top-right, on the title's own row.
+    private func costKPI(_ summary: SessionSummary) -> some View {
+        let cost = SessionsView.cost(of: summary, pricing: store.pricing)
+        return VStack(alignment: .trailing, spacing: 1) {
+            Text(cost.unpricedModels > 0 && cost.dollars == 0
+                ? "—" : "≈ \(UsageFormatting.money(cost.dollars))")
+                .font(.system(size: 22, weight: .semibold).monospacedDigit())
+            Text(cost.unpricedModels > 0
+                ? "at API list prices · \(cost.unpricedModels) unpriced"
+                : "at API list prices")
+                .font(.caption2)
                 .foregroundStyle(.tertiary)
-            Text(value)
+        }
+    }
+
+    private func contextStrip(_ summary: SessionSummary) -> some View {
+        FlowLayout(hSpacing: 16, vSpacing: 5) {
+            if let project = summary.projectPath, !project.isEmpty {
+                chip("folder", path(project))
+            }
+            if let branch = summary.gitBranch, !branch.isEmpty {
+                chip("arrow.triangle.branch", branch)
+            }
+            chip("calendar", started(summary))
+            if summary.activeSeconds > 0 {
+                chip("timer", active(summary))
+            }
+            chip(
+                "terminal",
+                summary.agentVersion.map { "\(store.provider.agentName) \($0)" }
+                    ?? store.provider.agentName)
+            // The id's tail: rollout stems share their whole prefix,
+            // and a uuid's last block is as unique as its first.
+            chip("number", String(summary.id.suffix(8)), mono: true)
+        }
+    }
+
+    private func chip(_ symbol: String, _ text: String, mono: Bool = false) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: symbol)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.tertiary)
+            Text(text)
                 .font(mono ? .caption.monospaced() : .callout)
+                .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
         }
-        .gridColumnAlignment(.leading)
+    }
+
+    /// One row, six tiles, equal stretch — the grid always spans the full
+    /// header width and breathes with the window.
+    private func statTiles(_ summary: SessionSummary) -> some View {
+        HStack(spacing: 8) {
+            StatTile(
+                symbol: "chevron.right", tint: ProviderStyle.accentColor,
+                value: summary.prompts.formatted(),
+                label: noun(summary.prompts, "prompt"))
+            StatTile(
+                symbol: "bolt.fill", tint: StatTint.api,
+                value: summary.apiCalls.formatted(),
+                label: noun(summary.apiCalls, "API call"))
+            StatTile(
+                symbol: "hammer.fill", tint: StatTint.tools,
+                value: summary.toolCalls.formatted(),
+                label: noun(summary.toolCalls, "tool call"))
+            StatTile(
+                symbol: "person.2.fill", tint: StatTint.agents,
+                value: summary.subagentCount.formatted(),
+                label: noun(summary.subagentCount, "subagent run"))
+            StatTile(
+                symbol: "arrow.down.right.and.arrow.up.left", tint: StatTint.compactions,
+                value: summary.compactions.formatted(),
+                label: noun(summary.compactions, "compaction"))
+            StatTile(
+                symbol: "cylinder.split.1x2.fill", tint: StatTint.tokens,
+                value: TokenFormat.compact(summary.totalTokens),
+                label: "tokens")
+        }
+    }
+
+    private func noun(_ count: Int, _ singular: String) -> String {
+        count == 1 ? singular : singular + "s"
     }
 
     private func path(_ raw: String?) -> String {
@@ -526,17 +688,6 @@ private struct SessionDetailPane: View {
         let span = summary.end.timeIntervalSince(summary.start)
         guard span > summary.activeSeconds * 1.5 else { return active }
         return "\(active) of \(UsageFormatting.duration(span))"
-    }
-
-    private func counters(_ summary: SessionSummary) -> String {
-        var parts = [
-            plural(summary.prompts, "prompt"),
-            "\(summary.apiCalls) API call\(summary.apiCalls == 1 ? "" : "s")",
-            plural(summary.toolCalls, "tool call"),
-        ]
-        if summary.subagentCount > 0 { parts.append(plural(summary.subagentCount, "subagent run")) }
-        if summary.compactions > 0 { parts.append(plural(summary.compactions, "compaction")) }
-        return parts.joined(separator: " · ")
     }
 
     // MARK: Message rows

@@ -11,6 +11,9 @@ struct ModelBreakdownGrid: View {
     let rows: [ModelTokenUsage]
     let colors: [String: Color]
     let pricing: PricingTable
+    /// The sessions detail promotes the cost into its own header KPI —
+    /// it suppresses this centered copy so the number appears once.
+    var showsHeadline = true
     @Binding var hoveredModel: String?
     @State private var costDetail: String?
 
@@ -22,19 +25,21 @@ struct ModelBreakdownGrid: View {
         let total = priced.compactMap { $0.rates?.dollars(for: $0.row.tally) }.reduce(0, +)
         let unpricedCount = priced.count(where: { $0.rates == nil })
         VStack(alignment: .leading, spacing: 2) {
-            // The headline number: what this window would have cost.
-            VStack(spacing: 0) {
-                Text("≈ \(UsageFormatting.money(total))")
-                    .font(.system(size: 18, weight: .semibold).monospacedDigit())
-                    .foregroundStyle(.primary)
-                Text(unpricedCount > 0
-                    ? "at API list prices · \(unpricedCount) unpriced"
-                    : "at API list prices")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+            if showsHeadline {
+                // The headline number: what this window would have cost.
+                VStack(spacing: 0) {
+                    Text("≈ \(UsageFormatting.money(total))")
+                        .font(.system(size: 18, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(.primary)
+                    Text(unpricedCount > 0
+                        ? "at API list prices · \(unpricedCount) unpriced"
+                        : "at API list prices")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 2)
             }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 2)
             columnHeader
             ForEach(priced, id: \.row.id) { entry in
                 modelRow(entry.row, rates: entry.rates)
