@@ -38,6 +38,10 @@ run = "scripts/bundle.sh"
 description = "Sign a binary with the stable identity (arg: path to binary)"
 run = "scripts/sign.sh"
 
+[tasks.icon]
+description = "Render the app icon to .build/icon/AppIcon.icns (cached until scripts/icon.swift changes)"
+run = "scripts/icon.sh"
+
 [tasks.axdump]
 description = "Dump the app's AX tree with frames (arg: pid, default newest ClaudeUsage)"
 run = "swift scripts/axdump.swift"

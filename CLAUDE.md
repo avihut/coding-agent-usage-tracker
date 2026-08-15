@@ -342,6 +342,14 @@ the README rather than silently deviating.
 - Day-to-day: `mise run test` / `mise run cli` / `mise run build` /
   `mise run app` (rebundle + relaunch) / `mise run bundle` (no launch)
   from the worktree.
+- The app icon (the "cursor fuel" mark — mint prompt chevron, block cursor
+  charged yellow→orange to the budget left) has NO checked-in asset:
+  `scripts/icon.swift` draws it in CoreGraphics (512-pt design space mapped
+  onto Apple's 824-pt grid; ≤32 px renders simplify — heavier chevron, no
+  baseline). `scripts/icon.sh` (`mise run icon`) caches the `.icns` at
+  `.build/icon/AppIcon.icns`, regenerating only when the renderer changes;
+  `bundle.sh`/`dist.sh` copy it into `Contents/Resources` and
+  `CFBundleIconFile` points at it. Changing the mark = editing the renderer.
 - Work is milestone-gated (spec §12, mirrored in the session task list):
   stop and show the user at each milestone boundary; don't start the next
   without their go.
