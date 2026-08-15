@@ -134,7 +134,9 @@ the README rather than silently deviating.
   subtotals). These behaviors are the contract — future graphs of this
   shape ship them by construction, not by reimplementation:
   (1) Cost/Tokens SegmentedPicker + series total in the header, no
-  title copy; (2) vertical marker lines at every prompt with ~4pt snap;
+  title copy; (2) vertical marker lines at every prompt with ~4pt snap
+  — and compactions as DASHED primary rules (v0.33.0, the meter reset
+  idiom: same semantic, a context reset; never accent, no snap);
   snapping (or hovering that prompt's list row) lights the whole
   section by CURTAINING everything outside it (windowBackgroundColor
   0.5 — the meter-popover idiom: the highlight is everything else

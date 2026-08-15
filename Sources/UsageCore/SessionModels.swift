@@ -252,21 +252,27 @@ public struct SessionChartModel: Sendable, Equatable {
     /// Heaviest model (by final tokens) first.
     public let models: [ModelSeries]
     public let promptRows: [Int]
+    /// Where the context was compacted — marked on the chart in the meter
+    /// chart's reset idiom (same semantic: a window reset), never as prompt
+    /// lines.
+    public let compactionRows: [Int]
     public let sections: [Section]
 
     public init(
         runningCost: [Double], runningTokens: [Double], models: [ModelSeries],
-        promptRows: [Int], sections: [Section]
+        promptRows: [Int], compactionRows: [Int], sections: [Section]
     ) {
         self.runningCost = runningCost
         self.runningTokens = runningTokens
         self.models = models
         self.promptRows = promptRows
+        self.compactionRows = compactionRows
         self.sections = sections
     }
 
     public static let empty = SessionChartModel(
-        runningCost: [], runningTokens: [], models: [], promptRows: [], sections: [])
+        runningCost: [], runningTokens: [], models: [], promptRows: [],
+        compactionRows: [], sections: [])
 
     public func running(_ measure: SessionChartMeasure) -> [Double] {
         measure == .cost ? runningCost : runningTokens
@@ -289,6 +295,7 @@ public struct SessionChartModel: Sendable, Equatable {
         runningTokens.reserveCapacity(rows.count)
         var tokens = 0
         var promptRows: [Int] = []
+        var compactionRows: [Int] = []
         // A model is priced iff its call rows carry ledger increments; rates
         // are per-model constants, so one row answers for all of them.
         var priced: [String: Bool] = [:]
@@ -298,6 +305,7 @@ public struct SessionChartModel: Sendable, Equatable {
                 priced[model] = priced[model] ?? (ledger[index].incremental != nil)
             }
             if case .prompt = row.kind { promptRows.append(index) }
+            if case .compaction = row.kind { compactionRows.append(index) }
             runningCost.append(ledger[index].running)
             runningTokens.append(Double(tokens))
         }
@@ -345,7 +353,7 @@ public struct SessionChartModel: Sendable, Equatable {
         }
         return SessionChartModel(
             runningCost: runningCost, runningTokens: runningTokens, models: models,
-            promptRows: promptRows, sections: sections)
+            promptRows: promptRows, compactionRows: compactionRows, sections: sections)
     }
 }
 

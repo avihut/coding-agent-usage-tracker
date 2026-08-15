@@ -182,6 +182,15 @@ struct RunningBreakdownChart: View {
                 .foregroundStyle(accent.opacity(promptLineOpacity))
                 .lineStyle(StrokeStyle(lineWidth: 1))
             }
+            // Compactions in the meter chart's reset idiom — dashed primary,
+            // the same semantic (a context window reset), never accent.
+            ForEach(model.compactionRows, id: \.self) { compaction in
+                RuleMark(
+                    x: .value("Message", Double(compaction)),
+                    yStart: .value("Value", 0), yEnd: .value("Value", ceiling))
+                .foregroundStyle(Color.primary.opacity(0.45))
+                .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
+            }
             // Section hover: curtains dim everything outside the prompt's
             // stretch — the undimmed span IS the highlight (meter idiom) —
             // while the prompt's own line goes full strength and the

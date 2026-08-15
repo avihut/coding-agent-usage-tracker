@@ -170,6 +170,7 @@ struct SessionChartModelTests {
         let model = Self.build()
         let rates = try #require(Self.pricing.rates(for: "claude-fable-5"))
         #expect(model.promptRows == [2, 5])
+        #expect(model.compactionRows == [7])
         #expect(model.sections.count == 2)
         #expect(model.sections[0].range == 2..<5)
         #expect(model.sections[0].cost == rates.dollars(for: TokenTally(input: 2000, output: 200)))
