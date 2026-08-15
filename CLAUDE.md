@@ -140,9 +140,9 @@ the README rather than silently deviating.
   .infinity shares — the grid must always FILL the header width and
   stretch with resizes (user-directed; that's why it's an HStack, not
   an adaptive LazyVGrid, which wraps 5+1 under squeeze). Tile styling
-  (v0.38.0–v0.39.0, user-directed): the WHOLE tile wears a light wash
-  of its StatTint (fill 0.1) under a slightly stronger frame (0.3) of
-  the same tint; glyph, value (20pt bold, a touch lighter than
+  (v0.38.0–v0.40.0, user-directed): the WHOLE tile wears a light wash
+  of its StatTint (fill 0.1, hover-deepened to 0.16 over 0.12s) under
+  a slightly stronger frame (0.3) of the same tint; glyph, value (20pt bold, a touch lighter than
   standard label ink in dark), and label stack CENTERED with the
   glyph on its own row (a corner glyph collided with the centered
   value on narrow tiles); the prompts tile wears the provider

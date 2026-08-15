@@ -155,6 +155,8 @@ private struct StatTile: View {
     let value: String
     let label: String
 
+    @State private var hovered = false
+
     /// The KPI number wants a touch more light than the standard label's
     /// 85%-white dark-mode ink; light mode keeps the standard label.
     private static let valueColor = Color(nsColor: NSColor(
@@ -184,11 +186,15 @@ private struct StatTile: View {
         .padding(.vertical, 12)
         .padding(.horizontal, 8)
         .background(
+            // The wash deepens a touch under the cursor — the same quiet
+            // lift the model grid's rows give.
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(tint.opacity(0.1)))
+                .fill(tint.opacity(hovered ? 0.16 : 0.1)))
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .strokeBorder(tint.opacity(0.3), lineWidth: 1))
+        .onHover { hovered = $0 }
+        .animation(.easeOut(duration: 0.12), value: hovered)
     }
 }
 
