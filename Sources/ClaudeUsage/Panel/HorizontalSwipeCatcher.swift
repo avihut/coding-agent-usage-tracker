@@ -65,7 +65,7 @@ struct HorizontalSwipeCatcher: NSViewRepresentable {
 
         /// True when the event was ours — consumed so the panel's scroll
         /// view can't rubber-band sideways under the swipe.
-        private func claim(_ event: NSEvent) -> Bool {
+        fileprivate func claim(_ event: NSEvent) -> Bool {
             guard let window, event.window === window else { return false }
             guard bounds.contains(convert(event.locationInWindow, from: nil))
             else { return false }
@@ -93,6 +93,71 @@ struct HorizontalSwipeCatcher: NSViewRepresentable {
             default:
                 accumulated = 0
             }
+            return true
+        }
+    }
+}
+
+/// The swipe catcher's continuous sibling: streams horizontal pan deltas —
+/// live gesture AND momentum tail, so panning glides — to the handler along
+/// with the view's width, for point→data-unit conversion. Same bounds-scoped
+/// local-monitor mechanics, same reasons.
+struct HorizontalPanCatcher: NSViewRepresentable {
+    /// The catcher goes inert (events pass through) while disabled — the
+    /// unzoomed chart has nothing to pan.
+    var enabled: Bool
+    /// (scrollingDeltaX in points, view width in points).
+    var onPan: (CGFloat, CGFloat) -> Void
+
+    func makeNSView(context: Context) -> PanView {
+        let view = PanView()
+        view.enabled = enabled
+        view.onPan = onPan
+        return view
+    }
+
+    func updateNSView(_ view: PanView, context: Context) {
+        view.enabled = enabled
+        view.onPan = onPan
+    }
+
+    final class PanView: NSView {
+        var enabled = false
+        var onPan: ((CGFloat, CGFloat) -> Void)?
+
+        private var monitor: Any?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            window == nil ? removeMonitor() : installMonitor()
+        }
+
+        deinit {
+            removeMonitor()
+        }
+
+        private func installMonitor() {
+            guard monitor == nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) {
+                [weak self] event in
+                guard let self else { return event }
+                return self.claim(event) ? nil : event
+            }
+        }
+
+        private func removeMonitor() {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
+        }
+
+        private func claim(_ event: NSEvent) -> Bool {
+            guard enabled, let window, event.window === window else { return false }
+            guard bounds.contains(convert(event.locationInWindow, from: nil))
+            else { return false }
+            guard abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY)
+            else { return false }
+            guard event.scrollingDeltaX != 0 else { return true }
+            onPan?(event.scrollingDeltaX, bounds.width)
             return true
         }
     }

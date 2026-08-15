@@ -43,11 +43,12 @@ struct RunningBreakdownChart: View {
     @State private var chartHoverRow: Int?
     /// X-only zoom: the visible span in event units while pinched in; nil =
     /// the whole session. The Y scale never zooms — the vertical range IS
-    /// the story. Zoomed, the chart pans natively (two-finger scroll) and
-    /// the minimap above tracks where the viewport sits.
+    /// the story. Zoomed, two-finger scrolls pan (the pan catcher feeds
+    /// scrollX) and the minimap above tracks where the viewport sits.
     @State private var visibleLength: Double?
-    /// Leading edge of the visible span, in event units — Charts' scroll
-    /// position binding, also driven by minimap scrubbing.
+    /// Leading edge of the visible span, in event units — fed by the pan
+    /// catcher, the pinch anchor math, and minimap scrubbing; the X domain
+    /// derives from it.
     @State private var scrollX: Double = 0
     /// Captured at pinch start so the event under the fingers stays put
     /// while the span stretches around it.
@@ -88,10 +89,15 @@ struct RunningBreakdownChart: View {
                         scrollX = min(max(target, 0), fullLength - length)
                     }
                     .frame(height: 20)
+                    .transition(.opacity)
                 }
                 chart
                     .frame(height: 140)
             }
+            // Scoped to the zoom-presence flip: the minimap fades while the
+            // layout grows/shrinks its slot — continuous pinching inside a
+            // zoom doesn't animate, only entering and leaving one.
+            .animation(.snappy(duration: 0.22), value: visibleLength == nil)
         }
     }
 
@@ -164,22 +170,30 @@ struct RunningBreakdownChart: View {
 
     // MARK: - Chart
 
-    /// The zoom shell: pinch drives the visible span (X only), and while
-    /// zoomed the plot pans with Charts' native horizontal scrolling — the
-    /// full-domain X scale stays put underneath, so the Y range and every
-    /// mark keep their meaning.
+    /// The zoom shell: pinch drives the visible span (X only), panning
+    /// slides it. The zoom IS the X domain — Charts' own scrollable-axes
+    /// machinery never responded to trackpad scrolls here, so the pan
+    /// catcher converts scroll deltas to data units directly and the scale
+    /// re-derives; the Y range never changes.
     private var chart: some View {
-        Group {
-            if let length = visibleLength {
-                chartCore
-                    .chartScrollableAxes(.horizontal)
-                    .chartXVisibleDomain(length: length)
-                    .chartScrollPosition(x: $scrollX)
-            } else {
-                chartCore
-            }
-        }
-        .gesture(magnify)
+        chartCore
+            // Marks beyond the zoom window must not bleed past the plot.
+            .chartPlotStyle { $0.clipped() }
+            .background(HorizontalPanCatcher(enabled: visibleLength != nil) { deltaX, width in
+                guard let length = visibleLength, width > 0 else { return }
+                // Fingers left (negative delta, natural scrolling) slide
+                // the window toward later events.
+                let shift = -Double(deltaX) / Double(width) * length
+                scrollX = min(max(scrollX + shift, 0), fullLength - length)
+            })
+            .gesture(magnify)
+    }
+
+    /// The visible X window: everything unzoomed, the panned span zoomed.
+    private var xDomain: ClosedRange<Double> {
+        guard let length = visibleLength else { return 0...fullLength }
+        let lo = min(max(scrollX, 0), max(fullLength - length, 0))
+        return lo...(lo + length)
     }
 
     private var magnify: some Gesture {
@@ -393,7 +407,7 @@ struct RunningBreakdownChart: View {
             }
         }
         .chartXAxis(.hidden)
-        .chartXScale(domain: 0...Double(count - 1))
+        .chartXScale(domain: xDomain)
         .chartYScale(domain: 0...ceiling * 1.15)
         .chartYAxis {
             AxisMarks(position: .trailing, values: [0, ceiling / 2, ceiling]) { value in
