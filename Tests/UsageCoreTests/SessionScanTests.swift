@@ -68,6 +68,30 @@ private let subagentB = #"""
 {"type":"assistant","timestamp":"2026-08-01T10:12:00.000Z","isSidechain":true,"requestId":"wa1","message":{"id":"wm1","model":"claude-haiku-4-5","usage":{"input_tokens":20,"output_tokens":10}}}
 """#
 
+/// April-era retry shape: u1 and u2 are siblings (same parentUuid), u1 got
+/// no reply — a dead branch left by a retry — while u2's branch continues.
+/// u4 closes the file unanswered: a singleton that must survive. The two
+/// texts DIFFER so the persisted firstPrompt proves it came from the
+/// survivor, not the dead first attempt.
+private let siblingRetryTranscript = #"""
+{"type":"user","timestamp":"2026-04-02T09:00:00.000Z","uuid":"u1","parentUuid":"p0","entrypoint":"cli","cwd":"/Users/dev/proj","message":{"role":"user","content":"Fix the flaky test (dropped attempt)"}}
+{"type":"user","timestamp":"2026-04-02T09:00:05.000Z","uuid":"u2","parentUuid":"p0","message":{"role":"user","content":"Fix the flaky test"}}
+{"type":"assistant","timestamp":"2026-04-02T09:00:30.000Z","uuid":"u3","parentUuid":"u2","requestId":"rr1","message":{"id":"rm1","model":"claude-fable-5","usage":{"input_tokens":100,"output_tokens":40},"content":[{"type":"text","text":"on it"}]}}
+{"type":"user","timestamp":"2026-04-02T09:05:00.000Z","uuid":"u4","parentUuid":"u3","message":{"role":"user","content":"Also update the docs"}}
+"""#
+
+/// Sibling groups the dedup must NOT flatten: a1/a2 both spawned replies
+/// (a genuine fork — both count), and d1/d2 are both dead — the LAST is
+/// kept as the honest latest attempt.
+private let siblingForkTranscript = #"""
+{"type":"user","timestamp":"2026-04-03T09:00:00.000Z","uuid":"a1","parentUuid":"q0","entrypoint":"cli","message":{"role":"user","content":"Attempt one"}}
+{"type":"user","timestamp":"2026-04-03T09:00:10.000Z","uuid":"a2","parentUuid":"q0","message":{"role":"user","content":"Attempt two"}}
+{"type":"assistant","timestamp":"2026-04-03T09:00:20.000Z","uuid":"b1","parentUuid":"a1","requestId":"fr1","message":{"id":"fm1","model":"claude-fable-5","usage":{"input_tokens":50,"output_tokens":20}}}
+{"type":"assistant","timestamp":"2026-04-03T09:00:40.000Z","uuid":"b2","parentUuid":"a2","requestId":"fr2","message":{"id":"fm2","model":"claude-fable-5","usage":{"input_tokens":60,"output_tokens":25}}}
+{"type":"user","timestamp":"2026-04-03T09:01:00.000Z","uuid":"d1","parentUuid":"b2","message":{"role":"user","content":"Dangling first"}}
+{"type":"user","timestamp":"2026-04-03T09:01:05.000Z","uuid":"d2","parentUuid":"b2","message":{"role":"user","content":"Dangling second"}}
+"""#
+
 @Suite("Session scan")
 struct SessionScanTests {
     @Test("one cli transcript rolls up: title chain, counts, models, span, kind")
@@ -215,6 +239,39 @@ struct SessionScanTests {
         #expect(sessions.map { $0.id } == ["newer", "older"])
     }
 
+    @Test("a retry's dead sibling prompt neither counts nor titles")
+    func siblingRetryDedup() throws {
+        let fixture = try SessionFixture()
+        defer { fixture.tearDown() }
+        try fixture.write("retry.jsonl", siblingRetryTranscript)
+
+        let sessions = fixture.scanner.scan(now: scanNow).sessions
+        let s = try #require(sessions.first)
+        // u1 (no descendants, not last of its group) is the dead branch;
+        // u2 and the unanswered EOF singleton u4 count.
+        #expect(s.prompts == 2)
+        // firstPrompt — and therefore the title fallback — comes from the
+        // SURVIVING first prompt, not the dropped attempt.
+        #expect(s.title == "Fix the flaky test")
+        // The dead prompt no longer stretches the session's start.
+        #expect(s.start == at("2026-04-02T09:00:05.000Z"))
+        #expect(s.apiCalls == 1)
+    }
+
+    @Test("sibling forks with replies keep both; double-dead groups keep the last")
+    func siblingForkSurvival() throws {
+        let fixture = try SessionFixture()
+        defer { fixture.tearDown() }
+        try fixture.write("fork.jsonl", siblingForkTranscript)
+
+        let sessions = fixture.scanner.scan(now: scanNow).sessions
+        let s = try #require(sessions.first)
+        // a1 and a2 both have descendants (a real fork — both were billed
+        // work); of the descendant-less d1/d2 pair only the last survives.
+        #expect(s.prompts == 3)
+        #expect(s.apiCalls == 2)
+    }
+
     @Test("a modified transcript re-summarizes")
     func modifiedResummarizes() throws {
         let fixture = try SessionFixture()
@@ -295,6 +352,26 @@ struct SessionDetailTests {
         if case .apiCall = detail.rows[1].kind {} else {
             Issue.record("sidechain usage must still be a call row")
         }
+    }
+
+    @Test("dead sibling prompts leave no row; survivors re-index densely")
+    func siblingRetryRows() throws {
+        let fixture = try SessionFixture()
+        defer { fixture.tearDown() }
+        try fixture.write("retry.jsonl", siblingRetryTranscript)
+        _ = fixture.scanner.scan(now: scanNow)
+
+        let detail = try #require(fixture.scanner.sessionDetail(id: "retry"))
+        #expect(detail.rows.count == 3)
+        // Ids must stay index-aligned after the dead row's removal — the
+        // ledger and span math subscript by them.
+        #expect(detail.rows.enumerated().allSatisfy { $0.offset == $0.element.id })
+        #expect(detail.rows[0].kind == .prompt(preview: "Fix the flaky test"))
+        if case .apiCall = detail.rows[1].kind {} else {
+            Issue.record("the surviving branch's call row must remain")
+        }
+        #expect(detail.rows[2].kind == .prompt(preview: "Also update the docs"))
+        #expect(detail.summary.prompts == 2)
     }
 
     @Test("command output, caveats, and task notifications produce no rows")

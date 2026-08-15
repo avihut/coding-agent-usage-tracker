@@ -71,9 +71,10 @@ public struct TranscriptScanner: Sendable {
     /// slots from growing the cache without limit.
     public static let timelineRetention: TimeInterval = 8 * 86400
 
-    /// v4 (0.30.0): per-file session summaries joined the cache. Bumping this
-    /// discards older caches wholesale — one deliberate full reparse.
-    private static let cacheVersion = 4
+    /// v5 (0.53.0): April-era duplicate sibling prompts dedup at parse time —
+    /// prompt counts persisted under v4 are inflated for those files. Bumping
+    /// this discards older caches wholesale — one deliberate full reparse.
+    private static let cacheVersion = 5
 
     /// Detail rows are bounded only defensively — the largest transcript on
     /// record yields ~1.4K rows; this cap exists for pathological files.
@@ -128,6 +129,8 @@ public struct TranscriptScanner: Sendable {
         let type: String?
         let timestamp: String?
         let requestId: String?
+        let uuid: String?
+        let parentUuid: String?
         let isSidechain: Bool?
         let isMeta: Bool?
         let isCompactSummary: Bool?
@@ -549,6 +552,49 @@ public struct TranscriptScanner: Sendable {
         var truncated = false
     }
 
+    /// A user prompt as first seen in the stream — countable only once the
+    /// whole file's parent links are known (see `survivingPromptIndexes`).
+    private struct PromptCandidate {
+        let uuid: String?
+        let parentUuid: String?
+        let t: Date
+        let preview: String
+        let rowIndex: Int?
+    }
+
+    /// April-era transcripts hold duplicate sibling user records — same
+    /// `parentUuid`, distinct `uuid`s: dead message-tree branches left by
+    /// retries and edits. A sibling prompt with no descendants produced
+    /// nothing and doesn't count. The LAST member of a group always counts
+    /// (a just-submitted prompt at EOF legitimately has no reply yet), and
+    /// prompts without tree ids can't be proven dead, so they count too.
+    /// Dead branches' assistant calls are untouched: those tokens were
+    /// billed, and cost must stay honest.
+    private static func survivingPromptIndexes(
+        candidates: [PromptCandidate], parents: Set<String>
+    ) -> Set<Int> {
+        var groupCounts: [String: Int] = [:]
+        var lastOfGroup: [String: Int] = [:]
+        for (index, candidate) in candidates.enumerated() {
+            guard let parent = candidate.parentUuid else { continue }
+            groupCounts[parent, default: 0] += 1
+            lastOfGroup[parent] = index
+        }
+        var survivors = Set<Int>()
+        for (index, candidate) in candidates.enumerated() {
+            guard let parent = candidate.parentUuid,
+                  groupCounts[parent, default: 0] > 1,
+                  lastOfGroup[parent] != index,
+                  let uuid = candidate.uuid
+            else {
+                survivors.insert(index)
+                continue
+            }
+            if parents.contains(uuid) { survivors.insert(index) }
+        }
+        return survivors
+    }
+
     /// One pass over one transcript. Rules run in a deliberate order: the
     /// metadata/title/prompt rules must see every line BEFORE the usage
     /// keep-rule — `ai-title` records have no timestamp and user records no
@@ -568,6 +614,8 @@ public struct TranscriptScanner: Sendable {
         var toolUseIDs = Set<String>()
         var activeMinutes = Set<Date>()
         var rowIndexByKey: [String: Int] = [:]
+        var promptCandidates: [PromptCandidate] = []
+        var allParentUuids = Set<String>()
         var lineNumber = 0
 
         func touch(_ date: Date) {
@@ -592,6 +640,10 @@ public struct TranscriptScanner: Sendable {
             guard let line = try? decoder.decode(Line.self, from: Data(rawLine)) else {
                 continue
             }
+
+            // Every line's parent link feeds the descendant test that
+            // resolves sibling prompt groups after the loop.
+            if let parent = line.parentUuid { allParentUuids.insert(parent) }
 
             // Identity scalars: first non-nil sticks (cwd verifiably varies
             // mid-session; first-seen is the session's stable identity).
@@ -647,10 +699,13 @@ public struct TranscriptScanner: Sendable {
                     } else if let command = PromptPreview.commandName(text) {
                         _ = appendRow(date, .command(name: command))
                     } else if let preview = PromptPreview.scrub(text) {
-                        meta.prompts += 1
-                        if meta.firstPrompt == nil { meta.firstPrompt = preview }
-                        touch(date)
-                        _ = appendRow(date, .prompt(preview: preview))
+                        // Buffered, not counted: whether this prompt is real
+                        // or a retry's dead sibling is only decidable once
+                        // every parent link has been seen.
+                        promptCandidates.append(PromptCandidate(
+                            uuid: line.uuid, parentUuid: line.parentUuid,
+                            t: date, preview: preview,
+                            rowIndex: appendRow(date, .prompt(preview: preview))))
                     }
                 }
             }
@@ -704,6 +759,30 @@ public struct TranscriptScanner: Sendable {
                 date, .apiCall(model: model, tally: recordTally, toolUses: lineToolUses)),
                let dedupKey = line.requestId ?? line.message?.id {
                 rowIndexByKey[dedupKey] = index
+            }
+        }
+
+        // Prompt candidates resolve now that every parent link is known:
+        // dead retry siblings drop from counts, the first prompt, start/end
+        // reach, and (when collecting) the rows themselves.
+        let survivorIndexes = Self.survivingPromptIndexes(
+            candidates: promptCandidates, parents: allParentUuids)
+        let survivors = survivorIndexes.sorted().map { promptCandidates[$0] }
+        meta.prompts = survivors.count
+        meta.firstPrompt = survivors.first?.preview
+        for candidate in survivors { touch(candidate.t) }
+        if collectRows, survivors.count < promptCandidates.count {
+            let deadRows = Set(promptCandidates.enumerated()
+                .filter { !survivorIndexes.contains($0.offset) }
+                .compactMap { $0.element.rowIndex })
+            if !deadRows.isEmpty {
+                // row.id == its index by construction; rebuild both.
+                var kept: [SessionEvent] = []
+                kept.reserveCapacity(result.rows.count - deadRows.count)
+                for row in result.rows where !deadRows.contains(row.id) {
+                    kept.append(SessionEvent(id: kept.count, t: row.t, kind: row.kind))
+                }
+                result.rows = kept
             }
         }
 
