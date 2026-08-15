@@ -81,6 +81,12 @@ public struct ClaudeActivitySource: LocalActivitySource {
     public func diskUsage(now: Date) -> TranscriptDiskUsage? {
         TranscriptDiskUsage.measure(root: root, now: now)
     }
+
+    public var providesSessions: Bool { true }
+
+    public func sessionDetail(id: String) -> SessionDetail? {
+        transcripts.sessionDetail(id: id)
+    }
 }
 
 /// The retention capability: Claude Code's `cleanupPeriodDays` — the one

@@ -104,6 +104,29 @@ struct UsageProviderTests {
         #expect(ClaudeProvider().accent == ProviderAccent(red: 0.851, green: 0.467, blue: 0.341))
     }
 
+    @Test("session capability: Claude provides, defaults decline")
+    func sessionCapability() throws {
+        let temp = FileManager.default.temporaryDirectory
+            .appending(path: "provider-sessions-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: temp) }
+
+        let claude = ClaudeProvider().makeLocalActivity(cacheDirectory: temp)
+        #expect(claude?.providesSessions == true)
+
+        // Codex and Gemini ride the protocol defaults untouched: no session
+        // capability, empty session lists.
+        let codex = CodexProvider(sessionsRoot: temp.appending(path: "codex"))
+            .makeLocalActivity(cacheDirectory: temp)
+        let gemini = GeminiProvider(tmpRoot: temp.appending(path: "gemini"))
+            .makeLocalActivity(cacheDirectory: temp)
+        for source in [codex, gemini] {
+            let source = try #require(source)
+            #expect(source.providesSessions == false)
+            #expect(source.sessionDetail(id: "anything") == nil)
+            #expect(source.scanTranscripts(now: Date()).sessions.isEmpty)
+        }
+    }
+
     @Test("Claude provider identity: hosts, links, glyph, capabilities")
     func claudeProviderIdentity() {
         let provider = ClaudeProvider()

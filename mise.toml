@@ -30,6 +30,15 @@ run = [
     "open ClaudeUsage.app",
 ]
 
+[tasks.hatch]
+description = "Relaunch the app with launch-hatch args (e.g. mise run hatch -- --sessions)"
+run = [
+    "scripts/bundle.sh",
+    "pkill -x ClaudeUsage || true",
+    "for i in $(seq 1 30); do pgrep -x ClaudeUsage >/dev/null || break; sleep 0.1; done",
+    "open ClaudeUsage.app --args {{arg(name='flags', var=true)}}",
+]
+
 [tasks.bundle]
 description = "Assemble + sign ClaudeUsage.app without launching (arg: release|debug)"
 run = "scripts/bundle.sh"

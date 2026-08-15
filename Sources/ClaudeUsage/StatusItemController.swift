@@ -21,6 +21,7 @@ final class StatusItemController: NSResponder {
     private var outsideClickMonitor: Any?
     private var resignActiveObserver: NSObjectProtocol?
     private var settingsController: SettingsWindowController?
+    private var sessionsController: SessionsWindowController?
     /// A deferrable provider switch (daily auto re-detection) parked while
     /// the panel is open; applied the moment it closes.
     private var pendingStore: UsageStore?
@@ -71,6 +72,9 @@ final class StatusItemController: NSResponder {
                 store: store, registry: registry,
                 onOpenSettings: { [weak self] in
                     self?.showSettings()
+                },
+                onOpenSessions: { [weak self] in
+                    self?.showSessions()
                 }))
         host.sizingOptions = .preferredContentSize
         return host
@@ -86,6 +90,10 @@ final class StatusItemController: NSResponder {
         if popover.isShown { popover.performClose(nil) }
         settingsController?.close()
         settingsController = nil
+        // Close before nil — never dealloc a visible NSWindow — and both
+        // before the outgoing store shuts down under the window's views.
+        sessionsController?.close()
+        sessionsController = nil
         let outgoing = store
         store = newStore
         outgoing.shutdown()
@@ -197,6 +205,15 @@ final class StatusItemController: NSResponder {
             settingsController = SettingsWindowController(store: store, registry: registry)
         }
         settingsController?.show(pane: pane)
+    }
+
+    /// Opens the Sessions window; also the `--sessions` launch hatch.
+    func showSessions() {
+        if popover.isShown { popover.performClose(nil) }
+        if sessionsController == nil {
+            sessionsController = SessionsWindowController(store: store, registry: registry)
+        }
+        sessionsController?.show()
     }
 
     // MARK: - Outside-interaction dismissal

@@ -71,6 +71,43 @@ the README rather than silently deviating.
   provider later = a new UsageProvider implementation + a spec §10
   amendment for its hosts (and for any local trees it reads); the engine,
   history, charts, and panel need zero changes.
+- SESSIONS BROWSER (2026-08-15 v0.30.0, user-directed "axis 3"): a
+  dedicated Sessions NSWindow (SessionsWindowController — the exact
+  SettingsWindowController contract: lazy first-show,
+  isReleasedWhenClosed=false, center() THEN setFrameAutosaveName,
+  activation trio every show, close() registered in
+  StatusItemController.adopt() BEFORE outgoing.shutdown()). Data layer:
+  `TranscriptScan.sessions: [SessionSummary]` — per-file summaries ride
+  the scanner's cache (v4; ONE `cacheVersion` constant now, never three
+  literals) as `SessionFileSummary` (title/firstPrompt≤120-scrubbed/cwd/
+  branch/entrypoint/version/start/end/stretches/prompts/toolCalls/
+  compactions; apiCalls + models stay DERIVED from `days` — never stored
+  twice), merged by path (`/subagents/` substring → part of the `<uuid>`
+  before it; covers workflows depth). TRAPS the design review caught,
+  now load-bearing: (1) `message.content` is a STRING on user lines —
+  `BlockList`'s lenient unkeyed decoder absorbs it; a synthesized
+  `[Block]?` silently drops every command/compaction/prompt line via the
+  loop's `try?`. (2) Metadata rules run BEFORE the usage keep-rule —
+  `ai-title` has no timestamp and would die at the old front guard.
+  (3) Tool counting sees every assistant line BEFORE dedup (streamed
+  lines share usage but carry DISTINCT tool_use blocks; count a per-file
+  id Set). (4) Session active time = sweep-UNION of per-file
+  grace-stitched stretches (subagents run concurrently — summing or
+  re-stitching double-counts). (5) `queue-operation` records duplicate
+  their dequeued user record — ignore entirely. Capability gate:
+  `LocalActivitySource.providesSessions` (default false) +
+  `sessionDetail(id:)` (default nil) — hides the ⋯ "Sessions…" item and
+  window for sessionless providers. Store: `sessions` published in
+  scanActivity's MainActor hop (single-flighted via isScanningActivity),
+  `sessionDetail(id:)` detached at .userInitiated with cancellation
+  propagated (SwiftUI's .task(id:) cancels on selection change — keyed
+  by a composite DetailKey{id, end} so live sessions refresh per scan).
+  `usage-cli sessions [--provider id]` prints the index via
+  `scan(persistCache: false)` — the APP is the cache's sole writer.
+  Background runs: `entrypoint != "cli"` → badge + dim + toggle
+  (default SHOW, user decision; no parent attribution — verified no
+  linkage exists in hook transcripts). `--sessions` launch hatch.
+  Spec §10 amendment lists exactly what the cache may materialize.
 - PROVIDER ACCENTS (2026-08-15 v0.29.0, user-directed): the brand accent
   is provider DATA like the glyph — `UsageProvider.accent:
   ProviderAccent` (pure sRGB components; UsageCore stays UI-framework-

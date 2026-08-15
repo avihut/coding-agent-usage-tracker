@@ -26,21 +26,30 @@ public struct DailyActivity: Codable, Sendable, Equatable, Identifiable {
     }
 }
 
-/// Everything one transcript scan yields: per-day totals for the heatmap plus
-/// the recent per-minute, per-model timeline for limit-window breakdowns.
+/// Everything one transcript scan yields: per-day totals for the heatmap,
+/// the recent per-minute timeline for limit-window breakdowns, and the
+/// per-session rollups for the sessions browser.
 public struct TranscriptScan: Sendable, Equatable {
     public let daily: [DailyActivity]
     /// Sorted by minute; spans at most `TranscriptScanner.timelineRetention`.
     public let timeline: [TokenSlot]
+    /// Sessions sorted by last activity, newest first. Empty for providers
+    /// that don't reconstruct sessions.
+    public let sessions: [SessionSummary]
 
-    public init(daily: [DailyActivity], timeline: [TokenSlot]) {
+    public init(
+        daily: [DailyActivity], timeline: [TokenSlot],
+        sessions: [SessionSummary] = []
+    ) {
         self.daily = daily
         self.timeline = timeline
+        self.sessions = sessions
     }
 }
 
 /// Read-only scanner over Claude Code's machine-local transcripts
-/// (`~/.claude/projects/**/*.jsonl`), feeding the activity heatmap.
+/// (`~/.claude/projects/**/*.jsonl`), feeding the activity heatmap and the
+/// sessions browser.
 ///
 /// Constraints honored: never writes inside `~/.claude`, never touches
 /// credential files, nothing leaves the machine. Its only artifact is an
@@ -62,10 +71,44 @@ public struct TranscriptScanner: Sendable {
     /// slots from growing the cache without limit.
     public static let timelineRetention: TimeInterval = 8 * 86400
 
+    /// v4 (0.30.0): per-file session summaries joined the cache. Bumping this
+    /// discards older caches wholesale — one deliberate full reparse.
+    private static let cacheVersion = 4
+
+    /// Detail rows are bounded only defensively — the largest transcript on
+    /// record yields ~1.4K rows; this cap exists for pathological files.
+    static let detailRowCap = 20_000
+
     private struct DayCount: Codable {
         var tokens: Int
         var messages: Int
         var models: [String: TokenTally] = [:]
+    }
+
+    /// The per-file half of a session. Persisted in the cache, so every field
+    /// is a deliberate materialization decision (spec §10): `firstPrompt` is
+    /// the ONE place scrubbed prompt text (≤ `PromptPreview.maxLength`) may
+    /// persist — full message text never leaves the parser.
+    struct SessionFileSummary: Codable, Equatable {
+        var title: String?
+        var firstPrompt: String?
+        var cwd: String?
+        var gitBranch: String?
+        var entrypoint: String?
+        var version: String?
+        var start: Date?
+        var end: Date?
+        /// Activity runs stitched at parse time with the DEFAULT grace —
+        /// cards can't honor a user grace below it; the detail page reparses
+        /// the main file and can.
+        var stretches: [DateInterval] = []
+        var prompts: Int = 0
+        var toolCalls: Int = 0
+        var compactions: Int = 0
+
+        var isEmpty: Bool {
+            self == SessionFileSummary()
+        }
     }
 
     private struct FileEntry: Codable {
@@ -73,6 +116,7 @@ public struct TranscriptScanner: Sendable {
         let size: Int
         let days: [String: DayCount]
         let slots: [TokenSlot]
+        let session: SessionFileSummary?
     }
 
     private struct CacheFile: Codable {
@@ -81,14 +125,60 @@ public struct TranscriptScanner: Sendable {
     }
 
     private struct Line: Decodable {
+        let type: String?
         let timestamp: String?
         let requestId: String?
+        let isSidechain: Bool?
+        let isMeta: Bool?
+        let isCompactSummary: Bool?
+        let entrypoint: String?
+        let cwd: String?
+        let gitBranch: String?
+        let version: String?
+        let aiTitle: String?
+        let summary: String?
+        let promptSource: String?
         let message: Message?
 
         struct Message: Decodable {
             let id: String?
             let model: String?
             let usage: Usage?
+            let content: BlockList?
+        }
+
+        struct Block: Decodable {
+            let type: String?
+            let id: String?
+        }
+
+        /// `message.content` is a plain string on user lines and an array of
+        /// blocks on assistant lines. A synthesized `[Block]?` would throw
+        /// typeMismatch on the string form — and the parse loop's `try?`
+        /// would silently drop the WHOLE line, losing every command record,
+        /// compaction marker, and typed prompt. This type absorbs the
+        /// mismatch itself, one decode pass, no per-line second decode.
+        struct BlockList: Decodable {
+            let blocks: [Block]
+
+            init(from decoder: Decoder) throws {
+                guard var container = try? decoder.unkeyedContainer() else {
+                    blocks = []
+                    return
+                }
+                var collected: [Block] = []
+                while !container.isAtEnd {
+                    if let block = try? container.decode(Block.self) {
+                        collected.append(block)
+                    } else {
+                        // Non-object item; consume it so the loop advances.
+                        _ = try? container.decode(Ignored.self)
+                    }
+                }
+                blocks = collected
+            }
+
+            private struct Ignored: Decodable {}
         }
 
         struct Usage: Decodable {
@@ -121,8 +211,60 @@ public struct TranscriptScanner: Sendable {
         }
     }
 
+    /// Second decode pass, run ONLY on non-sidechain, non-meta user lines:
+    /// pulls the prompt text without materializing tool_result payloads on
+    /// the assistant-dominated hot path.
+    private struct UserLine: Decodable {
+        let message: UserMessage?
+
+        struct UserMessage: Decodable {
+            let content: TextContent?
+        }
+
+        struct TextContent: Decodable {
+            /// The string itself, or the first text-typed item of an array.
+            let text: String?
+            let hasToolResult: Bool
+
+            init(from decoder: Decoder) throws {
+                if let single = try? decoder.singleValueContainer(),
+                   let string = try? single.decode(String.self) {
+                    text = string
+                    hasToolResult = false
+                    return
+                }
+                guard var container = try? decoder.unkeyedContainer() else {
+                    text = nil
+                    hasToolResult = false
+                    return
+                }
+                var firstText: String?
+                var sawToolResult = false
+                while !container.isAtEnd {
+                    if let item = try? container.decode(Item.self) {
+                        if item.type == "text", firstText == nil { firstText = item.text }
+                        if item.type == "tool_result" { sawToolResult = true }
+                    } else {
+                        _ = try? container.decode(Ignored.self)
+                    }
+                }
+                text = firstText
+                hasToolResult = sawToolResult
+            }
+
+            struct Item: Decodable {
+                let type: String?
+                let text: String?
+            }
+
+            private struct Ignored: Decodable {}
+        }
+    }
+
     /// Synchronous and potentially slow on the first run — call off-main.
-    public func scan(now: Date = Date()) -> TranscriptScan {
+    /// `persistCache: false` is for out-of-process readers (usage-cli): they
+    /// borrow the warm cache but must never race the app's writes.
+    public func scan(now: Date = Date(), persistCache: Bool = true) -> TranscriptScan {
         let fileManager = FileManager.default
         let cache = loadCache()
         let cutoff = now.addingTimeInterval(-Self.timelineRetention)
@@ -141,16 +283,21 @@ public struct TranscriptScanner: Sendable {
             if let cached = cache.files[path], cached.mtime == mtime, cached.size == size {
                 entry = cached
             } else {
-                let parsed = parse(item)
-                entry = FileEntry(mtime: mtime, size: size, days: parsed.days, slots: parsed.slots)
+                let parsed = parseFile(item, collectRows: false) ?? FileParse()
+                entry = FileEntry(
+                    mtime: mtime, size: size, days: parsed.days, slots: parsed.slots,
+                    session: parsed.session)
             }
             // Every pass re-trims, so slots age out of unchanged files too.
             files[path] = FileEntry(
                 mtime: entry.mtime, size: entry.size, days: entry.days,
-                slots: entry.slots.filter { $0.t >= cutoff })
+                slots: entry.slots.filter { $0.t >= cutoff },
+                session: entry.session)
         }
 
-        saveCache(CacheFile(version: 3, files: files))
+        if persistCache {
+            saveCache(CacheFile(version: Self.cacheVersion, files: files))
+        }
 
         var totals: [String: DayCount] = [:]
         var slotTotals: [SlotKey: TokenTally] = [:]
@@ -186,7 +333,158 @@ public struct TranscriptScanner: Sendable {
         let timeline = slotTotals
             .map { TokenSlot(t: $0.key.t, model: $0.key.model, tally: $0.value) }
             .sorted { ($0.t, $0.model) < ($1.t, $1.model) }
-        return TranscriptScan(daily: daily, timeline: timeline)
+        return TranscriptScan(
+            daily: daily, timeline: timeline, sessions: Self.mergeSessions(files: files))
+    }
+
+    /// Full parse of one listed session: fresh main-file rows + summary, with
+    /// subagent counters folded in from the cache (≤ one scan interval stale
+    /// — the next scan repairs it). Nil when the id is unknown, the
+    /// transcript left the disk, or the surrounding task was cancelled.
+    /// Synchronous and slow on multi-MB files — call off-main.
+    public func sessionDetail(id: String) -> SessionDetail? {
+        let cache = loadCache()
+        let mainSuffix = "/\(id).jsonl"
+        let cachedPath = cache.files.keys.first {
+            $0.hasSuffix(mainSuffix) && !$0.contains("/subagents/")
+        }
+        let url = cachedPath.map { URL(fileURLWithPath: $0) } ?? findTranscript(id: id)
+        guard let url, FileManager.default.fileExists(atPath: url.path) else { return nil }
+        guard let parsed = parseFile(url, collectRows: true) else { return nil }
+
+        let mainEntry = FileEntry(
+            mtime: 0, size: 0, days: parsed.days, slots: [], session: parsed.session)
+        let partsMarker = "/\(id)/subagents/"
+        let parts = cache.files.compactMap { path, entry in
+            path.contains(partsMarker) ? entry : nil
+        }
+        guard let summary = Self.buildSummary(id: id, main: mainEntry, parts: parts)
+        else { return nil }
+
+        var rows = parsed.rows
+        if parsed.truncated {
+            rows.append(SessionEvent(
+                id: rows.count, t: summary.end,
+                kind: .command(name: "… breakdown truncated")))
+        }
+        return SessionDetail(summary: summary, rows: rows)
+    }
+
+    /// Cold-cache fallback: the transcript lives one level under a project
+    /// directory, so ~80 stats find it without a tree walk.
+    private func findTranscript(id: String) -> URL? {
+        let fileManager = FileManager.default
+        guard let projects = try? fileManager.contentsOfDirectory(
+            at: root, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])
+        else { return nil }
+        for directory in projects {
+            let candidate = directory.appending(path: "\(id).jsonl")
+            if fileManager.fileExists(atPath: candidate.path) { return candidate }
+        }
+        return nil
+    }
+
+    // MARK: - Session merge
+
+    /// Groups per-file cache entries into sessions. Classification is pure
+    /// path math: everything under `<uuid>/subagents/` (including
+    /// `subagents/workflows/wf_*/`) is a part of session `<uuid>`; top-level
+    /// files ARE their session. Nothing role-related persists in the cache.
+    private static func mergeSessions(files: [String: FileEntry]) -> [SessionSummary] {
+        var mains: [String: FileEntry] = [:]
+        var parts: [String: [FileEntry]] = [:]
+        for (path, entry) in files {
+            if let range = path.range(of: "/subagents/") {
+                let parentDir = String(path[..<range.lowerBound])
+                let id = URL(fileURLWithPath: parentDir).lastPathComponent
+                parts[id, default: []].append(entry)
+            } else {
+                let id = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
+                mains[id] = entry
+            }
+        }
+        // Orphan part groups (main swept, directory lingering) have no
+        // identity and are dropped with their mains-less keys.
+        var sessions: [SessionSummary] = []
+        for (id, main) in mains {
+            if let summary = buildSummary(id: id, main: main, parts: parts[id] ?? []) {
+                sessions.append(summary)
+            }
+        }
+        return sessions.sorted { $0.end > $1.end }
+    }
+
+    private static func buildSummary(
+        id: String, main: FileEntry, parts: [FileEntry]
+    ) -> SessionSummary? {
+        guard let mainMeta = main.session else { return nil }
+        let group = [main] + parts
+
+        var apiCalls = 0
+        var models: [String: TokenTally] = [:]
+        for entry in group {
+            for count in entry.days.values {
+                // DayCount.messages counts exactly the deduped kept lines —
+                // the API-call count, derived instead of stored twice.
+                apiCalls += count.messages
+                for (model, tally) in count.models {
+                    var merged = models[model] ?? TokenTally()
+                    merged.add(tally)
+                    models[model] = merged
+                }
+            }
+        }
+
+        let metas = group.compactMap(\.session)
+        let prompts = metas.reduce(0) { $0 + $1.prompts }
+        // Metadata-only stubs and husks don't list.
+        guard apiCalls > 0 || prompts > 0 else { return nil }
+        guard let start = metas.compactMap(\.start).min(),
+              let end = metas.compactMap(\.end).max()
+        else { return nil }
+
+        let kind: SessionKind =
+            (mainMeta.entrypoint == nil || mainMeta.entrypoint == "cli")
+            ? .interactive : .background
+        return SessionSummary(
+            id: id,
+            title: mainMeta.title ?? mainMeta.firstPrompt ?? String(id.prefix(8)),
+            projectPath: mainMeta.cwd,
+            gitBranch: mainMeta.gitBranch,
+            agentVersion: mainMeta.version,
+            kind: kind,
+            start: start,
+            end: end,
+            activeSeconds: unionSeconds(metas.flatMap(\.stretches)),
+            prompts: prompts,
+            apiCalls: apiCalls,
+            toolCalls: metas.reduce(0) { $0 + $1.toolCalls },
+            subagentCount: parts.count,
+            compactions: metas.reduce(0) { $0 + $1.compactions },
+            models: models)
+    }
+
+    /// Total covered time of possibly-overlapping stretches. A sweep-union,
+    /// NOT a stitch over the concatenation — subagents run concurrently with
+    /// their parent, and summing (or stitching, which requires
+    /// non-overlapping input) would double-count parallel bursts.
+    private static func unionSeconds(_ stretches: [DateInterval]) -> TimeInterval {
+        guard !stretches.isEmpty else { return 0 }
+        let sorted = stretches.sorted { $0.start < $1.start }
+        var total: TimeInterval = 0
+        var runStart = sorted[0].start
+        var runEnd = sorted[0].end
+        for stretch in sorted.dropFirst() {
+            if stretch.start <= runEnd {
+                if stretch.end > runEnd { runEnd = stretch.end }
+            } else {
+                total += runEnd.timeIntervalSince(runStart)
+                runStart = stretch.start
+                runEnd = stretch.end
+            }
+        }
+        total += runEnd.timeIntervalSince(runStart)
+        return total
     }
 
     private struct SlotKey: Hashable {
@@ -194,24 +492,141 @@ public struct TranscriptScanner: Sendable {
         let model: String
     }
 
-    private func parse(_ url: URL) -> (days: [String: DayCount], slots: [TokenSlot]) {
-        guard let content = try? String(contentsOf: url, encoding: .utf8) else { return ([:], []) }
+    // MARK: - Per-file parse
+
+    private struct FileParse {
+        var days: [String: DayCount] = [:]
+        var slots: [TokenSlot] = []
+        var session: SessionFileSummary?
+        var rows: [SessionEvent] = []
+        var truncated = false
+    }
+
+    /// One pass over one transcript. Rules run in a deliberate order: the
+    /// metadata/title/prompt rules must see every line BEFORE the usage
+    /// keep-rule — `ai-title` records have no timestamp and user records no
+    /// usage, so the guard that filters tally lines would eat them first.
+    /// Returns nil only on task cancellation (checked when collecting rows).
+    private func parseFile(_ url: URL, collectRows: Bool) -> FileParse? {
+        guard let data = try? Data(contentsOf: url) else { return FileParse() }
         let decoder = JSONDecoder()
         let formatter = dayFormatter
+        var result = FileParse()
         var days: [String: DayCount] = [:]
         var slots: [SlotKey: TokenTally] = [:]
         var seen = Set<String>()
+        var meta = SessionFileSummary()
+        var aiTitle: String?
+        var legacyTitle: String?
+        var toolUseIDs = Set<String>()
+        var activeMinutes = Set<Date>()
+        var rowIndexByKey: [String: Int] = [:]
+        var lineNumber = 0
 
-        for rawLine in content.split(separator: "\n", omittingEmptySubsequences: true) {
-            guard let line = try? decoder.decode(Line.self, from: Data(rawLine.utf8)),
-                  let usage = line.message?.usage,
-                  let timestamp = line.timestamp,
-                  let date = FlexibleISO8601.date(from: timestamp),
+        func touch(_ date: Date) {
+            if meta.start.map({ date < $0 }) ?? true { meta.start = date }
+            if meta.end.map({ date > $0 }) ?? true { meta.end = date }
+        }
+
+        func appendRow(_ t: Date, _ kind: SessionEvent.Kind) -> Int? {
+            guard collectRows else { return nil }
+            guard result.rows.count < Self.detailRowCap else {
+                result.truncated = true
+                return nil
+            }
+            let index = result.rows.count
+            result.rows.append(SessionEvent(id: index, t: t, kind: kind))
+            return index
+        }
+
+        for rawLine in data.split(separator: UInt8(ascii: "\n")) {
+            lineNumber += 1
+            if collectRows, lineNumber % 2048 == 0, Task.isCancelled { return nil }
+            guard let line = try? decoder.decode(Line.self, from: Data(rawLine)) else {
+                continue
+            }
+
+            // Identity scalars: first non-nil sticks (cwd verifiably varies
+            // mid-session; first-seen is the session's stable identity).
+            if meta.cwd == nil { meta.cwd = line.cwd }
+            if meta.gitBranch == nil { meta.gitBranch = line.gitBranch }
+            if meta.entrypoint == nil { meta.entrypoint = line.entrypoint }
+            if meta.version == nil { meta.version = line.version }
+
+            // Titles: the file's LAST non-blank ai-title represents the
+            // session (they repeat and change mid-file). `summary` records
+            // are a legacy shape kept defensively.
+            if line.type == "ai-title" {
+                if let title = Self.nonBlank(line.aiTitle) { aiTitle = title }
+                continue
+            }
+            if line.type == "summary" {
+                if let title = Self.nonBlank(line.summary) { legacyTitle = title }
+                continue
+            }
+            // Queue operations duplicate their content as a real user record
+            // on dequeue — counting both would double prompts.
+            if line.type == "queue-operation" { continue }
+
+            let date = line.timestamp.flatMap { FlexibleISO8601.date(from: $0) }
+
+            // Tool calls: streamed lines of one API call each carry DISTINCT
+            // tool_use blocks while sharing usage — so this must see every
+            // assistant line, not just dedup winners, and must not require a
+            // timestamp or usage.
+            var lineToolUses = 0
+            if line.type == "assistant", let blocks = line.message?.content?.blocks {
+                for block in blocks where block.type == "tool_use" {
+                    lineToolUses += 1
+                    if let blockID = block.id { toolUseIDs.insert(blockID) }
+                }
+            }
+
+            // Prompts, commands, compactions — non-sidechain user lines only.
+            if line.type == "user", line.isSidechain != true, line.isMeta != true {
+                if line.isCompactSummary == true {
+                    meta.compactions += 1
+                    if let date {
+                        touch(date)
+                        _ = appendRow(date, .compaction)
+                    }
+                } else if let date,
+                          let user = try? decoder.decode(UserLine.self, from: Data(rawLine)),
+                          let content = user.message?.content,
+                          !content.hasToolResult,
+                          let text = content.text, !text.isEmpty {
+                    if Self.isSkippableUserText(text) || line.promptSource == "system" {
+                        // Command output, caveats, task notifications — noise.
+                    } else if let command = PromptPreview.commandName(text) {
+                        _ = appendRow(date, .command(name: command))
+                    } else if let preview = PromptPreview.scrub(text) {
+                        meta.prompts += 1
+                        if meta.firstPrompt == nil { meta.firstPrompt = preview }
+                        touch(date)
+                        _ = appendRow(date, .prompt(preview: preview))
+                    }
+                }
+            }
+
+            // The original keep-rule, predicate unchanged: only timestamped
+            // lines with net token movement count toward tallies.
+            guard let usage = line.message?.usage,
+                  let date,
                   usage.total > 0
             else { continue }
             // Retries/continuations repeat the same request — count it once.
             if let dedupKey = line.requestId ?? line.message?.id {
-                guard seen.insert(dedupKey).inserted else { continue }
+                guard seen.insert(dedupKey).inserted else {
+                    // A later streamed line of an already-counted call: its
+                    // tool_use blocks still belong on that call's row.
+                    if collectRows, lineToolUses > 0, let index = rowIndexByKey[dedupKey],
+                       case .apiCall(let model, let tally, let toolUses) = result.rows[index].kind {
+                        result.rows[index] = SessionEvent(
+                            id: index, t: result.rows[index].t,
+                            kind: .apiCall(model: model, tally: tally, toolUses: toolUses + lineToolUses))
+                    }
+                    continue
+                }
             }
             let model = line.message?.model ?? "unknown"
             let recordTally = TokenTally(
@@ -235,11 +650,53 @@ public struct TranscriptScanner: Sendable {
             var tally = slots[slotKey] ?? TokenTally()
             tally.add(recordTally)
             slots[slotKey] = tally
+
+            touch(date)
+            activeMinutes.insert(minute)
+            if let index = appendRow(
+                date, .apiCall(model: model, tally: recordTally, toolUses: lineToolUses)),
+               let dedupKey = line.requestId ?? line.message?.id {
+                rowIndexByKey[dedupKey] = index
+            }
         }
-        let sorted = slots
+
+        meta.title = aiTitle ?? legacyTitle
+        meta.toolCalls = toolUseIDs.count
+        meta.stretches = Self.stitchedStretches(minutes: activeMinutes)
+
+        result.days = days
+        result.slots = slots
             .map { TokenSlot(t: $0.key.t, model: $0.key.model, tally: $0.value) }
             .sorted { ($0.t, $0.model) < ($1.t, $1.model) }
-        return (days, sorted)
+        result.session = meta.isEmpty ? nil : meta
+        return result
+    }
+
+    /// Active minutes → chronological 60s runs → grace-stitched stretches.
+    /// The sort is load-bearing: `ActivityGrace.stitch` requires
+    /// chronological non-overlapping input and merges garbage silently
+    /// otherwise.
+    private static func stitchedStretches(minutes: Set<Date>) -> [DateInterval] {
+        guard !minutes.isEmpty else { return [] }
+        let runs = minutes.sorted().map { DateInterval(start: $0, duration: 60) }
+        return ActivityGrace.stitch(runs, grace: ActivityGrace.defaultSeconds)
+    }
+
+    private static func nonBlank(_ text: String?) -> String? {
+        guard let text else { return nil }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// Local-command output, caveat wrappers, and background-task
+    /// notifications read as user records but aren't the user speaking.
+    private static func isSkippableUserText(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.hasPrefix("<local-command-stdout>")
+            || trimmed.hasPrefix("<local-command-caveat>")
+            || trimmed.hasPrefix("Caveat:")
+            || trimmed.hasPrefix("[SYSTEM NOTIFICATION")
+            || trimmed.contains("<task-notification>")
     }
 
     private var dayFormatter: DateFormatter {
@@ -254,8 +711,8 @@ public struct TranscriptScanner: Sendable {
     private func loadCache() -> CacheFile {
         guard let data = try? Data(contentsOf: cacheURL),
               let cache = try? JSONDecoder().decode(CacheFile.self, from: data),
-              cache.version == 3
-        else { return CacheFile(version: 3, files: [:]) }
+              cache.version == Self.cacheVersion
+        else { return CacheFile(version: Self.cacheVersion, files: [:]) }
         return cache
     }
 

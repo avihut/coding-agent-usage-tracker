@@ -291,6 +291,20 @@ Non-negotiable; flag rather than work around:
   headers. `oauth_creds.json` and `google_accounts.json` are never read;
   zero network destinations. Its one meter is a LOCAL prompt count against
   a user-assumed daily cap — Google serves no readable usage numbers.
+- Sessions browser (amendment 2026-08-15, v0.30.0): `~/.claude/projects`
+  is read strictly read-only (codifying a read the app has performed since
+  v0.2.0, predating this amendment convention). The session index
+  MATERIALIZES new categories from those transcripts: session titles
+  (Claude Code's own `aiTitle` records), a first-prompt preview (≤120
+  characters, scrubbed of ANSI/data blobs — when no aiTitle exists, the
+  persisted title IS that preview), working directory, git branch,
+  `entrypoint` (interactive vs background classification), Claude Code's
+  version stamp, and activity stretch intervals. All of it persists ONLY in
+  the app's own provider-scoped `activity-cache.json`; the detail page's
+  message rows and their prompt previews are parsed on demand and live
+  in-memory only. Full message text is never persisted anywhere, and
+  nothing leaves the machine. `usage-cli sessions` reads that cache without
+  ever writing it — the app remains the cache's sole writer.
 - The token is never logged, persisted, or included in an error surface.
 - No sandbox entitlement, and no request for entitlements we don't need.
 - Don't install or register anything (login items, launch agents) without asking me

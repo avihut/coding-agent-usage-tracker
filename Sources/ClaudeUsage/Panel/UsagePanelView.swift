@@ -9,6 +9,8 @@ struct UsagePanelView: View {
     var registry: ProviderRegistry
     /// Wired by StatusItemController: closes the panel, opens the window.
     let onOpenSettings: () -> Void
+    /// Same shape for the Sessions window.
+    let onOpenSessions: () -> Void
     /// Coordinate space the row-frame preferences are measured in — the same
     /// view the shared popover attaches to, so its anchor rects line up.
     static let panelSpace = "usage-panel"
@@ -245,6 +247,9 @@ struct UsagePanelView: View {
                 }
                 Toggle("Launch at login", isOn: SettingsBindings.launchAtLogin())
                 Divider()
+                if store.providesSessions {
+                    Button("Sessions…") { onOpenSessions() }
+                }
                 Button("Settings…") { onOpenSettings() }
                 Button("Quit Claude Usage") { NSApp.terminate(nil) }
             } label: {

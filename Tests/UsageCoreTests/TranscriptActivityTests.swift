@@ -187,7 +187,9 @@ struct TranscriptScannerTests {
         try Self.transcript.write(to: root.appending(path: "a.jsonl"), atomically: true, encoding: .utf8)
         try FileManager.default.createDirectory(
             at: scanner.cacheURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try #"{"version":1,"files":{"bogus":{"mtime":0,"size":0,"days":{}}}}"#
+        // The realistic upgrade case: a v3 (pre-sessions) cache is discarded
+        // wholesale and the tree re-parses correctly.
+        try #"{"version":3,"files":{"bogus":{"mtime":0,"size":0,"days":{},"slots":[]}}}"#
             .write(to: scanner.cacheURL, atomically: true, encoding: .utf8)
 
         let scan = scanner.scan(now: Self.scanNow)

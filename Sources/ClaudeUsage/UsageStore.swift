@@ -28,6 +28,9 @@ final class UsageStore {
     /// Recent per-minute, per-model transcript usage; feeds the per-meter
     /// window breakdown in the panel.
     private(set) var tokenTimeline: [TokenSlot] = []
+    /// Per-session rollups from the last transcript scan, newest activity
+    /// first; feeds the Sessions window's sidebar.
+    private(set) var sessions: [SessionSummary] = []
     /// Best pricing table available (live feed, disk cache, or bundled).
     private(set) var pricing: PricingTable
     private(set) var isRefreshingPricing = false
@@ -49,6 +52,10 @@ final class UsageStore {
     private var ledger: RequestLedger
     private var watcher: AgentActivityWatcher?
     private var lastActivityScan: Date?
+    /// Single-flight for transcript scans: a window-open force-scan must not
+    /// overlap an FSEvents-triggered one — two concurrent scans race their
+    /// MainActor assignments and can land stale-last.
+    private var isScanningActivity = false
     private var lastPricingAttempt: Date?
 
     static let defaultInterval: TimeInterval = 300
@@ -65,6 +72,9 @@ final class UsageStore {
     /// no request ledger to fill, no API budget to render, and a manual
     /// refresh is just a disk rescan the trigger gate needn't ration.
     var isLocalProvider: Bool { provider.networkDestinations.isEmpty }
+    /// Gates the Sessions window and its menu item: "none yet" is an empty
+    /// state, "never" hides the feature.
+    var providesSessions: Bool { localActivity?.providesSessions ?? false }
 
     init(provider: any UsageProvider = ClaudeProvider(), service: UsageService? = nil) {
         let bundleID = Bundle.main.bundleIdentifier ?? "com.avihu.ClaudeUsage"
@@ -246,9 +256,10 @@ final class UsageStore {
     /// at most once a minute. A provider without local traces has nothing
     /// to scan — the activity section shows its empty state.
     func scanActivity(force: Bool = false) {
-        guard !isShutDown, let source = localActivity else { return }
+        guard !isShutDown, !isScanningActivity, let source = localActivity else { return }
         if !force, let last = lastActivityScan, Date().timeIntervalSince(last) < 60 { return }
         lastActivityScan = Date()
+        isScanningActivity = true
         Task.detached(priority: .utility) { [weak self] in
             let scan = source.scanTranscripts(now: Date())
             let activity = ActivityMerge.merge(
@@ -267,7 +278,26 @@ final class UsageStore {
                 }
                 _ = ModelPalette.assignment(
                     for: totals.sorted { $0.value > $1.value }.map(\.key))
+                // After the seed, so no render observes sessions first.
+                self?.sessions = scan.sessions
+                self?.isScanningActivity = false
             }
+        }
+    }
+
+    /// Parses one session in full, off-main. Cancellation propagates into
+    /// the parse (SwiftUI cancels its `.task` on selection change — rapid
+    /// sidebar clicking must not stack concurrent multi-MB parses).
+    func sessionDetail(id: String) async -> SessionDetail? {
+        guard !isShutDown, let source = localActivity, source.providesSessions
+        else { return nil }
+        let work = Task.detached(priority: .userInitiated) {
+            source.sessionDetail(id: id)
+        }
+        return await withTaskCancellationHandler {
+            await work.value
+        } onCancel: {
+            work.cancel()
         }
     }
 

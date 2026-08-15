@@ -145,6 +145,19 @@ public protocol LocalActivitySource: Sendable {
     func scanPromptDays() -> [Date: Int]
     /// Disk footprint of the traces, for the retention card's projection.
     func diskUsage(now: Date) -> TranscriptDiskUsage?
+    /// Whether this source reconstructs individual sessions — gates the
+    /// Sessions window and its menu item ("none yet" is an empty state;
+    /// "never" hides the feature).
+    var providesSessions: Bool { get }
+    /// Full parse of one listed session. Nil when the id is unknown or the
+    /// transcript no longer exists on disk. Synchronous and potentially
+    /// slow — call off-main.
+    func sessionDetail(id: String) -> SessionDetail?
+}
+
+extension LocalActivitySource {
+    public var providesSessions: Bool { false }
+    public func sessionDetail(id: String) -> SessionDetail? { nil }
 }
 
 /// The one sanctioned write into an agent's own configuration: how long it
