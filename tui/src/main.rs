@@ -1,16 +1,22 @@
 //! usage-tui: a full-screen terminal face for the metering engine — reads
 //! the live-state digest, computes nothing, fetches nothing, writes
 //! nothing, holds no credential (docs/DAEMON.md). Sized for a tmux pane:
-//! the layout re-plans itself from the pane's shape on every draw.
+//! the layout re-plans itself from the pane's shape on every draw, and the
+//! mouse is first-class (hover readouts, click-to-drill, wheel paging).
 
 mod digest;
 mod layout;
 mod socket;
 mod state;
+mod surfaces;
 mod ui;
 
-use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
-use state::App;
+use ratatui::crossterm::event::{
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, MouseButton,
+    MouseEventKind,
+};
+use ratatui::crossterm::execute;
+use state::{App, Hit, Surface};
 use std::path::PathBuf;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -44,7 +50,7 @@ fn parse_args() -> Result<(PathBuf, PathBuf), String> {
                     "usage-tui — terminal dashboard for the usage engine\n\n",
                     "  --digest <path>   read this live-state.json (default: app support)\n",
                     "  --socket <path>   control socket for commands (default: app support)\n",
-                    "\nkeys: q quit · r refresh · ? help"
+                    "\nkeys: q quit · r refresh · 1-3 meters · [ ] page · esc back · ? help"
                 )
                 .to_owned());
             }
@@ -70,12 +76,15 @@ fn main() {
     // message lands on a working screen (works under panic=abort too).
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
+        let _ = execute!(std::io::stdout(), DisableMouseCapture);
         ratatui::restore();
         default_hook(info);
     }));
 
     let terminal = ratatui::init();
+    let _ = execute!(std::io::stdout(), EnableMouseCapture);
     let result = run(terminal, App::new(digest_path, socket_path, local_offset));
+    let _ = execute!(std::io::stdout(), DisableMouseCapture);
     ratatui::restore();
     if let Err(error) = result {
         eprintln!("usage-tui: {error}");
@@ -91,8 +100,7 @@ fn run(mut terminal: ratatui::DefaultTerminal, mut app: App) -> std::io::Result<
     while !app.quit {
         let mut dirty = false;
 
-        // The digest's mtime is the update signal (design §7: a change
-        // reloads and diffs into place).
+        // The digest's mtime is the update signal (design §7).
         if last_stat.elapsed() >= Duration::from_millis(500) {
             last_stat = Instant::now();
             dirty |= app.poll_digest();
@@ -101,50 +109,152 @@ fn run(mut terminal: ratatui::DefaultTerminal, mut app: App) -> std::io::Result<
             app.notice = Some(reply);
             dirty = true;
         }
-        // A 1s tick redraws clocks and countdowns even when nothing else
-        // moved.
+        // A 1s tick redraws clocks and countdowns even when nothing moved.
         if dirty || last_draw.elapsed() >= Duration::from_secs(1) {
-            terminal.draw(|frame| ui::render(frame, &app, OffsetDateTime::now_utc()))?;
+            terminal.draw(|frame| ui::render(frame, &mut app, OffsetDateTime::now_utc()))?;
             last_draw = Instant::now();
         }
 
-        if !event::poll(Duration::from_millis(250))? {
+        if !event::poll(Duration::from_millis(100))? {
             continue;
         }
+        let mut redraw = true;
         match event::read()? {
-            Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
-                KeyCode::Char('q') => app.quit = true,
-                KeyCode::Esc => {
-                    if app.show_help {
-                        app.show_help = false;
-                    } else {
-                        app.quit = true;
+            Event::Key(key) if key.kind == KeyEventKind::Press => {
+                handle_key(&mut app, key.code, &reply_tx);
+            }
+            Event::Mouse(mouse) => match mouse.kind {
+                MouseEventKind::Moved => {
+                    app.pointer = Some((mouse.column, mouse.row));
+                }
+                MouseEventKind::Down(MouseButton::Left) => {
+                    let hit = app.hits.at(mouse.column, mouse.row).cloned();
+                    if let Some(hit) = hit {
+                        activate(&mut app, hit);
                     }
                 }
-                KeyCode::Char('?') => app.show_help = !app.show_help,
-                KeyCode::Char('r') => {
-                    // The socket blocks up to 3s — keep the loop fluid.
-                    let socket_path = app.socket_path.clone();
-                    let tx = reply_tx.clone();
-                    app.notice = Some("refreshing…".into());
-                    std::thread::spawn(move || {
-                        let reply = match socket::refresh(&socket_path) {
-                            Some(reply) => reply
-                                .message
-                                .unwrap_or_else(|| if reply.ok { "ok".into() } else { "refused".into() }),
-                            None => "engine socket not listening".into(),
-                        };
-                        let _ = tx.send(reply);
-                    });
-                }
-                _ => {}
+                MouseEventKind::ScrollUp => scroll(&mut app, -1),
+                MouseEventKind::ScrollDown => scroll(&mut app, 1),
+                _ => redraw = false,
             },
-            Event::Resize(..) => {
-                terminal.draw(|frame| ui::render(frame, &app, OffsetDateTime::now_utc()))?;
-                last_draw = Instant::now();
-            }
-            _ => {}
+            Event::Resize(..) => {}
+            _ => redraw = false,
+        }
+        if redraw {
+            terminal.draw(|frame| ui::render(frame, &mut app, OffsetDateTime::now_utc()))?;
+            last_draw = Instant::now();
         }
     }
     Ok(())
+}
+
+fn handle_key(app: &mut App, code: KeyCode, reply_tx: &mpsc::Sender<String>) {
+    match code {
+        KeyCode::Char('q') => app.quit = true,
+        KeyCode::Esc | KeyCode::Backspace => {
+            if app.show_help {
+                app.show_help = false;
+            } else if app.scrub.is_some() {
+                app.scrub = None;
+            } else if app.surface != Surface::Dashboard {
+                app.surface = Surface::Dashboard;
+            } else {
+                app.quit = true;
+            }
+        }
+        KeyCode::Char('?') => app.show_help = !app.show_help,
+        KeyCode::Char('r') => {
+            let socket_path = app.socket_path.clone();
+            let tx = reply_tx.clone();
+            app.notice = Some("refreshing…".into());
+            std::thread::spawn(move || {
+                let reply = match socket::refresh(&socket_path) {
+                    Some(reply) => reply
+                        .message
+                        .unwrap_or_else(|| if reply.ok { "ok".into() } else { "refused".into() }),
+                    None => "engine socket not listening".into(),
+                };
+                let _ = tx.send(reply);
+            });
+        }
+        KeyCode::Char(digit @ '1'..='4') => {
+            if let Some(digest) = &app.digest {
+                if let Some(index) = surfaces::meter_index_matching(&digest.meters, digit) {
+                    app.surface = Surface::Meter(index);
+                    app.scrub = None;
+                }
+            }
+        }
+        KeyCode::Tab => {
+            if let (Surface::Meter(index), Some(digest)) = (&app.surface, &app.digest) {
+                if !digest.meters.is_empty() {
+                    app.surface = Surface::Meter((index + 1) % digest.meters.len());
+                    app.scrub = None;
+                }
+            }
+        }
+        KeyCode::Char('[') => page_heatmap(app, 1),
+        KeyCode::Char(']') => page_heatmap(app, -1),
+        KeyCode::Left => step(app, 1),
+        KeyCode::Right => step(app, -1),
+        _ => {}
+    }
+}
+
+/// ←/→ mean "one step into the past/future" for whichever surface is open:
+/// scrub samples on a meter chart, calendar days on a day drill.
+fn step(app: &mut App, direction: i64) {
+    match &app.surface {
+        Surface::Meter(index) => {
+            let len = app
+                .digest
+                .as_ref()
+                .and_then(|d| d.meters.get(*index))
+                .map(|m| m.series.len())
+                .unwrap_or(0);
+            if len == 0 {
+                return;
+            }
+            let current = app.scrub.unwrap_or(0) as i64;
+            let moved = (current + direction).clamp(0, len as i64 - 1);
+            app.scrub = Some(moved as usize);
+        }
+        Surface::Day(day_key) => {
+            if let Some(moved) = surfaces::neighbor_day(day_key, -direction) {
+                app.surface = Surface::Day(moved);
+            }
+        }
+        Surface::Dashboard => {}
+    }
+}
+
+fn page_heatmap(app: &mut App, direction: i64) {
+    let moved = app.heat_page as i64 + direction;
+    app.heat_page = moved.max(0) as usize;
+}
+
+fn scroll(app: &mut App, direction: i64) {
+    match &app.surface {
+        // Wheel over an open meter scrubs; over the dashboard it pages the
+        // heatmap (design §7's wheel grammar).
+        Surface::Meter(_) => step(app, direction),
+        _ => page_heatmap(app, direction),
+    }
+}
+
+fn activate(app: &mut App, hit: Hit) {
+    match hit {
+        Hit::Meter(index) => {
+            app.surface = Surface::Meter(index);
+            app.scrub = None;
+        }
+        Hit::HeatDay(day_key) => app.surface = Surface::Day(day_key),
+        Hit::PageEarlier => page_heatmap(app, 1),
+        Hit::PageLater => page_heatmap(app, -1),
+        Hit::Back => {
+            app.surface = Surface::Dashboard;
+            app.scrub = None;
+        }
+        Hit::ModelRow(_) => {}
+    }
 }

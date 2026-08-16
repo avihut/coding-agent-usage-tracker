@@ -2,9 +2,61 @@
 //! freshness, and the one-line reply channel for socket commands.
 
 use crate::digest::LiveState;
+use ratatui::layout::Rect;
 use std::path::PathBuf;
 use std::time::SystemTime;
 use time::{Duration, OffsetDateTime, UtcOffset};
+
+/// Which surface owns the pane (design §3): the dashboard, or a detail
+/// surface that opened side-by-side (landscape) / replaced the dashboard
+/// with back navigation (portrait).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Surface {
+    Dashboard,
+    /// A meter's chart, by index into `digest.meters`.
+    Meter(usize),
+    /// One day's drill, by its digest dayKey ("2026-08-16").
+    Day(String),
+}
+
+/// One mouse-sensitive region from the LAST draw — the render pass writes
+/// these, the event pass reads them. Terminal UIs hit-test against what
+/// was actually painted, never a parallel geometry model.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Hit {
+    Meter(usize),
+    HeatDay(String),
+    PageEarlier,
+    PageLater,
+    ModelRow(usize),
+    Back,
+}
+
+#[derive(Debug, Default)]
+pub struct HitMap {
+    regions: Vec<(Rect, Hit)>,
+}
+
+impl HitMap {
+    pub fn clear(&mut self) {
+        self.regions.clear();
+    }
+
+    pub fn add(&mut self, rect: Rect, hit: Hit) {
+        self.regions.push((rect, hit));
+    }
+
+    pub fn at(&self, x: u16, y: u16) -> Option<&Hit> {
+        // Later additions win: surfaces paint over the dashboard.
+        self.regions
+            .iter()
+            .rev()
+            .find(|(rect, _)| {
+                x >= rect.x && x < rect.x + rect.width && y >= rect.y && y < rect.y + rect.height
+            })
+            .map(|(_, hit)| hit)
+    }
+}
 
 /// How the pane should speak about engine liveness (design §5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -34,6 +86,17 @@ pub struct App {
     last_modified: Option<SystemTime>,
     pub quit: bool,
     pub show_help: bool,
+    pub surface: Surface,
+    /// Heatmap pages stepped into the past; 0 = the current window.
+    pub heat_page: usize,
+    /// Scrub cursor into the open meter's series (index from the END).
+    pub scrub: Option<usize>,
+    /// Last mouse cell, for hover halos and readouts.
+    pub pointer: Option<(u16, u16)>,
+    /// The pointer resolved against the PREVIOUS frame's hit map — a
+    /// frame's own map doesn't exist until its widgets have registered.
+    pub hover_hit: Option<Hit>,
+    pub hits: HitMap,
 }
 
 impl App {
@@ -48,6 +111,12 @@ impl App {
             last_modified: None,
             quit: false,
             show_help: false,
+            surface: Surface::Dashboard,
+            heat_page: 0,
+            scrub: None,
+            pointer: None,
+            hover_hit: None,
+            hits: HitMap::default(),
         };
         app.reload();
         app

@@ -1,0 +1,347 @@
+//! Detail surfaces (design §3): a meter's window chart and a day's drill.
+//! In landscape they sit beside the dashboard; in portrait they replace it
+//! behind a `← back` header. Readouts are fixed lines — hover and scrub
+//! swap text in place, never reflowing the layout under the cursor.
+
+use crate::digest::{DayRollup, LiveState, LiveMeter};
+use crate::state::{App, Hit};
+use crate::ui::{compact, money, rgb, ramp, DIM, FAINT, WARNING, CRITICAL};
+use ratatui::layout::Rect;
+use ratatui::style::{Modifier, Style};
+use ratatui::symbols;
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Axis, Chart, Dataset, GraphType, Paragraph};
+use ratatui::Frame;
+use time::format_description::BorrowedFormatItem;
+use time::macros::format_description;
+use time::{Date, OffsetDateTime};
+
+pub const DAY_KEY: &[BorrowedFormatItem<'static>] = format_description!("[year]-[month]-[day]");
+
+/// The `← back` affordance both surfaces share in push mode.
+pub fn back_line(app: &mut App, rect: Rect, title: &str) -> Line<'static> {
+    app.hits.add(Rect::new(rect.x, rect.y, 7, 1), Hit::Back);
+    Line::from(vec![
+        Span::styled("← back", Style::new().fg(DIM).add_modifier(Modifier::BOLD)),
+        Span::styled(format!("  {title}"), Style::new().add_modifier(Modifier::BOLD)),
+    ])
+}
+
+// MARK: - Meter surface
+
+pub fn render_meter(
+    frame: &mut Frame,
+    app: &mut App,
+    digest: &LiveState,
+    index: usize,
+    rect: Rect,
+    pushed: bool,
+    now: OffsetDateTime,
+) {
+    let Some(meter) = digest.meters.get(index) else { return };
+    let accent = rgb(digest.engine.accent);
+    let risk = meter.risk.map(rgb);
+    let line_color = risk.unwrap_or(accent);
+
+    let mut lines: Vec<Line> = Vec::new();
+    let title = format!(
+        "{} {}  {}",
+        meter.tag,
+        meter.label,
+        meter
+            .percent
+            .map(|p| format!("{p}%"))
+            .unwrap_or_else(|| "—".into())
+    );
+    if pushed {
+        lines.push(back_line(app, rect, &title));
+    } else {
+        lines.push(Line::from(Span::styled(
+            title,
+            Style::new().add_modifier(Modifier::BOLD),
+        )));
+    }
+    let mut caption: Vec<Span> = Vec::new();
+    if let Some(reset) = &meter.reset_caption {
+        caption.push(Span::styled(reset.clone(), Style::new().fg(DIM)));
+    }
+    if let Some(forecast) = &meter.forecast {
+        if let Some(projected) = forecast.projected_at_reset {
+            caption.push(Span::styled(
+                format!("  proj. {projected}%"),
+                Style::new().fg(line_color),
+            ));
+        }
+        if let Some(text) = &forecast.caption {
+            caption.push(Span::styled(
+                format!("  {text}"),
+                Style::new().fg(risk.unwrap_or(WARNING)),
+            ));
+        }
+    }
+    lines.push(Line::from(caption));
+    let header_rows = lines.len() as u16;
+    frame.render_widget(Paragraph::new(lines), rect);
+
+    // Chart body: measured series in braille, the forecast's trajectory in
+    // dots, over the meter's own window.
+    let chart_area = Rect::new(
+        rect.x,
+        rect.y + header_rows,
+        rect.width,
+        rect.height.saturating_sub(header_rows + 2),
+    );
+    if chart_area.height < 3 || meter.series.is_empty() {
+        return;
+    }
+    let base = meter.series.first().map(|p| p.t).unwrap_or(now);
+    let minutes = |t: OffsetDateTime| (t - base).whole_seconds() as f64 / 60.0;
+    let measured: Vec<(f64, f64)> =
+        meter.series.iter().map(|p| (minutes(p.t), p.percent)).collect();
+    let trajectory: Vec<(f64, f64)> = meter
+        .forecast
+        .iter()
+        .flat_map(|f| f.curve.iter())
+        .map(|p| (minutes(p.t), p.percent))
+        .collect();
+    let x_end = trajectory
+        .last()
+        .map(|p| p.0)
+        .into_iter()
+        .chain(measured.last().map(|p| p.0))
+        .chain(meter.resets_at.map(minutes))
+        .fold(1.0f64, f64::max);
+    let now_x = minutes(now).clamp(0.0, x_end);
+    let now_marker = vec![(now_x, 0.0), (now_x, 25.0), (now_x, 50.0), (now_x, 75.0), (now_x, 100.0)];
+
+    let mut datasets = vec![Dataset::default()
+        .marker(symbols::Marker::Braille)
+        .graph_type(GraphType::Line)
+        .style(Style::new().fg(line_color))
+        .data(&measured)];
+    if !trajectory.is_empty() {
+        datasets.push(
+            Dataset::default()
+                .marker(symbols::Marker::Dot)
+                .graph_type(GraphType::Scatter)
+                .style(Style::new().fg(risk.unwrap_or(DIM)))
+                .data(&trajectory),
+        );
+    }
+    datasets.push(
+        Dataset::default()
+            .marker(symbols::Marker::Dot)
+            .graph_type(GraphType::Scatter)
+            .style(Style::new().fg(FAINT))
+            .data(&now_marker),
+    );
+    let chart = Chart::new(datasets)
+        .x_axis(Axis::default().bounds([0.0, x_end]))
+        .y_axis(
+            Axis::default()
+                .bounds([0.0, 115.0])
+                .labels(["0", "50", "100"])
+                .labels_alignment(ratatui::layout::Alignment::Right)
+                .style(Style::new().fg(FAINT)),
+        );
+    frame.render_widget(chart, chart_area);
+
+    // The session-stretch track under the plot, exhausted tail in red.
+    let track_y = chart_area.y + chart_area.height;
+    if track_y < rect.y + rect.height {
+        let width = chart_area.width.saturating_sub(4) as usize;
+        let mut cells = vec![Span::styled("░".repeat(width), Style::new().fg(FAINT))];
+        if width > 0 && x_end > 0.0 {
+            let mut painted = vec![None::<bool>; width];
+            for stretch in &meter.stretches {
+                let from = ((minutes(stretch.start) / x_end) * width as f64).floor() as usize;
+                let to = ((minutes(stretch.end) / x_end) * width as f64).ceil() as usize;
+                for cell in painted.iter_mut().take(to.min(width)).skip(from.min(width)) {
+                    *cell = Some(stretch.exhausted);
+                }
+            }
+            cells = painted
+                .iter()
+                .map(|cell| match cell {
+                    Some(true) => Span::styled("▬", Style::new().fg(CRITICAL)),
+                    Some(false) => Span::styled("▬", Style::new().fg(line_color)),
+                    None => Span::styled("░", Style::new().fg(FAINT)),
+                })
+                .collect();
+        }
+        frame.render_widget(
+            Paragraph::new(Line::from(cells)),
+            Rect::new(chart_area.x + 4, track_y, chart_area.width.saturating_sub(4), 1),
+        );
+    }
+
+    // Fixed readout line: the scrub cursor's sample, else the freshest one.
+    let readout_y = track_y + 1;
+    if readout_y < rect.y + rect.height {
+        let picked = app
+            .scrub
+            .and_then(|back| meter.series.iter().rev().nth(back))
+            .or(meter.series.last());
+        let text = picked
+            .map(|point| {
+                let local = point.t.to_offset(app.local_offset);
+                format!(
+                    "{:02}:{:02} · {:.0}%{}",
+                    local.hour(),
+                    local.minute(),
+                    point.percent,
+                    if app.scrub.is_some() { "  (←→ scrub, esc back)" } else { "" }
+                )
+            })
+            .unwrap_or_default();
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(text, Style::new().fg(DIM)))),
+            Rect::new(rect.x, readout_y, rect.width, 1),
+        );
+    }
+}
+
+// MARK: - Day surface
+
+pub fn render_day(
+    frame: &mut Frame,
+    app: &mut App,
+    digest: &LiveState,
+    day_key: &str,
+    rect: Rect,
+    pushed: bool,
+) {
+    let day: Option<&DayRollup> = digest.activity.days.iter().find(|d| d.day_key == day_key);
+    let accent = rgb(digest.engine.accent);
+    let mut lines: Vec<Line> = Vec::new();
+    let pretty = Date::parse(day_key, DAY_KEY)
+        .map(|d| format!("{} {} {}", d.weekday(), d.day(), d.month()))
+        .unwrap_or_else(|_| day_key.to_owned());
+    let mut title = pretty;
+    if let Some(day) = day {
+        title.push_str(&format!(" · {} tok", compact(day.tokens)));
+        if let Some(cost) = day.cost {
+            title.push_str(&format!(" · {}", money(cost)));
+        }
+        if day.prompts > 0 {
+            title.push_str(&format!(" · {} prompts", day.prompts));
+        }
+    }
+    if pushed {
+        lines.push(back_line(app, rect, &title));
+    } else {
+        lines.push(Line::from(Span::styled(
+            title,
+            Style::new().add_modifier(Modifier::BOLD),
+        )));
+    }
+    lines.push(Line::default());
+
+    // Hourly bars while the timeline still holds the day (~8 days), an
+    // honest label past that horizon (design §4: degrade, labeled).
+    if let Some(hours) = digest
+        .activity
+        .hour_days
+        .iter()
+        .find(|entry| entry.day_key == day_key)
+    {
+        let mut buckets = [0i64; 24];
+        for bucket in &hours.hours {
+            if (bucket.hour as usize) < 24 {
+                buckets[bucket.hour as usize] = bucket.tokens;
+            }
+        }
+        let max = buckets.iter().copied().max().unwrap_or(0).max(1);
+        let glyphs = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+        let cell = ((rect.width as usize) / 26).clamp(1, 3);
+        let mut spark: Vec<Span> = Vec::new();
+        for tokens in buckets {
+            spark.push(if tokens == 0 {
+                Span::styled("·".repeat(cell), Style::new().fg(FAINT))
+            } else {
+                let step = (((tokens * 7 + max - 1) / max) as usize).min(7);
+                Span::styled(glyphs[step].to_string().repeat(cell), Style::new().fg(accent))
+            });
+        }
+        lines.push(Line::from(spark));
+        lines.push(Line::from(Span::styled(
+            format!("{:<width$}12{:>width$}", "0", "23", width = cell * 12 - 1),
+            Style::new().fg(FAINT),
+        )));
+    } else if day.is_some() {
+        lines.push(Line::from(Span::styled(
+            "hourly detail is kept ~8 days — totals only for this day",
+            Style::new().fg(FAINT),
+        )));
+    } else {
+        lines.push(Line::from(Span::styled(
+            "no recorded activity on this day",
+            Style::new().fg(FAINT),
+        )));
+    }
+    lines.push(Line::default());
+
+    // Per-model table inside the 35-day drill horizon; labeled beyond.
+    match digest
+        .activity
+        .model_days
+        .iter()
+        .find(|entry| entry.day_key == day_key)
+    {
+        Some(models) => {
+            lines.push(Line::from(Span::styled(
+                "MODELS".to_owned(),
+                Style::new().fg(DIM).add_modifier(Modifier::BOLD),
+            )));
+            for model in models.models.iter().take(6) {
+                let name_width = (rect.width as usize).saturating_sub(22).clamp(8, 24);
+                lines.push(Line::from(vec![
+                    Span::styled("● ", Style::new().fg(rgb(model.color))),
+                    Span::styled(
+                        format!("{:<name_width$}", crate::ui::truncate(&model.display_name, name_width)),
+                        Style::new(),
+                    ),
+                    Span::styled(
+                        format!("{:>7}", compact(model.tally.total())),
+                        Style::new().fg(DIM),
+                    ),
+                    Span::styled(
+                        format!(
+                            "{:>9}",
+                            model.cost.map(money).unwrap_or_else(|| "—".into())
+                        ),
+                        Style::new(),
+                    ),
+                ]));
+            }
+        }
+        None if day.is_some() => {
+            lines.push(Line::from(Span::styled(
+                "per-model detail is kept ~35 days — totals only",
+                Style::new().fg(FAINT),
+            )));
+        }
+        None => {}
+    }
+
+    frame.render_widget(Paragraph::new(lines), rect);
+    let _ = ramp; // shared palette helper reserved for the hover halo pass
+}
+
+/// The next/previous calendar day key — the drill's ←→ stepping.
+pub fn neighbor_day(day_key: &str, step: i64) -> Option<String> {
+    let date = Date::parse(day_key, DAY_KEY).ok()?;
+    let moved = date.checked_add(time::Duration::days(step))?;
+    moved.format(DAY_KEY).ok()
+}
+
+/// Landscape opens a surface beside the dashboard when the split leaves
+/// both regions viable; anything narrower pushes (design §3).
+pub fn split_viable(area: Rect) -> bool {
+    area.width >= 84 && crate::layout::shape(area) == crate::layout::Shape::Landscape
+}
+
+pub fn meter_index_matching(meters: &[LiveMeter], digit: char) -> Option<usize> {
+    let index = (digit as usize).checked_sub('1' as usize)?;
+    (index < meters.len()).then_some(index)
+}
