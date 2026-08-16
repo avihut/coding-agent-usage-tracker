@@ -111,7 +111,7 @@ fn parse_args() -> Result<(PathBuf, PathBuf), String> {
                     "usage-tui — terminal dashboard for the usage engine\n\n",
                     "  --digest <path>   read this live-state.json (default: app support)\n",
                     "  --socket <path>   control socket for commands (default: app support)\n",
-                    "\nkeys: q quit · r refresh · 1-3 meters · [ ] page · esc back · ? help"
+                    "\nkeys: q quit · r refresh · arrows move the cursor, enter opens · 1-3 meters · [ ] page · esc back · ? help"
                 )
                 .to_owned());
             }
@@ -192,10 +192,12 @@ fn run(mut terminal: ratatui::DefaultTerminal, mut app: App) -> std::io::Result<
             Event::Mouse(mouse) => match mouse.kind {
                 MouseEventKind::Moved => {
                     app.pointer = Some((mouse.column, mouse.row));
+                    let was_keyboard = app.keyboard_mode;
+                    app.keyboard_mode = false;
                     // Repaint only when the hover target actually changed —
                     // waving the mouse over dead space costs nothing.
                     let target = app.hits.at(mouse.column, mouse.row).cloned();
-                    redraw = target != app.hover_hit;
+                    redraw = was_keyboard || target != app.hover_hit;
                 }
                 MouseEventKind::Down(MouseButton::Left) => {
                     let hit = app.hits.at(mouse.column, mouse.row).cloned();
@@ -224,12 +226,20 @@ fn handle_key(app: &mut App, code: KeyCode, reply_tx: &mpsc::Sender<String>) {
         KeyCode::Esc | KeyCode::Backspace => {
             if app.show_help {
                 app.show_help = false;
+            } else if app.keyboard_mode && app.focus_hit.is_some() {
+                // Dismiss the visible keyboard cursor before anything else.
+                app.focus_hit = None;
             } else if app.scrub.is_some() {
                 app.scrub = None;
             } else if app.surface != Surface::Dashboard {
                 app.surface = Surface::Dashboard;
             } else {
                 app.quit = true;
+            }
+        }
+        KeyCode::Enter | KeyCode::Char(' ') => {
+            if let Some(hit) = app.hover_hit.clone() {
+                activate(app, hit);
             }
         }
         KeyCode::Char('?') => app.show_help = !app.show_help,
@@ -265,9 +275,34 @@ fn handle_key(app: &mut App, code: KeyCode, reply_tx: &mpsc::Sender<String>) {
         }
         KeyCode::Char('[') => page_heatmap(app, 1),
         KeyCode::Char(']') => page_heatmap(app, -1),
-        KeyCode::Left => step(app, 1),
-        KeyCode::Right => step(app, -1),
+        // Horizontal arrows keep each detail surface's own grammar
+        // (scrub samples, step days); everywhere else all four arrows
+        // drive the keyboard cursor across the hit map.
+        KeyCode::Left => match app.surface {
+            Surface::Dashboard => focus_move(app, -1, 0),
+            _ => step(app, 1),
+        },
+        KeyCode::Right => match app.surface {
+            Surface::Dashboard => focus_move(app, 1, 0),
+            _ => step(app, -1),
+        },
+        KeyCode::Up => focus_move(app, 0, -1),
+        KeyCode::Down => focus_move(app, 0, 1),
         _ => {}
+    }
+}
+
+/// Move the keyboard cursor spatially over LAST frame's hit map — the
+/// same geometry mouse hover resolves against. At an edge the cursor
+/// stays put rather than wrapping.
+fn focus_move(app: &mut App, dx: i32, dy: i32) {
+    app.keyboard_mode = true;
+    let origin = app
+        .focus_hit
+        .as_ref()
+        .and_then(|hit| app.hits.rect_of(hit));
+    if let Some(next) = app.hits.spatial_next(origin, dx, dy) {
+        app.focus_hit = Some(next);
     }
 }
 

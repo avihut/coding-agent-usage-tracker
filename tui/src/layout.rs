@@ -57,16 +57,31 @@ fn wants(meter_count: usize, model_count: usize) -> Wants {
 }
 
 pub fn plan(area: Rect, meter_count: usize, model_count: usize) -> Plan {
+    let want = wants(meter_count, model_count);
     match shape(area) {
         Shape::Strip => Plan::default(),
-        Shape::Portrait => portrait(area, wants(meter_count, model_count)),
-        Shape::Landscape => landscape(area, wants(meter_count, model_count)),
+        // A blank row between sections is a luxury, bought only when it
+        // costs nothing: whichever plan lands more sections wins, and
+        // the breathing room breaks the tie.
+        Shape::Portrait => pick(portrait(area, &want, 1), portrait(area, &want, 0)),
+        Shape::Landscape => pick(landscape(area, &want, 1), landscape(area, &want, 0)),
     }
+}
+
+fn landed(plan: &Plan) -> usize {
+    [plan.meters, plan.today, plan.models, plan.heatmap]
+        .iter()
+        .filter(|section| section.is_some())
+        .count()
+}
+
+fn pick(gapped: Plan, tight: Plan) -> Plan {
+    if landed(&tight) > landed(&gapped) { tight } else { gapped }
 }
 
 /// One column, priority flow top-down; heatmap absorbs the remainder when
 /// at least 6 rows of it survive.
-fn portrait(area: Rect, want: Wants) -> Plan {
+fn portrait(area: Rect, want: &Wants, gap: u16) -> Plan {
     let mut plan = Plan::default();
     let mut y = area.y;
     let bottom = area.y + area.height;
@@ -76,7 +91,7 @@ fn portrait(area: Rect, want: Wants) -> Plan {
             return None;
         }
         let rect = Rect::new(area.x, *y, area.width, rows);
-        *y += rows;
+        *y += rows + gap;
         Some(rect)
     };
 
@@ -94,7 +109,7 @@ fn portrait(area: Rect, want: Wants) -> Plan {
 
 /// Two columns: identity + meters + today on the left, models + the
 /// heatmap strip on the right; the footer spans the bottom.
-fn landscape(area: Rect, want: Wants) -> Plan {
+fn landscape(area: Rect, want: &Wants, gap: u16) -> Plan {
     let mut plan = Plan::default();
     let body_height = area.height - 1;
     let left_width = (area.width / 2).clamp(30, 46);
@@ -113,7 +128,7 @@ fn landscape(area: Rect, want: Wants) -> Plan {
             return None;
         }
         let rect = Rect::new(left.x, *y, left.width, rows);
-        *y += rows;
+        *y += rows + gap;
         Some(rect)
     };
     plan.header = take(2, &mut y);
@@ -124,7 +139,7 @@ fn landscape(area: Rect, want: Wants) -> Plan {
     let right_bottom = right.y + right.height;
     if ry + want.models <= right_bottom {
         plan.models = Some(Rect::new(right.x, ry, right.width, want.models));
-        ry += want.models;
+        ry += want.models + gap;
     }
     let remaining = right_bottom.saturating_sub(ry);
     if remaining >= 5 {
@@ -188,6 +203,26 @@ mod tests {
         assert!(short.heatmap.is_none());
         let footer = short.footer.unwrap();
         assert_eq!(footer.y, 21);
+    }
+
+    #[test]
+    fn sections_breathe_when_the_room_is_free() {
+        // 46×30 portrait has rows to spare: every neighbor pair sits a
+        // blank row apart.
+        let plan = plan(rect(46, 30), 3, 4);
+        let (meters, today) = (plan.meters.unwrap(), plan.today.unwrap());
+        assert_eq!(today.y, meters.y + meters.height + 1);
+        assert!(plan.heatmap.is_some());
+    }
+
+    #[test]
+    fn breathing_room_is_surrendered_before_a_section_is() {
+        // 46×24 portrait: gapped planning would push the heatmap under
+        // its 6-row minimum, so the tight plan wins and keeps it.
+        let plan = plan(rect(46, 24), 3, 4);
+        assert!(plan.heatmap.is_some(), "the gap must never cost a section");
+        let (meters, today) = (plan.meters.unwrap(), plan.today.unwrap());
+        assert_eq!(today.y, meters.y + meters.height);
     }
 
     #[test]

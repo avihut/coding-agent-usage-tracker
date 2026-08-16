@@ -171,9 +171,28 @@ pub fn truncate(text: &str, width: usize) -> String {
 }
 
 pub fn render(frame: &mut Frame, app: &mut App, now: OffsetDateTime) {
-    app.hover_hit = app
-        .pointer
-        .and_then(|(x, y)| app.hits.at(x, y).cloned());
+    // The effective hot element: mouse hover or the keyboard cursor,
+    // whichever device spoke last. A cursor whose target vanished from
+    // the last frame (paged away, surface changed) is dropped, never
+    // ghosted. Everything hover-reactive reads hover_hit, so the
+    // keyboard cursor inherits every hover treatment.
+    let mouse = app.pointer.and_then(|(x, y)| app.hits.at(x, y).cloned());
+    let focus = app
+        .focus_hit
+        .take()
+        .filter(|hit| app.hits.rect_of(hit).is_some());
+    app.hover_hit = if app.keyboard_mode {
+        focus.clone().or(mouse)
+    } else {
+        mouse.or(focus.clone())
+    };
+    // The halo band is painted after the widgets, from last frame's
+    // geometry — the same one the hit resolved against.
+    let halo = app
+        .hover_hit
+        .as_ref()
+        .and_then(|hit| app.hits.rect_of(hit));
+    app.focus_hit = focus;
     app.hits.clear();
     let area = frame.area();
     let Some(digest) = app.digest.clone() else {
@@ -213,6 +232,24 @@ pub fn render(frame: &mut Frame, app: &mut App, now: OffsetDateTime) {
     }
     if app.show_help {
         render_help(frame, area);
+    } else if let Some(rect) = halo {
+        reverse_band(frame, rect);
+    }
+}
+
+/// The selection halo: REVERSED over the hot element's band, on top of
+/// whatever the widgets painted (idempotent with the heat day's own
+/// reversed cell — modifiers are flags). Works in NO_COLOR and ASCII
+/// dialects, which is the point: it needs no color and no mouse.
+fn reverse_band(frame: &mut Frame, rect: Rect) {
+    let area = frame.area();
+    let buffer = frame.buffer_mut();
+    for y in rect.top()..rect.bottom().min(area.bottom()) {
+        for x in rect.left()..rect.right().min(area.right()) {
+            if let Some(cell) = buffer.cell_mut(ratatui::layout::Position::new(x, y)) {
+                cell.set_style(Style::new().add_modifier(Modifier::REVERSED));
+            }
+        }
     }
 }
 
@@ -860,11 +897,12 @@ fn render_help(frame: &mut Frame, area: Rect) {
         Line::raw(""),
         Line::raw("q           quit"),
         Line::raw("r           ask the engine to refresh now"),
+        Line::raw("arrows      move the cursor; enter/space opens"),
         Line::raw("1-3 / click open a meter's window chart"),
         Line::raw("click a day drill into it; ←→ step days"),
         Line::raw("[ ]         page the heatmap into the past"),
         Line::raw("←→          scrub the open meter chart"),
-        Line::raw("esc         back (surface → dashboard → quit)"),
+        Line::raw("esc         back (cursor → surface → quit)"),
         Line::raw("mouse       hover readouts · wheel pages/scrubs"),
         Line::raw("?           toggle this help"),
     ];

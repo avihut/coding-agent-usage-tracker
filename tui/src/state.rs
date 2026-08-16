@@ -79,6 +79,51 @@ impl HitMap {
             })
             .map(|(_, hit)| hit)
     }
+
+    /// Where a hit was painted last frame (later additions win, like `at`).
+    pub fn rect_of(&self, hit: &Hit) -> Option<Rect> {
+        self.regions
+            .iter()
+            .rev()
+            .find(|(_, painted)| painted == hit)
+            .map(|(rect, _)| *rect)
+    }
+
+    /// The keyboard cursor's move: from the origin rect, the best target
+    /// in the (dx, dy) direction — nearest by progress along the arrow,
+    /// with off-axis drift penalized so columns and rows stay "straight".
+    /// No origin (first arrow press) summons the cursor to the topmost-
+    /// leftmost target.
+    pub fn spatial_next(&self, from: Option<Rect>, dx: i32, dy: i32) -> Option<Hit> {
+        // Doubled coordinates keep centers integral.
+        let center = |rect: &Rect| -> (i32, i32) {
+            (
+                2 * i32::from(rect.x) + i32::from(rect.width),
+                2 * i32::from(rect.y) + i32::from(rect.height),
+            )
+        };
+        let Some(origin) = from else {
+            return self
+                .regions
+                .iter()
+                .min_by_key(|(rect, _)| (rect.y, rect.x))
+                .map(|(_, hit)| hit.clone());
+        };
+        let (ox, oy) = center(&origin);
+        self.regions
+            .iter()
+            .filter_map(|(rect, hit)| {
+                let (cx, cy) = center(rect);
+                let along = (cx - ox) * dx + (cy - oy) * dy;
+                if along <= 0 {
+                    return None;
+                }
+                let across = ((cx - ox) * dy).abs() + ((cy - oy) * dx).abs();
+                Some((along + across * 3, hit))
+            })
+            .min_by_key(|(score, _)| *score)
+            .map(|(_, hit)| hit.clone())
+    }
 }
 
 /// How the pane should speak about engine liveness (design §5).
@@ -116,9 +161,19 @@ pub struct App {
     pub scrub: Option<usize>,
     /// Last mouse cell, for hover halos and readouts.
     pub pointer: Option<(u16, u16)>,
-    /// The pointer resolved against the PREVIOUS frame's hit map — a
-    /// frame's own map doesn't exist until its widgets have registered.
+    /// The EFFECTIVE hot element — mouse hover or keyboard focus,
+    /// whichever device spoke last — resolved against the PREVIOUS
+    /// frame's hit map (a frame's own map doesn't exist until its
+    /// widgets have registered). Every hover treatment reads this, so
+    /// the keyboard cursor gets halos and readouts for free.
     pub hover_hit: Option<Hit>,
+    /// The keyboard cursor: arrows move it across the hit map, Enter
+    /// activates it. It exists so hover interactions work in terminals
+    /// that never report mouse motion (and without a mouse at all).
+    pub focus_hit: Option<Hit>,
+    /// True after a navigation key, false after mouse motion — decides
+    /// which of focus/hover wins `hover_hit` when both exist.
+    pub keyboard_mode: bool,
     pub hits: HitMap,
 }
 
@@ -139,6 +194,8 @@ impl App {
             scrub: None,
             pointer: None,
             hover_hit: None,
+            focus_hit: None,
+            keyboard_mode: false,
             hits: HitMap::default(),
         };
         app.reload();
@@ -240,6 +297,41 @@ mod tests {
             app.freshness(datetime!(2026-08-16 12:00 UTC)),
             Freshness::EngineOffline
         );
+    }
+
+    #[test]
+    fn spatial_navigation_walks_the_hit_map() {
+        // A dashboard in miniature: three meter rows, two heat days
+        // beneath, a pager beside the days.
+        let mut hits = HitMap::default();
+        hits.add(Rect::new(0, 2, 40, 1), Hit::Meter(0));
+        hits.add(Rect::new(0, 3, 40, 1), Hit::Meter(1));
+        hits.add(Rect::new(0, 4, 40, 1), Hit::Meter(2));
+        hits.add(Rect::new(2, 8, 2, 1), Hit::HeatDay("2026-08-10".into()));
+        hits.add(Rect::new(5, 8, 2, 1), Hit::HeatDay("2026-08-11".into()));
+        hits.add(Rect::new(12, 8, 1, 1), Hit::PageEarlier);
+
+        // No origin: the cursor is summoned to the topmost target.
+        assert_eq!(hits.spatial_next(None, 0, 1), Some(Hit::Meter(0)));
+        // Straight down the meter column.
+        let from = hits.rect_of(&Hit::Meter(0));
+        assert_eq!(hits.spatial_next(from, 0, 1), Some(Hit::Meter(1)));
+        // Down from a full-width meter lands on whatever sits nearest its
+        // CENTER on the next band — here the pager, not the leftmost day.
+        let from = hits.rect_of(&Hit::Meter(2));
+        assert_eq!(hits.spatial_next(from, 0, 1), Some(Hit::PageEarlier));
+        // Right walks days before reaching the farther pager.
+        let from = hits.rect_of(&Hit::HeatDay("2026-08-10".into()));
+        assert_eq!(
+            hits.spatial_next(from, 1, 0),
+            Some(Hit::HeatDay("2026-08-11".into()))
+        );
+        // Up from a day returns to the meters.
+        let from = hits.rect_of(&Hit::HeatDay("2026-08-10".into()));
+        assert_eq!(hits.spatial_next(from, 0, -1), Some(Hit::Meter(2)));
+        // Nothing above the first meter: the cursor stays put (None).
+        let from = hits.rect_of(&Hit::Meter(0));
+        assert_eq!(hits.spatial_next(from, 0, -1), None);
     }
 
     #[test]

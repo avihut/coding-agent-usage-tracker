@@ -17,6 +17,9 @@ use time::macros::format_description;
 use time::{Date, OffsetDateTime};
 
 pub const DAY_KEY: &[BorrowedFormatItem<'static>] = format_description!("[year]-[month]-[day]");
+const AXIS_TIME: &[BorrowedFormatItem<'static>] = format_description!("[hour]:[minute]");
+const AXIS_DAY: &[BorrowedFormatItem<'static>] =
+    format_description!("[day padding:none].[month padding:none]");
 
 /// The `← back` affordance both surfaces share in push mode.
 pub fn back_line(app: &mut App, rect: Rect, title: &str) -> Line<'static> {
@@ -135,12 +138,41 @@ pub fn render_meter(
             .style(crate::ui::style(FAINT))
             .data(&now_marker),
     );
+    // Axis labels arrive with size: a roomy pane earns time marks along
+    // the bottom and a finer percent ladder; a tight one keeps every row
+    // for the plot. ratatui spreads labels EVENLY across the bounds, so
+    // honesty is arithmetic: the y top is 112.5 (overshoot headroom) and
+    // ten 12.5-steps put real values under "50" and "100", blanks between.
+    let x_labeled = chart_area.width >= 44 && chart_area.height >= 9;
+    let mut x_axis = Axis::default().bounds([0.0, x_end]);
+    if x_labeled {
+        let marks: usize = if chart_area.width >= 76 { 5 } else { 3 };
+        let format = if x_end <= 36.0 * 60.0 { AXIS_TIME } else { AXIS_DAY };
+        let labels: Vec<Span> = (0..marks)
+            .map(|mark| {
+                let minutes_in = x_end * mark as f64 / (marks - 1) as f64;
+                let at = base + time::Duration::seconds((minutes_in * 60.0) as i64);
+                Span::styled(
+                    at.to_offset(app.local_offset)
+                        .format(format)
+                        .unwrap_or_default(),
+                    crate::ui::style(FAINT),
+                )
+            })
+            .collect();
+        x_axis = x_axis.labels(labels).style(crate::ui::style(FAINT));
+    }
+    let y_labels: Vec<&str> = if chart_area.height >= 14 {
+        vec!["0", "", "25", "", "50", "", "75", "", "100", ""]
+    } else {
+        vec!["0", "", "", "", "50", "", "", "", "100", ""]
+    };
     let chart = Chart::new(datasets)
-        .x_axis(Axis::default().bounds([0.0, x_end]))
+        .x_axis(x_axis)
         .y_axis(
             Axis::default()
-                .bounds([0.0, 115.0])
-                .labels(["0", "50", "100"])
+                .bounds([0.0, 112.5])
+                .labels(y_labels)
                 .labels_alignment(ratatui::layout::Alignment::Right)
                 .style(crate::ui::style(FAINT)),
         );

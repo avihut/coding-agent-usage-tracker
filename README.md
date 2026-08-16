@@ -152,9 +152,12 @@ mise run tui-test   # digest contract + layout tests
 
 Detail surfaces open from the dashboard: click a meter (or `1-3`) for its
 window chart — measured percent in braille, forecast trajectory, session
-stretches, `←→` scrub — and click a heatmap day to drill into hourly bars
-and per-model rows (`[ ]` pages the calendar; everything hovers). For the
-tmux status bar, `usage-tui --status` prints one colored segment line:
+stretches, `←→` scrub, time and percent axis labels once the pane affords
+them — and click a heatmap day to drill into hourly bars and per-model
+rows (`[ ]` pages the calendar; everything hovers). No mouse needed: the
+arrow keys drive a focus cursor across whatever is interactive — it wears
+the same halo and readouts as hover — and `enter` opens it. For the tmux
+status bar, `usage-tui --status` prints one colored segment line:
 
 ```tmux
 set -g status-right '#(usage-tui --status)'

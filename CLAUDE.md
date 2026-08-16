@@ -149,7 +149,22 @@ the README rather than silently deviating.
   (tmux itself REQUIRES UTF-8 — a C-locale tmux pane is tmux's
   unsupported corner, not ours; digest DATA glyphs stay UTF-8).
   Redraw thrift: mouse-move repaints only when the hover target
-  changed; 1s clock tick; 500ms digest stat.
+  changed; 1s clock tick; 500ms digest stat. v0.71.0: keyboard focus
+  cursor — arrows walk the hit map spatially (HitMap::spatial_next,
+  center-distance with 3× off-axis penalty; ←→ stay scrub/day-step on
+  detail surfaces), enter/space activates, esc dismisses cursor first;
+  hover_hit holds the EFFECTIVE hot element (focus vs mouse by
+  keyboard_mode = last device), so every hover treatment (readouts,
+  reverse_band halo) serves both devices — built because some terminals
+  (Apple Terminal) never report mouse motion. Meter chart: honest axis
+  labels when the pane affords them (y top 112.5 with 12.5-step label
+  slots so "50"/"100" sit at true positions; x = local-time marks,
+  3 under 76 cols, 5 at/above; gated ≥44 cols × ≥9 rows). Dashboard
+  sections get a blank row between them when it costs no section
+  (layout::pick gapped-vs-tight). VERIFY GOTCHA: BSD grep on
+  capture-pane -e output goes binary-mode over braille bytes and
+  silently prints no matches — pipe through `cat -v` FIRST or use
+  grep -a; a zero match count there can be a false negative.
 - PROVIDER SEAM (2026-08-15 v0.25.0, user-directed decoupling): everything
   vendor-specific sits behind `UsageProvider` (Providers/UsageProvider.swift) —
   identity (serviceName/agentName/menuBarGlyph/links/networkDestinations),
