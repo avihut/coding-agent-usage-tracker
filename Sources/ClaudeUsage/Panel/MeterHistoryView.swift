@@ -1126,11 +1126,8 @@ struct MeterHistoryView: View {
     private func frameGainsPercentPerToken(rows: [ModelTokenUsage]) -> Double? {
         let total = WindowTokens.total(rows).total
         guard total > 0 else { return nil }
-        let series = points
-        let gains = zip(series, series.dropFirst())
-            .reduce(0) { $0 + max(0, $1.1.percent - $1.0.percent) }
-        guard gains >= 1 else { return nil }
-        return Double(gains) / Double(total)
+        return ModelCurves.gainsPercentPerToken(
+            percents: points.map(\.percent), tokens: total)
     }
 
     /// Layered labels: when the focused model's name and the now label
@@ -1149,30 +1146,26 @@ struct MeterHistoryView: View {
         return abs(xLabel - xNow) < (labelWidth + 18) / 2
     }
 
+    /// Colours the curves core built. The Window span is one window —
+    /// nothing can honestly exceed one limit there, so the cap is a safety
+    /// net; a Sliding frame can span several windows and the overshoot IS
+    /// the information.
     private func modelCurves(
         rows: [ModelTokenUsage], colors: [String: Color], percentPerToken: Double?
     ) -> [ModelCurve] {
-        let raw = rows.map { row in (model: row.model, curve: cumulativeCurve(model: row.model)) }
-        let norm: Double
-        if let percentPerToken {
-            norm = percentPerToken
-        } else {
-            let maxTotal = raw.compactMap { $0.curve.last?.total }.max() ?? 0
-            guard maxTotal > 0 else { return [] }
-            norm = 100.0 / Double(maxTotal)
-        }
-        // The Window span is one window — nothing can honestly exceed one
-        // limit there, so the cap is a safety net. A Sliding frame can
-        // span several windows and the overshoot IS the information.
-        let cap = effectiveSpan == .window
-        return raw.map { entry in
+        let end = min(domain.end, Date())
+        return ModelCurves.build(
+            models: rows.map(\.model),
+            moments: timeline.map {
+                ModelCurves.Moment(model: $0.model, t: $0.t, amount: $0.tally.total)
+            },
+            start: domain.start, end: end,
+            percentPerToken: percentPerToken, cap: effectiveSpan == .window
+        ).map { curve in
             ModelCurve(
-                model: entry.model,
-                color: colors[entry.model] ?? .gray,
-                points: entry.curve.map {
-                    let value = Double($0.total) * norm
-                    return ($0.t, cap ? min(100, value) : value)
-                })
+                model: curve.model,
+                color: colors[curve.model] ?? .gray,
+                points: curve.points.map { ($0.t, $0.value) })
         }
     }
 
@@ -1181,19 +1174,6 @@ struct MeterHistoryView: View {
     /// The plot top and the label headroom band scale from it.
     private func dataCeiling(_ curves: [ModelCurve]) -> Double {
         max(100, curves.flatMap { $0.points }.map { $0.normalized }.max() ?? 100)
-    }
-
-    /// Running total per ~180 buckets so a busy week doesn't hand Charts
-    /// thousands of minute slots. Covers the measured part of the domain.
-    /// CumulativeSeries holds the level flat across idle gaps — sparse
-    /// cumulative points would otherwise interpolate as phantom growth.
-    private func cumulativeCurve(model: String) -> [CumulativePoint] {
-        let start = domain.start
-        let end = min(domain.end, Date())
-        let moments = timeline
-            .filter { $0.model == model }
-            .map { (t: $0.t, amount: $0.tally.total) }
-        return CumulativeSeries.build(moments: moments, start: start, end: end)
     }
 
     // MARK: - Text lines

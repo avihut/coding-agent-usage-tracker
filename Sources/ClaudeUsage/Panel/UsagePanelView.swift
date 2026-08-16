@@ -50,6 +50,7 @@ struct UsagePanelView: View {
                         agentName: store.provider.agentName,
                         focus: $activityFocus,
                         samples: store.samples,
+                        timeline: store.tokenTimeline,
                         sessions: store.sessions,
                         windowOutcomes: store.windowOutcomes,
                         sessionAuditMeter: auditMeter(rank: 0),

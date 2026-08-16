@@ -13,6 +13,11 @@ struct AuditWindowChart: View {
     /// reaches. Only used by the hover curtain.
     let window: TimeInterval
     let accent: Color
+    /// Token moments behind the per-model overlay curves, and the palette
+    /// they share with every other model surface. Empty timeline = no
+    /// curves, and the chart is the percent trace alone.
+    var timeline: [TokenSlot] = []
+    var modelColors: [String: Color] = [:]
     /// Plot height; the caption row adds its fixed 14 below.
     var plotHeight: CGFloat = 114
 
@@ -34,9 +39,86 @@ struct AuditWindowChart: View {
             exhausted: model.exhausted)
     }
 
+    /// The model curve the cursor is nearest, drawn last and named at its
+    /// tip while its peers recede.
+    @State private var focusedModel: String?
+
     /// Strip space below the percent floor, the meter chart's idiom.
     private static let plotFloor = -10.0
     private static let stripY = -6.0
+
+    /// Per-model cumulative curves on this span's percent axis, anchored to
+    /// the percent the span actually gained (drops excluded, so a sawtooth
+    /// can't cancel itself). Capped only when the span IS one window — a day
+    /// over a 5h meter holds about five, and that overshoot is the point.
+    private var curves: [(model: String, color: Color, points: [ModelCurves.Point])] {
+        guard !timeline.isEmpty else { return [] }
+        let scoped = timeline.filter { domain.contains($0.t) }
+        let models = Array(Set(scoped.map(\.model))).sorted()
+        guard !models.isEmpty else { return [] }
+        let anchor = ModelCurves.gainsPercentPerToken(
+            percents: model.percent.map(\.percent),
+            tokens: scoped.reduce(0) { $0 + $1.tally.total })
+        return ModelCurves.build(
+            models: models,
+            moments: scoped.map {
+                ModelCurves.Moment(model: $0.model, t: $0.t, amount: $0.tally.total)
+            },
+            start: domain.start, end: domain.end,
+            percentPerToken: anchor,
+            cap: domain.duration <= window * 1.01
+        ).map { ($0.model, modelColors[$0.model] ?? .gray, $0.points) }
+    }
+
+    /// The focused curve is drawn last so it sits on top; its peers recede
+    /// to 0.15, the popover's figure.
+    private func curveOpacity(_ model: String) -> Double {
+        guard let focusedModel else { return 0.85 }
+        return model == focusedModel ? 1 : 0.15
+    }
+
+    private func drawOrder(
+        _ curves: [(model: String, color: Color, points: [ModelCurves.Point])]
+    ) -> [(model: String, color: Color, points: [ModelCurves.Point])] {
+        guard let focusedModel else { return curves }
+        return curves.filter { $0.model != focusedModel }
+            + curves.filter { $0.model == focusedModel }
+    }
+
+    /// Rebuilds the drawn curves and asks which one the cursor is on.
+    private func focusedCurve(
+        at date: Date, value: Double, plotHeight: CGFloat
+    ) -> String? {
+        let shown = curves
+        let ceiling = ModelCurves.ceiling(
+            shown.map { ModelCurves.Curve(model: $0.model, points: $0.points) })
+        return focus(
+            at: date, value: value, in: shown,
+            ceiling: ceiling, plotHeight: plotHeight)
+    }
+
+    /// The curve passing nearest the cursor, within ~8pt of plot height —
+    /// the popover's grab distance. Curves are dense (180 buckets), so the
+    /// nearest sample in time is close enough to compare heights against.
+    private func focus(
+        at date: Date, value: Double,
+        in curves: [(model: String, color: Color, points: [ModelCurves.Point])],
+        ceiling: Double, plotHeight: CGFloat
+    ) -> String? {
+        guard plotHeight > 0, ceiling > 0 else { return nil }
+        let grab = Double(8) / Double(plotHeight) * ceiling
+        var best: (model: String, distance: Double)?
+        for curve in curves {
+            guard let nearest = curve.points.min(by: {
+                abs($0.t.timeIntervalSince(date)) < abs($1.t.timeIntervalSince(date))
+            }) else { continue }
+            let distance = abs(nearest.value - value)
+            if distance <= grab, best.map({ distance < $0.distance }) ?? true {
+                best = (curve.model, distance)
+            }
+        }
+        return best?.model
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -55,7 +137,14 @@ struct AuditWindowChart: View {
     }
 
     private var chart: some View {
-        Chart {
+        let curves = self.curves
+        // Uncapped curves over a multi-window span run well past 100; a
+        // fixed 0…100 domain would clip them silently and read as a
+        // rendering fault. The headroom band above the tallest is the
+        // popover's 15%, so the tip labels never land on data.
+        let ceiling = ModelCurves.ceiling(
+            curves.map { ModelCurves.Curve(model: $0.model, points: $0.points) })
+        return Chart {
             ForEach(model.percent) { point in
                 AreaMark(
                     x: .value("Time", point.t), yStart: .value("Floor", 0),
@@ -66,7 +155,34 @@ struct AuditWindowChart: View {
                     .foregroundStyle(accent)
                     .lineStyle(StrokeStyle(lineWidth: 1.5))
             }
-            WindowPlot.resets(model.resets, hovered: hoveredReset, ceiling: 100)
+            WindowPlot.resets(model.resets, hovered: hoveredReset, ceiling: ceiling)
+            // Per-model overlay curves in the shared palette, focused one
+            // last so it draws on top. No legend to sync here — the day
+            // drill's grid has one, the week's audit has none — so the tip
+            // label is what names the curve under the cursor.
+            ForEach(drawOrder(curves), id: \.model) { curve in
+                ForEach(curve.points, id: \.t) { point in
+                    LineMark(
+                        x: .value("Time", point.t),
+                        y: .value("Tokens", point.value),
+                        series: .value("Model", curve.model))
+                        .foregroundStyle(curve.color.opacity(curveOpacity(curve.model)))
+                        .lineStyle(StrokeStyle(lineWidth: 1.2))
+                }
+            }
+            if let focusedModel, let curve = curves.first(where: { $0.model == focusedModel }),
+               let tip = curve.points.last {
+                PointMark(x: .value("Time", tip.t), y: .value("Tokens", tip.value))
+                    .symbolSize(0)
+                    .annotation(
+                        position: .top, alignment: .center, spacing: 2,
+                        overflowResolution: .init(x: .fit(to: .plot), y: .disabled)
+                    ) {
+                        Text(ModelNames.display(curve.model))
+                            .font(.system(size: 8, weight: .semibold))
+                            .foregroundStyle(curve.color)
+                    }
+            }
             // The strip: a faint full-width track with accent nubs where
             // sessions actually ran. Geometry is this chart's own — a single
             // round-capped rule rather than the popover's band — but the
@@ -101,7 +217,7 @@ struct AuditWindowChart: View {
             }
         }
         .chartXScale(domain: domain.start...domain.end)
-        .chartYScale(domain: Self.plotFloor...100)
+        .chartYScale(domain: Self.plotFloor...(ceiling * 1.15))
         .chartYAxis {
             AxisMarks(values: [0, 50, 100]) { value in
                 AxisGridLine()
@@ -154,18 +270,29 @@ struct AuditWindowChart: View {
                                     nubs.first { $0.contains(moment) }
                                 }
                                 hoveredReset = nil
+                                focusedModel = nil
                             } else {
                                 hoveredNub = nil
-                                hoveredReset = date.flatMap {
+                                // A reset line within reach outranks curve
+                                // focus — its ended window lights instead.
+                                let reset = date.flatMap {
                                     WindowPlot.nearestReset(
                                         to: $0, in: model.resets,
                                         span: domain.duration, trackWidth: plot.width)
+                                }
+                                hoveredReset = reset
+                                if reset == nil, let date, let depth {
+                                    focusedModel = focusedCurve(
+                                        at: date, value: depth, plotHeight: plot.height)
+                                } else {
+                                    focusedModel = nil
                                 }
                             }
                         case .ended:
                             hoverDate = nil
                             hoveredReset = nil
                             hoveredNub = nil
+                            focusedModel = nil
                         }
                     }
             }

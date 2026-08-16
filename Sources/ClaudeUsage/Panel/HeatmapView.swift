@@ -31,6 +31,8 @@ struct HeatmapView: View {
     /// and window length each audit surface reads; a nil info hides that
     /// surface's toggle.
     let samples: [UsageSample]
+    /// Token moments behind the audit charts' per-model overlay curves.
+    let timeline: [TokenSlot]
     let sessions: [SessionSummary]
     let windowOutcomes: [WindowOutcome]
     let sessionAuditMeter: AuditMeterInfo?
@@ -716,6 +718,8 @@ struct HeatmapView: View {
             domain: span,
             window: meter.window,
             accent: Self.accent,
+            timeline: timeline,
+            modelColors: modelColors,
             plotHeight: 114)
     }
 
@@ -1034,6 +1038,8 @@ struct HeatmapView: View {
             domain: span,
             window: meter.window,
             accent: Self.accent,
+            timeline: timeline,
+            modelColors: modelColors,
             plotHeight: 88)
     }
 
