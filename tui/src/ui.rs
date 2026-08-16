@@ -15,6 +15,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph};
 use ratatui::Frame;
 use std::collections::HashMap;
+use std::sync::OnceLock;
 use time::{Date, OffsetDateTime, UtcOffset};
 
 // The app's pinned palette (StatusItemRenderer's values).
@@ -22,6 +23,78 @@ pub const WARNING: Color = Color::Rgb(255, 159, 10);
 pub const CRITICAL: Color = Color::Rgb(255, 69, 58);
 pub const DIM: Color = Color::Rgb(140, 140, 145);
 pub const FAINT: Color = Color::Rgb(70, 70, 75);
+
+/// Every colored span routes here: NO_COLOR turns it into a plain style
+/// so risk falls back to the glyph dialect (markers, density ramps).
+pub fn style(color: Color) -> Style {
+    if crate::state::look().no_color {
+        Style::new()
+    } else {
+        Style::new().fg(color)
+    }
+}
+
+/// The drawing alphabet — UTF-8 blocks, or ASCII when the locale can't.
+pub struct Glyphs {
+    pub bar_fill: &'static str,
+    pub bar_empty: &'static str,
+    pub spark: [char; 8],
+    pub dot: &'static str,
+    pub heat_density: [&'static str; 4],
+    pub nub_active: &'static str,
+    pub nub_idle: &'static str,
+    pub live: &'static str,
+    pub hollow: &'static str,
+    pub backoff: &'static str,
+    pub sep: &'static str,
+    pub back: &'static str,
+    pub pager_left: &'static str,
+    pub pager_right: &'static str,
+    pub prompt_cell: &'static str,
+    pub ellipsis: char,
+}
+
+pub fn glyphs() -> &'static Glyphs {
+    if crate::state::look().ascii {
+        &Glyphs {
+            bar_fill: "#",
+            bar_empty: ".",
+            spark: ['.', ',', ':', ';', '=', '+', '*', '#'],
+            dot: ".",
+            heat_density: [".", ":", "*", "#"],
+            nub_active: "=",
+            nub_idle: ".",
+            live: "* ",
+            hollow: "o ",
+            backoff: "~ ",
+            sep: " - ",
+            back: "<- back",
+            pager_left: "<",
+            pager_right: ">",
+            prompt_cell: ", ",
+            ellipsis: '~',
+        }
+    } else {
+        &Glyphs {
+            bar_fill: "█",
+            bar_empty: "░",
+            spark: ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'],
+            dot: "·",
+            heat_density: ["░", "▒", "▓", "█"],
+            nub_active: "▬",
+            nub_idle: "░",
+            live: "● ",
+            hollow: "○ ",
+            backoff: "◌ ",
+            sep: " · ",
+            back: "← back",
+            pager_left: "‹",
+            pager_right: "›",
+            prompt_cell: "▪ ",
+            ellipsis: '…',
+        }
+    }
+}
 
 pub fn rgb(color: Rgb) -> Color {
     Color::Rgb(
@@ -92,7 +165,7 @@ pub fn truncate(text: &str, width: usize) -> String {
         text.to_owned()
     } else {
         let mut out: String = text.chars().take(width.saturating_sub(1)).collect();
-        out.push('…');
+        out.push(glyphs().ellipsis);
         out
     }
 }
@@ -217,7 +290,7 @@ fn render_dashboard(
 fn section_title(text: &str) -> Line<'static> {
     Line::from(Span::styled(
         text.to_owned(),
-        Style::new().fg(DIM).add_modifier(Modifier::BOLD),
+        style(DIM).add_modifier(Modifier::BOLD),
     ))
 }
 
@@ -232,7 +305,7 @@ fn header<'a>(
     let mut identity = vec![
         Span::styled(
             format!("{} ", engine.glyph),
-            Style::new().fg(accent).add_modifier(Modifier::BOLD),
+            style(accent).add_modifier(Modifier::BOLD),
         ),
         Span::styled(
             engine.service_name.clone(),
@@ -240,62 +313,62 @@ fn header<'a>(
         ),
     ];
     if let Some(plan) = &engine.plan_label {
-        identity.push(Span::styled(format!("  {plan}"), Style::new().fg(DIM)));
+        identity.push(Span::styled(format!("  {plan}"), style(DIM)));
     }
 
     let mut status: Vec<Span> = Vec::new();
     match freshness {
         Freshness::Live => {
-            status.push(Span::styled("● ", Style::new().fg(accent)));
+            status.push(Span::styled(glyphs().live, style(accent)));
             if let Some(fetched) = engine.fetched_at {
                 status.push(Span::styled(
                     format!("updated {}", clock(fetched, app.local_offset)),
-                    Style::new().fg(DIM),
+                    style(DIM),
                 ));
             }
             if let Some(next) = engine.next_poll_at {
                 status.push(Span::styled(
-                    format!(" · next in {}", countdown(next, now)),
-                    Style::new().fg(DIM),
+                    format!("{}next in {}", glyphs().sep, countdown(next, now)),
+                    style(DIM),
                 ));
             }
         }
         Freshness::Stale => {
-            status.push(Span::styled("○ ", Style::new().fg(DIM)));
+            status.push(Span::styled(glyphs().hollow, style(DIM)));
             if let Some(fetched) = engine.fetched_at {
                 status.push(Span::styled(
                     format!("as of {}", clock(fetched, app.local_offset)),
-                    Style::new().fg(DIM),
+                    style(DIM),
                 ));
             }
             if let Some(error) = &engine.error {
                 status.push(Span::styled(
-                    format!(" · {}", error.text),
-                    Style::new().fg(WARNING),
+                    format!("{}{}", glyphs().sep, error.text),
+                    style(WARNING),
                 ));
             }
         }
         Freshness::Backoff => {
-            status.push(Span::styled("◌ ", Style::new().fg(WARNING)));
+            status.push(Span::styled(glyphs().backoff, style(WARNING)));
             if let Some(until) = engine.backoff_until {
                 status.push(Span::styled(
                     format!("rate limited — resumes in {}", countdown(until, now)),
-                    Style::new().fg(WARNING),
+                    style(WARNING),
                 ));
             }
         }
         Freshness::EngineOffline => {
             status.push(Span::styled(
                 "engine offline — start: usage-cli daemon start",
-                Style::new().fg(CRITICAL),
+                style(CRITICAL),
             ));
         }
     }
     if !engine.is_local_provider {
         if let (Some(used), Some(ceiling)) = (engine.api_budget_used, engine.api_budget_ceiling) {
             status.push(Span::styled(
-                format!(" · API {used}/{ceiling}h"),
-                Style::new().fg(FAINT),
+                format!("{}API {used}/{ceiling}h", glyphs().sep),
+                style(FAINT),
             ));
         }
     }
@@ -326,30 +399,30 @@ fn meters<'a>(digest: &'a LiveState, freshness: Freshness, rect: Rect) -> Paragr
         let mut spans = vec![
             Span::styled(
                 format!("{} ", meter.tag),
-                Style::new().fg(DIM).add_modifier(Modifier::BOLD),
+                style(DIM).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 format!("{:<label_width$} ", truncate(&meter.label, label_width)),
                 Style::new(),
             ),
-            Span::styled("█".repeat(filled), Style::new().fg(bar_color)),
-            Span::styled("░".repeat(bar_width - filled), Style::new().fg(FAINT)),
+            Span::styled(glyphs().bar_fill.repeat(filled), style(bar_color)),
+            Span::styled(glyphs().bar_empty.repeat(bar_width - filled), style(FAINT)),
             match meter.percent {
                 Some(p) => Span::styled(
                     format!(" {p:>3}%"),
-                    Style::new().fg(bar_color).add_modifier(Modifier::BOLD),
+                    style(bar_color).add_modifier(Modifier::BOLD),
                 ),
-                None => Span::styled("   —".to_owned(), Style::new().fg(DIM)),
+                None => Span::styled("   —".to_owned(), style(DIM)),
             },
         ];
         if let Some(caption) = &meter.reset_caption {
-            spans.push(Span::styled(format!("  {caption}"), Style::new().fg(DIM)));
+            spans.push(Span::styled(format!("  {caption}"), style(DIM)));
         }
         if let Some(forecast) = &meter.forecast {
             if let Some(caption) = &forecast.caption {
                 spans.push(Span::styled(
-                    format!(" · {caption}"),
-                    Style::new().fg(bar_color),
+                    format!("{}{caption}", glyphs().sep),
+                    style(bar_color),
                 ));
             }
         }
@@ -360,11 +433,11 @@ fn meters<'a>(digest: &'a LiveState, freshness: Freshness, rect: Rect) -> Paragr
 
 fn today<'a>(digest: &'a LiveState, accent: Color, rect: Rect) -> Paragraph<'a> {
     let activity = &digest.activity;
-    let mut title = format!("TODAY · {} tok", compact(activity.today_tokens));
+    let mut title = format!("TODAY{}{} tok", glyphs().sep, compact(activity.today_tokens));
     if let Some(cost) = activity.today_cost {
-        title.push_str(&format!(" · {}", money(cost)));
+        title.push_str(&format!("{}{}", glyphs().sep, money(cost)));
     }
-    title.push_str(&format!(" · {} prompts", activity.today_prompts));
+    title.push_str(&format!("{}{} prompts", glyphs().sep, activity.today_prompts));
     let mut lines = vec![section_title(&title)];
 
     let mut buckets = [0i64; 24];
@@ -374,17 +447,17 @@ fn today<'a>(digest: &'a LiveState, accent: Color, rect: Rect) -> Paragraph<'a> 
         }
     }
     let max = buckets.iter().copied().max().unwrap_or(0).max(1);
-    let glyphs = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+    let spark_glyphs = glyphs().spark;
     let cell_width = ((rect.width as usize) / 24).clamp(1, 3);
     let mut spark: Vec<Span> = Vec::with_capacity(24);
     for tokens in buckets {
         let span = if tokens == 0 {
-            Span::styled("·".repeat(cell_width), Style::new().fg(FAINT))
+            Span::styled(glyphs().dot.repeat(cell_width), style(FAINT))
         } else {
             let step = (((tokens * 7 + max - 1) / max) as usize).min(7);
             Span::styled(
-                glyphs[step].to_string().repeat(cell_width),
-                Style::new().fg(accent),
+                spark_glyphs[step].to_string().repeat(cell_width),
+                style(accent),
             )
         };
         spark.push(span);
@@ -392,18 +465,18 @@ fn today<'a>(digest: &'a LiveState, accent: Color, rect: Rect) -> Paragraph<'a> 
     lines.push(Line::from(spark));
     lines.push(Line::from(Span::styled(
         format!("{:<width$}12{:>width$}", "0", "23", width = cell_width * 12 - 1),
-        Style::new().fg(FAINT),
+        style(FAINT),
     )));
     Paragraph::new(lines)
 }
 
 fn models<'a>(digest: &'a LiveState, rect: Rect) -> Paragraph<'a> {
-    let mut lines = vec![section_title("MODELS · today")];
+    let mut lines = vec![section_title(&format!("MODELS{}today", glyphs().sep))];
     let rows = (rect.height.max(1) - 1) as usize;
     if digest.models.is_empty() {
         lines.push(Line::from(Span::styled(
             "no usage yet today",
-            Style::new().fg(FAINT),
+            style(FAINT),
         )));
     }
     for model in digest.models.iter().take(rows) {
@@ -413,14 +486,14 @@ fn models<'a>(digest: &'a LiveState, rect: Rect) -> Paragraph<'a> {
             None => "—".into(),
         };
         lines.push(Line::from(vec![
-            Span::styled("● ", Style::new().fg(rgb(model.color))),
+            Span::styled(glyphs().live, style(rgb(model.color))),
             Span::styled(
                 format!("{:<name_width$}", truncate(&model.display_name, name_width)),
                 Style::new(),
             ),
             Span::styled(
                 format!("{:>7}", compact(model.tally.total())),
-                Style::new().fg(DIM),
+                style(DIM),
             ),
             Span::styled(format!("{cost:>9}"), Style::new()),
         ]));
@@ -429,6 +502,17 @@ fn models<'a>(digest: &'a LiveState, rect: Rect) -> Paragraph<'a> {
 }
 
 // MARK: - Heatmap (two forms, weekday-true, paged — design §4)
+
+/// The four density cells, doubled to cell width — leaked once, static
+/// forever (four tiny strings).
+fn heat_cell_text(quartile: usize) -> &'static str {
+    static CELLS: OnceLock<[String; 4]> = OnceLock::new();
+    let cells = CELLS.get_or_init(|| {
+        let g = glyphs().heat_density;
+        [g[0].repeat(2), g[1].repeat(2), g[2].repeat(2), g[3].repeat(2)]
+    });
+    &cells[quartile.min(3)]
+}
 
 struct HeatGrid {
     /// Weeks in the visible window, oldest first; each week is 7 Mondays-
@@ -492,23 +576,23 @@ fn render_heatmap(
     // Title row with the pager; zones register as hits.
     let mut title_spans = vec![Span::styled(
         "ACTIVITY".to_owned(),
-        Style::new().fg(DIM).add_modifier(Modifier::BOLD),
+        style(DIM).add_modifier(Modifier::BOLD),
     )];
     if app.heat_page > 0 {
         title_spans.push(Span::styled(
-            format!(" · {}w back", weeks_visible * app.heat_page),
-            Style::new().fg(DIM),
+            format!("{}{}w back", glyphs().sep, weeks_visible * app.heat_page),
+            style(DIM),
         ));
     }
     title_spans.push(Span::raw("  "));
     title_spans.push(Span::styled(
-        if grid.has_older { "‹" } else { " " }.to_owned(),
-        Style::new().fg(if grid.has_older { DIM } else { FAINT }),
+        if grid.has_older { glyphs().pager_left } else { " " }.to_owned(),
+        style(if grid.has_older { DIM } else { FAINT }),
     ));
     title_spans.push(Span::raw(" "));
     title_spans.push(Span::styled(
-        if grid.has_newer { "›" } else { " " }.to_owned(),
-        Style::new().fg(if grid.has_newer { DIM } else { FAINT }),
+        if grid.has_newer { glyphs().pager_right } else { " " }.to_owned(),
+        style(if grid.has_newer { DIM } else { FAINT }),
     ));
     frame.render_widget(
         Paragraph::new(Line::from(title_spans)),
@@ -535,30 +619,38 @@ fn render_heatmap(
         };
         let key = date.format(surfaces::DAY_KEY).unwrap_or_default();
         let entry = by_key.get(key.as_str());
-        let mut style;
+        let mut cell_style;
         let text;
+        let look = crate::state::look();
         match entry {
             Some(day) if day.tokens > 0 => {
                 let alpha = 0.25 + 0.75 * (day.tokens as f64 / max as f64).sqrt();
-                style = Style::new().fg(ramp(digest.engine.accent, alpha));
-                text = "██";
+                if look.no_color || look.ascii {
+                    // Density carries intensity when color can't.
+                    let quartile = (((alpha - 0.25) / 0.75) * 3.0).round() as usize;
+                    text = heat_cell_text(quartile.min(3));
+                    cell_style = Style::new();
+                } else {
+                    cell_style = style(ramp(digest.engine.accent, alpha));
+                    text = "██";
+                }
             }
             Some(day) if day.prompts > 0 => {
-                style = Style::new().fg(ramp(digest.engine.accent, 0.35));
-                text = "▪ ";
+                cell_style = style(ramp(digest.engine.accent, 0.35));
+                text = glyphs().prompt_cell;
             }
             _ => {
-                style = Style::new().fg(FAINT);
-                text = "· ";
+                cell_style = style(FAINT);
+                text = if look.ascii { ". " } else { "· " };
             }
         }
         if date == today {
-            style = style.add_modifier(Modifier::UNDERLINED);
+            cell_style = cell_style.add_modifier(Modifier::UNDERLINED);
         }
         if hovered_day.as_deref() == Some(key.as_str()) {
-            style = style.add_modifier(Modifier::REVERSED);
+            cell_style = cell_style.add_modifier(Modifier::REVERSED);
         }
-        (text.into(), style)
+        (text.into(), cell_style)
     };
 
     let grid_y = rect.y + 1;
@@ -568,7 +660,7 @@ fn render_heatmap(
         for row in 0..7usize.min(grid_height) {
             let mut spans = vec![Span::styled(
                 format!("{} ", letters[row]),
-                Style::new().fg(FAINT),
+                style(FAINT),
             )];
             for (week_index, week) in grid.weeks.iter().enumerate() {
                 let (text, style) = cell(week[row]);
@@ -598,7 +690,7 @@ fn render_heatmap(
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 "M  T  W  T  F  S  S".to_owned(),
-                Style::new().fg(FAINT),
+                style(FAINT),
             ))),
             Rect::new(rect.x, grid_y, rect.width, 1),
         );
@@ -644,19 +736,19 @@ fn render_heatmap(
         .as_deref()
         .and_then(|key| by_key.get(key).copied())
         .map(|day| {
-            let mut text = format!("{} · {} tok", day.day_key, compact(day.tokens));
+            let mut text = format!("{}{}{} tok", day.day_key, glyphs().sep, compact(day.tokens));
             if let Some(cost) = day.cost {
-                text.push_str(&format!(" · {}", money(cost)));
+                text.push_str(&format!("{}{}", glyphs().sep, money(cost)));
             }
             if day.prompts > 0 {
-                text.push_str(&format!(" · {} prompts", day.prompts));
+                text.push_str(&format!("{}{} prompts", glyphs().sep, day.prompts));
             }
             text.push_str("  (click to drill)");
             text
         })
-        .unwrap_or_else(|| "[ ] page · click a day to drill".into());
+        .unwrap_or_else(|| format!("[ ] page{}click a day to drill", glyphs().sep));
     frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(readout, Style::new().fg(FAINT)))),
+        Paragraph::new(Line::from(Span::styled(readout, style(FAINT)))),
         Rect::new(rect.x, readout_y, rect.width, 1),
     );
 }
@@ -668,26 +760,27 @@ fn footer<'a>(
     now: OffsetDateTime,
 ) -> Paragraph<'a> {
     let keys = match app.surface {
-        Surface::Dashboard => "q quit · r refresh · 1-3 meters · ? help",
-        _ => "esc back · ←→ step · r refresh · ? help",
+        Surface::Dashboard => "q quit / r refresh / 1-3 meters / ? help",
+        _ => "esc back / arrows step / r refresh / ? help",
     };
-    let mut spans = vec![Span::styled(keys, Style::new().fg(FAINT))];
+    let mut spans = vec![Span::styled(keys, style(FAINT))];
     if let Some(notice) = &app.notice {
-        spans.push(Span::styled(format!("  {notice}"), Style::new().fg(DIM)));
+        spans.push(Span::styled(format!("  {notice}"), style(DIM)));
     } else if freshness == Freshness::Backoff {
         if let Some(until) = digest.engine.backoff_until {
             spans.push(Span::styled(
-                format!("  429 backoff · resumes in {}", countdown(until, now)),
-                Style::new().fg(WARNING),
+                format!("  429 backoff{}resumes in {}", glyphs().sep, countdown(until, now)),
+                style(WARNING),
             ));
         }
     } else {
         spans.push(Span::styled(
             format!(
-                "  {} · v{} · {}",
-                digest.engine.host, digest.engine.app_version, digest.activity.time_zone
+                "  {}{}v{}{}{}",
+                digest.engine.host, glyphs().sep, digest.engine.app_version, glyphs().sep,
+                digest.activity.time_zone
             ),
-            Style::new().fg(FAINT),
+            style(FAINT),
         ));
     }
     Paragraph::new(Line::from(spans))
@@ -699,11 +792,11 @@ fn render_strip(frame: &mut Frame, area: Rect, digest: &LiveState, freshness: Fr
     let grey = freshness != Freshness::Live && freshness != Freshness::Backoff;
     let mut spans = vec![Span::styled(
         format!("{} ", digest.engine.glyph),
-        Style::new().fg(if grey { DIM } else { accent }),
+        style(if grey { DIM } else { accent }),
     )];
     for (index, segment) in digest.menu_bar.iter().enumerate() {
         if index > 0 {
-            spans.push(Span::styled(" · ".to_owned(), Style::new().fg(FAINT)));
+            spans.push(Span::styled(glyphs().sep.to_owned(), style(FAINT)));
         }
         let color = if grey {
             DIM
@@ -718,23 +811,23 @@ fn render_strip(frame: &mut Frame, area: Rect, digest: &LiveState, freshness: Fr
         };
         spans.push(Span::styled(
             format!("{} ", segment.tag),
-            Style::new().fg(DIM),
+            style(DIM),
         ));
         spans.push(Span::styled(
             segment
                 .percent
                 .map(|p| format!("{p}"))
                 .unwrap_or_else(|| "—".into()),
-            Style::new().fg(color).add_modifier(Modifier::BOLD),
+            style(color).add_modifier(Modifier::BOLD),
         ));
     }
     if freshness == Freshness::EngineOffline {
         spans.push(Span::styled(
             "  offline".to_owned(),
-            Style::new().fg(CRITICAL),
+            style(CRITICAL),
         ));
     } else if grey {
-        spans.push(Span::styled("  stale".to_owned(), Style::new().fg(DIM)));
+        spans.push(Span::styled("  stale".to_owned(), style(DIM)));
     }
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
@@ -750,7 +843,7 @@ fn render_offline(frame: &mut Frame, area: Rect, app: &App) {
     };
     let lines: Vec<Line> = message
         .lines()
-        .map(|line| Line::from(Span::styled(line.to_owned(), Style::new().fg(DIM))))
+        .map(|line| Line::from(Span::styled(line.to_owned(), style(DIM))))
         .collect();
     let height = lines.len() as u16;
     let top = area.y + area.height.saturating_sub(height) / 2;

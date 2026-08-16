@@ -8,6 +8,7 @@ mod digest;
 mod layout;
 mod socket;
 mod state;
+mod status;
 mod surfaces;
 mod ui;
 
@@ -44,6 +45,11 @@ fn parse_args() -> Result<(PathBuf, PathBuf), String> {
                     .next()
                     .map(PathBuf::from)
                     .ok_or("--socket needs a path")?;
+            }
+            "--status" => {
+                // One tmux-format line and out — no terminal takeover.
+                println!("{}", status::render(&digest));
+                std::process::exit(0);
             }
             "--help" | "-h" => {
                 return Err(concat!(
@@ -126,6 +132,10 @@ fn run(mut terminal: ratatui::DefaultTerminal, mut app: App) -> std::io::Result<
             Event::Mouse(mouse) => match mouse.kind {
                 MouseEventKind::Moved => {
                     app.pointer = Some((mouse.column, mouse.row));
+                    // Repaint only when the hover target actually changed —
+                    // waving the mouse over dead space costs nothing.
+                    let target = app.hits.at(mouse.column, mouse.row).cloned();
+                    redraw = target != app.hover_hit;
                 }
                 MouseEventKind::Down(MouseButton::Left) => {
                     let hit = app.hits.at(mouse.column, mouse.row).cloned();

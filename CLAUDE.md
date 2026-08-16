@@ -122,7 +122,19 @@ the README rather than silently deviating.
   footer, sections drop WHOLE. time crate: local offset captured once
   in main() before threads (soundness gate), UTC fallback. Verify
   renders headlessly: tmux new-session -d -x W -y H + capture-pane
-  (sizes 100×27, 46×30, 72×16, 46×8).
+  (sizes 100×27, 46×30, 72×16, 46×8); raw SGR mouse bytes via
+  send-keys -H exercise hover/click (hover resolves against the
+  PREVIOUS frame's hit map — a frame's own map doesn't exist until its
+  widgets registered). T2/T3: surfaces (meter chart via ratatui Chart
+  braille + day drill) open side-by-side when landscape ≥84 cols, else
+  push with ← back; heatmap weekday-true both forms, [ ]/‹›/wheel
+  paging; `usage-tui --status` prints a tmux status-right line;
+  NO_COLOR → style() helper strips color + `!`/`!!` markers + ░▒▓█
+  density heat; ascii Glyphs alphabet via locale or USAGE_TUI_ASCII=1
+  (tmux itself REQUIRES UTF-8 — a C-locale tmux pane is tmux's
+  unsupported corner, not ours; digest DATA glyphs stay UTF-8).
+  Redraw thrift: mouse-move repaints only when the hover target
+  changed; 1s clock tick; 500ms digest stat.
 - PROVIDER SEAM (2026-08-15 v0.25.0, user-directed decoupling): everything
   vendor-specific sits behind `UsageProvider` (Providers/UsageProvider.swift) —
   identity (serviceName/agentName/menuBarGlyph/links/networkDestinations),

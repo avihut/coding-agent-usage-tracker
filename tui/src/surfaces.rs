@@ -5,7 +5,7 @@
 
 use crate::digest::{DayRollup, LiveState, LiveMeter};
 use crate::state::{App, Hit};
-use crate::ui::{compact, money, rgb, ramp, DIM, FAINT, WARNING, CRITICAL};
+use crate::ui::{compact, glyphs, money, ramp, rgb, CRITICAL, DIM, FAINT, WARNING};
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::symbols;
@@ -22,7 +22,7 @@ pub const DAY_KEY: &[BorrowedFormatItem<'static>] = format_description!("[year]-
 pub fn back_line(app: &mut App, rect: Rect, title: &str) -> Line<'static> {
     app.hits.add(Rect::new(rect.x, rect.y, 7, 1), Hit::Back);
     Line::from(vec![
-        Span::styled("← back", Style::new().fg(DIM).add_modifier(Modifier::BOLD)),
+        Span::styled(glyphs().back, crate::ui::style(DIM).add_modifier(Modifier::BOLD)),
         Span::styled(format!("  {title}"), Style::new().add_modifier(Modifier::BOLD)),
     ])
 }
@@ -63,19 +63,19 @@ pub fn render_meter(
     }
     let mut caption: Vec<Span> = Vec::new();
     if let Some(reset) = &meter.reset_caption {
-        caption.push(Span::styled(reset.clone(), Style::new().fg(DIM)));
+        caption.push(Span::styled(reset.clone(), crate::ui::style(DIM)));
     }
     if let Some(forecast) = &meter.forecast {
         if let Some(projected) = forecast.projected_at_reset {
             caption.push(Span::styled(
                 format!("  proj. {projected}%"),
-                Style::new().fg(line_color),
+                crate::ui::style(line_color),
             ));
         }
         if let Some(text) = &forecast.caption {
             caption.push(Span::styled(
                 format!("  {text}"),
-                Style::new().fg(risk.unwrap_or(WARNING)),
+                crate::ui::style(risk.unwrap_or(WARNING)),
             ));
         }
     }
@@ -117,14 +117,14 @@ pub fn render_meter(
     let mut datasets = vec![Dataset::default()
         .marker(symbols::Marker::Braille)
         .graph_type(GraphType::Line)
-        .style(Style::new().fg(line_color))
+        .style(crate::ui::style(line_color))
         .data(&measured)];
     if !trajectory.is_empty() {
         datasets.push(
             Dataset::default()
                 .marker(symbols::Marker::Dot)
                 .graph_type(GraphType::Scatter)
-                .style(Style::new().fg(risk.unwrap_or(DIM)))
+                .style(crate::ui::style(risk.unwrap_or(DIM)))
                 .data(&trajectory),
         );
     }
@@ -132,7 +132,7 @@ pub fn render_meter(
         Dataset::default()
             .marker(symbols::Marker::Dot)
             .graph_type(GraphType::Scatter)
-            .style(Style::new().fg(FAINT))
+            .style(crate::ui::style(FAINT))
             .data(&now_marker),
     );
     let chart = Chart::new(datasets)
@@ -142,7 +142,7 @@ pub fn render_meter(
                 .bounds([0.0, 115.0])
                 .labels(["0", "50", "100"])
                 .labels_alignment(ratatui::layout::Alignment::Right)
-                .style(Style::new().fg(FAINT)),
+                .style(crate::ui::style(FAINT)),
         );
     frame.render_widget(chart, chart_area);
 
@@ -150,7 +150,7 @@ pub fn render_meter(
     let track_y = chart_area.y + chart_area.height;
     if track_y < rect.y + rect.height {
         let width = chart_area.width.saturating_sub(4) as usize;
-        let mut cells = vec![Span::styled("░".repeat(width), Style::new().fg(FAINT))];
+        let mut cells = vec![Span::styled(glyphs().nub_idle.repeat(width), crate::ui::style(FAINT))];
         if width > 0 && x_end > 0.0 {
             let mut painted = vec![None::<bool>; width];
             for stretch in &meter.stretches {
@@ -163,9 +163,9 @@ pub fn render_meter(
             cells = painted
                 .iter()
                 .map(|cell| match cell {
-                    Some(true) => Span::styled("▬", Style::new().fg(CRITICAL)),
-                    Some(false) => Span::styled("▬", Style::new().fg(line_color)),
-                    None => Span::styled("░", Style::new().fg(FAINT)),
+                    Some(true) => Span::styled(glyphs().nub_active, crate::ui::style(CRITICAL)),
+                    Some(false) => Span::styled(glyphs().nub_active, crate::ui::style(line_color)),
+                    None => Span::styled(glyphs().nub_idle, crate::ui::style(FAINT)),
                 })
                 .collect();
         }
@@ -186,16 +186,17 @@ pub fn render_meter(
             .map(|point| {
                 let local = point.t.to_offset(app.local_offset);
                 format!(
-                    "{:02}:{:02} · {:.0}%{}",
+                    "{:02}:{:02}{}{:.0}%{}",
                     local.hour(),
                     local.minute(),
+                    glyphs().sep,
                     point.percent,
-                    if app.scrub.is_some() { "  (←→ scrub, esc back)" } else { "" }
+                    if app.scrub.is_some() { "  (arrows scrub, esc back)" } else { "" }
                 )
             })
             .unwrap_or_default();
         frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(text, Style::new().fg(DIM)))),
+            Paragraph::new(Line::from(Span::styled(text, crate::ui::style(DIM)))),
             Rect::new(rect.x, readout_y, rect.width, 1),
         );
     }
@@ -219,12 +220,12 @@ pub fn render_day(
         .unwrap_or_else(|_| day_key.to_owned());
     let mut title = pretty;
     if let Some(day) = day {
-        title.push_str(&format!(" · {} tok", compact(day.tokens)));
+        title.push_str(&format!("{}{} tok", glyphs().sep, compact(day.tokens)));
         if let Some(cost) = day.cost {
-            title.push_str(&format!(" · {}", money(cost)));
+            title.push_str(&format!("{}{}", glyphs().sep, money(cost)));
         }
         if day.prompts > 0 {
-            title.push_str(&format!(" · {} prompts", day.prompts));
+            title.push_str(&format!("{}{} prompts", glyphs().sep, day.prompts));
         }
     }
     if pushed {
@@ -252,31 +253,31 @@ pub fn render_day(
             }
         }
         let max = buckets.iter().copied().max().unwrap_or(0).max(1);
-        let glyphs = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+        let spark_glyphs = glyphs().spark;
         let cell = ((rect.width as usize) / 26).clamp(1, 3);
         let mut spark: Vec<Span> = Vec::new();
         for tokens in buckets {
             spark.push(if tokens == 0 {
-                Span::styled("·".repeat(cell), Style::new().fg(FAINT))
+                Span::styled(glyphs().dot.repeat(cell), crate::ui::style(FAINT))
             } else {
                 let step = (((tokens * 7 + max - 1) / max) as usize).min(7);
-                Span::styled(glyphs[step].to_string().repeat(cell), Style::new().fg(accent))
+                Span::styled(spark_glyphs[step].to_string().repeat(cell), crate::ui::style(accent))
             });
         }
         lines.push(Line::from(spark));
         lines.push(Line::from(Span::styled(
             format!("{:<width$}12{:>width$}", "0", "23", width = cell * 12 - 1),
-            Style::new().fg(FAINT),
+            crate::ui::style(FAINT),
         )));
     } else if day.is_some() {
         lines.push(Line::from(Span::styled(
             "hourly detail is kept ~8 days — totals only for this day",
-            Style::new().fg(FAINT),
+            crate::ui::style(FAINT),
         )));
     } else {
         lines.push(Line::from(Span::styled(
             "no recorded activity on this day",
-            Style::new().fg(FAINT),
+            crate::ui::style(FAINT),
         )));
     }
     lines.push(Line::default());
@@ -291,19 +292,19 @@ pub fn render_day(
         Some(models) => {
             lines.push(Line::from(Span::styled(
                 "MODELS".to_owned(),
-                Style::new().fg(DIM).add_modifier(Modifier::BOLD),
+                crate::ui::style(DIM).add_modifier(Modifier::BOLD),
             )));
             for model in models.models.iter().take(6) {
                 let name_width = (rect.width as usize).saturating_sub(22).clamp(8, 24);
                 lines.push(Line::from(vec![
-                    Span::styled("● ", Style::new().fg(rgb(model.color))),
+                    Span::styled(glyphs().live, crate::ui::style(rgb(model.color))),
                     Span::styled(
                         format!("{:<name_width$}", crate::ui::truncate(&model.display_name, name_width)),
                         Style::new(),
                     ),
                     Span::styled(
                         format!("{:>7}", compact(model.tally.total())),
-                        Style::new().fg(DIM),
+                        crate::ui::style(DIM),
                     ),
                     Span::styled(
                         format!(
@@ -318,7 +319,7 @@ pub fn render_day(
         None if day.is_some() => {
             lines.push(Line::from(Span::styled(
                 "per-model detail is kept ~35 days — totals only",
-                Style::new().fg(FAINT),
+                crate::ui::style(FAINT),
             )));
         }
         None => {}

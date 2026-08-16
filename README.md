@@ -150,6 +150,19 @@ mise run tui        # build + run in this terminal
 mise run tui-test   # digest contract + layout tests
 ```
 
+Detail surfaces open from the dashboard: click a meter (or `1-3`) for its
+window chart — measured percent in braille, forecast trajectory, session
+stretches, `←→` scrub — and click a heatmap day to drill into hourly bars
+and per-model rows (`[ ]` pages the calendar; everything hovers). For the
+tmux status bar, `usage-tui --status` prints one colored segment line:
+
+```tmux
+set -g status-right '#(usage-tui --status)'
+```
+
+`NO_COLOR` switches risk to `!` markers and the heat ramp to ░▒▓█ density;
+non-UTF-8 locales (or `USAGE_TUI_ASCII=1`) drop to a plain-ASCII alphabet.
+
 The digest schema is pinned on both sides of the language boundary: the
 Swift tests and the TUI's serde tests decode the same golden fixtures in
 `Tests/UsageCoreTests/Fixtures/digest/`.

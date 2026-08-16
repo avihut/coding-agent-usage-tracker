@@ -4,8 +4,31 @@
 use crate::digest::LiveState;
 use ratatui::layout::Rect;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 use std::time::SystemTime;
 use time::{Duration, OffsetDateTime, UtcOffset};
+
+/// Environment-decided rendering posture, resolved once: NO_COLOR
+/// (no-color.org — presence of a non-empty value kills every color) and
+/// an ASCII fallback when the locale doesn't speak UTF-8.
+pub struct Look {
+    pub no_color: bool,
+    pub ascii: bool,
+}
+
+pub fn look() -> &'static Look {
+    static LOOK: OnceLock<Look> = OnceLock::new();
+    LOOK.get_or_init(|| Look {
+        no_color: std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty()),
+        ascii: std::env::var_os("USAGE_TUI_ASCII").is_some_and(|v| !v.is_empty()) || {
+            let lang = std::env::var("LC_ALL")
+                .or_else(|_| std::env::var("LC_CTYPE"))
+                .or_else(|_| std::env::var("LANG"))
+                .unwrap_or_default();
+            !lang.to_uppercase().replace('-', "").contains("UTF8")
+        },
+    })
+}
 
 /// Which surface owns the pane (design §3): the dashboard, or a detail
 /// surface that opened side-by-side (landscape) / replaced the dashboard
