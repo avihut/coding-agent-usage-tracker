@@ -218,11 +218,17 @@ struct HeatmapView: View {
 
     // MARK: - Period mode
 
+    /// One gap for every header control row, so the Activity header and the
+    /// day drill's header breathe identically.
+    private static let headerSpacing: CGFloat = 10
+
     /// Both pickers sit flush against the content's right edge — `fixedSize`
     /// instead of a fixed frame, which centered the control and left a
-    /// phantom right inset.
+    /// phantom right inset. The gap is wider than the default so the audit
+    /// toggle reads as its own control rather than a segment of the picker
+    /// beside it; the Spacer holds ~85pt of slack, so the row still fits.
     private var titleRow: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Self.headerSpacing) {
             Text("Activity").font(.caption.bold())
             Spacer()
             if period == .week, weeklyAuditMeter != nil {
@@ -592,7 +598,7 @@ struct HeatmapView: View {
     private func dayContent(_ entry: DailyActivity) -> some View {
         let rows = WindowTokens.rows(from: entry.models)
         return VStack(alignment: .leading, spacing: 8) {
-            HStack {
+            HStack(spacing: Self.headerSpacing) {
                 Button {
                     hoveredModel = nil
                     selectedDay = nil
@@ -708,6 +714,7 @@ struct HeatmapView: View {
                 domain: span, meterLabel: meter.label, window: meter.window,
                 samples: samples, sessions: sessions, outcomes: windowOutcomes),
             domain: span,
+            window: meter.window,
             accent: Self.accent,
             plotHeight: 114)
     }
@@ -1025,6 +1032,7 @@ struct HeatmapView: View {
                 domain: span, meterLabel: meter.label, window: meter.window,
                 samples: samples, sessions: sessions, outcomes: windowOutcomes),
             domain: span,
+            window: meter.window,
             accent: Self.accent,
             plotHeight: 88)
     }
