@@ -11,6 +11,7 @@
 mod activity;
 mod digest;
 mod layout;
+mod meter;
 mod socket;
 mod state;
 mod status;
@@ -112,7 +113,8 @@ fn parse_args() -> Result<(PathBuf, PathBuf), String> {
                     "usage-tui — terminal dashboard for the usage engine\n\n",
                     "  --digest <path>   read this live-state.json (default: app support)\n",
                     "  --socket <path>   control socket for commands (default: app support)\n",
-                    "\nkeys: q quit · r refresh · arrows move the cursor, enter opens · 1-3 meters · [ ] page · esc back · ? help"
+                    "\nkeys: q quit · r refresh · arrows move the cursor, enter opens · 1-3 meters · [ ] page\n",
+                    "      v span · c cost · p pace · s/z span+zoom on a meter · esc back · ? help"
                 )
                 .to_owned());
             }
@@ -258,6 +260,30 @@ fn handle_key(app: &mut App, code: KeyCode, reply_tx: &mpsc::Sender<String>) {
                 let _ = tx.send(reply);
             });
         }
+        // The panel's quick pace picks, as one cycling key. The engine
+        // persists the choice exactly as the ⋯ menu's does — a pane and a
+        // menu asking for the same thing must mean the same thing.
+        KeyCode::Char('p') => {
+            let Some(seconds) = app
+                .digest
+                .as_ref()
+                .map(|digest| state::next_pace(digest.engine.active_interval_seconds))
+            else {
+                return;
+            };
+            let socket_path = app.socket_path.clone();
+            let tx = reply_tx.clone();
+            app.notice = Some(format!("pace → {}m…", seconds / 60));
+            std::thread::spawn(move || {
+                let reply = match socket::set_interval(&socket_path, seconds) {
+                    Some(reply) => reply
+                        .message
+                        .unwrap_or_else(|| if reply.ok { "ok".into() } else { "refused".into() }),
+                    None => "engine socket not listening".into(),
+                };
+                let _ = tx.send(reply);
+            });
+        }
         KeyCode::Char(digit @ '1'..='4') => {
             if let Some(digest) = &app.digest {
                 if let Some(index) = surfaces::meter_index_matching(&digest.meters, digit) {
@@ -284,6 +310,11 @@ fn handle_key(app: &mut App, code: KeyCode, reply_tx: &mpsc::Sender<String>) {
             app.heat_page = 0;
         }
         KeyCode::Char('c') => app.dimension = app.dimension.toggled(),
+        // The meter popover's span picker and its frame dropdown, as two
+        // keys. Both are meter-surface grammar: on the dashboard they say
+        // so rather than silently doing nothing.
+        KeyCode::Char('s') => meter_span(app, false),
+        KeyCode::Char('z') => meter_span(app, true),
         // Horizontal arrows keep each detail surface's own grammar
         // (scrub samples, step days); everywhere else all four arrows
         // drive the keyboard cursor across the hit map.
@@ -315,16 +346,55 @@ fn focus_move(app: &mut App, dx: i32, dy: i32) {
     }
 }
 
+/// `s` swaps the open meter's span (sliding ↔ its limit window); `z` zooms
+/// the sliding frame in. Zooming out of the Window span means leaving it,
+/// so `z` there drops to sliding first — every press changes the view.
+fn meter_span(app: &mut App, zoom: bool) {
+    let Surface::Meter(index) = app.surface else {
+        app.notice = Some("open a meter first (1-3 or click one)".into());
+        return;
+    };
+    let Some(meter) = app.digest.as_ref().and_then(|d| d.meters.get(index)) else {
+        return;
+    };
+    let (span, rung) = app.meter_view(meter);
+    let now = OffsetDateTime::now_utc();
+    let rungs = meter::ladder(meter);
+    let next = if zoom {
+        match span {
+            meter::Span::Window => (meter::Span::Sliding, rung.min(rungs.len() - 1)),
+            meter::Span::Sliding => (span, (rung + 1) % rungs.len()),
+        }
+    } else if span == meter::Span::Sliding && !meter::window_available(meter, now) {
+        // No live reset means no window to show — the app hides the
+        // picker in exactly this case, so say why instead of no-op'ing.
+        app.notice = Some("no live reset — this meter has only a sliding span".into());
+        return;
+    } else {
+        (span.toggled(), rung)
+    };
+    app.meter_span.insert(meter.id.clone(), next);
+    app.notice = Some(format!("span {}", meter::view(meter, next.0, next.1, now).label));
+    app.scrub = None;
+}
+
 /// ←/→ mean "one step into the past/future" for whichever surface is open:
 /// scrub samples on a meter chart, calendar days on a day drill.
 fn step(app: &mut App, direction: i64) {
     match &app.surface {
         Surface::Meter(index) => {
+            // Bound by the VISIBLE points, not the whole published series:
+            // the cursor must never sit on a sample the span isn't drawing.
             let len = app
                 .digest
                 .as_ref()
                 .and_then(|d| d.meters.get(*index))
-                .map(|m| m.series.len())
+                .map(|m| {
+                    let (span, rung) = app.meter_view(m);
+                    meter::view(m, span, rung, OffsetDateTime::now_utc())
+                        .points
+                        .len()
+                })
                 .unwrap_or(0);
             if len == 0 {
                 return;

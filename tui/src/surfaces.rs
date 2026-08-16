@@ -6,7 +6,7 @@
 use crate::activity::ModelTotal;
 use crate::digest::{DayRollup, LiveState, LiveMeter};
 use crate::state::{App, Dimension, Hit};
-use crate::ui::{compact, glyphs, money, ramp, rgb, CRITICAL, DIM, FAINT, WARNING};
+use crate::ui::{compact, glyphs, money, ramp, rgb, CRITICAL, DIM, FAINT, HATCH, WARNING};
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::symbols;
@@ -47,15 +47,22 @@ pub fn render_meter(
     let risk = meter.risk.map(rgb);
     let line_color = risk.unwrap_or(accent);
 
+    // One answer to "what is on screen": the chart, the track, the readout
+    // and the ←→ scrub all read this slice (see meter.rs).
+    let (span, rung) = app.meter_view(meter);
+    let view = crate::meter::view(meter, span, rung, now);
+
     let mut lines: Vec<Line> = Vec::new();
     let title = format!(
-        "{} {}  {}",
+        "{} {}  {}{}{}",
         meter.tag,
         meter.label,
         meter
             .percent
             .map(|p| format!("{p}%"))
-            .unwrap_or_else(|| "—".into())
+            .unwrap_or_else(|| "—".into()),
+        glyphs().sep,
+        view.label,
     );
     if pushed {
         lines.push(back_line(app, rect, &title));
@@ -98,31 +105,68 @@ pub fn render_meter(
     if chart_area.height < 3 || meter.series.is_empty() {
         return;
     }
-    let base = meter.series.first().map(|p| p.t).unwrap_or(now);
-    let minutes = |t: OffsetDateTime| (t - base).whole_seconds() as f64 / 60.0;
+    let base = view.start;
+    let x_end = view.minutes();
     let measured: Vec<(f64, f64)> =
-        meter.series.iter().map(|p| (minutes(p.t), p.percent)).collect();
+        view.points.iter().map(|p| (view.at(p.t), p.percent)).collect();
+    // The trajectory is clipped to the domain too — a sliding frame must
+    // not stretch the axis out to a reset it isn't showing.
     let trajectory: Vec<(f64, f64)> = meter
         .forecast
         .iter()
         .flat_map(|f| f.curve.iter())
-        .map(|p| (minutes(p.t), p.percent))
+        .filter(|p| view.holds(p.t))
+        .map(|p| (view.at(p.t), p.percent))
         .collect();
-    let x_end = trajectory
-        .last()
-        .map(|p| p.0)
-        .into_iter()
-        .chain(measured.last().map(|p| p.0))
-        .chain(meter.resets_at.map(minutes))
-        .fold(1.0f64, f64::max);
-    let now_x = minutes(now).clamp(0.0, x_end);
-    let now_marker = vec![(now_x, 0.0), (now_x, 25.0), (now_x, 50.0), (now_x, 75.0), (now_x, 100.0)];
+    let now_x = view.at(now);
+    let now_marker = if view.holds(now) {
+        vec![(now_x, 0.0), (now_x, 25.0), (now_x, 50.0), (now_x, 75.0), (now_x, 100.0)]
+    } else {
+        Vec::new()
+    };
 
-    let mut datasets = vec![Dataset::default()
-        .marker(symbols::Marker::Braille)
-        .graph_type(GraphType::Line)
-        .style(crate::ui::style(line_color))
-        .data(&measured)];
+    // The unreachable region, drawn FIRST so the curves sit crisply over
+    // it: past the crossing the limit is already spent, so the rest of the
+    // window is dead time (the app hatches the same region — and yes, a
+    // crossing already in the past hatches over measured time, which is
+    // exactly what it means: from there on, you were out).
+    let hatch: Vec<(f64, f64)> = meter
+        .forecast
+        .as_ref()
+        .and_then(|forecast| forecast.exhausts_at)
+        .filter(|crossing| *crossing < view.end)
+        .map(|crossing| {
+            crate::meter::hatch(
+                view.at(crossing),
+                x_end,
+                100.0,
+                x_end,
+                chart_area.width,
+                chart_area.height,
+                // Wider apart without color, where the texture competes
+                // with the curve's own braille instead of sitting behind it.
+                if crate::state::look().no_color { 5 } else { 3 },
+            )
+        })
+        .unwrap_or_default();
+
+    let mut datasets = Vec::new();
+    if !hatch.is_empty() {
+        datasets.push(
+            Dataset::default()
+                .marker(symbols::Marker::Braille)
+                .graph_type(GraphType::Scatter)
+                .style(crate::ui::style(HATCH))
+                .data(&hatch),
+        );
+    }
+    datasets.push(
+        Dataset::default()
+            .marker(symbols::Marker::Braille)
+            .graph_type(GraphType::Line)
+            .style(crate::ui::style(line_color))
+            .data(&measured),
+    );
     if !trajectory.is_empty() {
         datasets.push(
             Dataset::default()
@@ -132,13 +176,15 @@ pub fn render_meter(
                 .data(&trajectory),
         );
     }
-    datasets.push(
-        Dataset::default()
-            .marker(symbols::Marker::Dot)
-            .graph_type(GraphType::Scatter)
-            .style(crate::ui::style(FAINT))
-            .data(&now_marker),
-    );
+    if !now_marker.is_empty() {
+        datasets.push(
+            Dataset::default()
+                .marker(symbols::Marker::Dot)
+                .graph_type(GraphType::Scatter)
+                .style(crate::ui::style(FAINT))
+                .data(&now_marker),
+        );
+    }
     // Axis labels arrive with size: a roomy pane earns time marks along
     // the bottom and a finer percent ladder; a tight one keeps every row
     // for the plot. ratatui spreads labels EVENLY across the bounds, so
@@ -187,8 +233,13 @@ pub fn render_meter(
         if width > 0 && x_end > 0.0 {
             let mut painted = vec![None::<bool>; width];
             for stretch in &meter.stretches {
-                let from = ((minutes(stretch.start) / x_end) * width as f64).floor() as usize;
-                let to = ((minutes(stretch.end) / x_end) * width as f64).ceil() as usize;
+                // Stretches outside the visible span paint nothing; one
+                // that straddles an edge paints the part that shows.
+                if stretch.end < view.start || stretch.start > view.end {
+                    continue;
+                }
+                let from = ((view.at(stretch.start) / x_end) * width as f64).floor() as usize;
+                let to = ((view.at(stretch.end) / x_end) * width as f64).ceil() as usize;
                 for cell in painted.iter_mut().take(to.min(width)).skip(from.min(width)) {
                     *cell = Some(stretch.exhausted);
                 }
@@ -213,21 +264,38 @@ pub fn render_meter(
     if readout_y < rect.y + rect.height {
         let picked = app
             .scrub
-            .and_then(|back| meter.series.iter().rev().nth(back))
-            .or(meter.series.last());
+            .and_then(|back| view.points.iter().rev().nth(back))
+            .or(view.points.last());
         let text = picked
             .map(|point| {
                 let local = point.t.to_offset(app.local_offset);
-                format!(
-                    "{:02}:{:02}{}{:.0}%{}",
+                let mut text = format!(
+                    "{:02}:{:02}{}{:.0}%",
                     local.hour(),
                     local.minute(),
                     glyphs().sep,
                     point.percent,
-                    if app.scrub.is_some() { "  (arrows scrub, esc back)" } else { "" }
-                )
+                );
+                if app.scrub.is_some() {
+                    text.push_str("  (arrows scrub, esc back)");
+                } else if !hatch.is_empty() {
+                    // What the shaded region means, in words — so the fill
+                    // never has to carry the meaning by itself.
+                    if let Some(crossing) =
+                        meter.forecast.as_ref().and_then(|f| f.exhausts_at)
+                    {
+                        let local = crossing.to_offset(app.local_offset);
+                        text.push_str(&format!(
+                            "{}unreachable past {:02}:{:02}",
+                            glyphs().sep,
+                            local.hour(),
+                            local.minute()
+                        ));
+                    }
+                }
+                text
             })
-            .unwrap_or_default();
+            .unwrap_or_else(|| "no samples in this span".to_owned());
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(text, crate::ui::style(DIM)))),
             Rect::new(rect.x, readout_y, rect.width, 1),

@@ -23,6 +23,18 @@ struct LiveStateTests {
         ISO8601DateFormatter().date(from: iso)!
     }
 
+    /// Three days of weekly-meter readings — enough to build a profile,
+    /// nowhere near the 14-day activation, so the fixture pins the
+    /// still-learning countdown rather than the silent ready state.
+    private var profileSamples: [UsageSample] {
+        (0..<4).map { step in
+            UsageSample(
+                t: date("2026-08-13T12:00:00Z").addingTimeInterval(Double(step) * 86400),
+                percents: ["Weekly (all)": 10 * step],
+                resets: ["Weekly (all)": date("2026-08-20T12:00:00Z")])
+        }
+    }
+
     /// A fully-populated, deterministic engine state: one crafted pricing
     /// table (never the bundled feed — it re-vendors), two meters with a
     /// forecast, samples crossing a reset, minute slots, and three days of
@@ -104,6 +116,8 @@ struct LiveStateTests {
             appVersion: "0.65.0",
             state: .live(snapshot),
             predictions: ["Session (5h)": prediction],
+            weeklyProfile: WeeklyProfile.build(
+                samples: profileSamples, label: "Weekly (all)", calendar: utc),
             samples: samples,
             timeline: timeline,
             activity: activity,
@@ -140,6 +154,41 @@ struct LiveStateTests {
         #expect(state.engine.planLabel != nil)
         #expect(state.engine.planSubscriptionType == "max")
         #expect(state.engine.systemAccent == RGBColor(red: 0, green: 0.478, blue: 1))
+    }
+
+    @Test("the forecast profile publishes its countdown, and its silence when ready")
+    func forecastMaturity() throws {
+        let profile = try #require(buildFixture().engine.forecastProfile)
+        // Three days of history against the 14-day activation span.
+        #expect(profile.isReady == false)
+        #expect(profile.historySpanSeconds == 3 * 86400)
+        #expect(profile.remainingSeconds == WeeklyProfile.activationSpan - 3 * 86400)
+        #expect(
+            profile.caption
+                == "Personalized forecast activates in 11 days — learning your weekly rhythm.")
+
+        // A machine too young to have built a profile at all is NOT an
+        // absent field: it owes the user the whole countdown, the way the
+        // app's caption falls back.
+        let fresh = ForecastProfile.from(nil)
+        #expect(fresh.isReady == false)
+        #expect(fresh.historySpanSeconds == 0)
+        #expect(fresh.remainingSeconds == WeeklyProfile.activationSpan)
+        #expect(fresh.caption?.contains("14 days") == true)
+
+        // Once ready there is nothing to count down — the app legends its
+        // typical-week overlay instead, so the caption goes silent.
+        let ready = ForecastProfile.from(
+            WeeklyProfile.build(
+                samples: (0..<20).map { step in
+                    UsageSample(
+                        t: date("2026-08-01T12:00:00Z").addingTimeInterval(Double(step) * 86400),
+                        percents: ["Weekly (all)": 5 * step])
+                },
+                label: "Weekly (all)", calendar: utc))
+        #expect(ready.isReady == true)
+        #expect(ready.remainingSeconds == nil)
+        #expect(ready.caption == nil)
     }
 
     @Test("meters speak the menu bar's tag vocabulary and the ramp's colors")

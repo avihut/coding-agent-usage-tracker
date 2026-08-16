@@ -3,6 +3,7 @@
 
 use crate::digest::LiveState;
 use ratatui::layout::Rect;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::time::SystemTime;
@@ -85,6 +86,21 @@ impl Dimension {
             Self::Cost => Self::Tokens,
         }
     }
+}
+
+/// The panel ⋯ menu's quick pace picks, in seconds. 3 minutes is the
+/// engine's own polling floor (TriggerGate) — the pane can ask for a
+/// faster pace than that no more than the app can.
+pub const PACE_PRESETS: [u32; 3] = [180, 300, 900];
+
+/// The next quick pick above the pace in force, wrapping at the top. A
+/// slider-set value in between advances to the next preset ABOVE it rather
+/// than snapping back to the floor, so `p` always changes something.
+pub fn next_pace(current: f64) -> u32 {
+    PACE_PRESETS
+        .into_iter()
+        .find(|preset| f64::from(*preset) > current + 0.5)
+        .unwrap_or(PACE_PRESETS[0])
 }
 
 /// One mouse-sensitive region from the LAST draw — the render pass writes
@@ -207,8 +223,14 @@ pub struct App {
     /// view, so each run starts on the app's fresh-install defaults.
     pub period: Period,
     pub dimension: Dimension,
-    /// Scrub cursor into the open meter's series (index from the END).
+    /// Scrub cursor into the open meter's VISIBLE points (index from the
+    /// END of `meter::view(...).points`, never the whole series — the
+    /// cursor must not reach a sample the span isn't drawing).
     pub scrub: Option<usize>,
+    /// Each meter's span and zoom rung, by meter id. The app persists these
+    /// per meter; the pane holds no store of its own, so they live for the
+    /// run and start where the app's fresh defaults do.
+    pub meter_span: HashMap<String, (crate::meter::Span, usize)>,
     /// Last mouse cell, for hover halos and readouts.
     pub pointer: Option<(u16, u16)>,
     /// The EFFECTIVE hot element — mouse hover or keyboard focus,
@@ -244,6 +266,7 @@ impl App {
             period: Period::Week,
             dimension: Dimension::Tokens,
             scrub: None,
+            meter_span: HashMap::new(),
             pointer: None,
             hover_hit: None,
             focus_hit: None,
@@ -252,6 +275,16 @@ impl App {
         };
         app.reload();
         app
+    }
+
+    /// The span and zoom rung in force for a meter — the app's own opening
+    /// state (sliding, at the meter's native scale) until `s`/`z` say
+    /// otherwise.
+    pub fn meter_view(&self, meter: &crate::digest::LiveMeter) -> (crate::meter::Span, usize) {
+        self.meter_span
+            .get(&meter.id)
+            .copied()
+            .unwrap_or_else(|| (crate::meter::Span::default(), crate::meter::default_rung(meter)))
     }
 
     /// Stat + reload when the publisher rewrote the file. Returns true when
@@ -336,6 +369,19 @@ mod tests {
         let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../Tests/UsageCoreTests/Fixtures/digest/live-state-v1.json");
         LiveState::parse(&std::fs::read(path).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn pace_cycles_upward_from_wherever_the_slider_left_it() {
+        // The three quick picks cycle.
+        assert_eq!(next_pace(180.0), 300);
+        assert_eq!(next_pace(300.0), 900);
+        assert_eq!(next_pace(900.0), 180);
+        // An in-between slider value advances to the next pick above it,
+        // never snapping backwards to the floor.
+        assert_eq!(next_pace(420.0), 900);
+        // Slower than every pick (the slider reaches 2h): wrap to the top.
+        assert_eq!(next_pace(3600.0), 180);
     }
 
     #[test]

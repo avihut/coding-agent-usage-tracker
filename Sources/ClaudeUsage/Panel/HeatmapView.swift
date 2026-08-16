@@ -391,22 +391,14 @@ struct HeatmapView: View {
             } else {
                 let remaining = weeklyProfile?.remainingUntilReady
                     ?? WeeklyProfile.activationSpan
-                Text("Personalized forecast activates in \(Self.readinessText(remaining)) — learning your weekly rhythm.")
+                // One sentence, one place: the digest publishes this same
+                // string so the terminal pane counts down identically.
+                Text(UsageFormatting.forecastActivation(remaining: remaining))
             }
         }
         .font(.caption2)
         .foregroundStyle(.tertiary)
         .fixedSize(horizontal: false, vertical: true)
-    }
-
-    /// "9 days" / "1 day" / "5 hours" — countdown granularity that matches
-    /// how slowly the history accumulates.
-    private static func readinessText(_ remaining: TimeInterval) -> String {
-        let days = Int((remaining / 86400).rounded(.up))
-        if days > 1 { return "\(days) days" }
-        let hours = max(1, Int((remaining / 3600).rounded(.up)))
-        if hours >= 24 { return "1 day" }
-        return hours == 1 ? "1 hour" : "\(hours) hours"
     }
 
     /// "7.3B tokens · 24 active days" (or "≈ $6,860 · …" in cost mode) —

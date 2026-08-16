@@ -65,6 +65,24 @@ pub struct EngineStatus {
     /// The provider's extra-usage credits line, when one was sent.
     #[serde(default)]
     pub spend: Option<SpendStatus>,
+    /// How far along the learned weekly rhythm is. Absent only from
+    /// engines that predate the field — a machine with no profile yet
+    /// still publishes one carrying the full countdown.
+    #[serde(default)]
+    pub forecast_profile: Option<ForecastProfile>,
+}
+
+/// Mirror of ForecastProfile — the maturity of the weekly rhythm behind
+/// the personalized forecast. The caption is pre-phrased by the engine and
+/// goes silent once ready; we render it, we never count days ourselves.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ForecastProfile {
+    pub is_ready: bool,
+    pub history_span_seconds: f64,
+    /// None once ready — absent, not zero.
+    pub remaining_seconds: Option<f64>,
+    pub caption: Option<String>,
 }
 
 /// Mirror of SpendStatus — minor units + currency; formatting is ours.
@@ -270,6 +288,19 @@ mod tests {
         assert_eq!(state.menu_bar.len(), 3);
         let accent = state.engine.system_accent.expect("golden carries systemAccent");
         assert!((accent.blue - 1.0).abs() < 1e-9);
+        // The maturity countdown, phrased once by the engine: three days
+        // of the fourteen collected, so the note is still owed.
+        let profile = state
+            .engine
+            .forecast_profile
+            .as_ref()
+            .expect("golden carries forecastProfile");
+        assert!(!profile.is_ready);
+        assert_eq!(profile.remaining_seconds, Some(11.0 * 86400.0));
+        assert_eq!(
+            profile.caption.as_deref(),
+            Some("Personalized forecast activates in 11 days — learning your weekly rhythm.")
+        );
     }
 
     #[test]

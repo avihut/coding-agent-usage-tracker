@@ -27,6 +27,9 @@ pub const FAINT: Color = Color::Rgb(70, 70, 75);
 /// The meter bars' empty track — a quiet solid, the terminal's version of
 /// the app's `.quaternary` capsule (the ░ spray read as dots in many fonts).
 const TRACK: Color = Color::Rgb(48, 48, 52);
+/// The unreachable region's diagonal fill: CRITICAL held well back from the
+/// data, the app's own `.red.opacity(0.13)` register.
+pub const HATCH: Color = Color::Rgb(80, 22, 19);
 
 /// The color normal-state fills wear: the host Mac's control accent when
 /// the digest carries it (the app's bars are `controlAccentColor`-tinted),
@@ -200,6 +203,26 @@ pub fn truncate(text: &str, width: usize) -> String {
     }
 }
 
+/// Greedy word wrap for the pane's few prose lines. A word longer than the
+/// whole width goes on its own line and overflows rather than being cut —
+/// the caller decides whether that many lines are affordable at all.
+pub fn wrap_words(text: &str, width: usize) -> Vec<String> {
+    if width == 0 {
+        return Vec::new();
+    }
+    let mut lines: Vec<String> = Vec::new();
+    for word in text.split_whitespace() {
+        match lines.last_mut() {
+            Some(line) if line.chars().count() + 1 + word.chars().count() <= width => {
+                line.push(' ');
+                line.push_str(word);
+            }
+            _ => lines.push(word.to_owned()),
+        }
+    }
+    lines
+}
+
 pub fn render(frame: &mut Frame, app: &mut App, now: OffsetDateTime) {
     // The effective hot element: mouse hover or the keyboard cursor,
     // whichever device spoke last. A cursor whose target vanished from
@@ -342,6 +365,9 @@ struct Dash {
     models_truncated: bool,
     /// Weeks the calendar forms will draw, capped by period and data.
     weeks: u16,
+    /// The engine's forecast-maturity countdown, phrased once by the
+    /// engine. Set only under the 7D bars, where the app prints it.
+    activation_note: Option<String>,
     meter_rows: u16,
     model_rows: u16,
     activity_rows: u16,
@@ -373,8 +399,20 @@ impl Dash {
             }
             Period::All => data_weeks(days, today),
         };
+        // The app prints the maturity countdown directly under its 7D bars
+        // and goes silent once the profile is live; the pane does the same.
+        // A digest without the field at all (an engine that predates it)
+        // says nothing rather than guessing a countdown.
+        let activation_note = match app.period {
+            Period::Week => digest
+                .engine
+                .forecast_profile
+                .as_ref()
+                .and_then(|profile| profile.caption.clone()),
+            _ => None,
+        };
         let activity_rows = match app.period {
-            Period::Week => Self::BAR_ROWS,
+            Period::Week => Self::BAR_ROWS + u16::from(activation_note.is_some()),
             // Only the all-time grid takes the landscape weekday strip.
             Period::All if layout::shape(area) == Shape::Landscape => Self::STRIP_ROWS,
             // title + weekday header + week rows + readout
@@ -391,6 +429,7 @@ impl Dash {
             model_rows: (models.len().min(4) as u16) + 2,
             models,
             weeks,
+            activation_note,
             // The credits line rides inside the meters section when the
             // provider sent one.
             meter_rows: digest.meters.len() as u16
@@ -1069,7 +1108,6 @@ fn activity_title(
 fn activity_readout(
     app: &App,
     digest: &LiveState,
-    data: &Dash,
     filter: Option<&ModelTotal>,
     window: (&str, &str),
 ) -> String {
@@ -1158,10 +1196,27 @@ fn render_bars(frame: &mut Frame, app: &mut App, digest: &LiveState, data: &Dash
             .add(Rect::new(rect.x + newer_x, rect.y, 1, 1), Hit::PageLater);
     }
 
-    // Rows: title, plot, weekday, date, readout. The plot keeps one row of
-    // headroom so the tallest bar's own total still has somewhere to sit.
+    // The maturity note sits between the date row and the readout, as it
+    // does under the app's bars — and wraps there too, rather than being
+    // cut mid-word. Two lines is the ceiling: past that the sentence costs
+    // more plot than it's worth, and the bars are the section's reason to
+    // be.
+    let note: Vec<String> = data
+        .activation_note
+        .as_deref()
+        .filter(|_| rect.height >= 9)
+        .map(|text| wrap_words(text, rect.width as usize))
+        .filter(|lines| lines.len() <= 2)
+        .unwrap_or_default();
+
+    // Rows: title, plot, weekday, date, [note,] readout. The plot keeps one
+    // row of headroom so the tallest bar's own total still has somewhere to
+    // sit.
     let plot_top = rect.y + 1;
-    let plot_height = rect.height.saturating_sub(4).max(1) as usize;
+    let plot_height = rect
+        .height
+        .saturating_sub(4 + note.len() as u16)
+        .max(1) as usize;
     let usable = plot_height.saturating_sub(1).max(1);
     let slot = ((rect.width as usize) / 7).max(1);
     let bar_width = slot.saturating_sub(1).max(1);
@@ -1347,9 +1402,21 @@ fn render_bars(frame: &mut Frame, app: &mut App, digest: &LiveState, data: &Dash
         );
     }
 
+    for (offset, line) in note.iter().enumerate() {
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(line.clone(), style(FAINT)))),
+            Rect::new(
+                rect.x,
+                plot_top + plot_height as u16 + 2 + offset as u16,
+                rect.width,
+                1,
+            ),
+        );
+    }
+
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
-            activity_readout(app, digest, data, filter, (&data.start, &data.end)),
+            activity_readout(app, digest, filter, (&data.start, &data.end)),
             style(FAINT),
         ))),
         Rect::new(rect.x, rect.y + rect.height - 1, rect.width, 1),
@@ -1564,7 +1631,7 @@ fn render_heatmap(frame: &mut Frame, app: &mut App, digest: &LiveState, data: &D
     };
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
-            activity_readout(app, digest, data, filter, (&window.0, &window.1)),
+            activity_readout(app, digest, filter, (&window.0, &window.1)),
             style(FAINT),
         ))),
         Rect::new(rect.x, rect.y + rect.height - 1, rect.width, 1),
@@ -1578,7 +1645,8 @@ fn footer<'a>(
     now: OffsetDateTime,
 ) -> Paragraph<'a> {
     let keys = match app.surface {
-        Surface::Dashboard => "q quit / r refresh / v span / c cost / 1-3 meters / ? help",
+        Surface::Dashboard => "q quit / r refresh / v span / c cost / p pace / 1-3 meters / ? help",
+        Surface::Meter(_) => "esc back / arrows scrub / s span / z zoom / r refresh / ? help",
         _ => "esc back / arrows step / r refresh / ? help",
     };
     let mut spans = vec![Span::styled(keys, style(FAINT))];
@@ -1695,6 +1763,8 @@ fn render_help(frame: &mut Frame, area: Rect) {
         Line::raw("r           ask the engine to refresh now"),
         Line::raw("v           activity span: 7D / 30D / All"),
         Line::raw("c           measure in tokens or cost"),
+        Line::raw("p           polling pace: 3m / 5m / 15m"),
+        Line::raw("s z         on a meter: span, then zoom the frame"),
         Line::raw("arrows      move the cursor; enter/space opens"),
         Line::raw("1-3 / click open a meter's window chart"),
         Line::raw("click a day drill into it; ←→ step days"),

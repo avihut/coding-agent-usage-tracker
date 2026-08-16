@@ -32,3 +32,13 @@ pub fn send(socket_path: &Path, command: &serde_json::Value) -> Option<Reply> {
 pub fn refresh(socket_path: &Path) -> Option<Reply> {
     send(socket_path, &serde_json::json!({ "refresh": {} }))
 }
+
+/// The engine's active pace. It clamps to its own floor and ceiling and
+/// echoes what it settled on, so the reply — not the request — is what the
+/// pane reports.
+pub fn set_interval(socket_path: &Path, seconds: u32) -> Option<Reply> {
+    send(
+        socket_path,
+        &serde_json::json!({ "setInterval": { "seconds": seconds } }),
+    )
+}

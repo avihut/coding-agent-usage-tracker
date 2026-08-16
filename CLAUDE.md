@@ -167,7 +167,26 @@ the README rather than silently deviating.
   slots so "50"/"100" sit at true positions; x = local-time marks,
   3 under 76 cols, 5 at/above; gated ≥44 cols × ≥9 rows). Dashboard
   sections get a blank row between them when it costs no section
-  (layout::pick gapped-vs-tight). VERIFY GOTCHA: BSD grep on
+  (layout::pick gapped-vs-tight). v0.76.0 (parity wave 3): the meter
+  surface's span math lives in tui/src/meter.rs — Span Sliding/Window
+  (`s`; Window needs a live future reset, else the key says why), a
+  window-CAPPED zoom ladder (`z`; the digest publishes ONE window per
+  meter, so sliding is a sub-range of it and the ladder grows downward
+  to 1h/2h instead of up past the window), and the unreachable
+  region's diagonal hatch pushed as the FIRST dataset so ratatui
+  layers it behind the marks (a crossing already past hatches over
+  measured time — that IS its meaning). Its `view()` is the one answer
+  to "what is on screen": chart, stretch track, readout and the ←→
+  scrub bound all read `view().points`, so the cursor can never reach
+  a sample the span isn't drawing. `p` cycles the panel's 3/5/15m pace
+  picks over the socket's setInterval (next preset ABOVE the pace in
+  force, so an in-between slider value never snaps backwards). The
+  digest gained `EngineStatus.forecastProfile` (additive): weekly-
+  rhythm maturity, countdown phrased once in
+  UsageFormatting.forecastActivation and printed by BOTH the app's 7D
+  caption and the pane's (wrapped, ≤2 lines, silent once ready) — a
+  machine with no profile yet publishes the FULL countdown, and only a
+  pre-field engine publishes nil. VERIFY GOTCHA: BSD grep on
   capture-pane -e output goes binary-mode over braille bytes and
   silently prints no matches — pipe through `cat -v` FIRST or use
   grep -a; a zero match count there can be a false negative.

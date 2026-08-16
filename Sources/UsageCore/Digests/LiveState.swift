@@ -114,6 +114,10 @@ public struct EngineStatus: Codable, Sendable, Equatable {
     public let error: ErrorStatus?
     /// The panel footer's enabled-credits line, when the provider sent one.
     public let spend: SpendStatus?
+    /// How far along the learned weekly rhythm is. Nil only from engines
+    /// that predate the field — a fresh install with no profile at all
+    /// still publishes one, carrying the full countdown.
+    public let forecastProfile: ForecastProfile?
 
     public init(
         providerID: String, serviceName: String, agentName: String, glyph: String,
@@ -124,7 +128,8 @@ public struct EngineStatus: Codable, Sendable, Equatable {
         backoffUntil: Date?, stale: Bool, isLocalProvider: Bool,
         activeIntervalSeconds: TimeInterval, paceMultiplier: Int,
         apiBudgetUsed: Int?, apiBudgetCeiling: Int?, apiBudgetFraction: Double?,
-        gateFloorSeconds: TimeInterval, error: ErrorStatus?, spend: SpendStatus?
+        gateFloorSeconds: TimeInterval, error: ErrorStatus?, spend: SpendStatus?,
+        forecastProfile: ForecastProfile? = nil
     ) {
         self.providerID = providerID
         self.serviceName = serviceName
@@ -152,6 +157,44 @@ public struct EngineStatus: Codable, Sendable, Equatable {
         self.gateFloorSeconds = gateFloorSeconds
         self.error = error
         self.spend = spend
+        self.forecastProfile = forecastProfile
+    }
+}
+
+/// The weekly-profile's maturity, so every face can say the same thing
+/// while the personalized forecast is still learning — and say nothing
+/// once it's live (there is no countdown left to run).
+public struct ForecastProfile: Codable, Sendable, Equatable {
+    public let isReady: Bool
+    /// Oldest-to-newest span of the samples the profile absorbed.
+    public let historySpanSeconds: TimeInterval
+    /// Nil once ready — absent, not zero.
+    public let remainingSeconds: TimeInterval?
+    /// Pre-phrased countdown (UsageFormatting.forecastActivation); nil once
+    /// ready, since the app then legends its typical-week overlay instead.
+    public let caption: String?
+
+    public init(
+        isReady: Bool, historySpanSeconds: TimeInterval,
+        remainingSeconds: TimeInterval?, caption: String?
+    ) {
+        self.isReady = isReady
+        self.historySpanSeconds = historySpanSeconds
+        self.remainingSeconds = remainingSeconds
+        self.caption = caption
+    }
+
+    /// From the engine's weekly profile. A nil profile is NOT an absent
+    /// field: an install too young to have built one owes the user the full
+    /// activation countdown, exactly as the app's caption falls back.
+    public static func from(_ profile: WeeklyProfile?) -> ForecastProfile {
+        let ready = profile?.isReady ?? false
+        let remaining = profile?.remainingUntilReady ?? WeeklyProfile.activationSpan
+        return ForecastProfile(
+            isReady: ready,
+            historySpanSeconds: profile?.historySpan ?? 0,
+            remainingSeconds: ready ? nil : remaining,
+            caption: ready ? nil : UsageFormatting.forecastActivation(remaining: remaining))
     }
 }
 
@@ -456,6 +499,9 @@ public enum LiveStateBuilder {
         appVersion: String,
         state: DisplayState,
         predictions: [String: UsagePrediction],
+        /// The overall weekly rhythm, for the maturity countdown. Nil is a
+        /// real state (too little history yet), not a missing argument.
+        weeklyProfile: WeeklyProfile? = nil,
         samples: [UsageSample],
         timeline: [TokenSlot],
         activity: [DailyActivity],
@@ -533,7 +579,8 @@ public enum LiveStateBuilder {
                 SpendStatus(
                     usedMinor: $0.usedMinor, limitMinor: $0.limitMinor,
                     currency: $0.currency, exponent: $0.exponent)
-            })
+            },
+            forecastProfile: .from(weeklyProfile))
 
         let meters = (snapshot?.meters ?? []).map { meter in
             liveMeter(

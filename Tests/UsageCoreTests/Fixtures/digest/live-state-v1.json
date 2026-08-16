@@ -126,6 +126,12 @@
     "apiBudgetUsed" : 7,
     "appVersion" : "0.65.0",
     "fetchedAt" : "2026-08-16T11:58:00Z",
+    "forecastProfile" : {
+      "caption" : "Personalized forecast activates in 11 days — learning your weekly rhythm.",
+      "historySpanSeconds" : 259200,
+      "isReady" : false,
+      "remainingSeconds" : 950400
+    },
     "gateFloorSeconds" : 180,
     "generatedAt" : "2026-08-16T12:00:00Z",
     "glyph" : "✳︎",

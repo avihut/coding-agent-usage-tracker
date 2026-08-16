@@ -1,6 +1,7 @@
 # TUI ↔ menu bar parity program
 
-Status: **WAVE 1 SHIPPED** (v0.73.0, 2026-08-16) — waves 2–4 queued.
+Status: **WAVES 1–3 SHIPPED** (v0.73.0 / v0.74.0 / v0.76.0, 2026-08-16)
+— wave 4 queued.
 This file is the source of truth for the program AND the context handoff
 for a fresh session: everything needed to execute lives here. Read it
 top to bottom before touching code.
@@ -37,13 +38,17 @@ Two decisions the USER made at program start (2026-08-16):
 |---|---|---|
 | 1 | v0.73.0 | 1–9, 26–30 (layout truth, color parity, state parity) — **SHIPPED** |
 | 2 | v0.74.0 | 10–15, 21–24 (activity bar chart + picker, models table) — **SHIPPED** |
-| 3 | v0.76.0 | 16–19, 31 (meter-surface keys, forecast note, pace picks) |
+| 3 | v0.76.0 | 16–19, 31 (meter-surface keys, forecast note, pace picks) — **SHIPPED** |
 | 4 | v0.77.0 | 20, 25 (both need digest extensions; 25 needs the §10 amendment) |
 
 v0.75.0 sits between waves 2 and 3: a user-reported bug (a limit at 100%
 still reading "runs out soon", its crossing never recorded) fixed
 engine-side in PredictionEngine + UsageFormatting.forecastCaption, so
 both faces inherited it. Wave 3 and 4 shifted one version later.
+
+WAVE 4 IS WHAT REMAINS: items 20 + 25 at v0.77.0. Item 25 needs the
+dated, user-directed docs/SPEC.md §10 amendment written FIRST (D2 is
+already decided — session titles are allowed in the local-only digest).
 
 Verify each wave headlessly (protocol below) before shipping it.
 
@@ -124,18 +129,35 @@ gives each stack band its own density glyph.
 16. [S][+d] Forecast-maturity note ("Personalized forecast activates in
     7 days — learning your weekly rhythm") — additive digest flag for
     weekly-profile state (e.g. `profileMature: Bool?` or days
-    remaining) published by the engine.
+    remaining) published by the engine. **SHIPPED v0.76.0**:
+    `EngineStatus.forecastProfile` (isReady / historySpanSeconds /
+    remainingSeconds / pre-phrased caption), phrased once in
+    `UsageFormatting.forecastActivation` — HeatmapView and the pane
+    now print the same sentence. A machine with NO profile yet
+    publishes the full countdown rather than nil (nil means "engine
+    predates the field"). The pane wraps it under the 7D bars, ≤2
+    lines, and goes silent once ready.
 
 ### Meter detail surface
 17. [M][✓] Span picker `s` — Sliding/Window (from the unshipped T2
     line). Digest series is window-scoped; sliding = trailing tail of
     the same series. Mirror the app's popover semantics
-    (`Panel/MeterHistoryView.swift`).
+    (`Panel/MeterHistoryView.swift`). **SHIPPED v0.76.0** in
+    `tui/src/meter.rs`; Window needs a live future reset, else the
+    key says why (the app hides its picker in that case).
 18. [S][✓] Zoom `z` (same unshipped plan line; see MeterHistoryView
-    for what zoom means there).
+    for what zoom means there — the SlidingFrame dropdown).
+    **SHIPPED v0.76.0**: `z` cycles the frame ladder, `z` from the
+    Window span drops to Sliding first, so every press changes the
+    view. Ladder deviation is deliberate — see #33.
 19. [S][✓] Hatch/dim the unreachable region beyond the projected
     exhaust crossing (app hatches; TUI has only the red mark —
-    forecast.exhaustAt is in the digest).
+    forecast.exhaustAt is in the digest). **SHIPPED v0.76.0**: a
+    diagonal stripe dataset pushed FIRST (ratatui layers datasets, so
+    first = behind the marks, as the app draws it behind its curves),
+    dim red, sparser under NO_COLOR. A crossing already in the past
+    hatches over measured time — that is what it MEANS ("from here
+    you were out"), not a bug to fix.
 20. [L][+d] Per-model cumulative curves + breakdown legend under the
     meter chart (the app popover's centerpiece; the deferred "v2"
     item). Needs an additive digest extension: per-model window series
@@ -175,11 +197,23 @@ gives each stack band its own density glyph.
     grammar).
 31. [S][✓] Quick pace presets — key `p` cycles 3/5/15m via the
     socket's `setInterval` (works against app-hosted and daemon —
-    both run the socket).
+    both run the socket). **SHIPPED v0.76.0**: `socket::set_interval`,
+    `state::next_pace` picks the next preset ABOVE the pace in force
+    (a slider-set in-between value never snaps backwards to 3m). The
+    engine persists it exactly as the ⋯ menu's picks do.
 
 ### Intentionally different (do NOT "fix")
 32. Push/pop animation, pointer cursors, hover popovers — GUI idioms;
     surfaces/instant swaps are the terminal equivalents.
+33. The zoom ladder (v0.76.0). The app's frames are 5h/12h/24h/wk/7d/
+    30d because it holds 56 days of samples; the digest publishes ONE
+    window per meter, so the pane's Sliding span can only ever be a
+    sub-range of that window. The ladder therefore grows DOWNWARD
+    (1h/2h added) and is capped by the meter's own window — a 5h
+    session meter offers 1h/2h/5h and nothing wider, since wider would
+    render emptiness. The calendar-anchored `wk` frame has no
+    counterpart at all: it is anchored to the week, the series to the
+    window, so it could only mislabel a partial slice.
 
 ## Context a fresh session needs (do not rediscover)
 
@@ -190,8 +224,11 @@ gives each stack band its own density glyph.
   on this machine, self-upgrades on every `mise run app` via
   LaunchAgentInstaller.ensure's version-kickstart. Auto-install is in
   force (§10 re-amended 2026-08-16); sticky opt-out `daemonAutoInstall`.
-- Tests: 362 Swift (`swift test`) + 17 Rust (`cd tui && cargo test`);
-  `mise run test` runs both.
+- Tests at v0.76.0: 365 Swift (`swift test`) + 28 Rust
+  (`cd tui && cargo test`); `mise run test` runs both. NOTE: clippy
+  and fmt are NOT gated by `mise run test` and the crate carries
+  pre-existing drift in state.rs/status.rs/ui.rs/main.rs/activity.rs —
+  don't sweep it into a feature commit.
 
 ### Digest (the only data source the TUI may use)
 - Schema: `Sources/UsageCore/Digests/LiveState.swift` (+ builder),
@@ -215,8 +252,8 @@ gives each stack band its own density glyph.
   TOTALS ONLY, no per-model hourly; days ~366d totals; model_days ~35d
   of {dayKey, models[] with full tallies}; hour_days ~8d; timeZone),
   menuBar segments.
-- NOT available (hence [+d] items): system accent (8), profile
-  maturity (16), per-model window series per meter (20), sessions (25),
+- NOT available (hence [+d] items): per-model window series per meter
+  (20), sessions (25),
   per-model HOURLY buckets (why today-spark stacking is impossible —
   do not attempt).
 
@@ -226,12 +263,23 @@ gives each stack band its own density glyph.
   activates `hover_hit`, r=socket refresh threaded via reply channel,
   1-4 meters, tab, [ ] page, arrows, **v period, c dimension**),
   `focus_move` (keyboard cursor), `find_usaged`/`ensure_engine`
-  (auto-install nudge, once, when EngineOffline). FREE KEYS still: s z
-  p (m, d also free).
+  (auto-install nudge, once, when EngineOffline). v0.76.0 added
+  **s span / z zoom** (meter surface only — on the dashboard they
+  say "open a meter first") and **p pace** (3/5/15m over the socket).
+  FREE KEYS still: m, d.
 - activity.rs (v0.74.0): the period math — `span`, `day_value`,
   `model_totals`, `active_days`, `total_value`, `segments`,
   `model_horizon_truncates`. Pure, tested; every activity surface
   reads it so table, chart and summary can't disagree.
+- meter.rs (v0.76.0): the meter surface's span math — `Span`
+  (Sliding/Window), the `FRAMES` ladder + `ladder`/`default_rung`
+  (window-capped), `window_available`, `view()` (start/end/label +
+  the CONTIGUOUS slice of series points on screen) and `hatch()`.
+  Pure, tested; the chart, stretch track, readout AND the ←→ scrub
+  bound all read `view().points`, so the cursor can never land on a
+  sample the span isn't drawing (the desync this module exists to
+  prevent). Per-meter span+rung live in `App.meter_span` for the run
+  — the pane persists nothing.
 - state.rs: App (digest, freshness via broker heartbeat rule, surface
   Dashboard/Meter(usize)/Day(String), heat_page, scrub, pointer,
   hover_hit = EFFECTIVE hot element (mouse vs keyboard focus by
@@ -261,8 +309,9 @@ gives each stack band its own density glyph.
   keep labels honest), stretch track, render_day (hourly ≤8d +
   models ≤35d with labeled degrade), neighbor_day, split_viable
   (landscape ≥84 cols side-by-side, else push with back).
-- socket.rs: NDJSON one-shot; refresh + (extend for setInterval —
-  wire shape `{"setInterval":{"seconds":300}}`, reply {ok,message}).
+- socket.rs: NDJSON one-shot; `refresh` + `set_interval` (wire shape
+  `{"setInterval":{"seconds":300}}`, reply {ok,message} — verified
+  against the live daemon).
 - status.rs: --status tmux line.
 
 ### App-side reference code (READ these to copy presentation)

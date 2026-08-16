@@ -107,6 +107,24 @@ public enum UsageFormatting {
         return exhaustText(exhaustsAt, now: now, timeZone: timeZone, locale: locale)
     }
 
+    /// "9 days" / "1 day" / "5 hours" — countdown granularity that matches
+    /// how slowly the sample history accumulates.
+    public static func readinessText(_ remaining: TimeInterval) -> String {
+        let days = Int((remaining / 86400).rounded(.up))
+        if days > 1 { return "\(days) days" }
+        let hours = max(1, Int((remaining / 3600).rounded(.up)))
+        if hours >= 24 { return "1 day" }
+        return hours == 1 ? "1 hour" : "\(hours) hours"
+    }
+
+    /// The one sentence every face prints while the weekly rhythm is still
+    /// being learned — under the app's 7D bars and under the pane's
+    /// activity chart. Written here so both say it the same way.
+    public static func forecastActivation(remaining: TimeInterval) -> String {
+        "Personalized forecast activates in \(readinessText(remaining))"
+            + " — learning your weekly rhythm."
+    }
+
     /// A past instant: the clock alone today, the weekday too once the day
     /// has turned.
     public static func stamp(

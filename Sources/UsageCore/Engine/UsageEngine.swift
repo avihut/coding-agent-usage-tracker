@@ -261,6 +261,7 @@ public final class UsageEngine {
             appVersion: AppIdentity.version,
             state: state,
             predictions: predictions,
+            weeklyProfile: weeklyProfile,
             samples: samples,
             timeline: tokenTimeline,
             activity: activity,
