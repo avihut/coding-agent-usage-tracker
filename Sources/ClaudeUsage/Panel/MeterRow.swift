@@ -93,9 +93,12 @@ struct MeterRow: View {
                 Text(UsageFormatting.resetText(resetsAt, now: Date()))
                     .foregroundStyle(.secondary))
         }
-        if let prediction, let exhaust = prediction.exhaustsAt {
+        if let prediction,
+           let caption = UsageFormatting.forecastCaption(
+               percent: meter.percent, exhaustsAt: prediction.exhaustsAt, now: Date())
+        {
             parts.append(
-                Text(UsageFormatting.exhaustText(exhaust, now: Date()))
+                Text(caption)
                     .foregroundStyle(riskColor(severity: prediction.severity) ?? .orange))
         }
         guard var line = parts.first else { return Text("") }

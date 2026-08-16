@@ -78,7 +78,47 @@ public enum UsageFormatting {
         timeZone: TimeZone = .current,
         locale: Locale = .current
     ) -> String {
-        eventPhrase("runs out", exhaustsAt, now: now, timeZone: timeZone, locale: locale)
+        // Already crossed: the limit is spent and the only useful thing
+        // left to say is when. Future-tense phrasing for a past crossing
+        // ("runs out soon" at 100%) is the thing this branch exists to
+        // prevent.
+        guard exhaustsAt > now else {
+            return "spent at \(stamp(exhaustsAt, now: now, timeZone: timeZone, locale: locale))"
+        }
+        return eventPhrase("runs out", exhaustsAt, now: now, timeZone: timeZone, locale: locale)
+    }
+
+    /// The forecast half of a meter's caption, for every surface that
+    /// draws one: "runs out in 1h 05m" while the limit still has room,
+    /// "spent at 15:32" once it's gone (or a bare "spent" when nothing
+    /// witnessed the crossing), nil while the forecast is clean.
+    public static func forecastCaption(
+        percent: Int?,
+        exhaustsAt: Date?,
+        now: Date,
+        timeZone: TimeZone = .current,
+        locale: Locale = .current
+    ) -> String? {
+        if let percent, percent >= 100 {
+            guard let exhaustsAt, exhaustsAt <= now else { return "spent" }
+            return "spent at \(stamp(exhaustsAt, now: now, timeZone: timeZone, locale: locale))"
+        }
+        guard let exhaustsAt else { return nil }
+        return exhaustText(exhaustsAt, now: now, timeZone: timeZone, locale: locale)
+    }
+
+    /// A past instant: the clock alone today, the weekday too once the day
+    /// has turned.
+    public static func stamp(
+        _ date: Date, now: Date, timeZone: TimeZone = .current, locale: Locale = .current
+    ) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let formatter = DateFormatter()
+        formatter.locale = locale
+        formatter.timeZone = timeZone
+        formatter.dateFormat = calendar.isDate(date, inSameDayAs: now) ? "HH:mm" : "EEE HH:mm"
+        return formatter.string(from: date)
     }
 
     /// The shared future-event vocabulary: relative "in 3h 20m" inside a

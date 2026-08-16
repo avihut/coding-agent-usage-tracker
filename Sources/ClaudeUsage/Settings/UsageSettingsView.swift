@@ -72,9 +72,16 @@ struct UsageSettingsPane: View {
                     "Projected at reset",
                     prediction.projectedAtReset.map { "\($0)%" } ?? "—")
                 if let exhaust = prediction.exhaustsAt {
-                    infoRow(
-                        "Crosses the limit",
-                        "in \(UsageFormatting.duration(exhaust.timeIntervalSince(Date())))")
+                    // A crossing already behind us is a record, not a
+                    // countdown — "in -3h" is the shape to avoid.
+                    let now = Date()
+                    if exhaust > now {
+                        infoRow(
+                            "Crosses the limit",
+                            "in \(UsageFormatting.duration(exhaust.timeIntervalSince(now)))")
+                    } else {
+                        infoRow("Limit spent", "at \(UsageFormatting.stamp(exhaust, now: now))")
+                    }
                 }
                 if prediction.rawVerdict != prediction.verdict {
                     Text("Latest reading says \(verdictName(prediction.rawVerdict)) — one more agreeing refresh flips the color.")

@@ -639,9 +639,9 @@ public enum LiveStateBuilder {
                 baselineRatePerHour: prediction.baselineRatePerHour,
                 paceFactor: prediction.paceFactor,
                 basis: basisName(prediction.basis),
-                caption: prediction.exhaustsAt.map {
-                    UsageFormatting.exhaustText($0, now: now, timeZone: timeZone, locale: locale)
-                },
+                caption: UsageFormatting.forecastCaption(
+                    percent: meter.percent, exhaustsAt: prediction.exhaustsAt,
+                    now: now, timeZone: timeZone, locale: locale),
                 curve: thin(
                     prediction.curve.map { SeriesPoint(t: $0.t, percent: $0.percent) },
                     to: Self.curveCap))

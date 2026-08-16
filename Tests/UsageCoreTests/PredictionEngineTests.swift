@@ -301,4 +301,82 @@ struct PredictionEngineTests {
         #expect(PredictionEngine.durationText(hours: 30) == "1d 6h")
         #expect(PredictionEngine.durationText(hours: 2) == "2h")
     }
+
+    /// A spent limit is a record, not a forecast: the crossing is recalled
+    /// from the samples that witnessed it and must not drift toward `now`
+    /// on every refresh (which is what made an exhausted meter keep
+    /// promising it was about to run out).
+    @Test("an exhausted limit pins the moment it was spent")
+    func spent() {
+        let now = Date()
+        let meter = Meter(
+            id: "weekly_scoped", label: "Weekly · Fable", percent: 100,
+            resetsAt: now.addingTimeInterval(5 * 3600), level: .critical, rank: 2,
+            limitWindow: 7 * 86400)
+        let samples = [
+            sample(180, 82, label: "Weekly · Fable", now: now),
+            sample(150, 96, label: "Weekly · Fable", now: now),
+            sample(120, 100, label: "Weekly · Fable", now: now),
+            sample(30, 100, label: "Weekly · Fable", now: now),
+        ]
+        let first = try! #require(
+            PredictionEngine.predict(meter: meter, samples: samples, now: now))
+        let crossing = now.addingTimeInterval(-120 * 60)
+        #expect(first.verdict == .red)
+        #expect(first.severity == 1)
+        #expect(first.projectedAtReset == 100)
+        #expect(abs(first.exhaustsAt!.timeIntervalSince(crossing)) < 1)
+
+        // Ten minutes later the crossing has not moved.
+        let later = now.addingTimeInterval(600)
+        let second = try! #require(
+            PredictionEngine.predict(meter: meter, samples: samples, now: later))
+        #expect(second.exhaustsAt == first.exhaustsAt)
+
+        // A flat all-100 tail has no measurable rate — the forecast used to
+        // vanish there, taking the "spent" state with it.
+        let flat = [
+            sample(120, 100, label: "Weekly · Fable", now: now),
+            sample(60, 100, label: "Weekly · Fable", now: now),
+        ]
+        let stillSpent = try! #require(
+            PredictionEngine.predict(meter: meter, samples: flat, now: now))
+        #expect(stillSpent.verdict == .red)
+        #expect(stillSpent.exhaustsAt != nil)
+
+        // Nothing witnessed the crossing: still spent, just no moment.
+        let unwitnessed = try! #require(
+            PredictionEngine.predict(meter: meter, samples: [], now: now))
+        #expect(unwitnessed.verdict == .red)
+        #expect(unwitnessed.exhaustsAt == nil)
+    }
+
+    @Test("spent limits speak in the past tense")
+    func spentPhrasing() {
+        let now = Date()
+        let utc = TimeZone(identifier: "UTC")!
+        let posix = Locale(identifier: "en_US_POSIX")
+        // The bug: a crossing at or behind `now` phrased as a future event.
+        #expect(
+            UsageFormatting.exhaustText(now, now: now, timeZone: utc, locale: posix)
+                .hasPrefix("spent at "))
+        #expect(
+            UsageFormatting.forecastCaption(
+                percent: 100, exhaustsAt: now.addingTimeInterval(-3600),
+                now: now, timeZone: utc, locale: posix)?
+                .hasPrefix("spent at ") == true)
+        // Spent, but no sample saw it happen.
+        #expect(
+            UsageFormatting.forecastCaption(
+                percent: 100, exhaustsAt: nil, now: now, timeZone: utc, locale: posix) == "spent")
+        // Still room: the forecast keeps its future tense.
+        #expect(
+            UsageFormatting.forecastCaption(
+                percent: 64, exhaustsAt: now.addingTimeInterval(3600),
+                now: now, timeZone: utc, locale: posix) == "runs out in 1h")
+        // Clean forecast, nothing to say.
+        #expect(
+            UsageFormatting.forecastCaption(
+                percent: 64, exhaustsAt: nil, now: now, timeZone: utc, locale: posix) == nil)
+    }
 }

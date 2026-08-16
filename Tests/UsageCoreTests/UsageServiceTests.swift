@@ -166,7 +166,22 @@ struct FormattingTests {
         let now = Date(timeIntervalSince1970: 0)
         #expect(UsageFormatting.exhaustText(now.addingTimeInterval(2 * 3600 + 10 * 60), now: now) == "runs out in 2h 10m")
         #expect(UsageFormatting.exhaustText(now.addingTimeInterval(45 * 60), now: now) == "runs out in 45m")
-        #expect(UsageFormatting.exhaustText(now.addingTimeInterval(-1), now: now) == "runs out soon")
+        // Where the two phrases part company: a reset still ahead of us is
+        // always future ("resets soon"), but a crossing already behind us
+        // has happened — the limit is spent, and the tense says so. The
+        // stamp carries the weekday only once the day has turned (epoch
+        // minus a second is the previous Wednesday).
+        let utcTime = TimeZone(identifier: "UTC")!
+        let posixLocale = Locale(identifier: "en_US_POSIX")
+        #expect(
+            UsageFormatting.exhaustText(
+                now.addingTimeInterval(-1), now: now, timeZone: utcTime,
+                locale: posixLocale) == "spent at Wed 23:59")
+        // Same day: the clock alone carries it.
+        #expect(
+            UsageFormatting.exhaustText(
+                now.addingTimeInterval(10 * 3600), now: now.addingTimeInterval(12 * 3600),
+                timeZone: utcTime, locale: posixLocale) == "spent at 10:00")
         // Beyond a day both phrases go weekday-absolute (epoch is a Thursday).
         let utc = TimeZone(identifier: "UTC")!
         let posix = Locale(identifier: "en_US_POSIX")

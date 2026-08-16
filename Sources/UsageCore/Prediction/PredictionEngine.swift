@@ -129,15 +129,68 @@ public enum PredictionEngine {
         meter: Meter, samples: [UsageSample], profile: WeeklyProfile? = nil,
         previous: UsagePrediction? = nil, now: Date
     ) -> UsagePrediction? {
-        guard let percent = meter.percent,
-              let rate = ratePerHour(
-                  samples: samples, label: meter.label,
-                  window: meter.rateWindow, now: now)
+        guard let percent = meter.percent else { return nil }
+        // A spent limit is a measurement, not a forecast — and it must not
+        // depend on one. Once every sample reads 100 the rate is
+        // unmeasurable (a flat tail has no slope), which used to erase the
+        // prediction entirely and with it any word about being spent.
+        if percent >= 100 {
+            return spent(
+                resetsAt: meter.resetsAt,
+                at: spentAt(samples: samples, label: meter.label),
+                now: now)
+        }
+        guard let rate = ratePerHour(
+            samples: samples, label: meter.label,
+            window: meter.rateWindow, now: now)
         else { return nil }
         return prediction(
             percent: percent, resetsAt: meter.resetsAt, ratePerHour: rate,
             windowLength: meter.limitWindow ?? 0,
             profile: profile, previous: previous, now: now)
+    }
+
+    /// When this window's limit was actually spent: the first sample to
+    /// read 100 since the last reset. The crossing is a fact to be
+    /// recalled, never a projection to be recomputed — recomputing it each
+    /// refresh is what kept an exhausted meter saying "runs out soon" and
+    /// left the moment it ran out unrecorded. Nil when no sample witnessed
+    /// the crossing (the app wasn't watching).
+    public static func spentAt(samples: [UsageSample], label: String) -> Date? {
+        let points = samples
+            .compactMap { sample in sample.percents[label].map { (sample.t, $0) } }
+            .sorted { $0.0 < $1.0 }
+        guard !points.isEmpty else { return nil }
+        // The tail after the most recent drop is the current window, the
+        // same seam `ratePerHour` cuts on.
+        var tail = points
+        for index in points.indices.dropFirst().reversed() where points[index].1 < points[index - 1].1 {
+            tail = Array(points[index...])
+            break
+        }
+        return tail.first { $0.1 >= 100 }?.0
+    }
+
+    /// The forecast for a limit that is already gone: nothing left to
+    /// project, the trajectory flat at the ceiling until the reset.
+    static func spent(resetsAt: Date?, at spentAt: Date?, now: Date) -> UsagePrediction {
+        let liveReset = resetsAt.flatMap { $0 > now ? $0 : nil }
+        return UsagePrediction(
+            ratePerHour: 0,
+            baselineRatePerHour: nil,
+            paceFactor: nil,
+            basis: .recentOnly,
+            projectedAtReset: liveReset != nil ? 100 : nil,
+            exhaustsAt: spentAt,
+            // Measured, so it skips the verdict smoothing that exists to
+            // keep one odd sample from flipping a *forecast*.
+            verdict: .red,
+            rawVerdict: .red,
+            severity: 1,
+            text: "limit spent",
+            curve: liveReset.map { reset in
+                [.init(t: now, percent: 100), .init(t: reset, percent: 100)]
+            } ?? [])
     }
 
     /// Percent-per-hour from recent samples of one meter: a least-squares
@@ -225,8 +278,13 @@ public enum PredictionEngine {
     public static func prediction(
         percent: Int, resetsAt: Date?, ratePerHour rate: Double,
         windowLength: TimeInterval = 0, profile: WeeklyProfile? = nil,
-        previous: UsagePrediction? = nil, now: Date
+        previous: UsagePrediction? = nil, spentAt: Date? = nil, now: Date
     ) -> UsagePrediction {
+        // Nothing left to forecast once the limit is gone; the crossing
+        // comes from the record, not from extrapolating zero headroom.
+        if percent >= 100 {
+            return spent(resetsAt: resetsAt, at: spentAt, now: now)
+        }
         let liveReset = resetsAt.flatMap { $0 > now ? $0 : nil }
         if let reset = liveReset,
            let baseline = baseline(
