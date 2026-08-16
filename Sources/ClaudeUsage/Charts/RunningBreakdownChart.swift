@@ -211,16 +211,35 @@ struct RunningBreakdownChart: View {
                 // Zooming out to (almost) everything snaps cleanly back to
                 // the unzoomed chart instead of leaving a 2% crumb.
                 if proposed >= fullLength * 0.98 {
-                    visibleLength = nil
-                    scrollX = 0
+                    setZoom(nil, scroll: 0)
                     return
                 }
                 let length = max(proposed, Self.minVisible)
-                visibleLength = length
-                scrollX = min(max(base.anchorData - base.anchorFraction * length, 0),
-                              fullLength - length)
+                setZoom(
+                    length,
+                    scroll: min(max(base.anchorData - base.anchorFraction * length, 0),
+                                fullLength - length))
             }
             .onEnded { _ in pinchBase = nil }
+    }
+
+    /// All zoom-state writes funnel through here: entering or leaving a zoom
+    /// runs as ONE withAnimation transaction so the minimap's slot AND every
+    /// sibling laid out below the chart (divider, column header, the whole
+    /// message table) slide together. The body-scoped .animation alone can't
+    /// do that — it animates this subtree while the chart block's new height
+    /// reaches the parent instantly, so the table would jump. In-zoom pinch
+    /// ticks stay transaction-free to track the fingers exactly.
+    private func setZoom(_ length: Double?, scroll: Double) {
+        if (visibleLength == nil) != (length == nil) {
+            withAnimation(.snappy(duration: 0.22)) {
+                visibleLength = length
+                scrollX = scroll
+            }
+        } else {
+            visibleLength = length
+            scrollX = scroll
+        }
     }
 
     private var chartCore: some View {
