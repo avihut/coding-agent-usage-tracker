@@ -14,6 +14,10 @@ let package = Package(
             name: "ClaudeUsage",
             dependencies: ["UsageCore"]
         ),
+        .executableTarget(
+            name: "usaged",
+            dependencies: ["UsageCore"]
+        ),
         .testTarget(
             name: "UsageCoreTests",
             dependencies: ["UsageCore"],

@@ -8,12 +8,18 @@ ROOT="${0:A:h:h}"
 CONFIG="${1:-release}"
 
 swift build -c "$CONFIG" --product ClaudeUsage --package-path "$ROOT"
+swift build -c "$CONFIG" --product usaged --package-path "$ROOT"
 
 APP="$ROOT/ClaudeUsage.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$ROOT/Support/Info.plist" "$APP/Contents/Info.plist"
 cp "$ROOT/.build/$CONFIG/ClaudeUsage" "$APP/Contents/MacOS/ClaudeUsage"
+# The launchd engine rides inside the bundle so there is exactly one
+# installed copy; sign it before the outer bundle seals over it. It reads
+# the Keychain, so the stable identity matters (same ACL as the app).
+cp "$ROOT/.build/$CONFIG/usaged" "$APP/Contents/MacOS/usaged"
+"$ROOT/scripts/sign.sh" "$APP/Contents/MacOS/usaged"
 "$ROOT/scripts/icon.sh"
 cp "$ROOT/.build/icon/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 "$ROOT/scripts/sign.sh" "$APP"

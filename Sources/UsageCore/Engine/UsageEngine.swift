@@ -71,7 +71,7 @@ public final class UsageEngine {
     private let history: UsageHistory
     private let windowLedger: WindowLedger
     private let pricingService: PricingService
-    private var gate = TriggerGate()
+    private var gate: TriggerGate
     private let scheduler = Scheduler()
     private var cadence: AdaptiveCadence
     private var ledger: RequestLedger
@@ -107,7 +107,8 @@ public final class UsageEngine {
         service: UsageService? = nil,
         defaults: UserDefaults = .standard,
         bundleID: String? = nil,
-        host: Host = .app
+        host: Host = .app,
+        gateSeed: Date? = nil
     ) {
         let bundleID = bundleID ?? Bundle.main.bundleIdentifier ?? "com.avihu.ClaudeUsage"
         let support = StorageScope.supportDirectory(bundleID: bundleID, providerID: provider.id)
@@ -115,6 +116,10 @@ public final class UsageEngine {
         self.provider = provider
         self.defaults = defaults
         self.hostKind = host
+        // A host taking over from a dead one seeds the gate with the old
+        // host's last fetch (the digest's stamp) — a handover must never
+        // double-poll inside the floor.
+        self.gate = TriggerGate(lastAllowed: gateSeed)
         self.publisher = StatePublisher(fileURL: LiveState.fileURL(bundleID: bundleID))
         self.localActivity = provider.makeLocalActivity(cacheDirectory: support)
         self.service = service

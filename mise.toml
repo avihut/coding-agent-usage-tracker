@@ -47,6 +47,14 @@ run = "scripts/bundle.sh"
 description = "Sign a binary with the stable identity (arg: path to binary)"
 run = "scripts/sign.sh"
 
+[tasks.daemon]
+description = "usaged launch-agent control (arg: install|uninstall|start|stop|status)"
+run = [
+    "swift build --product usage-cli",
+    "scripts/sign.sh .build/debug/usage-cli",
+    ".build/debug/usage-cli daemon {{arg(name='verb')}}",
+]
+
 [tasks.icon]
 description = "Render the app icon to .build/icon/AppIcon.icns (cached until scripts/icon.swift changes)"
 run = "scripts/icon.sh"

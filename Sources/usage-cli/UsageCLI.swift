@@ -33,6 +33,13 @@ struct UsageCLI {
             runState()
             return
         }
+        if let index = arguments.firstIndex(of: "daemon"),
+           arguments.indices.contains(index + 1) {
+            runDaemon(
+                verb: arguments[index + 1],
+                appOverride: value(after: "--app", in: arguments))
+            return
+        }
 
         let credential: Credential
         do {
@@ -200,6 +207,134 @@ struct UsageCLI {
             FileHandle.standardOutput.write(Data("\n".utf8))
         } catch {
             die("digest failed to encode: \(type(of: error))", code: 12)
+        }
+    }
+
+    // MARK: - daemon mode
+
+    private static let launchAgentLabel = "com.avihu.usaged"
+    private static var launchAgentPlist: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appending(path: "Library/LaunchAgents/\(launchAgentLabel).plist")
+    }
+
+    /// `usage-cli daemon install|uninstall|start|stop|status [--app <path>]`.
+    /// Install is the ONE sanctioned launch-agent registration (spec §10
+    /// amendment) and only ever runs because the user typed it. The plist
+    /// points at the usaged binary embedded in ClaudeUsage.app.
+    private static func runDaemon(verb: String, appOverride: String?) {
+        let uid = getuid()
+        switch verb {
+        case "install":
+            guard let binary = usagedBinary(appOverride: appOverride) else {
+                die(
+                    "cannot find ClaudeUsage.app (searched LaunchServices) — pass --app <path-to-ClaudeUsage.app>",
+                    code: 14)
+            }
+            let plist: [String: Any] = [
+                "Label": launchAgentLabel,
+                "ProgramArguments": [binary.path],
+                "RunAtLoad": true,
+                "KeepAlive": true,
+                "ThrottleInterval": 10,
+                "ProcessType": "Background",
+            ]
+            do {
+                let data = try PropertyListSerialization.data(
+                    fromPropertyList: plist, format: .xml, options: 0)
+                try FileManager.default.createDirectory(
+                    at: launchAgentPlist.deletingLastPathComponent(),
+                    withIntermediateDirectories: true)
+                try data.write(to: launchAgentPlist)
+            } catch {
+                die("cannot write \(launchAgentPlist.path): \(error)", code: 15)
+            }
+            // A previous registration would make bootstrap a no-op error.
+            _ = launchctl(["bootout", "gui/\(uid)/\(launchAgentLabel)"])
+            let result = launchctl(["bootstrap", "gui/\(uid)", launchAgentPlist.path])
+            guard result.status == 0 else {
+                die("launchctl bootstrap failed: \(result.output)", code: 16)
+            }
+            note("installed \(launchAgentLabel) → \(binary.path)")
+        case "uninstall":
+            _ = launchctl(["bootout", "gui/\(uid)/\(launchAgentLabel)"])
+            try? FileManager.default.removeItem(at: launchAgentPlist)
+            note("uninstalled \(launchAgentLabel) (agent booted out, plist removed)")
+        case "start":
+            guard FileManager.default.fileExists(atPath: launchAgentPlist.path) else {
+                die("not installed — run `usage-cli daemon install` first", code: 17)
+            }
+            let result = launchctl(["bootstrap", "gui/\(uid)", launchAgentPlist.path])
+            if result.status != 0 {
+                // Already loaded: kick it instead.
+                _ = launchctl(["kickstart", "gui/\(uid)/\(launchAgentLabel)"])
+            }
+            note("started")
+        case "stop":
+            let result = launchctl(["bootout", "gui/\(uid)/\(launchAgentLabel)"])
+            note(result.status == 0 ? "stopped" : "was not running")
+        case "status":
+            let print = launchctl(["print", "gui/\(uid)/\(launchAgentLabel)"])
+            if print.status == 0 {
+                let state = print.output
+                    .split(separator: "\n")
+                    .first { $0.contains("state =") }
+                    .map { $0.trimmingCharacters(in: .whitespaces) } ?? "state unknown"
+                note("launchd: \(state)")
+            } else {
+                note("launchd: not loaded")
+            }
+            let digest = LiveState.fileURL(bundleID: "com.avihu.ClaudeUsage")
+            if let attributes = try? FileManager.default.attributesOfItem(atPath: digest.path),
+               let modified = attributes[.modificationDate] as? Date {
+                let age = Int(Date().timeIntervalSince(modified))
+                note("digest: written \(age)s ago")
+            } else {
+                note("digest: absent")
+            }
+            let socket = EngineHostBroker.socketURL(bundleID: "com.avihu.ClaudeUsage")
+            if let reply = ControlSocket.send(.status, to: socket) {
+                note("socket: \(reply.message ?? "ok")")
+            } else {
+                note("socket: no listener")
+            }
+        default:
+            die("unknown daemon verb '\(verb)' — install|uninstall|start|stop|status", code: 18)
+        }
+    }
+
+    /// The embedded engine binary inside the installed app. LaunchServices
+    /// knows where the app lives; `--app` overrides for unregistered copies.
+    private static func usagedBinary(appOverride: String?) -> URL? {
+        if let appOverride {
+            let url = URL(fileURLWithPath: appOverride)
+                .appending(path: "Contents/MacOS/usaged")
+            return FileManager.default.fileExists(atPath: url.path) ? url : nil
+        }
+        guard let apps = LSCopyApplicationURLsForBundleIdentifier(
+            "com.avihu.ClaudeUsage" as CFString, nil)?.takeRetainedValue() as? [URL]
+        else { return nil }
+        for app in apps {
+            let url = app.appending(path: "Contents/MacOS/usaged")
+            if FileManager.default.fileExists(atPath: url.path) { return url }
+        }
+        return nil
+    }
+
+    private static func launchctl(_ arguments: [String]) -> (status: Int32, output: String) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        process.arguments = arguments
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        do {
+            try process.run()
+            process.waitUntilExit()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            return (process.terminationStatus, String(decoding: data, as: UTF8.self))
+        } catch {
+            return (-1, "\(error)")
         }
     }
 
