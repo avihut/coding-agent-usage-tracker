@@ -92,3 +92,47 @@ public enum HarnessDetector {
             id: id, present: present, recentFiles: recent, newestActivity: newest)
     }
 }
+
+/// The shared provider-resolution rules: the app's registry and `usaged`
+/// must pick the SAME harness from the same persisted selection and the
+/// same detection signals, or a host handover would silently switch
+/// vendors. Both call here; neither carries a private copy.
+public enum HarnessResolution {
+    /// "auto" or a provider id — the persisted Metering choice's key.
+    public static let selectionKey = "activeProviderID"
+    public static let automatic = "auto"
+
+    /// Every provider this build ships, bundled default first — the
+    /// tie-break order when detection sees an all-quiet machine.
+    public static func standardProviders() -> [any UsageProvider] {
+        [ClaudeProvider(), CodexProvider(), GeminiProvider()]
+    }
+
+    /// A manual choice must exist and be present on this machine; anything
+    /// else falls back to detection, and an empty machine falls back to
+    /// the bundled default.
+    public static func resolve(
+        selection: String, providers: [any UsageProvider], signals: [HarnessSignal]
+    ) -> String {
+        if selection != automatic,
+           providers.contains(where: { $0.id == selection }),
+           signals.first(where: { $0.id == selection })?.present == true {
+            return selection
+        }
+        return HarnessDetector.activeID(in: signals) ?? providers[0].id
+    }
+
+    /// Detection scores each provider's session artifacts — the same trees
+    /// the FSEvents watcher observes.
+    public static func candidates(
+        providers: [any UsageProvider], bundleID: String
+    ) -> [(id: String, directories: [URL])] {
+        providers.map { provider in
+            let support = StorageScope.supportDirectory(
+                bundleID: bundleID, providerID: provider.id)
+            let directories =
+                provider.makeLocalActivity(cacheDirectory: support)?.watchDirectories ?? []
+            return (provider.id, directories)
+        }
+    }
+}

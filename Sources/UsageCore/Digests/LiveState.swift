@@ -7,12 +7,14 @@ import Foundation
 /// it too when a daemon hosts the engine. docs/DAEMON.md is the design —
 /// its draft spec §10 amendment is NOT in force until the daemon ships.
 ///
-/// SyncDigest discipline applies verbatim: the schema evolves additively
-/// forever (new fields only — never remove, rename, or retype), readers
-/// tolerate unknown fields, and the golden fixtures in
+/// SyncDigest discipline applies: the schema evolves additively forever
+/// (new fields only — never remove, rename, or retype), readers tolerate
+/// unknown fields, and the golden fixtures in
 /// Tests/UsageCoreTests/Fixtures/digest/ pin the encoded shape. The TUI's
 /// serde contract tests decode the SAME fixture files, so cross-language
-/// drift fails a test instead of a render.
+/// drift fails a test instead of a render. The freeze anchors at the first
+/// external consumer (the TUI, v0.67.0) — until it lands, pre-consumer
+/// reshaping is allowed with a deliberate golden regen; after it, never.
 ///
 /// Absent ≠ zero, throughout: an unpriced cost is nil and an unreported
 /// percent is nil — never 0. Readers mirror these as options; encoding a 0
@@ -78,6 +80,10 @@ public struct EngineStatus: Codable, Sendable, Equatable {
     public let glyph: String
     public let accent: RGBColor
     public let planLabel: String?
+    /// The label's raw credential facts, so a client-mode app can rebuild
+    /// PlanInfo verbatim. Same privacy standing as the label itself.
+    public let planSubscriptionType: String?
+    public let planRateLimitTier: String?
     public let appVersion: String
     public let pid: Int
     /// "app" | "daemon" — which host kind runs the engine.
@@ -91,19 +97,26 @@ public struct EngineStatus: Codable, Sendable, Equatable {
     /// Local-files provider: no network, no budget gauge; a manual refresh
     /// is a disk rescan.
     public let isLocalProvider: Bool
+    /// The user's chosen active pace and the cadence's current decay
+    /// multiplier (1 at pace, 2/4/8 as quiet decays it).
+    public let activeIntervalSeconds: TimeInterval
+    public let paceMultiplier: Int
     /// Nil for local providers — absent, not zero.
     public let apiBudgetUsed: Int?
     public let apiBudgetCeiling: Int?
+    public let apiBudgetFraction: Double?
     public let gateFloorSeconds: TimeInterval
     public let error: ErrorStatus?
 
     public init(
         providerID: String, serviceName: String, agentName: String, glyph: String,
-        accent: RGBColor, planLabel: String?, appVersion: String, pid: Int,
+        accent: RGBColor, planLabel: String?, planSubscriptionType: String?,
+        planRateLimitTier: String?, appVersion: String, pid: Int,
         host: String, generatedAt: Date, fetchedAt: Date?, nextPollAt: Date?,
         backoffUntil: Date?, stale: Bool, isLocalProvider: Bool,
-        apiBudgetUsed: Int?, apiBudgetCeiling: Int?, gateFloorSeconds: TimeInterval,
-        error: ErrorStatus?
+        activeIntervalSeconds: TimeInterval, paceMultiplier: Int,
+        apiBudgetUsed: Int?, apiBudgetCeiling: Int?, apiBudgetFraction: Double?,
+        gateFloorSeconds: TimeInterval, error: ErrorStatus?
     ) {
         self.providerID = providerID
         self.serviceName = serviceName
@@ -111,6 +124,8 @@ public struct EngineStatus: Codable, Sendable, Equatable {
         self.glyph = glyph
         self.accent = accent
         self.planLabel = planLabel
+        self.planSubscriptionType = planSubscriptionType
+        self.planRateLimitTier = planRateLimitTier
         self.appVersion = appVersion
         self.pid = pid
         self.host = host
@@ -120,21 +135,31 @@ public struct EngineStatus: Codable, Sendable, Equatable {
         self.backoffUntil = backoffUntil
         self.stale = stale
         self.isLocalProvider = isLocalProvider
+        self.activeIntervalSeconds = activeIntervalSeconds
+        self.paceMultiplier = paceMultiplier
         self.apiBudgetUsed = apiBudgetUsed
         self.apiBudgetCeiling = apiBudgetCeiling
+        self.apiBudgetFraction = apiBudgetFraction
         self.gateFloorSeconds = gateFloorSeconds
         self.error = error
     }
 }
 
-/// A user-facing failure, pre-phrased by the engine's error taxonomy.
+/// A user-facing failure, pre-phrased by the engine's error taxonomy. The
+/// `code` carries the taxonomy case name so a client-mode app can rebuild
+/// the typed error; readers that only render use `text` + `hint`.
 public struct ErrorStatus: Codable, Sendable, Equatable {
     public let text: String
     public let hint: String?
+    public let code: String
+    /// Set only for code "http".
+    public let httpStatus: Int?
 
-    public init(text: String, hint: String?) {
+    public init(text: String, hint: String?, code: String, httpStatus: Int?) {
         self.text = text
         self.hint = hint
+        self.code = code
+        self.httpStatus = httpStatus
     }
 }
 
@@ -164,14 +189,23 @@ public struct Stretch: Codable, Sendable, Equatable {
     }
 }
 
-/// The forecast mirror: what the prediction engine concluded, pre-phrased.
+/// The forecast mirror: what the prediction engine concluded, pre-phrased,
+/// plus the working figures the settings pane surfaces — enough for a
+/// client-mode app to rebuild the UsagePrediction verbatim.
 public struct MeterForecast: Codable, Sendable, Equatable {
     public let projectedAtReset: Int?
     public let exhaustsAt: Date?
     /// "green" | "yellow" | "red".
     public let verdict: String
+    /// The raw (pre-hysteresis) verdict — "pending flip" displays need it.
+    public let rawVerdict: String
     /// The exhaustion-risk scale, 0…1.
     public let severity: Double
+    public let ratePerHour: Double
+    public let baselineRatePerHour: Double?
+    public let paceFactor: Double?
+    /// "recentOnly" | "windowAverage" | "weeklyProfile".
+    public let basis: String
     /// "runs out in 1h 05m" — refreshed on every publish; nil while clean.
     public let caption: String?
     /// The dashed trajectory to the reset, ≤48 points.
@@ -179,12 +213,19 @@ public struct MeterForecast: Codable, Sendable, Equatable {
 
     public init(
         projectedAtReset: Int?, exhaustsAt: Date?, verdict: String,
-        severity: Double, caption: String?, curve: [SeriesPoint]
+        rawVerdict: String, severity: Double, ratePerHour: Double,
+        baselineRatePerHour: Double?, paceFactor: Double?, basis: String,
+        caption: String?, curve: [SeriesPoint]
     ) {
         self.projectedAtReset = projectedAtReset
         self.exhaustsAt = exhaustsAt
         self.verdict = verdict
+        self.rawVerdict = rawVerdict
         self.severity = severity
+        self.ratePerHour = ratePerHour
+        self.baselineRatePerHour = baselineRatePerHour
+        self.paceFactor = paceFactor
+        self.basis = basis
         self.caption = caption
         self.curve = curve
     }
@@ -200,6 +241,11 @@ public struct LiveMeter: Codable, Sendable, Equatable, Identifiable {
     public let percent: Int?
     /// "normal" | "warning" | "critical".
     public let level: String
+    /// Normalized rank semantics (0 session-style, 1 overall, 2 scoped) —
+    /// with rateWindow and forcesWarning, a client can rebuild the Meter.
+    public let rank: Int
+    public let rateWindowSeconds: TimeInterval
+    public let forcesWarning: Bool
     /// Resolved through RiskRamp; nil while the forecast is clean.
     public let risk: RGBColor?
     public let resetsAt: Date?
@@ -215,6 +261,7 @@ public struct LiveMeter: Codable, Sendable, Equatable, Identifiable {
 
     public init(
         id: String, label: String, tag: String, percent: Int?, level: String,
+        rank: Int, rateWindowSeconds: TimeInterval, forcesWarning: Bool,
         risk: RGBColor?, resetsAt: Date?, limitWindow: TimeInterval?,
         scopedModelName: String?, resetCaption: String?, forecast: MeterForecast?,
         series: [SeriesPoint], stretches: [Stretch]
@@ -224,6 +271,9 @@ public struct LiveMeter: Codable, Sendable, Equatable, Identifiable {
         self.tag = tag
         self.percent = percent
         self.level = level
+        self.rank = rank
+        self.rateWindowSeconds = rateWindowSeconds
+        self.forcesWarning = forcesWarning
         self.risk = risk
         self.resetsAt = resetsAt
         self.limitWindow = limitWindow
@@ -386,9 +436,11 @@ public enum LiveStateBuilder {
         pricing: PricingTable,
         colorLedger: ModelColorLedger,
         graceSeconds: TimeInterval,
+        activeInterval: TimeInterval,
+        paceMultiplier: Int,
         nextPollAt: Date?,
         backoffUntil: Date?,
-        apiBudget: (used: Int, ceiling: Int)?,
+        apiBudget: (used: Int, ceiling: Int, fraction: Double)?,
         now: Date,
         calendar: Calendar = .current,
         locale: Locale = .current
@@ -425,6 +477,8 @@ public enum LiveStateBuilder {
             glyph: provider.menuBarGlyph,
             accent: accent,
             planLabel: snapshot?.plan?.displayLabel,
+            planSubscriptionType: snapshot?.plan?.subscriptionType,
+            planRateLimitTier: snapshot?.plan?.rateLimitTier,
             appVersion: appVersion,
             pid: pid,
             host: host,
@@ -434,13 +488,18 @@ public enum LiveStateBuilder {
             backoffUntil: backoffUntil,
             stale: state.isStale,
             isLocalProvider: provider.networkDestinations.isEmpty,
+            activeIntervalSeconds: activeInterval,
+            paceMultiplier: paceMultiplier,
             apiBudgetUsed: apiBudget?.used,
             apiBudgetCeiling: apiBudget?.ceiling,
+            apiBudgetFraction: apiBudget?.fraction,
             gateFloorSeconds: TriggerGate.floor,
             error: state.error.map {
-                ErrorStatus(
+                let code = errorCode($0)
+                return ErrorStatus(
                     text: $0.shortText(agent: provider.agentName),
-                    hint: $0.hint(agent: provider.agentName))
+                    hint: $0.hint(agent: provider.agentName),
+                    code: code.name, httpStatus: code.httpStatus)
             })
 
         let meters = (snapshot?.meters ?? []).map { meter in
@@ -541,7 +600,12 @@ public enum LiveStateBuilder {
                 projectedAtReset: prediction.projectedAtReset,
                 exhaustsAt: prediction.exhaustsAt,
                 verdict: verdictName(prediction.verdict),
+                rawVerdict: verdictName(prediction.rawVerdict),
                 severity: prediction.severity,
+                ratePerHour: prediction.ratePerHour,
+                baselineRatePerHour: prediction.baselineRatePerHour,
+                paceFactor: prediction.paceFactor,
+                basis: basisName(prediction.basis),
                 caption: prediction.exhaustsAt.map {
                     UsageFormatting.exhaustText($0, now: now, timeZone: timeZone, locale: locale)
                 },
@@ -556,6 +620,9 @@ public enum LiveStateBuilder {
             tag: tag(for: meter),
             percent: meter.percent,
             level: levelName(meter.level),
+            rank: meter.rank,
+            rateWindowSeconds: meter.rateWindow,
+            forcesWarning: meter.forcesWarning,
             risk: RiskRamp.color(severity: prediction?.severity ?? 0),
             resetsAt: meter.resetsAt,
             limitWindow: meter.limitWindow,
@@ -676,6 +743,28 @@ public enum LiveStateBuilder {
         case .green: "green"
         case .yellow: "yellow"
         case .red: "red"
+        }
+    }
+
+    static func basisName(_ basis: UsagePrediction.Basis) -> String {
+        switch basis {
+        case .recentOnly: "recentOnly"
+        case .windowAverage: "windowAverage"
+        case .weeklyProfile: "weeklyProfile"
+        }
+    }
+
+    static func errorCode(_ error: UsageError) -> (name: String, httpStatus: Int?) {
+        switch error {
+        case .noCredentials: ("noCredentials", nil)
+        case .keychainDenied: ("keychainDenied", nil)
+        case .credentialsUnreadable: ("credentialsUnreadable", nil)
+        case .signInExpired: ("signInExpired", nil)
+        case .rateLimited: ("rateLimited", nil)
+        case .http(let status): ("http", status)
+        case .network: ("network", nil)
+        case .schema: ("schema", nil)
+        case .noLocalData: ("noLocalData", nil)
         }
     }
 

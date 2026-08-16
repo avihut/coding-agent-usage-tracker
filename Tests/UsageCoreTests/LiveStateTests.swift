@@ -110,9 +110,11 @@ struct LiveStateTests {
             pricing: pricing,
             colorLedger: ledger,
             graceSeconds: 900,
+            activeInterval: 300,
+            paceMultiplier: 1,
             nextPollAt: date("2026-08-16T12:03:00Z"),
             backoffUntil: nil,
-            apiBudget: (used: 7, ceiling: 20),
+            apiBudget: (used: 7, ceiling: 20, fraction: 0.35),
             now: now,
             calendar: utc,
             locale: posix)
@@ -130,8 +132,12 @@ struct LiveStateTests {
         #expect(state.engine.fetchedAt == date("2026-08-16T11:58:00Z"))
         #expect(state.engine.apiBudgetUsed == 7)
         #expect(state.engine.apiBudgetCeiling == 20)
+        #expect(state.engine.apiBudgetFraction == 0.35)
+        #expect(state.engine.activeIntervalSeconds == 300)
+        #expect(state.engine.paceMultiplier == 1)
         #expect(state.engine.gateFloorSeconds == TriggerGate.floor)
         #expect(state.engine.planLabel != nil)
+        #expect(state.engine.planSubscriptionType == "max")
     }
 
     @Test("meters speak the menu bar's tag vocabulary and the ramp's colors")
@@ -148,10 +154,14 @@ struct LiveStateTests {
         #expect(forecast.verdict == "green")
         #expect(forecast.projectedAtReset == 78)
         #expect(forecast.caption == nil)
+        #expect(forecast.basis == "windowAverage")
+        #expect(forecast.ratePerHour == 12)
+        #expect(session.rank == 0)
 
         let weekly = try #require(state.meters.first { $0.id == "weekly_all" })
         #expect(weekly.tag == "W")
         #expect(weekly.level == "warning")
+        #expect(weekly.rank == 1)
         // Absent ≠ zero: an unreported percent stays nil.
         #expect(weekly.percent == nil)
         #expect(weekly.risk == nil)

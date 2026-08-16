@@ -11,8 +11,8 @@ import UsageCore
 @MainActor
 @Observable
 final class ProviderRegistry {
-    static let selectionKey = "activeProviderID"
-    static let automatic = "auto"
+    static let selectionKey = HarnessResolution.selectionKey
+    static let automatic = HarnessResolution.automatic
 
     /// A Metering picker row.
     struct HarnessChoice: Identifiable, Equatable {
@@ -42,18 +42,16 @@ final class ProviderRegistry {
     /// `launchOverride` is the `--provider <id>` verification hatch: it
     /// wins for this launch without touching the persisted choice.
     init(bundleID: String, launchOverride: String? = nil) {
-        let providers: [any UsageProvider] = [
-            ClaudeProvider(), CodexProvider(), GeminiProvider(),
-        ]
+        let providers = HarnessResolution.standardProviders()
         self.providers = providers
         self.bundleID = bundleID
         let stored = UserDefaults.standard.string(forKey: Self.selectionKey) ?? Self.automatic
         let selection = launchOverride ?? stored
         self.selection = selection
         let signals = HarnessDetector.rank(
-            candidates: Self.candidates(providers: providers, bundleID: bundleID))
+            candidates: HarnessResolution.candidates(providers: providers, bundleID: bundleID))
         self.signals = signals
-        self.activeID = Self.resolve(
+        self.activeID = HarnessResolution.resolve(
             selection: selection, providers: providers, signals: signals)
         // Catalog + style install before any UI renders or scan runs —
         // display names and accent colors read them from everywhere.
@@ -77,7 +75,7 @@ final class ProviderRegistry {
 
     /// "Automatic (Claude Code)" — names what auto currently resolves to.
     var automaticLabel: String {
-        let autoID = Self.resolve(
+        let autoID = HarnessResolution.resolve(
             selection: Self.automatic, providers: providers, signals: signals)
         return "Automatic (\(provider(for: autoID).agentName))"
     }
@@ -94,7 +92,7 @@ final class ProviderRegistry {
     /// may switch the active harness; an explicit choice only refreshes
     /// the signals shown in Settings.
     func redetect(deferrable: Bool) {
-        let candidates = Self.candidates(providers: providers, bundleID: bundleID)
+        let candidates = HarnessResolution.candidates(providers: providers, bundleID: bundleID)
         Task.detached(priority: .utility) {
             let signals = HarnessDetector.rank(candidates: candidates)
             await MainActor.run { [weak self] in
@@ -106,7 +104,7 @@ final class ProviderRegistry {
     }
 
     private func apply(deferrable: Bool) {
-        let winner = Self.resolve(
+        let winner = HarnessResolution.resolve(
             selection: selection, providers: providers, signals: signals)
         guard winner != activeID else { return }
         // Drop the registry's reference; the status item still holds the
@@ -128,34 +126,6 @@ final class ProviderRegistry {
 
     private func provider(for id: String) -> any UsageProvider {
         providers.first { $0.id == id } ?? providers[0]
-    }
-
-    /// A manual choice must exist and be present on this machine; anything
-    /// else falls back to detection, and an empty machine falls back to
-    /// the bundled default.
-    private static func resolve(
-        selection: String, providers: [any UsageProvider], signals: [HarnessSignal]
-    ) -> String {
-        if selection != automatic,
-           providers.contains(where: { $0.id == selection }),
-           signals.first(where: { $0.id == selection })?.present == true {
-            return selection
-        }
-        return HarnessDetector.activeID(in: signals) ?? providers[0].id
-    }
-
-    /// Detection scores each provider's session artifacts — the same trees
-    /// the FSEvents watcher observes.
-    private static func candidates(
-        providers: [any UsageProvider], bundleID: String
-    ) -> [(id: String, directories: [URL])] {
-        providers.map { provider in
-            let support = StorageScope.supportDirectory(
-                bundleID: bundleID, providerID: provider.id)
-            let directories =
-                provider.makeLocalActivity(cacheDirectory: support)?.watchDirectories ?? []
-            return (provider.id, directories)
-        }
     }
 
     private func scheduleDailyRedetect() {

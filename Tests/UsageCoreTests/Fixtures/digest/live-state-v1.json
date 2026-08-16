@@ -119,8 +119,10 @@
       "green" : 0.467,
       "red" : 0.851
     },
+    "activeIntervalSeconds" : 300,
     "agentName" : "Claude Code",
     "apiBudgetCeiling" : 20,
+    "apiBudgetFraction" : 0.35,
     "apiBudgetUsed" : 7,
     "appVersion" : "0.65.0",
     "fetchedAt" : "2026-08-16T11:58:00Z",
@@ -130,8 +132,11 @@
     "host" : "app",
     "isLocalProvider" : false,
     "nextPollAt" : "2026-08-16T12:03:00Z",
+    "paceMultiplier" : 1,
     "pid" : 4242,
     "planLabel" : "Max plan · 1x",
+    "planRateLimitTier" : "default_max_1x",
+    "planSubscriptionType" : "max",
     "providerID" : "claude",
     "serviceName" : "Claude",
     "stale" : false
@@ -159,7 +164,10 @@
   ],
   "meters" : [
     {
+      "forcesWarning" : false,
       "forecast" : {
+        "baselineRatePerHour" : 6,
+        "basis" : "windowAverage",
         "curve" : [
           {
             "percent" : 53,
@@ -170,7 +178,10 @@
             "t" : "2026-08-16T14:00:00Z"
           }
         ],
+        "paceFactor" : 1.5,
         "projectedAtReset" : 78,
+        "ratePerHour" : 12,
+        "rawVerdict" : "green",
         "severity" : 0.4,
         "verdict" : "green"
       },
@@ -179,6 +190,8 @@
       "level" : "normal",
       "limitWindow" : 18000,
       "percent" : 53,
+      "rank" : 0,
+      "rateWindowSeconds" : 2700,
       "resetCaption" : "resets in 2h",
       "resetsAt" : "2026-08-16T14:00:00Z",
       "risk" : {
@@ -223,9 +236,12 @@
       "tag" : "S"
     },
     {
+      "forcesWarning" : false,
       "id" : "weekly_all",
       "label" : "Weekly (all)",
       "level" : "warning",
+      "rank" : 1,
+      "rateWindowSeconds" : 14400,
       "series" : [
 
       ],

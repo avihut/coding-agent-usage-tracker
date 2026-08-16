@@ -245,9 +245,11 @@ public final class UsageEngine {
             pricing: pricing,
             colorLedger: ModelColorLedger.load(from: defaults, providerID: provider.id),
             graceSeconds: grace,
+            activeInterval: activeInterval,
+            paceMultiplier: paceMultiplier(now: now),
             nextPollAt: nextRefreshAt,
             backoffUntil: cadence.backoffUntil,
-            apiBudget: isLocalProvider ? nil : (ledger.used(at: now), ledger.ceiling),
+            apiBudget: isLocalProvider ? nil : apiBudget(now: now),
             now: now)
         publisher.publish(digest)
     }

@@ -69,6 +69,27 @@ public struct UsagePrediction: Sendable, Equatable {
     /// from the burst's slope toward the baseline's. Empty without a live
     /// future reset.
     public let curve: [Point]
+
+    /// Memberwise, public so a client-mode app can rebuild predictions
+    /// verbatim from the live-state digest's forecast mirror.
+    public init(
+        ratePerHour: Double, baselineRatePerHour: Double?, paceFactor: Double?,
+        basis: Basis, projectedAtReset: Int?, exhaustsAt: Date?,
+        verdict: Verdict, rawVerdict: Verdict, severity: Double, text: String,
+        curve: [Point]
+    ) {
+        self.ratePerHour = ratePerHour
+        self.baselineRatePerHour = baselineRatePerHour
+        self.paceFactor = paceFactor
+        self.basis = basis
+        self.projectedAtReset = projectedAtReset
+        self.exhaustsAt = exhaustsAt
+        self.verdict = verdict
+        self.rawVerdict = rawVerdict
+        self.severity = severity
+        self.text = text
+        self.curve = curve
+    }
 }
 
 /// The forecast engine. The recent burn rate is a least-squares slope over
