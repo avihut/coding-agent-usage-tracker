@@ -34,7 +34,10 @@ struct HorizontalSwipeCatcher: NSViewRepresentable {
     final class SwipeView: NSView {
         var onStep: ((Int) -> Void)?
 
-        private var monitor: Any?
+        /// nonisolated(unsafe): every live access is main-actor
+        /// (install/remove), and deinit's read is exclusive by definition —
+        /// the marker exists so that read is legal at all.
+        nonisolated(unsafe) private var monitor: Any?
         private var accumulated: CGFloat = 0
         private var fired = false
         /// One step needs a deliberate swipe, not a grazed touch.
@@ -46,7 +49,9 @@ struct HorizontalSwipeCatcher: NSViewRepresentable {
         }
 
         deinit {
-            removeMonitor()
+            // Not removeMonitor(): deinit is nonisolated and may not call
+            // main-actor methods — it unhooks the token directly instead.
+            if let monitor { NSEvent.removeMonitor(monitor) }
         }
 
         private func installMonitor() {
@@ -125,7 +130,10 @@ struct HorizontalPanCatcher: NSViewRepresentable {
         var enabled = false
         var onPan: ((CGFloat, CGFloat) -> Void)?
 
-        private var monitor: Any?
+        /// nonisolated(unsafe): every live access is main-actor
+        /// (install/remove), and deinit's read is exclusive by definition —
+        /// the marker exists so that read is legal at all.
+        nonisolated(unsafe) private var monitor: Any?
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
@@ -133,7 +141,8 @@ struct HorizontalPanCatcher: NSViewRepresentable {
         }
 
         deinit {
-            removeMonitor()
+            // Same monitor teardown concession as SwipeView above.
+            if let monitor { NSEvent.removeMonitor(monitor) }
         }
 
         private func installMonitor() {

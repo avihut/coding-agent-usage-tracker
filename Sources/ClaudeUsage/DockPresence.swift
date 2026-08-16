@@ -25,10 +25,10 @@ final class DockPresence: NSObject {
 }
 
 /// Every close path — the red button, Cmd+W, and a teardown `close()` —
-/// lands in `windowWillClose`. AppKit delivers it on the main thread, which
-/// is what lets the main-actor implementation satisfy the nonisolated
-/// requirement under a `@preconcurrency` conformance.
-extension DockPresence: @preconcurrency NSWindowDelegate {
+/// lands in `windowWillClose`. The SDK marks NSWindowDelegate @MainActor
+/// now, so the main-actor implementation satisfies the requirement
+/// directly — no `@preconcurrency` bridge needed.
+extension DockPresence: NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         guard let window = notification.object as? NSWindow else { return }
         visible.remove(ObjectIdentifier(window))
