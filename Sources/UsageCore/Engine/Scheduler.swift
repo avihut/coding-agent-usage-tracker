@@ -1,20 +1,22 @@
-import AppKit
+import Foundation
 import Network
 
-/// Emits refresh triggers; owns no refresh logic or cadence. The store decides
-/// whether a trigger actually runs (gate + single-flight + backoff) and
-/// schedules every fire one-shot, so the delay can change between polls.
+/// Emits refresh triggers; owns no refresh logic or cadence. The engine
+/// decides whether a trigger actually runs (gate + single-flight + backoff)
+/// and schedules every fire one-shot, so the delay can change between polls.
+/// System wake is the one impulse the host process must supply itself
+/// (`UsageEngine.noteWake()`) — the app's NSWorkspace observer and the
+/// daemon's IOKit power callback both live outside core.
 @MainActor
 final class Scheduler {
-    var onTrigger: ((UsageStore.RefreshReason) -> Void)?
+    var onTrigger: ((UsageEngine.RefreshReason) -> Void)?
 
     private var timer: Timer?
-    private var wakeObserver: NSObjectProtocol?
     private var pathMonitor: NWPathMonitor?
     private var networkWasSatisfied = true
 
     /// When the pending one-shot will fire; nil once it has fired, which is
-    /// how the store tells a live timer from a spent one.
+    /// how the engine tells a live timer from a spent one.
     var nextFireDate: Date? {
         guard let timer, timer.isValid else { return nil }
         return timer.fireDate
@@ -22,16 +24,6 @@ final class Scheduler {
 
     /// Starts the event sources. Polling is driven by `schedule(after:)`.
     func start() {
-        // Stale numbers after lid-open are what make these widgets feel
-        // broken (spec §9) — refresh on wake.
-        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
-            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.onTrigger?(.wake)
-            }
-        }
-
         let monitor = NWPathMonitor()
         monitor.pathUpdateHandler = { [weak self] path in
             let satisfied = path.status == .satisfied
@@ -47,17 +39,11 @@ final class Scheduler {
         pathMonitor = monitor
     }
 
-    /// Tears the event sources down — the wake observer would otherwise be
-    /// retained by NotificationCenter forever and the path monitor would
-    /// keep its queue alive. Called when the registry retires this
-    /// scheduler's store.
+    /// Tears the event sources down — the path monitor would otherwise keep
+    /// its queue alive. Called when the engine's host retires it.
     func stop() {
         timer?.invalidate()
         timer = nil
-        if let wakeObserver {
-            NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver)
-        }
-        wakeObserver = nil
         pathMonitor?.cancel()
         pathMonitor = nil
         onTrigger = nil

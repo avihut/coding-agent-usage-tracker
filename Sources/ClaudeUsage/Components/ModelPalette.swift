@@ -38,20 +38,14 @@ enum ModelPalette {
         (1.30, 0.50),
     ]
 
-    /// Provider-scoped: each harness keeps its own ledger, so every
-    /// provider's heaviest family lands on slot 0 — its vendor accent —
-    /// instead of whatever slots another vendor's families left free.
-    private static var storageKey: String {
-        "\(ProviderStyle.providerID).modelColorLedger"
-    }
-
     /// Colors for these models (and every model ever seen) from the
     /// persistent ledger, growing and saving it when new models appear.
+    /// Persistence lives with core `ModelColorLedger` — the engine's
+    /// usage-ordered seed and this lookup share the one write path.
     static func assignment(for models: [String]) -> [String: Color] {
-        let defaults = UserDefaults.standard
-        let stored = read(defaults)
-        let grown = stored.assigning(models.map { ($0, ModelFamily.familyName($0)) })
-        if grown != stored { write(grown, to: defaults) }
+        let grown = ModelColorLedger.grow(
+            models.map { ($0, ModelFamily.familyName($0)) },
+            defaults: .standard, providerID: ProviderStyle.providerID)
         var result: [String: Color] = [:]
         for (family, familyShades) in grown.shades {
             guard let hue = grown.hues[family] else { continue }
@@ -76,18 +70,5 @@ enum ModelPalette {
         return Color(
             hue: h, saturation: min(1, s * step.saturation),
             brightness: min(1, b * step.brightness), opacity: a)
-    }
-
-    private static func read(_ defaults: UserDefaults) -> ModelColorLedger {
-        guard let dict = defaults.dictionary(forKey: storageKey) else { return .init() }
-        return ModelColorLedger(
-            hues: dict["hues"] as? [String: Int] ?? [:],
-            shades: dict["shades"] as? [String: [String: Int]] ?? [:])
-    }
-
-    private static func write(_ ledger: ModelColorLedger, to defaults: UserDefaults) {
-        defaults.set(["hues": ledger.hues, "shades": ledger.shades], forKey: storageKey)
-        // One launch briefly persisted a flat model→slot scheme here.
-        defaults.removeObject(forKey: "modelColorSlots")
     }
 }

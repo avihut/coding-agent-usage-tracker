@@ -44,6 +44,21 @@ the README rather than silently deviating.
   host files) — byte-identical moves, `private`→`internal` only where a
   type crossed its old file. New code lands in the matching folder; a
   file that outgrows ~600 lines splits along whole-type seams like these.
+- ENGINE (2026-08-16 v0.64.0, phase E of the daemon/TUI program): the
+  orchestrator is core `UsageEngine` (Engine/UsageEngine.swift, @MainActor
+  @Observable public) — refresh gate/backoff, cadence, transcript scans,
+  predictions, pricing, and color-ledger seeding all live there. Hosts
+  inject their UserDefaults domain (app: `.standard`; usaged will pass the
+  app's suite) and forward their platform wake signal to `noteWake()`.
+  Engine/Scheduler.swift (one-shot Timer + NWPathMonitor, wake observer
+  removed) and Engine/AgentActivityWatcher.swift (FSEvents) descended with
+  it. App-side `UsageStore` is a thin @Observable façade preserving the
+  historical member surface — Observation tracks through its computed
+  forwards into engine storage, so views/controllers are untouched — plus
+  the one AppKit piece: the NSWorkspace didWake observer wired to
+  noteWake(). ModelColorLedger owns the ONE ledger write path
+  (provider-scoped key, `grow(_:defaults:providerID:)`); app ModelPalette
+  only maps stored slots → SwiftUI Colors.
 - PROVIDER SEAM (2026-08-15 v0.25.0, user-directed decoupling): everything
   vendor-specific sits behind `UsageProvider` (Providers/UsageProvider.swift) —
   identity (serviceName/agentName/menuBarGlyph/links/networkDestinations),
@@ -434,16 +449,17 @@ the README rather than silently deviating.
   two providers share a directory. `StorageMigration` (one-time,
   copy-verify-delete, marker "storageScopeVersion", runs FIRST in
   applicationDidFinishLaunching) moved the pre-0.26 singletons into
-  claude/. Switch teardown lessons: UsageStore.shutdown() +
-  Scheduler.stop() (the didWake observer and NWPathMonitor leak without
-  them), SettingsWindowController.close() before dropping it (never
+  claude/. Switch teardown lessons: UsageStore.shutdown() (engine shutdown
+  stops the Scheduler's NWPathMonitor + the FSEvents watcher, and the
+  façade releases its didWake observer — all leak without it),
+  SettingsWindowController.close() before dropping it (never
   dealloc a visible NSWindow), and observeState()'s re-arm carries a
   store-identity guard (a stale observation landing post-switch would
   otherwise double-register tracking).
-- One refresh pipeline, one entry point: `UsageStore.refresh(reason:)` owns
-  single-flighting, the 60-second minimum interval, and 429-backoff
-  enforcement for every trigger (timer, wake, network-restore, manual,
-  launch, activity).
+- One refresh pipeline, one entry point: `UsageEngine.refresh(_:)` (the
+  UsageStore façade forwards to it) owns single-flighting, the 60-second
+  minimum interval, and 429-backoff enforcement for every trigger (timer,
+  wake, network-restore, manual, launch, activity).
 - Polling cadence is adaptive (`AdaptiveCadence`, pure + tested): quiet time
   decays the user-chosen active interval ×2 (15 min) / ×4 (1 h) / ×8 (4 h),
   capped at an hour between polls — or at the chosen pace itself when that's

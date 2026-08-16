@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 
 @testable import UsageCore
@@ -55,5 +56,25 @@ struct ModelColorLedgerTests {
         ]
         let first = ModelColorLedger().assigning(models)
         #expect(first.assigning(models.reversed()) == first)
+    }
+
+    @Test("grow persists under the provider-scoped key and round-trips")
+    func persistenceRoundTrip() throws {
+        let suite = "test.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let grown = ModelColorLedger.grow(
+            [("claude-fable-5", "Fable"), ("claude-opus-5", "Opus")],
+            defaults: defaults, providerID: "claude")
+        #expect(defaults.dictionary(forKey: "claude.modelColorLedger") != nil)
+        #expect(ModelColorLedger.load(from: defaults, providerID: "claude") == grown)
+        // Another provider's ledger is a separate reservation book.
+        #expect(ModelColorLedger.load(from: defaults, providerID: "codex") == ModelColorLedger())
+        // Growing with nothing new writes nothing new.
+        #expect(
+            ModelColorLedger.grow(
+                [("claude-opus-5", "Opus")], defaults: defaults, providerID: "claude")
+                == grown)
     }
 }
