@@ -436,6 +436,20 @@ the README rather than silently deviating.
   this machine's digest (read-only cache use, zero network, no
   Keychain). Dollars never sync: viewers price tallies with their own
   feed.
+- CHART MARK COLORS: inside a `Chart`, ALWAYS spell it `Color.primary` /
+  `Color.secondary` / `Color.quaternary`. The bare hierarchical `.primary`
+  does NOT mean the label color there — it resolves against the plot's own
+  foreground, i.e. the accent. v0.76.2 (be917c5): AuditWindowChart's reset
+  dashes and strip track came out in the system accent (purple on this
+  Mac) while MeterHistoryView's identical marks, spelled `Color.primary`,
+  stayed white — user-reported as "the reset dashed lines are in a
+  different color", and a violation of the contract's clause (2) "never
+  accent". Verified with a headless ImageRenderer probe: `.primary`
+  sampled (0.00, 0.62, 1.00), `Color.primary` sampled the label color.
+  Bare hierarchical styles on a Text INSIDE an annotation are fine — it's
+  an ordinary view. Still spelled the bare way, deliberately unreported
+  and left alone: MeterHistoryView's now rule (:554) and readout crosshair
+  (:645), RunningBreakdownChart's hover crosshair (:412).
 - CHART BEHAVIOR CONTRACT (2026-08-15 v0.32.0, user-directed standing
   rule): any surface that plots a running/cumulative series over an
   event list renders `RunningBreakdownChart`
