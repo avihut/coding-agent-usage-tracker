@@ -318,8 +318,12 @@ the README rather than silently deviating.
   (Charts' .chartScrollableAxes never responded to trackpad scrolls
   here — don't go back to it), momentum included; a ChartMinimap strip
   (total hairline + viewport box) appears above only while zoomed,
-  fading while the layout animates its slot (animation scoped to the
-  zoom-presence flip, value: visibleLength == nil); minimap dragging
+  fading while the layout animates its slot; zoom-presence FLIPS run
+  through setZoom's withAnimation transaction (v0.62.0) so siblings
+  BELOW the chart (divider/header/table) slide too — a body-scoped
+  .animation(value: visibleLength == nil) alone animates only the
+  chart subtree and the table jumps; in-zoom pinch ticks stay
+  transaction-free to track fingers; minimap dragging
   is GRAB semantics (v0.60.2): press captures the viewport's start
   fraction, drags move it RELATIVELY — never teleport-to-pointer, a
   plain click moves nothing; hover lights the strip, pointer
