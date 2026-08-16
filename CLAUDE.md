@@ -198,31 +198,24 @@ the README rather than silently deviating.
   DayTally), title = scrubbed first user_message, kind always
   .interactive (rollouts carry no headless marker), detail rows from
   user_message + token_count deltas. Gemini stays sessionless.
-- MESSAGE-TABLE PERFORMANCE (2026-08-16 v0.61.0, user: "VERY sluggish"
-  scrolling): the table is LAZY, NOT VIRTUALIZED — LazyVStack creates
-  rows on demand and RETAINS every one it ever created, so per-row
-  AppKit machinery accumulates as you scroll. The rule: message rows
-  carry ZERO per-row .onHover / .pointerStyle / .onTapGesture /
-  .popover (each was a tracking area or presentation host × every
-  visited row; ~1.4K rows crawled). Instead: (1) `MessageRow` is a
-  file-scope Equatable view of pure value inputs (+ .equatable()), so
-  hover/flash changes re-render only the rows whose inputs changed;
-  (2) ONE `rowInteractionLayer` overlay owns hover/click/pointer with
-  fixed-row-height hit math (`Column.rowHeight` 20pt, ids are dense
-  ordinals — v0.53.0 guarantees), with `listHoverRow` ownership
-  mirroring chartHoverRow; (3) ONE popover host: `costPopoverProxy`,
-  an invisible row-sized proxy offset to the open row (same height
-  math). v0.61.1 hard-won corollaries: the proxy exists ALWAYS, not
-  just while open — macOS silently drops a popover whose anchor view
-  was inserted in the same transaction that presented it; and the tap
-  handler cycles costRow through nil when re-clicking the open row —
-  AppKit dismissals (app deactivation) don't write false back through
-  the binding, so a same-value @State write would present nothing.
-  (4) `MessageRow` sizes ITSELF to `Column.rowHeight` (frame INSIDE
-  the row view, before .background) — framed from outside, the
-  background hugs the shorter text and dark slivers open between
-  adjacent lit rows. Don't reintroduce per-row interactive modifiers
-  in any long lazy list.
+- MESSAGE-TABLE PERFORMANCE (2026-08-16, v0.61.0–v0.61.2, user: "VERY
+  sluggish" scrolling): the table is LAZY, NOT VIRTUALIZED — LazyVStack
+  creates rows on demand and RETAINS every one it ever created. The
+  v0.61.0/.1 restructure (Equatable MessageRow + one interaction-layer
+  overlay with fixed-row-height hit math + one popover proxy) DID NOT
+  improve the felt scroll performance (user verdict) and caused three
+  regressions (dead cost popover — anchor inserted in the presenting
+  transaction; popover anchored at the list top — .offset is a render
+  transform AppKit ignores when resolving popover anchors; dark
+  slivers between lit rows), so v0.61.2 REVERTED the table wholesale
+  to the per-row-modifier form (v0.60.3 state). Do NOT re-attempt that
+  restructure. If sluggishness is tackled again, the lever is real
+  row recycling: an NSTableView-backed List or NSTableView wrapper,
+  not SwiftUI-side diffing. Transferable macOS facts learned: popover
+  anchors resolve against LAYOUT frames (position anchors with
+  padding, never .offset), and a popover whose anchor view is
+  inserted in the same transaction that flips isPresented is silently
+  dropped.
   (Panel/) turns a two-finger horizontal trackpad swipe into ONE
   arrow-equivalent step (threshold 55pt, fired once per gesture phase
   cycle, momentum/mouse-wheel events never step). Mechanism is a
