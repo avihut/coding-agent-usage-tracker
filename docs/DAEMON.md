@@ -1,8 +1,9 @@
 # The engine, its hosts, and consumer interfaces
 
-Status: **live-state digest SHIPPED (v0.65.0). Daemon, lease, and control
-socket NOT BUILT YET** — the draft spec §10 amendment at the bottom is not
-in force until they ship. Design decided 2026-08-16 (user-directed).
+Status: **SHIPPED through v0.66.0** — digest (v0.65.0), then usaged +
+lease + control socket + app host/client modes (v0.66.0). The spec §10
+amendment is IN FORCE (docs/SPEC.md). Design decided 2026-08-16
+(user-directed). Install remains opt-in: `usage-cli daemon install`.
 
 ## Why
 
@@ -82,34 +83,36 @@ transports it; it is unrelated to the CloudKit sync digest (docs/SYNC.md).
 Inspection: `usage-cli state` prints the file verbatim (and warns if it no
 longer decodes). `usage-cli state | jq .menuBar` etc.
 
-## What ships next (D2)
+## The host arbitration (shipped v0.66.0)
 
-- `Engine/EngineLease.swift` — `flock(2)` on `<root>/engine.lock`; the
-  kernel releases on death, so stale locks cannot exist.
-- `Engine/ControlSocket.swift` — commands: status, refresh (gate-enforced),
-  setInterval, setProvider, settingsChanged, refreshPricing, scanNow,
-  shutdown.
-- `Sources/usaged/` — the launchd user agent (RunAtLoad + KeepAlive),
-  signed with the app's identity, embedded in the app bundle; installed
-  ONLY by an explicit user-run `usage-cli daemon install`.
-- App host/client modes with daemon-wins arbitration.
+- `engine.lock` — an exclusive `flock(2)`: whoever holds it runs engine +
+  publisher + socket. The kernel releases on death, so a held lease is
+  always a live process and stale locks cannot exist.
+- `daemon.alive` — touched by usaged every 2s from first breath: how a
+  lease-holding app learns a daemon wants the engine (the daemon can bind
+  nothing while the app holds the lease).
+- The app's role check runs every 30s (and on wake): hosting + fresh
+  marker → shut the embedded engine down, release the lease, flip to
+  client. Client + heartbeat stale beyond max(2× the digest's own poll
+  horizon, 3 min) + lease free → take the lease, host embedded, seed the
+  refresh gate from the digest's fetch stamp (never double-poll inside
+  the floor); a takeover inside the floor presents the cached snapshot
+  immediately instead of a loading shell.
+- Control socket commands: status, refresh (gate-enforced), setInterval,
+  setProvider, settingsChanged, refreshPricing, scanNow, shutdown.
+- `usaged` (Sources/usaged/, embedded at ClaudeUsage.app/Contents/MacOS/):
+  RunAtLoad + KeepAlive + ThrottleInterval 10, signed with the app's
+  identity, IOKit sleep/wake (sleep acknowledged immediately), daily
+  auto-redetection. Installed ONLY by the user running
+  `usage-cli daemon install` / `mise run daemon -- install`.
+- Client-mode reads are read-only everywhere: digest, history.json,
+  window-ledger.json, pricing cache, and transcript scans via
+  `scanTranscriptsReadOnly` (parse caches never written).
 
-## DRAFT spec §10 amendment (NOT in force)
+## Spec §10 amendment
 
-To take effect only when the daemon phase ships, after sign-off:
-
-1. The app family may materialize exactly ONE engine-state artifact outside
-   the per-provider scopes: `live-state.json` at the scoped Application
-   Support root, with the field list above and nothing more. It is
-   local-only and carries no credentials, paths, or message text.
-2. One unix-domain control socket (`control.sock`, mode 0600, same root)
-   accepting only the enumerated commands; every mutating command passes
-   the same TriggerGate/backoff discipline as in-app actions.
-3. Exactly one launch agent, `com.avihu.usaged`, running the same engine
-   code under the same rules (§10 read-only trees, network destinations,
-   Keychain conduct). It is never installed or registered without an
-   explicit user-run install command, and `usage-cli daemon uninstall`
-   removes it completely.
-4. Single-writer rule: whichever process holds the engine lease is the only
-   writer of usage caches, history, ledgers, and the digest. Everything
-   else reads.
+IN FORCE since v0.66.0 — the authoritative text lives in docs/SPEC.md §10
+("Engine host + consumer interfaces", 2026-08-16): one engine-state
+artifact (`live-state.json`), one control socket + the two arbitration
+artifacts, exactly one user-installed launch agent under all §10 rules,
+and the lease-holder-is-sole-writer rule.

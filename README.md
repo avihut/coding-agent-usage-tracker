@@ -135,6 +135,29 @@ Every lifecycle script in `scripts/` has a matching mise task — `mise tasks`
 lists the full catalog, including the AX verification pair
 (`axdump` / `axpress`).
 
+## The headless engine (optional daemon)
+
+The metering engine can run as a launchd user agent, `usaged` (embedded in
+the app bundle), so consumer interfaces — the upcoming TUI, or the menu bar
+app itself — render with nothing else open. The daemon wins: while it runs,
+the app renders its published `live-state.json` digest and sends commands
+over a local socket; quit the daemon and the app hosts the engine embedded
+again within moments (`docs/DAEMON.md` has the full design).
+
+```sh
+mise run daemon -- install    # write + bootstrap com.avihu.usaged (asks launchd, nothing else)
+mise run daemon -- status     # launchd state, digest age, socket ping
+mise run daemon -- stop       # boot it out (plist kept)
+mise run daemon -- uninstall  # boot out + remove the plist
+usage-cli state | jq          # inspect the live digest
+```
+
+Nothing installs itself: the launch agent exists only after you run
+`install`, and `uninstall` removes it completely. The daemon's first fetch
+reads the Claude Code token through the same signed identity as the app —
+approve the one Keychain prompt with "Always Allow" and it never asks
+again.
+
 Signing uses the local `Apple Development` identity so the Keychain ACL from
 "Always Allow" survives rebuilds (override with `CODESIGN_IDENTITY=...`). Those
 certificates last a year; when one expires, signing fails with "no identity

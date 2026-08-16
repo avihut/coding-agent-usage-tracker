@@ -76,8 +76,32 @@ the README rather than silently deviating.
   yellow→red, panel riskColor + menu bar + digest all blend through it)
   and `ModelColorMath` (pure HSB, slot 0 = provider accent; app
   ModelPalette wraps it). `usage-cli state` prints the file verbatim.
-  docs/DAEMON.md holds the architecture + DRAFT §10 amendment — NOT in
-  force until the daemon ships (SYNC.md precedent).
+  docs/DAEMON.md holds the architecture; the §10 amendment is IN FORCE
+  from v0.66.0.
+- DAEMON + HOST ARBITRATION (2026-08-16 v0.66.0, phase D2): `usaged`
+  (Sources/usaged/, 5th target, embedded signed at ClaudeUsage.app/
+  Contents/MacOS/usaged) runs the engine headless under launchd
+  (com.avihu.usaged: RunAtLoad, KeepAlive, ThrottleInterval 10; IOKit
+  wake with sleep acknowledged immediately; daily redetect via shared
+  HarnessResolution). Install is USER-RUN ONLY: `usage-cli daemon
+  install|uninstall|start|stop|status` / `mise run daemon -- <verb>`.
+  THE DAEMON WINS: Engine/EngineLease.swift (flock on engine.lock —
+  kernel-released, stale-proof), daemon.alive 2s marker, Engine/
+  ControlSocket.swift (NDJSON unix socket 0600, one request per
+  connection; commands status/refresh/setInterval/setProvider/
+  settingsChanged/refreshPricing/scanNow/shutdown), Engine/
+  EngineHostBroker.swift (pure rules: hosting app yields ≤30s of a
+  fresh marker; client takes over only when heartbeat outages max(2×
+  poll horizon, 3min) AND lease free, gate SEEDED from the digest's
+  fetchedAt so handovers never double-poll — a sub-floor takeover
+  presents UsageService.cachedSnapshot as live). App side: UsageStore
+  façade runs Mode.hosting(UsageEngine)/Mode.client(DigestClient);
+  DigestClient rebuilds digest→core types (meters/predictions/plan/
+  spend/typed errors) and reads history/ledger/pricing/transcripts
+  READ-ONLY (scanTranscriptsReadOnly — lease holder is the sole cache
+  writer, spec §10). Verified live: yield 10-14s, takeover ≤35s, no
+  double-poll, meters instant from cache. Keychain: usaged shares the
+  app's signing identity; its first fetch may prompt ONCE.
 - PROVIDER SEAM (2026-08-15 v0.25.0, user-directed decoupling): everything
   vendor-specific sits behind `UsageProvider` (Providers/UsageProvider.swift) —
   identity (serviceName/agentName/menuBarGlyph/links/networkDestinations),

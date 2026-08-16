@@ -313,6 +313,28 @@ Non-negotiable; flag rather than work around:
 - No sandbox entitlement, and no request for entitlements we don't need.
 - Don't install or register anything (login items, launch agents) without asking me
   first in the session.
+- Engine host + consumer interfaces (amendment 2026-08-16, v0.66.0;
+  design in docs/DAEMON.md):
+  - The app family may materialize exactly ONE engine-state artifact above
+    the per-provider scopes: `live-state.json` at the scoped Application
+    Support root (render-ready meters, forecasts, captions, activity
+    rollups, resolved colors). Local-only; never transported; no
+    credentials, full filesystem paths, prompt text, or session titles.
+  - One unix-domain control socket (`control.sock`, mode 0600, same root)
+    accepting only the enumerated `ControlCommand` verbs; every mutating
+    command passes the same TriggerGate/backoff discipline as in-app
+    actions. Plus two tiny host-arbitration artifacts beside it:
+    `engine.lock` (flock) and `daemon.alive` (liveness marker).
+  - Exactly one launch agent, `com.avihu.usaged`, running the same engine
+    code under every rule in this section (read-only trees, the two
+    network destinations, Keychain conduct, the 180s floor). It is
+    installed ONLY by the user running `usage-cli daemon install`
+    (honoring the ask-first rule above), and
+    `usage-cli daemon uninstall` removes it completely.
+  - Single-writer rule: whichever process holds `engine.lock` is the only
+    writer of usage caches, history, ledgers, and the digest. Every other
+    process — usage-cli, the TUI, the app in client mode — reads only
+    (transcript scans by non-holders never persist their parse caches).
 - App must produce *some* readable state in every failure mode. An empty or crashed
   menu bar item is a bug.
 
