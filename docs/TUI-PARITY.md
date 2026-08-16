@@ -36,9 +36,14 @@ Two decisions the USER made at program start (2026-08-16):
 | Wave | Version | Items |
 |---|---|---|
 | 1 | v0.73.0 | 1–9, 26–30 (layout truth, color parity, state parity) — **SHIPPED** |
-| 2 | v0.74.0 | 10–15, 21–24 (activity bar chart + picker, models table) — user-priority items 11 and 15 |
-| 3 | v0.75.0 | 16–19, 31 (meter-surface keys, forecast note, pace picks) |
-| 4 | v0.76.0 | 20, 25 (both need digest extensions; 25 needs D2) |
+| 2 | v0.74.0 | 10–15, 21–24 (activity bar chart + picker, models table) — **SHIPPED** |
+| 3 | v0.76.0 | 16–19, 31 (meter-surface keys, forecast note, pace picks) |
+| 4 | v0.77.0 | 20, 25 (both need digest extensions; 25 needs the §10 amendment) |
+
+v0.75.0 sits between waves 2 and 3: a user-reported bug (a limit at 100%
+still reading "runs out soon", its crossing never recorded) fixed
+engine-side in PredictionEngine + UsageFormatting.forecastCaption, so
+both faces inherited it. Wave 3 and 4 shifted one version later.
 
 Verify each wave headlessly (protocol below) before shipping it.
 
@@ -83,6 +88,14 @@ field needed · [§10] user ruling needed.
    Today the TUI only swaps color on `risk`.
 
 ### Activity section
+Items 10–15 and 21–24 SHIPPED in v0.74.0. Notes worth keeping: the
+bars keep full height under a model hover and dim the other bands
+(the app's own split — the CALENDAR forms rescale to the model
+instead, `HeatmapView.color(for:)` vs `segmentOpacity`); 30D is built
+from its 30-day window padded to whole weeks with blanks, never from
+a count of week rows (the old grid swept in 5 extra days); monochrome
+gives each stack band its own density glyph.
+
 10. [L][✓] **7D stacked-bar chart** — the app's signature view: per-day
     bars stacked by model in ledger colors, per-day totals above,
     weekday+date labels, today bold, ‹ paging. Buildable entirely from
@@ -211,10 +224,14 @@ field needed · [§10] user ruling needed.
 - main.rs: event loop (1s tick, 500ms digest stat, 100ms poll), keys
   (q, esc-chain: help→cursor→scrub→surface→quit, enter/space
   activates `hover_hit`, r=socket refresh threaded via reply channel,
-  1-4 meters, tab, [ ] page, arrows), `focus_move` (keyboard cursor),
-  `find_usaged`/`ensure_engine` (auto-install nudge, once, when
-  EngineOffline). FREE KEYS for this program: v c s z p (m, d also
-  free).
+  1-4 meters, tab, [ ] page, arrows, **v period, c dimension**),
+  `focus_move` (keyboard cursor), `find_usaged`/`ensure_engine`
+  (auto-install nudge, once, when EngineOffline). FREE KEYS still: s z
+  p (m, d also free).
+- activity.rs (v0.74.0): the period math — `span`, `day_value`,
+  `model_totals`, `active_days`, `total_value`, `segments`,
+  `model_horizon_truncates`. Pure, tested; every activity surface
+  reads it so table, chart and summary can't disagree.
 - state.rs: App (digest, freshness via broker heartbeat rule, surface
   Dashboard/Meter(usize)/Day(String), heat_page, scrub, pointer,
   hover_hit = EFFECTIVE hot element (mouse vs keyboard focus by
@@ -231,10 +248,13 @@ field needed · [§10] user ruling needed.
   ≈35d note); `today()` at :491; `style()` = the NO_COLOR choke point
   (NEVER blanket-sed a call pattern into a helper's own body — the
   v0.69 self-recursion spin); Glyphs alphabet (UTF-8/ASCII).
-- layout.rs: Shape strip(<10r|<40c)/landscape(cols≥2.1×rows)/portrait;
-  plan() = pick(gapped, tight) — 1-row inter-section gap only when it
-  costs no section (landed-count). Item 2 adds a wide-portrait tier
-  here; item 1 caps the heatmap remainder here + in heat_grid.
+- layout.rs: Shape strip(<10r|<40c)/landscape(cols≥2.1×rows)/portrait
+  + wide-portrait (≥84 cols, v0.73.0); plan() = pick(gapped, tight) —
+  1-row inter-section gap only when it costs no section
+  (landed-count). **plan() now takes each section's TRUE row count**
+  (meters incl. credits line, models incl. rollup, activity per its
+  form), computed by `Dash::build` in ui.rs — the layout guesses
+  nothing and reserves no row that goes unpainted.
 - surfaces.rs: render_meter (braille Chart, forecast dots, now marker,
   axis labels: x local-time marks gated ≥44c×≥9r, y top=112.5 with
   12.5-step label slots — ratatui spreads labels EVENLY over bounds,
