@@ -12,11 +12,9 @@ pub const STRIP_MIN_ROWS: u16 = 10;
 pub const STRIP_MIN_COLS: u16 = 40;
 const LANDSCAPE_ASPECT: f64 = 2.1;
 /// Portrait panes at least this wide split into two columns (meters/today/
-/// models left, the heatmap full-height right) — a tall pane otherwise
-/// blackens its right half.
+/// models left, the activity section full-height right) — a tall pane
+/// otherwise blackens its right half.
 pub const WIDE_PORTRAIT_MIN_COLS: u16 = 84;
-/// A landscape heatmap paints title + 7 weekday rows + readout, never more.
-const LANDSCAPE_HEAT_ROWS: u16 = 9;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Shape {
@@ -46,45 +44,40 @@ pub struct Plan {
     pub footer: Option<Rect>,
 }
 
-/// Rows each section wants (header/footer are fixed; the rest scale with
-/// content, capped so no section hogs a small pane).
+/// Rows each section wants — the count it will actually paint, title
+/// included. Callers know their own content (how many meters, whether a
+/// credits line rides along, which activity form is up), so the layout
+/// never guesses and never reserves a row nothing fills.
 struct Wants {
     meters: u16,
     today: u16,
     models: u16,
 }
 
-fn wants(meter_count: usize, model_count: usize) -> Wants {
-    Wants {
-        // meter_count includes the credits line when the digest carries
-        // spend; min(5) still fits 4 meters + credits.
-        meters: (meter_count.max(1) as u16).min(5) + 1, // +1 section title
-        today: 3,                                       // title + spark + hour axis
-        models: (model_count as u16).min(4) + 1,
-    }
-}
-
-/// `heat_weeks` is the data's real Monday-aligned week span — the heatmap
-/// section is capped at what it can actually paint (title + weekday labels
-/// + that many week rows + readout), so a tall pane stops manufacturing
-/// empty dot-weeks. Reclaimed rows stay blank.
-pub fn plan(area: Rect, meter_count: usize, model_count: usize, heat_weeks: u16) -> Plan {
-    let want = wants(meter_count, model_count);
-    let heat_cap = heat_weeks.max(1).saturating_add(3);
+pub fn plan(area: Rect, meter_rows: u16, model_rows: u16, activity_rows: u16) -> Plan {
+    let want = Wants {
+        meters: meter_rows.max(2),
+        today: 3, // title + spark + hour axis
+        models: model_rows.max(2),
+    };
+    let activity = activity_rows.max(1);
     match shape(area) {
         Shape::Strip => Plan::default(),
         // A blank row between sections is a luxury, bought only when it
         // costs nothing: whichever plan lands more sections wins, and
         // the breathing room breaks the tie.
         Shape::Portrait if area.width >= WIDE_PORTRAIT_MIN_COLS => pick(
-            wide_portrait(area, &want, 1, heat_cap),
-            wide_portrait(area, &want, 0, heat_cap),
+            wide_portrait(area, &want, 1, activity),
+            wide_portrait(area, &want, 0, activity),
         ),
         Shape::Portrait => pick(
-            portrait(area, &want, 1, heat_cap),
-            portrait(area, &want, 0, heat_cap),
+            portrait(area, &want, 1, activity),
+            portrait(area, &want, 0, activity),
         ),
-        Shape::Landscape => pick(landscape(area, &want, 1), landscape(area, &want, 0)),
+        Shape::Landscape => pick(
+            landscape(area, &want, 1, activity),
+            landscape(area, &want, 0, activity),
+        ),
     }
 }
 
@@ -99,9 +92,9 @@ fn pick(gapped: Plan, tight: Plan) -> Plan {
     if landed(&tight) > landed(&gapped) { tight } else { gapped }
 }
 
-/// One column, priority flow top-down; heatmap absorbs the remainder when
-/// at least 6 rows of it survive, up to its data cap.
-fn portrait(area: Rect, want: &Wants, gap: u16, heat_cap: u16) -> Plan {
+/// One column, priority flow top-down; the activity section absorbs the
+/// remainder when at least 6 rows of it survive, up to what it will paint.
+fn portrait(area: Rect, want: &Wants, gap: u16, activity: u16) -> Plan {
     let mut plan = Plan::default();
     let mut y = area.y;
     let bottom = area.y + area.height;
@@ -121,7 +114,7 @@ fn portrait(area: Rect, want: &Wants, gap: u16, heat_cap: u16) -> Plan {
     plan.models = take(want.models, &mut y);
     let remaining = (bottom - 1).saturating_sub(y);
     if remaining >= 6 {
-        plan.heatmap = Some(Rect::new(area.x, y, area.width, remaining.min(heat_cap)));
+        plan.heatmap = Some(Rect::new(area.x, y, area.width, remaining.min(activity)));
     }
     plan.footer = Some(Rect::new(area.x, bottom - 1, area.width, 1));
     plan
@@ -130,7 +123,7 @@ fn portrait(area: Rect, want: &Wants, gap: u16, heat_cap: u16) -> Plan {
 /// The wide-portrait tier: the priority column keeps the left, the heatmap
 /// stands full-height (data-capped) on the right — same two-column idea as
 /// landscape, but the pane's tall shape favors the calendar form.
-fn wide_portrait(area: Rect, want: &Wants, gap: u16, heat_cap: u16) -> Plan {
+fn wide_portrait(area: Rect, want: &Wants, gap: u16, activity: u16) -> Plan {
     let mut plan = Plan::default();
     let body_height = area.height - 1;
     let right_width = (area.width / 2).clamp(24, 40);
@@ -152,7 +145,7 @@ fn wide_portrait(area: Rect, want: &Wants, gap: u16, heat_cap: u16) -> Plan {
     plan.today = take(want.today, &mut y);
     plan.models = take(want.models, &mut y);
 
-    let height = body_height.min(heat_cap);
+    let height = body_height.min(activity);
     if height >= 6 {
         plan.heatmap = Some(Rect::new(right.x, right.y, right.width, height));
     }
@@ -162,7 +155,7 @@ fn wide_portrait(area: Rect, want: &Wants, gap: u16, heat_cap: u16) -> Plan {
 
 /// Two columns: identity + meters + today on the left, models + the
 /// heatmap strip on the right; the footer spans the bottom.
-fn landscape(area: Rect, want: &Wants, gap: u16) -> Plan {
+fn landscape(area: Rect, want: &Wants, gap: u16, activity: u16) -> Plan {
     let mut plan = Plan::default();
     let body_height = area.height - 1;
     let left_width = (area.width / 2).clamp(30, 46);
@@ -196,12 +189,7 @@ fn landscape(area: Rect, want: &Wants, gap: u16) -> Plan {
     }
     let remaining = right_bottom.saturating_sub(ry);
     if remaining >= 5 {
-        plan.heatmap = Some(Rect::new(
-            right.x,
-            ry,
-            right.width,
-            remaining.min(LANDSCAPE_HEAT_ROWS),
-        ));
+        plan.heatmap = Some(Rect::new(right.x, ry, right.width, remaining.min(activity)));
     }
     plan.footer = Some(Rect::new(
         area.x,
@@ -224,7 +212,7 @@ mod tests {
     fn tiny_panes_are_strips() {
         assert_eq!(shape(rect(46, 8)), Shape::Strip);
         assert_eq!(shape(rect(39, 30)), Shape::Strip);
-        assert!(plan(rect(46, 8), 3, 4, 53).header.is_none());
+        assert!(plan(rect(46, 8), 4, 5, 56).header.is_none());
     }
 
     #[test]
@@ -239,7 +227,7 @@ mod tests {
 
     #[test]
     fn portrait_keeps_the_priority_order_and_drops_from_the_bottom() {
-        let full = plan(rect(46, 30), 3, 4, 53);
+        let full = plan(rect(46, 30), 4, 5, 56);
         assert!(full.header.is_some());
         assert!(full.meters.is_some());
         assert!(full.today.is_some());
@@ -253,7 +241,7 @@ mod tests {
         // the last row. (Any pane short enough to also drop models is
         // below the strip floor or landscape by aspect — the ladder's
         // bottom rung in portrait is the heatmap.)
-        let short = plan(rect(40, 20), 3, 4, 53);
+        let short = plan(rect(40, 20), 4, 5, 56);
         assert!(short.header.is_some());
         assert!(short.meters.is_some());
         assert!(short.today.is_some());
@@ -267,7 +255,7 @@ mod tests {
     fn sections_breathe_when_the_room_is_free() {
         // 46×30 portrait has rows to spare: every neighbor pair sits a
         // blank row apart.
-        let plan = plan(rect(46, 30), 3, 4, 53);
+        let plan = plan(rect(46, 30), 4, 5, 56);
         let (meters, today) = (plan.meters.unwrap(), plan.today.unwrap());
         assert_eq!(today.y, meters.y + meters.height + 1);
         assert!(plan.heatmap.is_some());
@@ -277,7 +265,7 @@ mod tests {
     fn breathing_room_is_surrendered_before_a_section_is() {
         // 46×23 portrait: gapped planning would push the heatmap under
         // its 6-row minimum, so the tight plan wins and keeps it.
-        let plan = plan(rect(46, 23), 3, 4, 53);
+        let plan = plan(rect(46, 23), 4, 5, 56);
         assert!(plan.heatmap.is_some(), "the gap must never cost a section");
         let (meters, today) = (plan.meters.unwrap(), plan.today.unwrap());
         assert_eq!(today.y, meters.y + meters.height);
@@ -285,7 +273,7 @@ mod tests {
 
     #[test]
     fn landscape_splits_columns_and_spans_the_footer() {
-        let plan = plan(rect(100, 27), 3, 4, 53);
+        let plan = plan(rect(100, 27), 4, 5, 56);
         let (header, models) = (plan.header.unwrap(), plan.models.unwrap());
         assert!(header.x < models.x, "models live in the right column");
         assert!(plan.heatmap.is_some());
@@ -296,23 +284,24 @@ mod tests {
     fn compact_landscape_sacrifices_the_heatmap_before_the_meters() {
         // 72×16 from the design doc: both columns viable, heatmap only if
         // ≥5 rows remain to its right column.
-        let plan = plan(rect(72, 16), 3, 4, 53);
+        let plan = plan(rect(72, 16), 4, 5, 56);
         assert!(plan.meters.is_some());
         assert!(plan.models.is_some());
         assert!(plan.heatmap.is_some());
     }
 
     #[test]
-    fn heatmap_height_stops_at_the_data() {
-        // 46×40 portrait with only 6 weeks of data: the heatmap gets
-        // title + labels + 6 week rows + readout = 9 rows, not the whole
+    fn the_activity_section_stops_at_what_it_paints() {
+        // 46×40 portrait with only 6 weeks of data (title + labels + 6
+        // week rows + readout = 9): the section takes 9, not the whole
         // remainder; the reclaimed rows stay blank.
-        let plan = plan(rect(46, 40), 3, 4, 6);
+        let plan = plan(rect(46, 40), 4, 5, 9);
         assert_eq!(plan.heatmap.unwrap().height, 9);
 
-        // Landscape caps at its 7 fixed weekday rows regardless of data.
-        let wide = super::plan(rect(120, 56), 3, 4, 53);
-        assert!(wide.heatmap.unwrap().height <= 9);
+        // Same rule in a tall landscape pane, where the weekday-letter
+        // strip form asks for its 9 rows and no more.
+        let wide = super::plan(rect(120, 56), 4, 5, 9);
+        assert_eq!(wide.heatmap.unwrap().height, 9);
     }
 
     #[test]
@@ -321,7 +310,7 @@ mod tests {
         // that one column would blacken the right half. The heatmap stands
         // full-height (data-capped) on the right; the priority sections
         // keep the left; the footer spans.
-        let plan = plan(rect(95, 110), 3, 4, 53);
+        let plan = plan(rect(95, 110), 4, 5, 56);
         let (header, heatmap) = (plan.header.unwrap(), plan.heatmap.unwrap());
         assert!(header.x < heatmap.x, "heatmap lives in the right column");
         assert_eq!(heatmap.y, 0, "heatmap starts at the top of the pane");
@@ -329,7 +318,7 @@ mod tests {
         assert!(plan.models.is_some(), "priority sections keep the left column");
         assert_eq!(plan.footer.unwrap().width, 95);
         // Below the wide threshold the single column keeps the pane.
-        let narrow = super::plan(rect(60, 80), 3, 4, 53);
+        let narrow = super::plan(rect(60, 80), 4, 5, 56);
         assert_eq!(narrow.heatmap.unwrap().x, 0);
     }
 }

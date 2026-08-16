@@ -42,6 +42,51 @@ pub enum Surface {
     Day(String),
 }
 
+/// The activity span, the app's 7D/30D/All pills. Session-local by design
+/// (the app persists its pick; the pane starts each run on the app's own
+/// fresh-install default).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Period {
+    Week,
+    Month,
+    All,
+}
+
+impl Period {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Week => Self::Month,
+            Self::Month => Self::All,
+            Self::All => Self::Week,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Week => "7D",
+            Self::Month => "30D",
+            Self::All => "All",
+        }
+    }
+}
+
+/// What the activity charts measure — token volume or estimated cost
+/// (the app's Tokens/Cost picker).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Dimension {
+    Tokens,
+    Cost,
+}
+
+impl Dimension {
+    pub fn toggled(self) -> Self {
+        match self {
+            Self::Tokens => Self::Cost,
+            Self::Cost => Self::Tokens,
+        }
+    }
+}
+
 /// One mouse-sensitive region from the LAST draw — the render pass writes
 /// these, the event pass reads them. Terminal UIs hit-test against what
 /// was actually painted, never a parallel geometry model.
@@ -157,6 +202,11 @@ pub struct App {
     pub surface: Surface,
     /// Heatmap pages stepped into the past; 0 = the current window.
     pub heat_page: usize,
+    /// The activity span (7D bars / 30D calendar / all-time grid) and what
+    /// the charts measure. The app persists both; a pane is a transient
+    /// view, so each run starts on the app's fresh-install defaults.
+    pub period: Period,
+    pub dimension: Dimension,
     /// Scrub cursor into the open meter's series (index from the END).
     pub scrub: Option<usize>,
     /// Last mouse cell, for hover halos and readouts.
@@ -191,6 +241,8 @@ impl App {
             show_help: false,
             surface: Surface::Dashboard,
             heat_page: 0,
+            period: Period::Week,
+            dimension: Dimension::Tokens,
             scrub: None,
             pointer: None,
             hover_hit: None,

@@ -3,8 +3,9 @@
 //! behind a `← back` header. Readouts are fixed lines — hover and scrub
 //! swap text in place, never reflowing the layout under the cursor.
 
+use crate::activity::ModelTotal;
 use crate::digest::{DayRollup, LiveState, LiveMeter};
-use crate::state::{App, Hit};
+use crate::state::{App, Dimension, Hit};
 use crate::ui::{compact, glyphs, money, ramp, rgb, CRITICAL, DIM, FAINT, WARNING};
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -270,91 +271,125 @@ pub fn render_day(
     }
     lines.push(Line::default());
 
-    // Hourly bars while the timeline still holds the day (~8 days), an
-    // honest label past that horizon (design §4: degrade, labeled).
-    if let Some(hours) = digest
-        .activity
-        .hour_days
-        .iter()
-        .find(|entry| entry.day_key == day_key)
-    {
-        let mut buckets = [0i64; 24];
-        for bucket in &hours.hours {
-            if (bucket.hour as usize) < 24 {
-                buckets[bucket.hour as usize] = bucket.tokens;
-            }
-        }
-        let max = buckets.iter().copied().max().unwrap_or(0).max(1);
-        let spark_glyphs = glyphs().spark;
-        let cell = ((rect.width as usize) / 26).clamp(1, 3);
-        let mut spark: Vec<Span> = Vec::new();
-        for tokens in buckets {
-            spark.push(if tokens == 0 {
-                Span::styled(glyphs().dot.repeat(cell), crate::ui::style(FAINT))
-            } else {
-                let step = (((tokens * 7 + max - 1) / max) as usize).min(7);
-                Span::styled(spark_glyphs[step].to_string().repeat(cell), crate::ui::style(accent))
-            });
-        }
-        lines.push(Line::from(spark));
-        lines.push(Line::from(Span::styled(
-            format!("{:<width$}12{:>width$}", "0", "23", width = cell * 12 - 1),
-            crate::ui::style(FAINT),
-        )));
-    } else if day.is_some() {
-        lines.push(Line::from(Span::styled(
-            "hourly detail is kept ~8 days — totals only for this day",
-            crate::ui::style(FAINT),
-        )));
-    } else {
-        lines.push(Line::from(Span::styled(
-            "no recorded activity on this day",
-            crate::ui::style(FAINT),
-        )));
-    }
-    lines.push(Line::default());
-
-    // Per-model table inside the 35-day drill horizon; labeled beyond.
-    match digest
+    // The app's non-ring day drill, terminal-idiomized: the day drawn as a
+    // chart with real height, then the same breakdown grid underneath —
+    // per-model composition plus the four token classes and the priced
+    // rollup. (A donut is a GUI idiom; bars carry the same composition
+    // where cells are the only ink.)
+    let models: Vec<ModelTotal> = digest
         .activity
         .model_days
         .iter()
         .find(|entry| entry.day_key == day_key)
-    {
-        Some(models) => {
-            lines.push(Line::from(Span::styled(
-                "MODELS".to_owned(),
-                crate::ui::style(DIM).add_modifier(Modifier::BOLD),
-            )));
-            for model in models.models.iter().take(6) {
-                let name_width = (rect.width as usize).saturating_sub(22).clamp(8, 24);
-                lines.push(Line::from(vec![
-                    Span::styled(glyphs().live, crate::ui::style(rgb(model.color))),
-                    Span::styled(
-                        format!("{:<name_width$}", crate::ui::truncate(&model.display_name, name_width)),
-                        Style::new(),
-                    ),
-                    Span::styled(
-                        format!("{:>7}", compact(model.tally.total())),
-                        crate::ui::style(DIM),
-                    ),
-                    Span::styled(
-                        format!(
-                            "{:>9}",
-                            model.cost.map(money).unwrap_or_else(|| "—".into())
-                        ),
-                        Style::new(),
-                    ),
-                ]));
+        .map(|entry| entry.models.iter().map(ModelTotal::from).collect())
+        .unwrap_or_default();
+
+    let wide = rect.width >= 46;
+    let name_width = (rect.width as usize)
+        .saturating_sub(if wide { 36 } else { 20 })
+        .clamp(8, 22);
+    // Rows the table and its chrome will claim, so the chart takes only
+    // what is genuinely spare.
+    let table_rows = if models.is_empty() {
+        2
+    } else {
+        3 + models.len().min(6) + 1
+    };
+    let spare = (rect.height as usize)
+        .saturating_sub(lines.len() + table_rows + 2)
+        .min(8);
+
+    let hours = digest
+        .activity
+        .hour_days
+        .iter()
+        .find(|entry| entry.day_key == day_key);
+    match hours {
+        Some(hours) => {
+            let mut buckets = [0.0f64; 24];
+            for bucket in &hours.hours {
+                if (bucket.hour as usize) < 24 {
+                    buckets[bucket.hour as usize] = match app.dimension {
+                        Dimension::Tokens => bucket.tokens as f64,
+                        Dimension::Cost => bucket.cost.unwrap_or(0.0),
+                    };
+                }
             }
-        }
-        None if day.is_some() => {
+            let max = buckets.iter().copied().fold(0.0_f64, f64::max);
+            let cell = ((rect.width as usize) / 24).clamp(1, 3);
+            if spare >= 2 && max > 0.0 {
+                // A real plot: 24 hour columns, height carrying magnitude.
+                for row in 0..spare {
+                    let from_bottom = spare - 1 - row;
+                    let mut spans: Vec<Span> = Vec::new();
+                    for value in buckets {
+                        let filled = if value > 0.0 {
+                            (((value / max) * spare as f64).round() as usize).max(1)
+                        } else {
+                            0
+                        };
+                        spans.push(if from_bottom < filled {
+                            Span::styled(glyphs().bar_fill.repeat(cell), crate::ui::style(accent))
+                        } else {
+                            Span::raw(" ".repeat(cell))
+                        });
+                    }
+                    lines.push(Line::from(spans));
+                }
+            } else {
+                // Too short for a plot — the one-line spark still speaks.
+                let spark_glyphs = glyphs().spark;
+                let mut spark: Vec<Span> = Vec::new();
+                for value in buckets {
+                    spark.push(if value <= 0.0 {
+                        Span::styled(glyphs().dot.repeat(cell), crate::ui::style(FAINT))
+                    } else {
+                        let step = ((value / max.max(f64::MIN_POSITIVE) * 7.0).ceil() as usize)
+                            .clamp(0, 7);
+                        Span::styled(
+                            spark_glyphs[step].to_string().repeat(cell),
+                            crate::ui::style(accent),
+                        )
+                    });
+                }
+                lines.push(Line::from(spark));
+            }
             lines.push(Line::from(Span::styled(
-                "per-model detail is kept ~35 days — totals only",
+                format!("{:<width$}12{:>width$}", "0", "23", width = cell * 12 - 1),
                 crate::ui::style(FAINT),
             )));
         }
-        None => {}
+        None if day.is_some() => {
+            lines.push(Line::from(Span::styled(
+                "hourly detail is kept ~8 days — totals only for this day",
+                crate::ui::style(FAINT),
+            )));
+        }
+        None => {
+            lines.push(Line::from(Span::styled(
+                "no recorded activity on this day",
+                crate::ui::style(FAINT),
+            )));
+        }
+    }
+    lines.push(Line::default());
+
+    // Per-model table inside the 35-day drill horizon; labeled beyond.
+    if !models.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "MODELS".to_owned(),
+            crate::ui::style(DIM).add_modifier(Modifier::BOLD),
+        )));
+        lines.push(crate::ui::model_columns(name_width, wide));
+        for model in models.iter().take(6) {
+            lines.push(crate::ui::model_row(model, name_width, wide, false));
+        }
+        lines.push(crate::ui::cost_rollup(&models));
+    } else if day.is_some() {
+        lines.push(Line::from(Span::styled(
+            "per-model detail is kept ~35 days — totals only",
+            crate::ui::style(FAINT),
+        )));
     }
 
     frame.render_widget(Paragraph::new(lines), rect);

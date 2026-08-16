@@ -164,7 +164,7 @@ pub struct ModelRow {
     pub cost: Option<f64>,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Tally {
     pub input: i64,
@@ -178,6 +178,23 @@ pub struct Tally {
 impl Tally {
     pub fn total(&self) -> i64 {
         self.input + self.cache_creation + self.cache_read + self.output
+    }
+
+    /// Input the model processed anew — fresh prompt plus cache writes.
+    /// The app's tables show this apart from cache re-reads, which dwarf
+    /// it in an agentic loop and would misread as typed prompt volume.
+    pub fn uncached_input(&self) -> i64 {
+        self.input + self.cache_creation
+    }
+
+    /// `cacheCreation1h` is a SLICE of cacheCreation (a costlier TTL), not
+    /// a fifth class — summing it here would double-count.
+    pub fn add(&mut self, other: Tally) {
+        self.input += other.input;
+        self.output += other.output;
+        self.cache_creation += other.cache_creation;
+        self.cache_read += other.cache_read;
+        self.cache_creation1h += other.cache_creation1h;
     }
 }
 

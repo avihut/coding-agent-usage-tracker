@@ -8,6 +8,7 @@
 //! the layout re-plans itself from the pane's shape on every draw, and the
 //! mouse is first-class (hover readouts, click-to-drill, wheel paging).
 
+mod activity;
 mod digest;
 mod layout;
 mod socket;
@@ -275,6 +276,14 @@ fn handle_key(app: &mut App, code: KeyCode, reply_tx: &mpsc::Sender<String>) {
         }
         KeyCode::Char('[') => page_heatmap(app, 1),
         KeyCode::Char(']') => page_heatmap(app, -1),
+        // The app's activity pills and Tokens/Cost picker, as keys. Pages
+        // don't translate between window sizes, so a period switch lands
+        // on the current window — the app resets its pager the same way.
+        KeyCode::Char('v') => {
+            app.period = app.period.next();
+            app.heat_page = 0;
+        }
+        KeyCode::Char('c') => app.dimension = app.dimension.toggled(),
         // Horizontal arrows keep each detail surface's own grammar
         // (scrub samples, step days); everywhere else all four arrows
         // drive the keyboard cursor across the hit map.
