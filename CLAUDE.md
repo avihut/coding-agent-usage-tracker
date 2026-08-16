@@ -31,8 +31,21 @@ the README rather than silently deviating.
 
 - `UsageCore` is a library with zero AppKit/SwiftUI imports; all logic is
   headlessly testable. The app layer is a pure function of store state.
+- CODE LAYOUT (2026-08-16 v0.63.0 reorg): UsageCore groups by subject —
+  Api/ Refresh/ Credentials/ Providers/{,Claude,Codex,Gemini}/ Activity/
+  Sessions/ Pricing/ Prediction/ Audit/ Formatting/ Storage/ Digests/ —
+  with AppIdentity.swift alone at the core root (the release-bump sed
+  path). App target: App/ MenuBar/ Store/ Components/ Panel/ Charts/
+  Sessions/ Settings/. The four big view files split along existing type
+  boundaries (UsagePanelView → MeterRow/RiskColor/MeterHistoryView;
+  SessionsView → SessionRow/SessionComponents/SessionDetailPane;
+  SettingsView → SettingsScaffolding/GeneralSettingsPane/CostSettingsPane;
+  TokenFormat, CodexActivitySource, SessionChartModel out of their old
+  host files) — byte-identical moves, `private`→`internal` only where a
+  type crossed its old file. New code lands in the matching folder; a
+  file that outgrows ~600 lines splits along whole-type seams like these.
 - PROVIDER SEAM (2026-08-15 v0.25.0, user-directed decoupling): everything
-  vendor-specific sits behind `UsageProvider` (UsageProvider.swift) —
+  vendor-specific sits behind `UsageProvider` (Providers/UsageProvider.swift) —
   identity (serviceName/agentName/menuBarGlyph/links/networkDestinations),
   `credentials: CredentialChain`, `fetchRawUsage`, `snapshot(fromRawUsage:)`
   (bytes → normalized `Snapshot`; the cache stores raw bytes and replays
@@ -41,7 +54,7 @@ the README rather than silently deviating.
   scanPromptDays/diskUsage — read-only by contract), `agentSettings`
   (protocol `AgentSettingsStore`: the ONE sanctioned retention write),
   `modelCatalog` (`ModelCatalog` closures: displayName/familyName/
-  familyRank), `bundledRates`. `ClaudeProvider` (ClaudeProvider.swift) is
+  familyRank), `bundledRates`. `ClaudeProvider` (Providers/Claude/ClaudeProvider.swift) is
   the only implementation and owns every Claude fact: the OAuth endpoint
   (via UsageClient), keychain/file credential chain, ~/.claude paths
   (ClaudeActivitySource), cleanupPeriodDays (ClaudeCodeSettings
@@ -259,7 +272,7 @@ the README rather than silently deviating.
   its merged `stretches` — scanner unionIntervals feeds both
   activeSeconds and the nubs), outcomes forever from v0.55.0.
 - SYNC DIGEST (2026-08-16 v0.51.0, axis-1 prep, membership-gated):
-  `SyncDigest.swift` (UsageCore) is the FROZEN CloudKit schema —
+  `Digests/SyncDigest.swift` (UsageCore) is the FROZEN CloudKit schema —
   digest types + `SyncDigestBuilder` + `SyncRecordName`, pure, Codable,
   zero CloudKit imports. Design and rationale live in docs/SYNC.md
   (zone-per-device writer-owns-zone merge model, archive semantics,
@@ -334,7 +347,7 @@ the README rather than silently deviating.
   is provider DATA like the glyph — `UsageProvider.accent:
   ProviderAccent` (pure sRGB components; UsageCore stays UI-framework-
   free): Claude terracotta #D97757, Codex OpenAI-green #10A37F, Gemini
-  blue #4285F4. App side: `ProviderStyle` facade (ProviderStyle.swift,
+  blue #4285F4. App side: `ProviderStyle` facade (Components/ProviderStyle.swift,
   `nonisolated(unsafe)` statics accent+providerID, installed by
   ProviderRegistry beside ModelNames.catalog — same written-only-on-
   MainActor-before-UI-rebuilds contract). Derived surfaces: menu bar
@@ -348,7 +361,7 @@ the README rather than silently deviating.
   critical red, severity ramp, cached badge) deliberately stay fixed —
   only brand accents follow the harness.
 - GEMINI PROVIDER (2026-08-15 v0.28.0, thin and honest): `GeminiProvider`
-  (UsageCore/GeminiProvider.swift) — local-files-only like Codex, but
+  (UsageCore/Providers/Gemini/GeminiProvider.swift) — local-files-only like Codex, but
   Google serves NO readable usage numbers, so the one meter (rank 0,
   "Daily · counted locally", limitWindow 24h, reset next midnight
   America/Los_Angeles) is a LOCAL count of today's prompts vs an assumed
@@ -369,7 +382,7 @@ the README rather than silently deviating.
   .h5, ≤24h → .h24, else .d7. oauth_creds.json/google_accounts.json
   never read.
 - CODEX PROVIDER (2026-08-15 v0.27.0, first non-Claude harness):
-  `CodexProvider` (UsageCore/CodexProvider.swift) is LOCAL-FILES-ONLY —
+  `CodexProvider` (UsageCore/Providers/Codex/CodexProvider.swift) is LOCAL-FILES-ONLY —
   zero network destinations, zero credentials (`StaticCredentialSource`
   returns an empty token so UsageService stays byte-identical;
   `~/.codex/auth.json` is NEVER read, spec §10 amendment). Meters come
@@ -582,7 +595,7 @@ the README rather than silently deviating.
   unhighlighted nubs). The dead stretch past the exhaustion
   crossing gets a red nub of its own ("unreachable" in the readout).
   Segmented pickers are built ONLY through the shared `SegmentedPicker`
-  (Sources/ClaudeUsage/SegmentedPicker.swift — mini/bare/semibold, one
+  (Sources/ClaudeUsage/Components/SegmentedPicker.swift — mini/bare/semibold, one
   place for the style; settings panes pass size: .regular). Hover-driven stats lines are fixed-height by
   design — swapping text must never reflow the layout under the cursor —
   and today's cell/bar carries a subtle ring (grids only — the 7D bar's
@@ -647,7 +660,7 @@ the README rather than silently deviating.
   claude-orange intensity) with busiest/quietest-day insights, sample-
   history stats (count, span, thinning, on-disk size), and a plain-words
   explainer; card scaffolding (`SettingsCard`/`SettingsPaneScroll`/
-  `infoRow`/`note`) is shared internal from SettingsView.swift. The API
+  `infoRow`/`note`) is shared internal from Settings/SettingsScaffolding.swift. The API
   Cost pane — pricing-feed status with a manual
   Refresh Now (`PricingService.refreshNow` — bypasses the daily staleness
   gate, same single allowed destination), the list rates behind the
@@ -716,7 +729,7 @@ the README rather than silently deviating.
   menu bar segment numbers blend yellow→red by `severity` (accent/white
   while clean; percent-threshold palette only when no prediction
   exists — no hard warning/critical cliff). The blend lives in ONE
-  file-scope `riskColor(severity:)` (UsagePanelView.swift) — bars,
+  file-scope `riskColor(severity:)` (Panel/RiskColor.swift) — bars,
   captions, the chart's dashed trajectory and its Y-axis projection
   label all call it. The Window chart labels the
   projected finish percent on the Y axis in that ramp color
