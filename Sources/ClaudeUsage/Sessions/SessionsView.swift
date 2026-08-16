@@ -10,6 +10,7 @@ struct SessionsView: View {
     var navigator: SessionsNavigator
 
     @State private var selectedID: String?
+    @State private var hoveredID: String?
     /// User decision: background runs are visible by default, badged and
     /// dimmed; the toggle lets them be hidden.
     @AppStorage("sessionsShowBackground") private var showBackground = true
@@ -65,6 +66,23 @@ struct SessionsView: View {
                                     cost: Self.cost(of: session, pricing: store.pricing),
                                     colors: colors
                                 )
+                                // The panel shortlist's hover grammar, minus
+                                // its click chrome; quiet on the selected row,
+                                // where the system highlight already speaks.
+                                .background(
+                                    RoundedRectangle(cornerRadius: 5)
+                                        .fill(Color.primary.opacity(
+                                            hoveredID == session.id
+                                                && selectedID != session.id ? 0.06 : 0))
+                                        .padding(.horizontal, -6)
+                                        .padding(.vertical, -2))
+                                .onHover { inside in
+                                    if inside {
+                                        hoveredID = session.id
+                                    } else if hoveredID == session.id {
+                                        hoveredID = nil
+                                    }
+                                }
                                 .tag(session.id)
                             }
                         }

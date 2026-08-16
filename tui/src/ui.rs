@@ -233,24 +233,44 @@ pub fn render(frame: &mut Frame, app: &mut App, now: OffsetDateTime) {
     if app.show_help {
         render_help(frame, area);
     } else if let Some(rect) = halo {
-        reverse_band(frame, rect);
+        highlight_band(frame, rect);
     }
 }
 
-/// The selection halo: REVERSED over the hot element's band, on top of
-/// whatever the widgets painted (idempotent with the heat day's own
-/// reversed cell — modifiers are flags). Works in NO_COLOR and ASCII
-/// dialects, which is the point: it needs no color and no mouse.
-fn reverse_band(frame: &mut Frame, rect: Rect) {
+/// The selection halo, painted over whatever the widgets left in the
+/// band: bold plus a lifted foreground — the modern register, no
+/// background slab. Cells wearing the terminal's default color take
+/// bold alone (an explicit "bright" literal would fight light themes).
+/// NO_COLOR keeps REVERSED: bold barely registers on the monochrome
+/// density glyphs, and that dialect already trades nuance for clarity.
+fn highlight_band(frame: &mut Frame, rect: Rect) {
+    let no_color = crate::state::look().no_color;
     let area = frame.area();
     let buffer = frame.buffer_mut();
     for y in rect.top()..rect.bottom().min(area.bottom()) {
         for x in rect.left()..rect.right().min(area.right()) {
             if let Some(cell) = buffer.cell_mut(ratatui::layout::Position::new(x, y)) {
-                cell.set_style(Style::new().add_modifier(Modifier::REVERSED));
+                let mut lift = Style::new().add_modifier(if no_color {
+                    Modifier::REVERSED
+                } else {
+                    Modifier::BOLD
+                });
+                if !no_color {
+                    if let Color::Rgb(r, g, b) = cell.fg {
+                        lift = lift.fg(brighten(r, g, b));
+                    }
+                }
+                cell.set_style(lift);
             }
         }
     }
+}
+
+/// Lift a color ~45% toward white — enough to read as "lit", not enough
+/// to wash the hue out.
+fn brighten(r: u8, g: u8, b: u8) -> Color {
+    let lift = |c: u8| c + ((255 - u16::from(c)) * 45 / 100) as u8;
+    Color::Rgb(lift(r), lift(g), lift(b))
 }
 
 fn render_surface(
@@ -596,7 +616,30 @@ fn render_heatmap(
     let days = &digest.activity.days;
     let by_key: HashMap<&str, &DayRollup> =
         days.iter().map(|d| (d.day_key.as_str(), d)).collect();
-    let max = days.iter().map(|d| d.tokens).max().unwrap_or(0).max(1);
+    // A hovered/focused model row filters the grid to that model's own
+    // days, in its ledger color — the pane's version of the app's
+    // hover-to-filter. Calendar geometry stays unfiltered: paging and
+    // week rows never shrink under a filter.
+    let filter = match &app.hover_hit {
+        Some(Hit::ModelRow(index)) => digest.models.get(*index),
+        _ => None,
+    };
+    let heat_tokens: HashMap<&str, i64> = match filter {
+        Some(model) => digest
+            .activity
+            .model_days
+            .iter()
+            .filter_map(|day| {
+                day.models
+                    .iter()
+                    .find(|m| m.id == model.id)
+                    .map(|m| (day.day_key.as_str(), m.tally.total()))
+            })
+            .collect(),
+        None => days.iter().map(|d| (d.day_key.as_str(), d.tokens)).collect(),
+    };
+    let max = heat_tokens.values().copied().max().unwrap_or(0).max(1);
+    let heat_color = filter.map(|m| m.color).unwrap_or(digest.engine.accent);
     let today = now.to_offset(app.local_offset).date();
     let landscape = rect.width > rect.height * 4;
 
@@ -615,6 +658,12 @@ fn render_heatmap(
         "ACTIVITY".to_owned(),
         style(DIM).add_modifier(Modifier::BOLD),
     )];
+    if let Some(model) = filter {
+        title_spans.push(Span::styled(
+            format!("{}{}", glyphs().sep, model.display_name),
+            style(rgb(model.color)),
+        ));
+    }
     if app.heat_page > 0 {
         title_spans.push(Span::styled(
             format!("{}{}w back", glyphs().sep, weeks_visible * app.heat_page),
@@ -655,38 +704,34 @@ fn render_heatmap(
             return ("  ".into(), Style::new());
         };
         let key = date.format(surfaces::DAY_KEY).unwrap_or_default();
-        let entry = by_key.get(key.as_str());
+        let tokens = heat_tokens.get(key.as_str()).copied().unwrap_or(0);
         let mut cell_style;
         let text;
         let look = crate::state::look();
-        match entry {
-            Some(day) if day.tokens > 0 => {
-                let alpha = 0.25 + 0.75 * (day.tokens as f64 / max as f64).sqrt();
-                if look.no_color || look.ascii {
-                    // Density carries intensity when color can't.
-                    let quartile = (((alpha - 0.25) / 0.75) * 3.0).round() as usize;
-                    text = heat_cell_text(quartile.min(3));
-                    cell_style = Style::new();
-                } else {
-                    cell_style = style(ramp(digest.engine.accent, alpha));
-                    text = "██";
-                }
+        if tokens > 0 {
+            let alpha = 0.25 + 0.75 * (tokens as f64 / max as f64).sqrt();
+            if look.no_color || look.ascii {
+                // Density carries intensity when color can't.
+                let quartile = (((alpha - 0.25) / 0.75) * 3.0).round() as usize;
+                text = heat_cell_text(quartile.min(3));
+                cell_style = Style::new();
+            } else {
+                cell_style = style(ramp(heat_color, alpha));
+                text = "██";
             }
-            Some(day) if day.prompts > 0 => {
-                cell_style = style(ramp(digest.engine.accent, 0.35));
-                text = glyphs().prompt_cell;
-            }
-            _ => {
-                cell_style = style(FAINT);
-                text = if look.ascii { ". " } else { "· " };
-            }
+        } else if filter.is_none()
+            && by_key.get(key.as_str()).is_some_and(|day| day.prompts > 0)
+        {
+            cell_style = style(ramp(digest.engine.accent, 0.35));
+            text = glyphs().prompt_cell;
+        } else {
+            cell_style = style(FAINT);
+            text = if look.ascii { ". " } else { "· " };
         }
         if date == today {
             cell_style = cell_style.add_modifier(Modifier::UNDERLINED);
         }
-        if hovered_day.as_deref() == Some(key.as_str()) {
-            cell_style = cell_style.add_modifier(Modifier::REVERSED);
-        }
+        // The hovered/focused day's lift comes from the shared halo pass.
         (text.into(), cell_style)
     };
 
@@ -783,7 +828,14 @@ fn render_heatmap(
             text.push_str("  (click to drill)");
             text
         })
-        .unwrap_or_else(|| format!("[ ] page{}click a day to drill", glyphs().sep));
+        .unwrap_or_else(|| match filter {
+            Some(model) => format!(
+                "{} only{}per-model days are kept ≈35d",
+                model.display_name,
+                glyphs().sep
+            ),
+            None => format!("[ ] page{}click a day to drill", glyphs().sep),
+        });
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(readout, style(FAINT)))),
         Rect::new(rect.x, readout_y, rect.width, 1),

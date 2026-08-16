@@ -155,8 +155,14 @@ the README rather than silently deviating.
   detail surfaces), enter/space activates, esc dismisses cursor first;
   hover_hit holds the EFFECTIVE hot element (focus vs mouse by
   keyboard_mode = last device), so every hover treatment (readouts,
-  reverse_band halo) serves both devices — built because some terminals
-  (Apple Terminal) never report mouse motion. Meter chart: honest axis
+  halo) serves both devices — built because some terminals (Apple
+  Terminal) never report mouse motion. v0.72.0: the halo is
+  highlight_band — BOLD + fg lifted ~45% toward white (brighten();
+  default-fg cells get bold alone, theme-safe); REVERSED survives only
+  in NO_COLOR where bold can't carry it. Hovering/focusing a ModelRow
+  filters the heatmap to that model's model_days in its ledger color
+  (title gains "· <name>", readout notes the ≈35d window; prompt-dot
+  cells and calendar geometry stay unfiltered). Meter chart: honest axis
   labels when the pane affords them (y top 112.5 with 12.5-step label
   slots so "50"/"100" sit at true positions; x = local-time marks,
   3 under 76 cols, 5 at/above; gated ≥44 cols × ≥9 rows). Dashboard
