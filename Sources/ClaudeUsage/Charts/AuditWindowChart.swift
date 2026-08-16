@@ -21,6 +21,16 @@ struct AuditWindowChart: View {
     /// The reset line under the cursor — its whole ended window lights up,
     /// the meter popover's idiom.
     @State private var hoveredReset: Date?
+    /// The activity nub under the cursor; the graph above it stays lit while
+    /// everything else curtains.
+    @State private var hoveredNub: WindowPlot.Nub?
+
+    /// The ledger's plain intervals in the strip's shared shape. Kind is
+    /// `.active` throughout for now — a remembered spent-through stretch is
+    /// task #130, and it lands here without touching the drawing.
+    private var nubs: [WindowPlot.Nub] {
+        model.nubs.map { WindowPlot.Nub(start: $0.start, end: $0.end) }
+    }
 
     /// Strip space below the percent floor, the meter chart's idiom.
     private static let plotFloor = -10.0
@@ -54,61 +64,32 @@ struct AuditWindowChart: View {
                     .foregroundStyle(accent)
                     .lineStyle(StrokeStyle(lineWidth: 1.5))
             }
-            // `Color.primary`, never the bare hierarchical `.primary`: inside
-            // a Chart the hierarchical styles resolve against the plot's own
-            // accent-derived foreground, which painted these dashes in the
-            // system accent while the meter popover's identical marks stayed
-            // white. Same lesson for `.secondary` below.
-            ForEach(model.resets, id: \.self) { reset in
-                RuleMark(
-                    x: .value("Reset", reset), yStart: .value("Floor", 0),
-                    yEnd: .value("Ceiling", 100))
-                    .foregroundStyle(Color.primary.opacity(hoveredReset == reset ? 1 : 0.7))
-                    .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [3, 3]))
-            }
+            WindowPlot.resets(model.resets, hovered: hoveredReset, ceiling: 100)
             // The strip: a faint full-width track with accent nubs where
-            // sessions actually ran.
+            // sessions actually ran. Geometry is this chart's own — a single
+            // round-capped rule rather than the popover's band — but the
+            // colouring and the hover dimming come from WindowPlot.
             RuleMark(
                 xStart: .value("Start", domain.start), xEnd: .value("End", domain.end),
                 y: .value("Track", Self.stripY))
                 .foregroundStyle(Color.secondary.opacity(0.18))
                 .lineStyle(StrokeStyle(lineWidth: 4, lineCap: .round))
-            ForEach(model.nubs, id: \.self) { nub in
+            ForEach(nubs, id: \.start) { nub in
                 RuleMark(
                     xStart: .value("Start", nub.start), xEnd: .value("End", nub.end),
                     y: .value("Nub", Self.stripY))
-                    .foregroundStyle(accent)
+                    .foregroundStyle(
+                        WindowPlot.nubColor(nub.kind, accent: accent)
+                            .opacity(WindowPlot.nubOpacity(nub, hovered: hoveredNub)))
                     .lineStyle(StrokeStyle(lineWidth: 4, lineCap: .round))
             }
-            // Reset hover: curtain-dim everything outside the limit window
-            // that ended at this line — the undimmed stretch IS the window —
-            // with a solid twin marking where that window began. Straight
-            // from the meter popover, so the two charts answer a hovered
-            // reset the same way.
-            if let hoveredReset {
-                let curtain = Color(nsColor: .windowBackgroundColor).opacity(0.5)
-                let windowStart = max(domain.start, hoveredReset.addingTimeInterval(-window))
-                RuleMark(
-                    x: .value("Window start", windowStart),
-                    yStart: .value("Floor", 0), yEnd: .value("Ceiling", 100))
-                    .foregroundStyle(Color.primary)
-                    .lineStyle(StrokeStyle(lineWidth: 1.5))
-                if windowStart > domain.start {
-                    RectangleMark(
-                        xStart: .value("Time", domain.start),
-                        xEnd: .value("Time", windowStart),
-                        yStart: .value("Floor", Self.plotFloor),
-                        yEnd: .value("Ceiling", 100))
-                        .foregroundStyle(curtain)
-                }
-                if hoveredReset < domain.end {
-                    RectangleMark(
-                        xStart: .value("Time", hoveredReset),
-                        xEnd: .value("Time", domain.end),
-                        yStart: .value("Floor", Self.plotFloor),
-                        yEnd: .value("Ceiling", 100))
-                        .foregroundStyle(curtain)
-                }
+            if let hoveredNub {
+                WindowPlot.nubCurtain(
+                    hoveredNub, start: domain.start, end: domain.end, ceiling: 100)
+            } else if let hoveredReset {
+                WindowPlot.resetCurtain(
+                    hoveredReset, window: window,
+                    start: domain.start, end: domain.end, ceiling: 100)
             } else if let hoverDate {
                 RuleMark(
                     x: .value("Hover", hoverDate), yStart: .value("Floor", 0),
@@ -151,28 +132,33 @@ struct AuditWindowChart: View {
                         case .active(let location):
                             let plot = geo[proxy.plotFrame!]
                             let date: Date? = proxy.value(atX: location.x - plot.minX)
+                            let depth: Double? = proxy.value(atY: location.y - plot.minY)
                             hoverDate = date
-                            hoveredReset = date.flatMap {
-                                nearestReset(to: $0, plotWidth: plot.width)
+                            // Below the plot floor the cursor is on the
+                            // activity strip: nubs take the hover there and
+                            // the reset lines let go — the popover's
+                            // precedence, so both charts read the same.
+                            if let depth, depth < 0 {
+                                hoveredNub = date.flatMap { moment in
+                                    nubs.first { $0.contains(moment) }
+                                }
+                                hoveredReset = nil
+                            } else {
+                                hoveredNub = nil
+                                hoveredReset = date.flatMap {
+                                    WindowPlot.nearestReset(
+                                        to: $0, in: model.resets,
+                                        span: domain.duration, trackWidth: plot.width)
+                                }
                             }
                         case .ended:
                             hoverDate = nil
                             hoveredReset = nil
+                            hoveredNub = nil
                         }
                     }
             }
         }
-    }
-
-    /// The reset line within grabbing distance of the cursor (~4pt of track),
-    /// measured against the live plot width rather than a fixed constant —
-    /// this chart is sized by its container, not pinned like the popover's.
-    private func nearestReset(to date: Date, plotWidth: CGFloat) -> Date? {
-        guard plotWidth > 0 else { return nil }
-        let tolerance = domain.duration * 4 / Double(plotWidth)
-        return model.resets
-            .min { abs($0.timeIntervalSince(date)) < abs($1.timeIntervalSince(date)) }
-            .flatMap { abs($0.timeIntervalSince(date)) <= tolerance ? $0 : nil }
     }
 
     /// Whole-hour clock ticks for a day span, day boundaries for a week —
@@ -223,7 +209,18 @@ struct AuditWindowChart: View {
     /// plot, the ledger's verdict otherwise. Never reflows.
     @ViewBuilder private var caption: some View {
         HStack(spacing: 4) {
-            if let hoveredReset {
+            if let hoveredNub {
+                // The hovered session's range and length — the popover's
+                // phrasing, and the reason its curtain has words.
+                Text(
+                    "\(UsageFormatting.clockTime(hoveredNub.sessionStart))"
+                    + " – \(UsageFormatting.clockTime(hoveredNub.end)) · "
+                    + (hoveredNub.kind == .exhausted ? "unreachable " : "active ")
+                    + UsageFormatting.duration(
+                        hoveredNub.end.timeIntervalSince(hoveredNub.sessionStart)))
+                    .font(.caption2)
+                    .foregroundStyle(hoveredNub.kind == .exhausted ? .red : .secondary)
+            } else if let hoveredReset {
                 // The window the hovered line closed, named the same way the
                 // meter popover names it.
                 Text(

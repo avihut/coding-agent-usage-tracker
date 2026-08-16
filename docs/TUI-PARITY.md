@@ -39,14 +39,23 @@ Two decisions the USER made at program start (2026-08-16):
 | 1 | v0.73.0 | 1–9, 26–30 (layout truth, color parity, state parity) — **SHIPPED** |
 | 2 | v0.74.0 | 10–15, 21–24 (activity bar chart + picker, models table) — **SHIPPED** |
 | 3 | v0.76.0 | 16–19, 31 (meter-surface keys, forecast note, pace picks) — **SHIPPED** |
-| 4 | v0.77.0 | 20, 25 (both need digest extensions; 25 needs the §10 amendment) |
+| 4 | v0.80.0 | 20, 25 (both need digest extensions; 25 needs the §10 amendment) |
 
 v0.75.0 sits between waves 2 and 3: a user-reported bug (a limit at 100%
 still reading "runs out soon", its crossing never recorded) fixed
 engine-side in PredictionEngine + UsageFormatting.forecastCaption, so
 both faces inherited it. Wave 3 and 4 shifted one version later.
 
-WAVE 4 IS WHAT REMAINS: items 20 + 25 at v0.77.0. Item 25 needs the
+v0.76.2–v0.79.0 sit between waves 3 and 4, all app-side and all
+user-reported on 2026-08-16, taken first at the user's direction: the day
+drill's audit chart had drifted from the meter popover it claims to speak
+for (reset dashes in the system accent, no reset hover, no nub hover, no
+model curves), and nothing remembered a window that sat at 100% until its
+reset. v0.77.0 answers the root cause the user named twice — the two
+charts were separate implementations — by extracting Charts/WindowPlot.
+Wave 4 shifted three versions later.
+
+WAVE 4 IS WHAT REMAINS: items 20 + 25 at v0.80.0. Item 25 needs the
 dated, user-directed docs/SPEC.md §10 amendment written FIRST (D2 is
 already decided — session titles are allowed in the local-only digest).
 

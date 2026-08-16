@@ -386,16 +386,14 @@ struct MeterHistoryView: View {
         }
     }
 
-    /// The reset line within grabbing distance of the cursor (~4pt of
-    /// track). Reset dates are value-stable across renders, so matching
-    /// the stored hover by value is drift-proof.
+    /// Grabbing distance is measured against this chart's pinned width —
+    /// the audit chart passes its live plot width to the same helper.
     private func nearestReset(
         to date: Date, in resets: [Date], start: Date, end: Date
     ) -> Date? {
-        let tolerance = end.timeIntervalSince(start) * 4 / Double(Self.chartWidth)
-        return resets
-            .min { abs($0.timeIntervalSince(date)) < abs($1.timeIntervalSince(date)) }
-            .flatMap { abs($0.timeIntervalSince(date)) <= tolerance ? $0 : nil }
+        WindowPlot.nearestReset(
+            to: date, in: resets, span: end.timeIntervalSince(start),
+            trackWidth: Self.chartWidth)
     }
 
     // MARK: - Chart
@@ -445,39 +443,15 @@ struct MeterHistoryView: View {
             // anything softer vanishes against the dark material. The
             // hovered line goes full primary and its whole ended window
             // lights via the curtains below.
-            ForEach(series.resets, id: \.timeIntervalSinceReferenceDate) { reset in
-                RuleMark(
-                    x: .value("Reset", reset),
-                    yStart: .value("Usage", 0), yEnd: .value("Usage", ceiling))
-                .foregroundStyle(Color.primary.opacity(hoveredReset == reset ? 1 : 0.7))
-                .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [3, 3]))
-            }
+            WindowPlot.resets(series.resets, hovered: hoveredReset, ceiling: ceiling)
             // Reset hover: curtain-dim everything outside the limit window
             // that ended at this line — the undimmed stretch IS the window
             // — with a solid twin marking where that window began. The
             // summary below re-tallies to the same window.
             if let hoveredReset {
-                let curtain = Color(nsColor: .windowBackgroundColor).opacity(0.5)
-                let windowStart = max(start, hoveredReset.addingTimeInterval(-window))
-                RuleMark(
-                    x: .value("Window start", windowStart),
-                    yStart: .value("Usage", 0), yEnd: .value("Usage", ceiling))
-                .foregroundStyle(Color.primary)
-                .lineStyle(StrokeStyle(lineWidth: 1.5))
-                if windowStart > start {
-                    RectangleMark(
-                        xStart: .value("Time", start),
-                        xEnd: .value("Time", windowStart),
-                        yStart: .value("Usage", 0), yEnd: .value("Usage", ceiling))
-                    .foregroundStyle(curtain)
-                }
-                if hoveredReset < end {
-                    RectangleMark(
-                        xStart: .value("Time", hoveredReset),
-                        xEnd: .value("Time", end),
-                        yStart: .value("Usage", 0), yEnd: .value("Usage", ceiling))
-                    .foregroundStyle(curtain)
-                }
+                WindowPlot.resetCurtain(
+                    hoveredReset, window: window,
+                    start: start, end: end, ceiling: ceiling)
             }
             if effectiveSpan == .sliding,
                ceiling > 100 || end.timeIntervalSince(start) > window * 1.01 {
@@ -584,21 +558,7 @@ struct MeterHistoryView: View {
             // highlight. Nubs dim via their own opacity (curtains stop at
             // the plot floor).
             if let hovered {
-                let curtain = Color(nsColor: .windowBackgroundColor).opacity(0.5)
-                if hovered.start > start {
-                    RectangleMark(
-                        xStart: .value("Time", start),
-                        xEnd: .value("Time", hovered.start),
-                        yStart: .value("Usage", 0), yEnd: .value("Usage", ceiling))
-                    .foregroundStyle(curtain)
-                }
-                if hovered.end < end {
-                    RectangleMark(
-                        xStart: .value("Time", hovered.end),
-                        xEnd: .value("Time", end),
-                        yStart: .value("Usage", 0), yEnd: .value("Usage", ceiling))
-                    .foregroundStyle(curtain)
-                }
+                WindowPlot.nubCurtain(hovered, start: start, end: end, ceiling: ceiling)
                 // The session's duration, highlighted in the headroom band
                 // and centered over its nub — the at-a-glance answer while
                 // the readout line below spells out the range.
@@ -930,26 +890,13 @@ struct MeterHistoryView: View {
         return offset >= -clearance * leftReach && offset <= clearance * rightReach
     }
 
-    private struct ActivitySegment: Equatable {
-        enum Kind: Equatable {
-            case active
-            /// The dead stretch past the projected limit crossing.
-            case exhausted
-        }
-
-        let start: Date
-        let end: Date
-        var kind: Kind = .active
-        /// The session's true start when the frame clips its nub at the
-        /// domain's left edge — labels and the session summary honor it;
-        /// drawing keeps `start`.
-        var fullStart: Date? = nil
-
-        var sessionStart: Date { fullStart ?? start }
-    }
+    /// The strip's stretches are `WindowPlot.Nub` — the same type the audit
+    /// chart draws — so the exhausted colouring and the hover curtains have
+    /// one definition between the two charts.
+    private typealias ActivitySegment = WindowPlot.Nub
 
     private func nubColor(_ segment: ActivitySegment) -> Color {
-        segment.kind == .exhausted ? .red : orange
+        WindowPlot.nubColor(segment.kind, accent: orange)
     }
 
     /// The stored hover re-anchored onto freshly built segments. No date
@@ -968,13 +915,10 @@ struct MeterHistoryView: View {
         return segments.first { $0.kind == .active && $0.start <= mid && mid <= $0.end }
     }
 
-    /// The hovered nub at full strength; with any nub hovered, its peers
-    /// recede along with the curtained graph above them. `hovered` is the
-    /// live-resolved nub, an element of the same array being drawn, so
-    /// equality here is exact.
+    /// `hovered` is the live-resolved nub, an element of the same array being
+    /// drawn, so the equality inside `WindowPlot.nubOpacity` is exact.
     private func nubOpacity(_ segment: ActivitySegment, hovered: ActivitySegment?) -> Double {
-        guard let hovered else { return 0.7 }
-        return segment == hovered ? 1 : 0.25
+        WindowPlot.nubOpacity(segment, hovered: hovered)
     }
 
     /// "Wed 09:15 – Wed 14:15 · window 5 hr" while a reset line is
