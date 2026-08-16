@@ -1,0 +1,25 @@
+[package]
+name = "usage-tui"
+# Rides the repo's release train — bumped with AppIdentity/Info.plist.
+version = "0.67.0"
+edition = "2024"
+rust-version = "1.95"
+description = "Terminal dashboard for the coding-agent usage meter — renders the engine's live-state digest, computes nothing"
+publish = false
+
+[dependencies]
+# ratatui re-exports its own crossterm (see src/main.rs) so the backend and
+# event versions can never drift apart.
+ratatui = "0.30.2"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+time = { version = "0.3.55", features = ["serde-well-known", "formatting", "parsing", "macros"] }
+
+# daft's size-tuned release shape. panic = "abort" still runs the panic
+# hook first, so the terminal-restore hook holds.
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+strip = true
+panic = "abort"

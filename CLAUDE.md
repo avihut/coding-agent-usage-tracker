@@ -101,7 +101,28 @@ the README rather than silently deviating.
   READ-ONLY (scanTranscriptsReadOnly — lease holder is the sole cache
   writer, spec §10). Verified live: yield 10-14s, takeover ≤35s, no
   double-poll, meters instant from cache. Keychain: usaged shares the
-  app's signing identity; its first fetch may prompt ONCE.
+  app's signing identity; its first fetch may prompt ONCE. The app-hosted
+  engine ALSO runs the control socket (host trio travels together) — a
+  TUI works identically against either host; app-side socket refuses
+  setProvider/shutdown (registry owns switching; nobody kills an app
+  over a socket).
+- RUST TUI (2026-08-16 v0.67.0, phase T1; tui/ cargo crate, usage-tui):
+  the dependency rule is SCOPED — UsageCore/app/usaged stay zero-dep
+  Swift; the TUI carries exactly ratatui, serde, serde_json, time
+  (crossterm comes re-exported through ratatui so versions can't drift),
+  Cargo.lock committed, rust pinned in mise [tools] (1.95, daft-style
+  minimum_release_age 7d). The TUI is a FACE: reads live-state.json +
+  sends socket commands; no network, no credentials, no writes. Digest
+  mirrors live in tui/src/digest.rs with #![allow(dead_code)] (mirror
+  completeness over usage) and MUST decode the same goldens as
+  LiveStateTests — that pair of suites IS the schema freeze from here on
+  (additive-only for real now). Layout = dynamic shape math
+  (tui/src/layout.rs): strip under 10 rows/40 cols, landscape at
+  cols ≥ 2.1×rows, priority flow header→meters→today→models→heatmap→
+  footer, sections drop WHOLE. time crate: local offset captured once
+  in main() before threads (soundness gate), UTC fallback. Verify
+  renders headlessly: tmux new-session -d -x W -y H + capture-pane
+  (sizes 100×27, 46×30, 72×16, 46×8).
 - PROVIDER SEAM (2026-08-15 v0.25.0, user-directed decoupling): everything
   vendor-specific sits behind `UsageProvider` (Providers/UsageProvider.swift) —
   identity (serviceName/agentName/menuBarGlyph/links/networkDestinations),

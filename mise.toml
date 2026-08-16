@@ -1,10 +1,18 @@
+[settings]
+# Refuse tool versions younger than 7 days (supply-chain cooldown) — the
+# daft repo's convention, adopted with its Rust toolchain wiring.
+minimum_release_age = "7d"
+
+[tools]
+rust = "1.95"
+
 [tasks.build]
 description = "Build all targets"
 run = "swift build"
 
 [tasks.test]
-description = "Run unit tests"
-run = "swift test"
+description = "Run every test: Swift core + Rust TUI"
+run = ["swift test", "cargo test --manifest-path tui/Cargo.toml"]
 
 [tasks.cli]
 description = "Build, sign, and run the usage-cli debug tool"
@@ -66,3 +74,15 @@ run = "swift scripts/axdump.swift"
 [tasks.axpress]
 description = "Press/select an AX element by title/description/value (args: [pid] target)"
 run = "swift scripts/axpress.swift"
+
+[tasks.tui]
+description = "Build and run the terminal dashboard (usage-tui)"
+run = "cargo run --release --manifest-path tui/Cargo.toml"
+
+[tasks.tui-build]
+description = "Build the terminal dashboard"
+run = "cargo build --release --manifest-path tui/Cargo.toml"
+
+[tasks.tui-test]
+description = "Rust TUI tests (digest contract, layout, formatting)"
+run = "cargo test --manifest-path tui/Cargo.toml"

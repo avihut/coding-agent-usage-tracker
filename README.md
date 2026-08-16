@@ -135,6 +135,25 @@ Every lifecycle script in `scripts/` has a matching mise task — `mise tasks`
 lists the full catalog, including the AX verification pair
 (`axdump` / `axpress`).
 
+## The terminal dashboard (usage-tui)
+
+A full-screen TUI face for tmux panes (`tui/`, Rust + ratatui): reads the
+engine's `live-state.json`, computes nothing, and re-plans its layout from
+the pane's shape — portrait stacks the sections, landscape splits into
+columns, and anything under ~10×40 collapses to a one-line strip
+(`✳︎ S 34 · W 59 · F 92`). Keys: `q` quit, `r` ask the engine to refresh
+(over the control socket), `?` help. Works against the app-hosted engine
+or the daemon interchangeably.
+
+```sh
+mise run tui        # build + run in this terminal
+mise run tui-test   # digest contract + layout tests
+```
+
+The digest schema is pinned on both sides of the language boundary: the
+Swift tests and the TUI's serde tests decode the same golden fixtures in
+`Tests/UsageCoreTests/Fixtures/digest/`.
+
 ## The headless engine (optional daemon)
 
 The metering engine can run as a launchd user agent, `usaged` (embedded in

@@ -28,6 +28,11 @@ final class UsageStore {
 
     private var mode: Mode
     @ObservationIgnored private let lease: EngineLease
+    /// The host trio travels together: whoever runs the engine also runs
+    /// the publisher (inside the engine) and this command socket — a TUI
+    /// against the app-hosted engine works identically to one against
+    /// usaged.
+    @ObservationIgnored private var socket: ControlSocket?
     @ObservationIgnored private let bundleID: String
     @ObservationIgnored private let providerValue: any UsageProvider
     @ObservationIgnored private let serviceOverride: UsageService?
@@ -178,10 +183,11 @@ final class UsageStore {
             leaseHeldByOther: EngineLease.isHeld(at: lease.lockURL),
             daemonAlive: daemonAlive)
         if role == .host, lease.acquire() {
-            mode = .hosting(
-                UsageEngine(
-                    provider: provider, service: service, defaults: .standard,
-                    bundleID: bundleID, host: .app))
+            let engine = UsageEngine(
+                provider: provider, service: service, defaults: .standard,
+                bundleID: bundleID, host: .app)
+            mode = .hosting(engine)
+            startSocket(for: engine)
         } else {
             mode = .client(DigestClient(provider: provider, bundleID: bundleID))
             // An explicit Metering pick must reach the daemon; auto
@@ -221,6 +227,8 @@ final class UsageStore {
         switch mode {
         case .hosting(let engine):
             engine.shutdown()
+            socket?.stop()
+            socket = nil
             lease.release()
         case .client(let client):
             client.shutdown()
@@ -231,6 +239,48 @@ final class UsageStore {
             NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver)
         }
         wakeObserver = nil
+    }
+
+    /// The app-hosted engine answers the same socket verbs usaged does,
+    /// minus process-lifecycle ones — a provider switch belongs to the
+    /// registry here, and nobody shuts an app down over a socket.
+    private func startSocket(for engine: UsageEngine) {
+        let socket = ControlSocket(
+            socketURL: EngineHostBroker.socketURL(bundleID: bundleID)
+        ) { [weak engine] command in
+            guard let engine else { return ControlReply(ok: false, message: "engine gone") }
+            switch command {
+            case .status:
+                return ControlReply(
+                    ok: true,
+                    message: "app pid \(ProcessInfo.processInfo.processIdentifier), "
+                        + "provider \(engine.provider.id), v\(AppIdentity.version)")
+            case .refresh:
+                engine.refresh(.manual)
+                return ControlReply(ok: true, message: "refresh requested (gate may coalesce)")
+            case .setInterval(let seconds):
+                engine.setActiveInterval(seconds)
+                return ControlReply(ok: true, message: "interval \(Int(engine.activeInterval))s")
+            case .settingsChanged:
+                engine.thresholdsChanged()
+                return ControlReply(ok: true)
+            case .refreshPricing:
+                engine.refreshPricingNow()
+                return ControlReply(ok: true)
+            case .scanNow:
+                engine.scanActivity(force: true)
+                return ControlReply(ok: true)
+            case .setProvider, .shutdown:
+                return ControlReply(
+                    ok: false, message: "not while the app hosts — use the app's Metering menu")
+            }
+        }
+        do {
+            try socket.start()
+            self.socket = socket
+        } catch {
+            // The pane still renders; only remote commands are lost.
+        }
     }
 
     // MARK: - Host arbitration
@@ -249,9 +299,11 @@ final class UsageStore {
         case .hosting(let engine):
             let markerAge = Self.daemonMarkerAge(bundleID: bundleID)
             guard EngineHostBroker.shouldYield(daemonMarkerAge: markerAge) else { return }
-            // The daemon wins: stop the embedded engine, free the lease,
-            // render the daemon's digest from here on.
+            // The daemon wins: stop the embedded engine, free the lease
+            // and the socket path, render the daemon's digest from here on.
             engine.shutdown()
+            socket?.stop()
+            socket = nil
             lease.release()
             mode = .client(DigestClient(provider: providerValue, bundleID: bundleID))
         case .client(let client):
@@ -266,11 +318,12 @@ final class UsageStore {
             guard lease.acquire() else { return }
             let seed = client.state.snapshot?.fetchedAt
             client.shutdown()
-            mode = .hosting(
-                UsageEngine(
-                    provider: providerValue, service: serviceOverride,
-                    defaults: .standard, bundleID: bundleID, host: .app,
-                    gateSeed: seed))
+            let engine = UsageEngine(
+                provider: providerValue, service: serviceOverride,
+                defaults: .standard, bundleID: bundleID, host: .app,
+                gateSeed: seed)
+            mode = .hosting(engine)
+            startSocket(for: engine)
         }
     }
 
