@@ -61,7 +61,9 @@ struct HeatmapView: View {
         var id: String { rawValue }
     }
 
-    @State private var period: Period = .month
+    /// The chosen span, persisted — reopening the panel (or relaunching the
+    /// app) lands on whatever span was last picked; fresh installs on 7D.
+    @AppStorage("activityPeriod") private var period: Period = .week
     @State private var dimension: Dimension = .tokens
     /// Audit-view toggles, persisted: the day drill-down's ring↔timeline and
     /// the 7D chart's bars↔window presentations.
