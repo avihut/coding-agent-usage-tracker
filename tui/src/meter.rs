@@ -9,9 +9,11 @@
 //! Parity note (`Panel/MeterHistoryView.swift`): the app's Sliding span
 //! reads 56 days of samples and can cross resets. The digest publishes ONE
 //! window per meter — so here Sliding is a trailing sub-range of that
-//! window, and the zoom ladder is capped by it. That cap is why the ladder
-//! grows downward (1h/2h) where the app's starts at 5h, and why the app's
-//! calendar-anchored "this week" frame has no counterpart.
+//! window, and the zoom ladder is bounded at BOTH ends by it: capped by the
+//! window's length, floored by how far apart that window's 120 published
+//! points fall. That is why the ladder grows downward (1h/2h) where the
+//! app's starts at 5h, why a weekly meter's tight rungs disappear, and why
+//! the app's calendar-anchored "this week" frame has no counterpart.
 
 use crate::digest::{LiveMeter, SeriesPoint};
 use time::{Duration, OffsetDateTime};
@@ -69,20 +71,44 @@ fn window_seconds(meter: &LiveMeter) -> i64 {
         .unwrap_or(UNSTATED_WINDOW)
 }
 
-/// The rungs this meter can honor: those inside its published window, plus
-/// the window itself when nothing else fits (a 1h window would otherwise
-/// offer no zoom at all).
+/// Typical seconds between published samples — the median gap, so a reset
+/// cliff's one-second pair can't pass for the sampling rate. None when the
+/// series is too short to have a rhythm at all.
+fn sample_spacing(meter: &LiveMeter) -> Option<i64> {
+    if meter.series.len() < 3 {
+        return None;
+    }
+    let mut gaps: Vec<i64> = meter
+        .series
+        .windows(2)
+        .map(|pair| (pair[1].t - pair[0].t).whole_seconds())
+        .collect();
+    gaps.sort_unstable();
+    Some(gaps[gaps.len() / 2].max(1))
+}
+
+/// The rungs this meter can honor: inside its published window, and wide
+/// enough that its own samples can draw a line there. The digest thins each
+/// series to 120 points over the whole window, so a weekly meter's samples
+/// land ~90 minutes apart — a 1h rung would open on an empty plot and read
+/// as broken rather than as honest degradation. The widest rung always
+/// survives (a window shorter than every rung still offers itself).
 pub fn ladder(meter: &LiveMeter) -> Vec<Frame> {
     let window = window_seconds(meter);
     let rungs: Vec<Frame> = FRAMES
         .into_iter()
         .filter(|frame| frame.seconds <= window)
         .collect();
-    if rungs.is_empty() {
-        vec![Frame { label: "the window", seconds: window }]
-    } else {
-        rungs
-    }
+    let Some(widest) = rungs.last().copied() else {
+        return vec![Frame { label: "the window", seconds: window }];
+    };
+    // Three samples is the fewest that reads as a trend rather than a dot.
+    let floor = sample_spacing(meter).map_or(0, |spacing| spacing * 3);
+    let usable: Vec<Frame> = rungs
+        .into_iter()
+        .filter(|frame| frame.seconds >= floor)
+        .collect();
+    if usable.is_empty() { vec![widest] } else { usable }
 }
 
 /// The rung a meter opens on — the app's own rule (5h windows read at 5h,
@@ -241,14 +267,63 @@ mod tests {
             scoped_model_name: None,
             reset_caption: None,
             forecast: None,
-            series: (0..10)
+            // 06:00–16:00 every 10 minutes: the digest's real density for
+            // a 5h window (~120 points), so the ladder's sample-spacing
+            // floor behaves here as it does on a live meter.
+            series: (0..=60)
                 .map(|step| SeriesPoint {
-                    t: datetime!(2026-08-16 06:00 UTC) + Duration::hours(step),
-                    percent: 10.0 * step as f64,
+                    t: datetime!(2026-08-16 06:00 UTC) + Duration::minutes(10 * step),
+                    percent: step as f64,
                 })
                 .collect(),
             stretches: vec![],
         }
+    }
+
+    #[test]
+    fn the_ladder_drops_rungs_the_samples_cannot_fill() {
+        // A weekly window with the digest's real thinning: 120 points over
+        // 7 days lands them ~90 minutes apart, so the tight rungs would
+        // open on an empty plot. They don't exist.
+        let mut weekly = meter(Some(7.0 * 86400.0), None);
+        weekly.series = (0..120)
+            .map(|step| SeriesPoint {
+                t: datetime!(2026-08-10 00:00 UTC) + Duration::minutes(90 * step),
+                percent: step as f64 / 2.0,
+            })
+            .collect();
+        let rungs: Vec<&str> = ladder(&weekly).iter().map(|f| f.label).collect();
+        assert_eq!(
+            rungs,
+            ["last 5h", "last 12h", "last 24h", "last 2 days", "last 7 days"]
+        );
+        // A meter sampled every couple of minutes keeps the tight end.
+        let mut dense = meter(Some(7.0 * 86400.0), None);
+        dense.series = (0..120)
+            .map(|step| SeriesPoint {
+                t: datetime!(2026-08-10 00:00 UTC) + Duration::minutes(3 * step),
+                percent: step as f64,
+            })
+            .collect();
+        assert_eq!(ladder(&dense).first().unwrap().label, "last 1h");
+        // A reset cliff's one-second pair must not pass for the rhythm —
+        // the median ignores it.
+        let mut cliffed = weekly.clone();
+        cliffed.series.insert(
+            1,
+            SeriesPoint { t: datetime!(2026-08-10 01:30:01 UTC), percent: 0.0 },
+        );
+        assert_eq!(ladder(&cliffed).first().unwrap().label, "last 5h");
+        // Samples so sparse that no rung can hold them still leave one.
+        let mut sparse = meter(Some(7.0 * 86400.0), None);
+        sparse.series = (0..3)
+            .map(|step| SeriesPoint {
+                t: datetime!(2026-08-10 00:00 UTC) + Duration::days(3 * step),
+                percent: step as f64,
+            })
+            .collect();
+        assert_eq!(ladder(&sparse).len(), 1);
+        assert_eq!(ladder(&sparse)[0].label, "last 7 days");
     }
 
     #[test]
@@ -298,15 +373,16 @@ mod tests {
     fn the_visible_slice_is_what_scrub_indexes() {
         let now = datetime!(2026-08-16 12:00 UTC);
         let session = meter(Some(5.0 * 3600.0), Some(datetime!(2026-08-16 14:00 UTC)));
-        // Hourly samples 06:00–15:00. A 2h sliding frame holds 10:00–12:00.
+        // Ten-minute samples 06:00–16:00; a 2h sliding frame holds
+        // 10:00–12:00 inclusive.
         let zoomed = view(&session, Span::Sliding, 1, now);
-        assert_eq!(zoomed.points.len(), 3);
+        assert_eq!(zoomed.points.len(), 13);
         assert_eq!(zoomed.points.first().unwrap().t, datetime!(2026-08-16 10:00 UTC));
         assert_eq!(zoomed.points.last().unwrap().t, now);
         // The window span reaches back further AND forward to the reset.
         let whole = view(&session, Span::Window, 1, now);
-        // 09:00 through 14:00 inclusive, hourly.
-        assert_eq!(whole.points.len(), 6);
+        // 09:00 through 14:00 inclusive.
+        assert_eq!(whole.points.len(), 31);
         assert_eq!(whole.minutes(), 300.0);
         // An out-of-domain instant clamps onto the axis instead of escaping.
         assert_eq!(whole.at(datetime!(2026-08-16 05:00 UTC)), 0.0);

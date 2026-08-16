@@ -170,9 +170,13 @@ the README rather than silently deviating.
   (layout::pick gapped-vs-tight). v0.76.0 (parity wave 3): the meter
   surface's span math lives in tui/src/meter.rs — Span Sliding/Window
   (`s`; Window needs a live future reset, else the key says why), a
-  window-CAPPED zoom ladder (`z`; the digest publishes ONE window per
-  meter, so sliding is a sub-range of it and the ladder grows downward
-  to 1h/2h instead of up past the window), and the unreachable
+  digest-BOUNDED zoom ladder (`z` zooms IN one rung per press, wrapping
+  at the tightest; the digest publishes ONE window per meter, so
+  sliding is a sub-range of it — the ladder is capped by that window
+  and floored at 3× the MEDIAN gap between the meter's own published
+  points, because 120 points thinned over 7 days would leave a 1h rung
+  empty; median, not mean, so one outage can't strip usable rungs),
+  and the unreachable
   region's diagonal hatch pushed as the FIRST dataset so ratatui
   layers it behind the marks (a crossing already past hatches over
   measured time — that IS its meaning). Its `view()` is the one answer

@@ -147,9 +147,11 @@ gives each stack band its own density glyph.
     key says why (the app hides its picker in that case).
 18. [S][✓] Zoom `z` (same unshipped plan line; see MeterHistoryView
     for what zoom means there — the SlidingFrame dropdown).
-    **SHIPPED v0.76.0**: `z` cycles the frame ladder, `z` from the
-    Window span drops to Sliding first, so every press changes the
-    view. Ladder deviation is deliberate — see #33.
+    **SHIPPED v0.76.0**, corrected v0.76.1: `z` zooms IN one rung per
+    press (wrapping back out at the tightest), and from the Window
+    span drops to Sliding first — so every press changes the view and
+    the FIRST press is always the useful one. Ladder deviation is
+    deliberate — see #33.
 19. [S][✓] Hatch/dim the unreachable region beyond the projected
     exhaust crossing (app hatches; TUI has only the red mark —
     forecast.exhaustAt is in the digest). **SHIPPED v0.76.0**: a
@@ -205,15 +207,22 @@ gives each stack band its own density glyph.
 ### Intentionally different (do NOT "fix")
 32. Push/pop animation, pointer cursors, hover popovers — GUI idioms;
     surfaces/instant swaps are the terminal equivalents.
-33. The zoom ladder (v0.76.0). The app's frames are 5h/12h/24h/wk/7d/
-    30d because it holds 56 days of samples; the digest publishes ONE
-    window per meter, so the pane's Sliding span can only ever be a
-    sub-range of that window. The ladder therefore grows DOWNWARD
-    (1h/2h added) and is capped by the meter's own window — a 5h
-    session meter offers 1h/2h/5h and nothing wider, since wider would
-    render emptiness. The calendar-anchored `wk` frame has no
-    counterpart at all: it is anchored to the week, the series to the
-    window, so it could only mislabel a partial slice.
+33. The zoom ladder (v0.76.0/.1). The app's frames are 5h/12h/24h/wk/
+    7d/30d because it holds 56 days of samples; the digest publishes
+    ONE window per meter, so the pane's Sliding span can only ever be
+    a sub-range of that window. The ladder is therefore bounded at
+    BOTH ends by the digest: capped by the meter's window (wider would
+    render emptiness — a 5h session meter stops at 5h) and floored at
+    3× the MEDIAN gap between that meter's own published points
+    (v0.76.1), since 120 points thinned across a 7-day window land far
+    enough apart that a 1h rung would open on an empty plot and read
+    as broken. Median, not mean: one multi-hour outage skews the mean
+    and would strip usable rungs. On this machine the weekly meters
+    (median gap ~34 min) offer 2h upward, the session meter (~3 min)
+    the whole ladder. Hence 1h/2h exist at all, below where the app's
+    ladder starts. The calendar-anchored `wk` frame has no counterpart
+    at all: it is anchored to the week, the series to the window, so
+    it could only mislabel a partial slice.
 
 ## Context a fresh session needs (do not rediscover)
 

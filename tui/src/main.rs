@@ -363,7 +363,16 @@ fn meter_span(app: &mut App, zoom: bool) {
     let next = if zoom {
         match span {
             meter::Span::Window => (meter::Span::Sliding, rung.min(rungs.len() - 1)),
-            meter::Span::Sliding => (span, (rung + 1) % rungs.len()),
+            // Zoom IN: each press tightens the frame, wrapping back out at
+            // the end. Stepping the other way would make the first press on
+            // every meter jump to the tightest rung — the least useful one,
+            // and on a coarsely-sampled weekly meter a near-empty plot.
+            meter::Span::Sliding => (
+                span,
+                rung.min(rungs.len() - 1)
+                    .checked_sub(1)
+                    .unwrap_or(rungs.len() - 1),
+            ),
         }
     } else if span == meter::Span::Sliding && !meter::window_available(meter, now) {
         // No live reset means no window to show — the app hides the
