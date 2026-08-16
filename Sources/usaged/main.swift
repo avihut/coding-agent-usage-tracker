@@ -166,9 +166,15 @@ final class DaemonHost {
         let previous = try? LiveState.decoder().decode(
             LiveState.self,
             from: Data(contentsOf: LiveState.fileURL(bundleID: Usaged.bundleID)))
+        // No AppKit here: the user's accent choice comes from the global
+        // defaults domain (visible in any process's search list), mapped
+        // through the pinned dark-appearance swatch table.
+        let accentChoice = UserDefaults.standard.object(
+            forKey: SystemAccentPalette.defaultsKey) as? Int
         engine = UsageEngine(
             provider: provider, defaults: defaults, bundleID: Usaged.bundleID,
-            host: .daemon, gateSeed: previous?.engine.fetchedAt)
+            host: .daemon, gateSeed: previous?.engine.fetchedAt,
+            systemAccent: SystemAccentPalette.color(appleAccentColor: accentChoice))
     }
 
     private func resolveProvider() -> any UsageProvider {

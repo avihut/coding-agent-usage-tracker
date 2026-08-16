@@ -23,6 +23,16 @@ pub const WARNING: Color = Color::Rgb(255, 159, 10);
 pub const CRITICAL: Color = Color::Rgb(255, 69, 58);
 pub const DIM: Color = Color::Rgb(140, 140, 145);
 pub const FAINT: Color = Color::Rgb(70, 70, 75);
+/// The meter bars' empty track — a quiet solid, the terminal's version of
+/// the app's `.quaternary` capsule (the ░ spray read as dots in many fonts).
+const TRACK: Color = Color::Rgb(48, 48, 52);
+
+/// The color normal-state fills wear: the host Mac's control accent when
+/// the digest carries it (the app's bars are `controlAccentColor`-tinted),
+/// the provider accent from engines that predate the field.
+fn fill_accent(digest: &LiveState) -> Color {
+    rgb(digest.engine.system_accent.unwrap_or(digest.engine.accent))
+}
 
 /// Every colored span routes here: NO_COLOR turns it into a plain style
 /// so risk falls back to the glyph dialect (markers, density ramps).
@@ -201,13 +211,21 @@ pub fn render(frame: &mut Frame, app: &mut App, now: OffsetDateTime) {
     };
     let freshness = app.freshness(now);
     if layout::shape(area) == Shape::Strip {
-        render_strip(frame, area, &digest, freshness);
+        render_strip(frame, area, &digest, freshness, now);
         return;
     }
 
+    // What the sections really hold: the credits line rides in the meters
+    // section, and the heatmap only ever needs its data's week span.
+    let meter_rows = digest.meters.len() + usize::from(digest.engine.spend.is_some());
+    let heat_weeks = data_weeks(
+        &digest.activity.days,
+        now.to_offset(app.local_offset).date(),
+    );
+
     match app.surface.clone() {
         Surface::Dashboard => {
-            let plan = layout::plan(area, digest.meters.len(), digest.models.len().min(4));
+            let plan = layout::plan(area, meter_rows, digest.models.len().min(4), heat_weeks);
             render_dashboard(frame, app, &digest, freshness, &plan, now);
         }
         surface => {
@@ -222,7 +240,7 @@ pub fn render(frame: &mut Frame, app: &mut App, now: OffsetDateTime) {
                     area.width - left_width - 1,
                     area.height,
                 );
-                let plan = layout::plan(left, digest.meters.len(), digest.models.len().min(4));
+                let plan = layout::plan(left, meter_rows, digest.models.len().min(4), heat_weeks);
                 render_dashboard(frame, app, &digest, freshness, &plan, now);
                 render_surface(frame, app, &digest, &surface, right, false, now);
             } else {
@@ -303,16 +321,15 @@ fn render_dashboard(
 ) {
     let accent = rgb(digest.engine.accent);
     if let Some(rect) = plan.header {
-        frame.render_widget(header(digest, freshness, app, now, accent), rect);
+        frame.render_widget(header(digest, freshness, app, now, accent, rect.width), rect);
     }
     if let Some(rect) = plan.meters {
         frame.render_widget(meters(digest, freshness, rect), rect);
-        for (index, _) in digest
-            .meters
-            .iter()
-            .take((rect.height.max(1) - 1) as usize)
-            .enumerate()
-        {
+        // The credits line (when spend rides along) takes the last row and
+        // is not a meter — no hit region for it.
+        let hit_rows = ((rect.height.max(1) - 1) as usize)
+            .saturating_sub(usize::from(digest.engine.spend.is_some()));
+        for (index, _) in digest.meters.iter().take(hit_rows).enumerate() {
             app.hits.add(
                 Rect::new(rect.x, rect.y + 1 + index as u16, rect.width, 1),
                 Hit::Meter(index),
@@ -357,6 +374,7 @@ fn header<'a>(
     app: &'a App,
     now: OffsetDateTime,
     accent: Color,
+    width: u16,
 ) -> Paragraph<'a> {
     let engine = &digest.engine;
     let mut identity = vec![
@@ -373,69 +391,144 @@ fn header<'a>(
         identity.push(Span::styled(format!("  {plan}"), style(DIM)));
     }
 
-    let mut status: Vec<Span> = Vec::new();
-    match freshness {
-        Freshness::Live => {
-            status.push(Span::styled(glyphs().live, style(accent)));
-            if let Some(fetched) = engine.fetched_at {
-                status.push(Span::styled(
-                    format!("updated {}", clock(fetched, app.local_offset)),
-                    style(DIM),
-                ));
+    // The status line is built at full phrasing first; when the pane can't
+    // seat it, the compact register drops the filler words ("updated",
+    // "in") so the cadence facts — idle ×N, the budget gauge — survive
+    // instead of clipping off the edge.
+    let build = |compact: bool| -> Vec<Span<'a>> {
+        let mut status: Vec<Span> = Vec::new();
+        match freshness {
+            Freshness::Live => {
+                status.push(Span::styled(glyphs().live, style(accent)));
+                if let Some(fetched) = engine.fetched_at {
+                    let stamp = clock(fetched, app.local_offset);
+                    status.push(Span::styled(
+                        if compact { stamp } else { format!("updated {stamp}") },
+                        style(DIM),
+                    ));
+                }
+                if let Some(next) = engine.next_poll_at {
+                    let count = countdown(next, now);
+                    status.push(Span::styled(
+                        format!(
+                            "{}{}",
+                            glyphs().sep,
+                            if compact { format!("next {count}") } else { format!("next in {count}") }
+                        ),
+                        style(DIM),
+                    ));
+                }
             }
-            if let Some(next) = engine.next_poll_at {
+            Freshness::Stale => {
+                status.push(Span::styled(glyphs().hollow, style(DIM)));
+                if let Some(fetched) = engine.fetched_at {
+                    let stamp = clock(fetched, app.local_offset);
+                    status.push(Span::styled(
+                        if compact { stamp } else { format!("as of {stamp}") },
+                        style(DIM),
+                    ));
+                }
+                if let Some(error) = &engine.error {
+                    // The typed error, pre-phrased by the engine's
+                    // taxonomy; the hint rides along when there is one
+                    // (the app's error block shows both). Clips at the
+                    // pane edge when even the hint is too much.
+                    let mut copy = error.text.clone();
+                    if let Some(hint) = &error.hint {
+                        copy.push_str(&format!(" — {hint}"));
+                    }
+                    status.push(Span::styled(
+                        format!("{}{copy}", glyphs().sep),
+                        style(WARNING),
+                    ));
+                }
+            }
+            Freshness::Backoff => {
+                status.push(Span::styled(glyphs().backoff, style(WARNING)));
+                if let Some(until) = engine.backoff_until {
+                    let count = countdown(until, now);
+                    status.push(Span::styled(
+                        if compact {
+                            format!("429{}resumes {count}", glyphs().sep)
+                        } else {
+                            format!("rate limited — resumes in {count}")
+                        },
+                        style(WARNING),
+                    ));
+                }
+            }
+            Freshness::EngineOffline => {
                 status.push(Span::styled(
-                    format!("{}next in {}", glyphs().sep, countdown(next, now)),
-                    style(DIM),
+                    "engine offline — start: usage-cli daemon start",
+                    style(CRITICAL),
                 ));
+                return status;
             }
         }
-        Freshness::Stale => {
-            status.push(Span::styled(glyphs().hollow, style(DIM)));
-            if let Some(fetched) = engine.fetched_at {
-                status.push(Span::styled(
-                    format!("as of {}", clock(fetched, app.local_offset)),
-                    style(DIM),
-                ));
-            }
-            if let Some(error) = &engine.error {
-                status.push(Span::styled(
-                    format!("{}{}", glyphs().sep, error.text),
-                    style(WARNING),
-                ));
-            }
-        }
-        Freshness::Backoff => {
-            status.push(Span::styled(glyphs().backoff, style(WARNING)));
-            if let Some(until) = engine.backoff_until {
-                status.push(Span::styled(
-                    format!("rate limited — resumes in {}", countdown(until, now)),
-                    style(WARNING),
-                ));
-            }
-        }
-        Freshness::EngineOffline => {
+        // Cadence transparency, the panel status line's grammar: "idle ×N"
+        // says why "next in" reads slower than the chosen pace.
+        if engine.pace_multiplier > 1 {
             status.push(Span::styled(
-                "engine offline — start: usage-cli daemon start",
-                style(CRITICAL),
+                format!("{}idle ×{}", glyphs().sep, engine.pace_multiplier),
+                style(DIM),
             ));
         }
-    }
-    if !engine.is_local_provider {
-        if let (Some(used), Some(ceiling)) = (engine.api_budget_used, engine.api_budget_ceiling) {
-            status.push(Span::styled(
-                format!("{}API {used}/{ceiling}h", glyphs().sep),
-                style(FAINT),
-            ));
+        if !engine.is_local_provider {
+            if let (Some(used), Some(ceiling)) =
+                (engine.api_budget_used, engine.api_budget_ceiling)
+            {
+                // The refresh button's pressure grammar: orange nearing
+                // the hourly budget, red at or past it, quiet otherwise.
+                let pressure = match engine.api_budget_fraction {
+                    Some(fraction) if fraction >= 1.0 => style(CRITICAL),
+                    Some(fraction) if fraction >= 0.8 => style(WARNING),
+                    _ => style(FAINT),
+                };
+                status.push(Span::styled(
+                    format!("{}API {used}/{ceiling}h", glyphs().sep),
+                    pressure,
+                ));
+            }
         }
-    }
+        status
+    };
+    let full = build(false);
+    let length: usize = full.iter().map(|span| span.content.chars().count()).sum();
+    let status = if length <= width as usize { full } else { build(true) };
     Paragraph::new(vec![Line::from(identity), Line::from(status)])
 }
 
 fn meters<'a>(digest: &'a LiveState, freshness: Freshness, rect: Rect) -> Paragraph<'a> {
     let mut lines = vec![section_title("LIMITS")];
     let grey = freshness == Freshness::Stale || freshness == Freshness::EngineOffline;
-    for meter in digest.meters.iter().take((rect.height.max(1) - 1) as usize) {
+    let rows = (rect.height.max(1) - 1) as usize;
+    let spend = digest.engine.spend.as_ref();
+    let visible =
+        &digest.meters[..digest.meters.len().min(rows.saturating_sub(usize::from(spend.is_some())))];
+
+    // One track width for the whole section, stretched into whatever the
+    // longest caption leaves free — the app's full-width capsule,
+    // terminal-fitted. Bars align because the width is shared.
+    let label_width = 12usize;
+    let suffix_len = |meter: &crate::digest::LiveMeter| -> usize {
+        let mut len = 5; // " 100%"
+        if let Some(caption) = &meter.reset_caption {
+            len += 2 + caption.chars().count();
+        }
+        if let Some(caption) = meter.forecast.as_ref().and_then(|f| f.caption.as_ref()) {
+            len += glyphs().sep.chars().count() + caption.chars().count();
+        }
+        len
+    };
+    let max_suffix = visible.iter().map(suffix_len).max().unwrap_or(5);
+    let bar_width = (rect.width as usize)
+        .saturating_sub(2 + label_width + 1 + max_suffix)
+        .clamp(8, 64);
+
+    for meter in visible {
+        // The app's ladder: grey when stale, the risk blend while the
+        // forecast is severe, otherwise the level — where normal wears the
+        // system accent, exactly like controlAccentColor-tinted capsules.
         let bar_color = if grey {
             DIM
         } else if let Some(risk) = meter.risk {
@@ -444,15 +537,19 @@ fn meters<'a>(digest: &'a LiveState, freshness: Freshness, rect: Rect) -> Paragr
             match meter.level.as_str() {
                 "warning" => WARNING,
                 "critical" => CRITICAL,
-                _ => rgb(digest.engine.accent),
+                _ => fill_accent(digest),
             }
         };
-        let label_width = 12usize;
-        let bar_width = (rect.width as usize)
-            .saturating_sub(label_width + 25)
-            .clamp(8, 30);
         let percent = meter.percent.unwrap_or(0).clamp(0, 100) as usize;
         let filled = (percent * bar_width).div_ceil(100).min(bar_width);
+        // The empty track: a quiet solid where color can carry the
+        // difference; the distinct-glyph dialects keep their own alphabet.
+        let look = crate::state::look();
+        let track = if look.no_color || look.ascii {
+            Span::styled(glyphs().bar_empty.repeat(bar_width - filled), style(FAINT))
+        } else {
+            Span::styled("█".repeat(bar_width - filled), Style::new().fg(TRACK))
+        };
         let mut spans = vec![
             Span::styled(
                 format!("{} ", meter.tag),
@@ -463,11 +560,13 @@ fn meters<'a>(digest: &'a LiveState, freshness: Freshness, rect: Rect) -> Paragr
                 Style::new(),
             ),
             Span::styled(glyphs().bar_fill.repeat(filled), style(bar_color)),
-            Span::styled(glyphs().bar_empty.repeat(bar_width - filled), style(FAINT)),
+            track,
             match meter.percent {
+                // Neutral bold, the app's big figure — state color stays
+                // on the bar and the runs-out caption.
                 Some(p) => Span::styled(
                     format!(" {p:>3}%"),
-                    style(bar_color).add_modifier(Modifier::BOLD),
+                    Style::new().add_modifier(Modifier::BOLD),
                 ),
                 None => Span::styled("   —".to_owned(), style(DIM)),
             },
@@ -485,7 +584,33 @@ fn meters<'a>(digest: &'a LiveState, freshness: Freshness, rect: Rect) -> Paragr
         }
         lines.push(Line::from(spans));
     }
+    if let Some(spend) = spend {
+        if lines.len() <= rows {
+            lines.push(Line::from(vec![
+                Span::styled(format!("{:<15}", "credits"), style(DIM)),
+                Span::styled(spend_text(spend), Style::new()),
+            ]));
+        }
+    }
     Paragraph::new(lines)
+}
+
+/// SpendLine.formatted, ported: "$0.00 of $50.00" — minor units scaled by
+/// the currency's exponent, "$" only for USD.
+fn spend_text(spend: &crate::digest::SpendStatus) -> String {
+    let amount = |minor: i64| -> String {
+        let symbol = if spend.currency == "USD" {
+            "$".to_owned()
+        } else {
+            format!("{} ", spend.currency)
+        };
+        let scaled = minor as f64 / 10f64.powi(spend.exponent);
+        format!("{symbol}{scaled:.precision$}", precision = spend.exponent.max(0) as usize)
+    };
+    match spend.limit_minor {
+        Some(limit) => format!("{} of {}", amount(spend.used_minor), amount(limit)),
+        None => amount(spend.used_minor),
+    }
 }
 
 fn today<'a>(digest: &'a LiveState, accent: Color, rect: Rect) -> Paragraph<'a> {
@@ -505,7 +630,7 @@ fn today<'a>(digest: &'a LiveState, accent: Color, rect: Rect) -> Paragraph<'a> 
     }
     let max = buckets.iter().copied().max().unwrap_or(0).max(1);
     let spark_glyphs = glyphs().spark;
-    let cell_width = ((rect.width as usize) / 24).clamp(1, 3);
+    let cell_width = ((rect.width as usize) / 24).clamp(1, 6);
     let mut spark: Vec<Span> = Vec::with_capacity(24);
     for tokens in buckets {
         let span = if tokens == 0 {
@@ -579,6 +704,22 @@ struct HeatGrid {
     has_newer: bool,
 }
 
+/// How many Monday-aligned weeks the day data actually spans, today's week
+/// included — the ceiling on useful heatmap rows/columns. Empty data reads
+/// as one week (today's own).
+fn data_weeks(days: &[DayRollup], today: Date) -> u16 {
+    let monday =
+        |d: Date| d - time::Duration::days(i64::from(d.weekday().number_days_from_monday()));
+    let Some(oldest) = days
+        .first()
+        .and_then(|day| Date::parse(&day.day_key, surfaces::DAY_KEY).ok())
+    else {
+        return 1;
+    };
+    let span = monday(today) - monday(oldest);
+    (span.whole_weeks().max(0) as u16) + 1
+}
+
 fn heat_grid(days: &[DayRollup], weeks_visible: usize, page: usize, today: Date) -> HeatGrid {
     // Anchor on today's week (Monday start), step whole windows back.
     let monday = today - time::Duration::days(i64::from(today.weekday().number_days_from_monday()));
@@ -644,12 +785,18 @@ fn render_heatmap(
     let landscape = rect.width > rect.height * 4;
 
     // Rows: title, grid, readout. Portrait grids weeks-as-rows; landscape
-    // weeks-as-columns (7 fixed rows).
+    // weeks-as-columns (7 fixed rows). Both stop at the data's real week
+    // span — the window never manufactures empty dot-weeks beyond it, and
+    // the paging stride equals what is actually painted (portrait's grid
+    // budget loses one row to the weekday-letter line).
+    let span_cap = data_weeks(days, today) as usize;
     let grid_height = rect.height.saturating_sub(2) as usize;
     let weeks_visible = if landscape {
-        ((rect.width as usize).saturating_sub(3) / 2).clamp(4, 60)
+        ((rect.width as usize).saturating_sub(3) / 2)
+            .clamp(4, 60)
+            .min(span_cap.max(4))
     } else {
-        grid_height.max(1)
+        grid_height.saturating_sub(1).clamp(1, span_cap.max(1))
     };
     let grid = heat_grid(days, weeks_visible, app.heat_page, today);
 
@@ -876,7 +1023,13 @@ fn footer<'a>(
 }
 
 /// Below the floor: one line that still says everything (design §3).
-fn render_strip(frame: &mut Frame, area: Rect, digest: &LiveState, freshness: Freshness) {
+fn render_strip(
+    frame: &mut Frame,
+    area: Rect,
+    digest: &LiveState,
+    freshness: Freshness,
+    now: OffsetDateTime,
+) {
     let accent = rgb(digest.engine.accent);
     let grey = freshness != Freshness::Live && freshness != Freshness::Backoff;
     let mut spans = vec![Span::styled(
@@ -915,6 +1068,15 @@ fn render_strip(frame: &mut Frame, area: Rect, digest: &LiveState, freshness: Fr
             "  offline".to_owned(),
             style(CRITICAL),
         ));
+    } else if freshness == Freshness::Backoff {
+        // The 429 marker with its ticking retry countdown — the strip's
+        // only word on it, so it earns its columns.
+        if let Some(until) = digest.engine.backoff_until {
+            spans.push(Span::styled(
+                format!("  {}{}", glyphs().backoff, countdown(until, now)),
+                style(WARNING),
+            ));
+        }
     } else if grey {
         spans.push(Span::styled("  stale".to_owned(), style(DIM)));
     }
@@ -985,6 +1147,24 @@ mod tests {
         assert_eq!(compact(1_200_000), "1.2M");
         assert_eq!(compact(3_000_000_000), "3B");
         assert_eq!(compact(150_000), "150K");
+    }
+
+    #[test]
+    fn data_weeks_spans_monday_to_monday() {
+        let day = |key: &str| DayRollup {
+            day_key: key.into(),
+            tokens: 1,
+            prompts: 0,
+            cost: None,
+        };
+        // 2026-08-16 is a Sunday (week of Mon 08-10). One same-week day.
+        assert_eq!(data_weeks(&[day("2026-08-12")], date!(2026 - 08 - 16)), 1);
+        // A Sunday one week back sits in the previous Monday week.
+        assert_eq!(data_weeks(&[day("2026-08-09")], date!(2026 - 08 - 16)), 2);
+        // Mon 06-01 → Mon 08-10 is ten whole weeks, both endpoints counted.
+        assert_eq!(data_weeks(&[day("2026-06-01")], date!(2026 - 08 - 16)), 11);
+        // No data: today's own week.
+        assert_eq!(data_weeks(&[], date!(2026 - 08 - 16)), 1);
     }
 
     #[test]

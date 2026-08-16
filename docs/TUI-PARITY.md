@@ -1,6 +1,6 @@
 # TUI ↔ menu bar parity program
 
-Status: **QUEUED** (user-approved 2026-08-16, executes as v0.73.0+).
+Status: **WAVE 1 SHIPPED** (v0.73.0, 2026-08-16) — waves 2–4 queued.
 This file is the source of truth for the program AND the context handoff
 for a fresh session: everything needed to execute lives here. Read it
 top to bottom before touching code.
@@ -20,21 +20,22 @@ the daemon self-upgrades, verify with
 "Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>" → annotated
 tag → `git push && git push --tags` → update auto-memory.
 
-Two decisions the USER must make before their items build (ask at
-program start, then proceed):
+Two decisions the USER made at program start (2026-08-16):
 
-- **D1 — system accent (item 8): recommended YES**, adopt.
-- **D2 — sessions in the digest (item 25)**: spec §10 currently FORBIDS
-  session titles inside `live-state.json`. Either (a) user-directed §10
-  re-amendment allowing titles in the local-only digest, or (b) ship
-  the shortlist with `project · branch` instead of titles. Do not build
-  25 before this ruling.
+- **D1 — system accent (item 8): DECIDED YES** — adopted, shipped in
+  v0.73.0 (`EngineStatus.systemAccent`, app converts live
+  `controlAccentColor` in dark appearance; usaged maps the
+  `AppleAccentColor` global via `SystemAccentPalette`'s pinned table).
+- **D2 — sessions in the digest (item 25): DECIDED (a)** — user-directed
+  §10 re-amendment allowing session titles in the local-only digest.
+  The amendment itself lands at wave-4 start, dated, BEFORE item 25
+  builds (docs/SPEC.md §10).
 
 ### Wave → version map
 
 | Wave | Version | Items |
 |---|---|---|
-| 1 | v0.73.0 | 1–9, 26–30 (layout truth, color parity, state parity) |
+| 1 | v0.73.0 | 1–9, 26–30 (layout truth, color parity, state parity) — **SHIPPED** |
 | 2 | v0.74.0 | 10–15, 21–24 (activity bar chart + picker, models table) — user-priority items 11 and 15 |
 | 3 | v0.75.0 | 16–19, 31 (meter-surface keys, forecast note, pace picks) |
 | 4 | v0.76.0 | 20, 25 (both need digest extensions; 25 needs D2) |

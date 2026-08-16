@@ -139,7 +139,12 @@
     "planSubscriptionType" : "max",
     "providerID" : "claude",
     "serviceName" : "Claude",
-    "stale" : false
+    "stale" : false,
+    "systemAccent" : {
+      "blue" : 1,
+      "green" : 0.478,
+      "red" : 0
+    }
   },
   "menuBar" : [
     {

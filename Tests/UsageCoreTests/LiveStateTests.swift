@@ -115,6 +115,7 @@ struct LiveStateTests {
             nextPollAt: date("2026-08-16T12:03:00Z"),
             backoffUntil: nil,
             apiBudget: (used: 7, ceiling: 20, fraction: 0.35),
+            systemAccent: SystemAccentPalette.color(appleAccentColor: 4),
             now: now,
             calendar: utc,
             locale: posix)
@@ -138,6 +139,7 @@ struct LiveStateTests {
         #expect(state.engine.gateFloorSeconds == TriggerGate.floor)
         #expect(state.engine.planLabel != nil)
         #expect(state.engine.planSubscriptionType == "max")
+        #expect(state.engine.systemAccent == RGBColor(red: 0, green: 0.478, blue: 1))
     }
 
     @Test("meters speak the menu bar's tag vocabulary and the ramp's colors")

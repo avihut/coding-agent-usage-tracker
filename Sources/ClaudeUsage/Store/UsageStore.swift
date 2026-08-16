@@ -185,7 +185,8 @@ final class UsageStore {
         if role == .host, lease.acquire() {
             let engine = UsageEngine(
                 provider: provider, service: service, defaults: .standard,
-                bundleID: bundleID, host: .app)
+                bundleID: bundleID, host: .app,
+                systemAccent: Self.systemAccent())
             mode = .hosting(engine)
             startSocket(for: engine)
         } else {
@@ -302,6 +303,21 @@ final class UsageStore {
         }
     }
 
+    /// The Mac's control accent for the digest, resolved in the dark
+    /// appearance so the app publishes the same sRGB the daemon's pinned
+    /// `SystemAccentPalette` table would — terminal grounds are dark, and
+    /// RiskRamp pins its endpoints in the same appearance.
+    private static func systemAccent() -> UsageCore.RGBColor? {
+        var accent: UsageCore.RGBColor?
+        NSAppearance(named: .darkAqua)?.performAsCurrentDrawingAppearance {
+            guard let color = NSColor.controlAccentColor.usingColorSpace(.sRGB) else { return }
+            accent = UsageCore.RGBColor(
+                red: color.redComponent, green: color.greenComponent,
+                blue: color.blueComponent)
+        }
+        return accent
+    }
+
     // MARK: - Host arbitration
 
     private static func daemonMarkerAge(bundleID: String) -> TimeInterval? {
@@ -340,7 +356,7 @@ final class UsageStore {
             let engine = UsageEngine(
                 provider: providerValue, service: serviceOverride,
                 defaults: .standard, bundleID: bundleID, host: .app,
-                gateSeed: seed)
+                gateSeed: seed, systemAccent: Self.systemAccent())
             mode = .hosting(engine)
             startSocket(for: engine)
         }

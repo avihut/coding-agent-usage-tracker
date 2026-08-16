@@ -64,6 +64,11 @@ public final class UsageEngine {
     /// sharing with the app).
     private let defaults: UserDefaults
     private let hostKind: Host
+    /// The host Mac's control accent, injected by the host process (the app
+    /// converts the live NSColor; usaged maps the AppleAccentColor global
+    /// through `SystemAccentPalette`) — published so terminal clients tint
+    /// normal-state fills like the app's own controls. Nil = provider accent.
+    private let systemAccent: RGBColor?
     /// Publishes live-state.json after every landing point — consumer
     /// interfaces (the TUI, a client-mode app) render from that file.
     private let publisher: StatePublisher
@@ -108,7 +113,8 @@ public final class UsageEngine {
         defaults: UserDefaults = .standard,
         bundleID: String? = nil,
         host: Host = .app,
-        gateSeed: Date? = nil
+        gateSeed: Date? = nil,
+        systemAccent: RGBColor? = nil
     ) {
         let bundleID = bundleID ?? Bundle.main.bundleIdentifier ?? "com.avihu.ClaudeUsage"
         let support = StorageScope.supportDirectory(bundleID: bundleID, providerID: provider.id)
@@ -116,6 +122,7 @@ public final class UsageEngine {
         self.provider = provider
         self.defaults = defaults
         self.hostKind = host
+        self.systemAccent = systemAccent
         // A host taking over from a dead one seeds the gate with the old
         // host's last fetch (the digest's stamp) — a handover must never
         // double-poll inside the floor.
@@ -265,6 +272,7 @@ public final class UsageEngine {
             nextPollAt: nextRefreshAt,
             backoffUntil: cadence.backoffUntil,
             apiBudget: isLocalProvider ? nil : apiBudget(now: now),
+            systemAccent: systemAccent,
             now: now)
         publisher.publish(digest)
     }

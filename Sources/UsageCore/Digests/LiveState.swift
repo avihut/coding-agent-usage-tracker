@@ -79,6 +79,11 @@ public struct EngineStatus: Codable, Sendable, Equatable {
     public let agentName: String
     public let glyph: String
     public let accent: RGBColor
+    /// The host Mac's control accent (dark-appearance sRGB), so terminal
+    /// clients can tint normal-state fills the way the app's own controls
+    /// are tinted. Nil from engines that predate the field — readers fall
+    /// back to the provider accent.
+    public let systemAccent: RGBColor?
     public let planLabel: String?
     /// The label's raw credential facts, so a client-mode app can rebuild
     /// PlanInfo verbatim. Same privacy standing as the label itself.
@@ -112,7 +117,8 @@ public struct EngineStatus: Codable, Sendable, Equatable {
 
     public init(
         providerID: String, serviceName: String, agentName: String, glyph: String,
-        accent: RGBColor, planLabel: String?, planSubscriptionType: String?,
+        accent: RGBColor, systemAccent: RGBColor? = nil, planLabel: String?,
+        planSubscriptionType: String?,
         planRateLimitTier: String?, appVersion: String, pid: Int,
         host: String, generatedAt: Date, fetchedAt: Date?, nextPollAt: Date?,
         backoffUntil: Date?, stale: Bool, isLocalProvider: Bool,
@@ -125,6 +131,7 @@ public struct EngineStatus: Codable, Sendable, Equatable {
         self.agentName = agentName
         self.glyph = glyph
         self.accent = accent
+        self.systemAccent = systemAccent
         self.planLabel = planLabel
         self.planSubscriptionType = planSubscriptionType
         self.planRateLimitTier = planRateLimitTier
@@ -460,6 +467,7 @@ public enum LiveStateBuilder {
         nextPollAt: Date?,
         backoffUntil: Date?,
         apiBudget: (used: Int, ceiling: Int, fraction: Double)?,
+        systemAccent: RGBColor? = nil,
         now: Date,
         calendar: Calendar = .current,
         locale: Locale = .current
@@ -495,6 +503,7 @@ public enum LiveStateBuilder {
             agentName: provider.agentName,
             glyph: provider.menuBarGlyph,
             accent: accent,
+            systemAccent: systemAccent,
             planLabel: snapshot?.plan?.displayLabel,
             planSubscriptionType: snapshot?.plan?.subscriptionType,
             planRateLimitTier: snapshot?.plan?.rateLimitTier,

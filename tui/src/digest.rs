@@ -37,6 +37,10 @@ pub struct EngineStatus {
     pub agent_name: String,
     pub glyph: String,
     pub accent: Rgb,
+    /// The host Mac's control accent (dark-appearance sRGB); absent from
+    /// engines that predate the field — fall back to the provider accent.
+    #[serde(default)]
+    pub system_accent: Option<Rgb>,
     pub plan_label: Option<String>,
     pub app_version: String,
     pub pid: i64,
@@ -58,6 +62,19 @@ pub struct EngineStatus {
     pub api_budget_ceiling: Option<i64>,
     pub api_budget_fraction: Option<f64>,
     pub error: Option<ErrorStatus>,
+    /// The provider's extra-usage credits line, when one was sent.
+    #[serde(default)]
+    pub spend: Option<SpendStatus>,
+}
+
+/// Mirror of SpendStatus — minor units + currency; formatting is ours.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpendStatus {
+    pub used_minor: i64,
+    pub limit_minor: Option<i64>,
+    pub currency: String,
+    pub exponent: i32,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -234,6 +251,8 @@ mod tests {
         assert_eq!(state.engine.host, "app");
         assert_eq!(state.meters.len(), 2);
         assert_eq!(state.menu_bar.len(), 3);
+        let accent = state.engine.system_accent.expect("golden carries systemAccent");
+        assert!((accent.blue - 1.0).abs() < 1e-9);
     }
 
     #[test]
