@@ -135,9 +135,16 @@ public enum PredictionEngine {
         // unmeasurable (a flat tail has no slope), which used to erase the
         // prediction entirely and with it any word about being spent.
         if percent >= 100 {
+            // Scope the search to THIS window: a reset nothing was awake
+            // to witness leaves no drop in the history, and an unscoped
+            // search would then recall a previous window's crossing —
+            // a stale timestamp in place of a sliding one.
+            let windowStart = meter.resetsAt.flatMap { reset in
+                meter.limitWindow.map { reset.addingTimeInterval(-$0) }
+            }
             return spent(
                 resetsAt: meter.resetsAt,
-                at: spentAt(samples: samples, label: meter.label),
+                at: spentAt(samples: samples, label: meter.label, since: windowStart),
                 now: now)
         }
         guard let rate = ratePerHour(
@@ -156,8 +163,15 @@ public enum PredictionEngine {
     /// refresh is what kept an exhausted meter saying "runs out soon" and
     /// left the moment it ran out unrecorded. Nil when no sample witnessed
     /// the crossing (the app wasn't watching).
-    public static func spentAt(samples: [UsageSample], label: String) -> Date? {
+    ///
+    /// `since` is the current window's start where the meter knows it —
+    /// the only reliable boundary, since an unwitnessed reset leaves no
+    /// drop for the tail seam to find.
+    public static func spentAt(
+        samples: [UsageSample], label: String, since: Date? = nil
+    ) -> Date? {
         let points = samples
+            .filter { sample in since.map { sample.t >= $0 } ?? true }
             .compactMap { sample in sample.percents[label].map { (sample.t, $0) } }
             .sorted { $0.0 < $1.0 }
         guard !points.isEmpty else { return nil }

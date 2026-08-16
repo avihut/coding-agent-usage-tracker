@@ -349,6 +349,23 @@ struct PredictionEngineTests {
             PredictionEngine.predict(meter: meter, samples: [], now: now))
         #expect(unwitnessed.verdict == .red)
         #expect(unwitnessed.exhaustsAt == nil)
+
+        // An unwitnessed reset leaves no drop in the history, so the tail
+        // seam alone would reach back into the PREVIOUS window and recall
+        // its crossing. The window's own start is the boundary that holds.
+        let staleMeter = Meter(
+            id: "weekly_scoped", label: "Weekly · Fable", percent: 100,
+            resetsAt: now.addingTimeInterval(3600), level: .critical, rank: 2,
+            limitWindow: 6 * 3600)
+        let acrossWindows = [
+            sample(600, 100, label: "Weekly · Fable", now: now), // last window
+            sample(120, 100, label: "Weekly · Fable", now: now), // this one
+        ]
+        let scoped = try! #require(
+            PredictionEngine.predict(meter: staleMeter, samples: acrossWindows, now: now))
+        #expect(
+            abs(scoped.exhaustsAt!.timeIntervalSince(now.addingTimeInterval(-120 * 60))) < 1,
+            "the crossing must come from the current window, not the last one")
     }
 
     @Test("spent limits speak in the past tense")

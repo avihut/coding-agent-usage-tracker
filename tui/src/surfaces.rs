@@ -384,7 +384,7 @@ pub fn render_day(
         for model in models.iter().take(6) {
             lines.push(crate::ui::model_row(model, name_width, wide, false));
         }
-        lines.push(crate::ui::cost_rollup(&models));
+        lines.push(crate::ui::cost_rollup(&models, 6));
     } else if day.is_some() {
         lines.push(Line::from(Span::styled(
             "per-model detail is kept ~35 days — totals only",

@@ -777,7 +777,7 @@ fn models<'a>(app: &App, data: &'a Dash, seats: usize, rect: Rect) -> Paragraph<
             .is_some_and(|filter| filter.id != model.id);
         lines.push(model_row(model, name_width, wide, dim));
     }
-    lines.push(cost_rollup(&data.models));
+    lines.push(cost_rollup(&data.models, seats));
     Paragraph::new(lines)
 }
 
@@ -871,9 +871,11 @@ fn models_title(app: &App, data: &Dash, name_width: usize, wide: bool, width: u1
     ])
 }
 
-/// "≈ $1,308 at API list prices" — the grid's headline, and the honest
-/// tail when some models have no rates at all.
-pub fn cost_rollup(rows: &[ModelTotal]) -> Line<'static> {
+/// "≈ $1,308 at API list prices" — the grid's headline over EVERY model
+/// in scope, the honest tail when some have no rates at all, and the
+/// count of any the section had no room to seat (a cap nobody is told
+/// about reads as "this is all of it").
+pub fn cost_rollup(rows: &[ModelTotal], shown: usize) -> Line<'static> {
     let priced: Vec<f64> = rows.iter().filter_map(|row| row.cost).collect();
     let unpriced = rows.len() - priced.len();
     let total: f64 = priced.iter().sum();
@@ -884,6 +886,9 @@ pub fn cost_rollup(rows: &[ModelTotal]) -> Line<'static> {
     };
     if unpriced > 0 && !priced.is_empty() {
         text.push_str(&format!("{}{unpriced} unpriced", glyphs().sep));
+    }
+    if rows.len() > shown {
+        text.push_str(&format!("{}+{} more", glyphs().sep, rows.len() - shown));
     }
     Line::from(Span::styled(text, style(FAINT)))
 }
@@ -1058,7 +1063,16 @@ fn activity_title(
 /// The line under every activity form: the hovered day's facts, else the
 /// focused model's scoped totals, else the period summary — the app's
 /// footerStats, one register down.
-fn activity_readout(app: &App, digest: &LiveState, data: &Dash, filter: Option<&ModelTotal>) -> String {
+/// `window` is the span actually drawn, which is the period's own span
+/// except in the paged all-time grid — there the pane shows the weeks
+/// that fit, and the line must describe those, not the whole history.
+fn activity_readout(
+    app: &App,
+    digest: &LiveState,
+    data: &Dash,
+    filter: Option<&ModelTotal>,
+    window: (&str, &str),
+) -> String {
     if let Some(Hit::HeatDay(key)) = &app.hover_hit {
         if let Some(day) = digest
             .activity
@@ -1081,12 +1095,13 @@ fn activity_readout(app: &App, digest: &LiveState, data: &Dash, filter: Option<&
         Dimension::Tokens => format!("{} tokens", compact(value as i64)),
         Dimension::Cost => format!("≈ {}", money(value)),
     };
+    let (start, end) = window;
     if let Some(model) = filter {
         let days = digest
             .activity
             .model_days
             .iter()
-            .filter(|day| day.day_key >= data.start && day.day_key <= data.end)
+            .filter(|day| day.day_key.as_str() >= start && day.day_key.as_str() <= end)
             .filter(|day| day.models.iter().any(|m| m.id == model.id))
             .count();
         return format!(
@@ -1097,13 +1112,9 @@ fn activity_readout(app: &App, digest: &LiveState, data: &Dash, filter: Option<&
             glyphs().sep
         );
     }
-    let total = activity::total_value(&digest.activity.days, &data.start, &data.end, app.dimension);
-    let active = activity::active_days(&digest.activity.days, &data.start, &data.end, app.dimension);
-    format!(
-        "{}{}{active} active days",
-        measure(total),
-        glyphs().sep
-    )
+    let total = activity::total_value(&digest.activity.days, start, end, app.dimension);
+    let active = activity::active_days(&digest.activity.days, start, end);
+    format!("{}{}{active} active days", measure(total), glyphs().sep)
 }
 
 /// The 7D form: one stacked bar per day in the models' ledger colors, its
@@ -1338,7 +1349,7 @@ fn render_bars(frame: &mut Frame, app: &mut App, digest: &LiveState, data: &Dash
 
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
-            activity_readout(app, digest, data, filter),
+            activity_readout(app, digest, data, filter, (&data.start, &data.end)),
             style(FAINT),
         ))),
         Rect::new(rect.x, rect.y + rect.height - 1, rect.width, 1),
@@ -1544,9 +1555,16 @@ fn render_heatmap(frame: &mut Frame, app: &mut App, digest: &LiveState, data: &D
         }
     }
 
+    // The grid's own bounds: for a paged all-time view these are the weeks
+    // on screen, not the whole history the period nominally covers.
+    let drawn: Vec<Date> = grid.weeks.iter().flatten().flatten().copied().collect();
+    let window = match (drawn.iter().min(), drawn.iter().max()) {
+        (Some(first), Some(last)) => (activity::day_key(*first), activity::day_key(*last)),
+        _ => (data.start.clone(), data.end.clone()),
+    };
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
-            activity_readout(app, digest, data, filter),
+            activity_readout(app, digest, data, filter, (&window.0, &window.1)),
             style(FAINT),
         ))),
         Rect::new(rect.x, rect.y + rect.height - 1, rect.width, 1),

@@ -124,11 +124,14 @@ pub fn model_horizon_truncates(activity: &ActivityRollup, start: &str) -> bool {
         .is_some_and(|day| day.day_key.as_str() > start)
 }
 
-/// Days in scope with any recorded activity — the app's "N active days".
-pub fn active_days(days: &[DayRollup], start: &str, end: &str, dimension: Dimension) -> usize {
+/// Days in scope with any recorded activity — the app's "N active days",
+/// which counts a day the agent worked whether or not tokens survived to
+/// prove it (swept transcripts leave prompt counts behind) and does not
+/// change with the measure being charted.
+pub fn active_days(days: &[DayRollup], start: &str, end: &str) -> usize {
     days.iter()
         .filter(|day| day.day_key.as_str() >= start && day.day_key.as_str() <= end)
-        .filter(|day| day_value(day, dimension) > 0.0)
+        .filter(|day| day.tokens > 0 || day.prompts > 0)
         .count()
 }
 
@@ -279,20 +282,26 @@ mod tests {
             total_value(&days, "2026-08-10", "2026-08-16", Dimension::Tokens),
             300.0
         );
-        assert_eq!(
-            active_days(&days, "2026-08-10", "2026-08-16", Dimension::Tokens),
-            2
-        );
-        // In cost mode an unpriced day carries no magnitude — and isn't
-        // counted active, matching the app's cost-indexed bars.
+        assert_eq!(active_days(&days, "2026-08-10", "2026-08-16"), 2);
+        // In cost mode an unpriced day carries no magnitude...
         assert_eq!(
             total_value(&days, "2026-08-10", "2026-08-16", Dimension::Cost),
             1.0
         );
-        assert_eq!(
-            active_days(&days, "2026-08-10", "2026-08-16", Dimension::Cost),
-            1
-        );
+        // ...but the day was still worked: "active days" counts activity,
+        // not the measure currently charted, as the app's does.
+        assert_eq!(active_days(&days, "2026-08-10", "2026-08-16"), 2);
+        // A day known only from prompt history (transcripts already swept)
+        // is active too — its magnitude is unknown, not zero.
+        let swept = [rollup("2026-08-13", 0, None)];
+        assert_eq!(active_days(&swept, "2026-08-10", "2026-08-16"), 0);
+        let prompted = [DayRollup {
+            day_key: "2026-08-13".into(),
+            tokens: 0,
+            prompts: 4,
+            cost: None,
+        }];
+        assert_eq!(active_days(&prompted, "2026-08-10", "2026-08-16"), 1);
         // Out-of-span days never leak in.
         assert_eq!(
             total_value(&days, "2026-08-11", "2026-08-11", Dimension::Tokens),
