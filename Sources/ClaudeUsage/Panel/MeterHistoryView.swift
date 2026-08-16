@@ -420,10 +420,6 @@ struct MeterHistoryView: View {
         let nowLabelShown = hovered == nil
             && !nowEclipsed(by: focusedCurve, now: now, start: start, end: end)
         return Chart {
-            // Ground first: the stretches this frame already spent out. A
-            // closed window that ran out is history the chart owes the user,
-            // the same red the projected dead zone uses.
-            WindowPlot.exhaustedRegions(spent, ceiling: ceiling)
             // Activity strip, iStat-style: a band under the plot floor —
             // orange where transcripts logged tokens, a faint track where
             // they didn't. Future (right of now) stays empty.
@@ -729,28 +725,10 @@ struct MeterHistoryView: View {
         // time. Drawn behind the marks so curves stay crisp over it.
         .chartBackground { proxy in
             GeometryReader { geo in
-                if let exhaust = exhaustDate,
-                   let plotFrame = proxy.plotFrame,
-                   let xStart = proxy.position(forX: exhaust),
-                   let yTop = proxy.position(forY: 100),
-                   let yBottom = proxy.position(forY: 0) {
-                    let plot = geo[plotFrame]
-                    let region = CGRect(
-                        x: plot.minX + xStart, y: plot.minY + yTop,
-                        width: max(0, plot.width - xStart), height: yBottom - yTop)
-                    Canvas { context, _ in
-                        context.clip(to: Path(region))
-                        context.fill(Path(region), with: .color(.red.opacity(0.05)))
-                        var x = region.minX - region.height
-                        while x < region.maxX {
-                            var stripe = Path()
-                            stripe.move(to: CGPoint(x: x, y: region.maxY))
-                            stripe.addLine(to: CGPoint(x: x + region.height, y: region.minY))
-                            context.stroke(stripe, with: .color(.red.opacity(0.13)), lineWidth: 1)
-                            x += 6
-                        }
-                    }
-                }
+                // The forecast's dead zone and the windows that already ran
+                // out hatch identically — one list, one painter.
+                WindowPlot.unusableHatching(
+                    unusableSpans(spent: spent), proxy: proxy, geometry: geo)
             }
         }
         .chartOverlay { proxy in
@@ -979,6 +957,16 @@ struct MeterHistoryView: View {
         return ExhaustedStretches.build(
             resets: series.resets, window: window, meterLabel: meter.label,
             samples: samples, domain: DateInterval(start: start, end: end))
+    }
+
+    /// Every span in this frame nothing could land in: the windows that
+    /// already ran out, plus the live window's dead zone from the projected
+    /// crossing to the frame's end. One list so the hatching can't drift
+    /// between a remembered exhaustion and a forecast one.
+    private func unusableSpans(spent: [DateInterval]) -> [DateInterval] {
+        let (_, end) = domain
+        guard let exhaust = exhaustDate, exhaust < end else { return spent }
+        return spent + [DateInterval(start: exhaust, end: end)]
     }
 
     private func activitySegments(now: Date, spent: [DateInterval]) -> [ActivitySegment] {

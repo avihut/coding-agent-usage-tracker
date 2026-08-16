@@ -84,10 +84,24 @@ struct ExhaustedStretchesTests {
         #expect(outside.isEmpty)
     }
 
-    /// A session straddling the crossing splits: the work that landed
-    /// before the limit went is still live, only the tail is spent. Flipping
-    /// the whole session red would misreport when work stopped landing.
-    @Test func aSessionStraddlingTheCrossingSplits() {
+    /// The red on the strip must be exactly as long as the red region above
+    /// it. A spent span draws end to end even where nothing ran — being
+    /// locked out is the fact, and a nub only as long as the user's last
+    /// session was what made the two disagree on screen.
+    @Test func aSpentSpanDrawsItsWholeLengthEvenWithNoActivity() {
+        let span = DateInterval(start: at(96), end: at(100))
+        let pieces = ExhaustedStretches.mark(
+            [DateInterval(start: at(90), end: at(93))], exhausted: [span])
+
+        let spent = pieces.filter(\.isExhausted)
+        #expect(spent.count == 1)
+        #expect(spent.first?.span == span)
+    }
+
+    /// A session straddling the crossing keeps only the part that landed
+    /// while the limit was live; the spent span covers the rest, so nothing
+    /// double-draws.
+    @Test func aSessionStraddlingTheCrossingKeepsOnlyItsLivePart() {
         let pieces = ExhaustedStretches.mark(
             [DateInterval(start: at(90), end: at(99))],
             exhausted: [DateInterval(start: at(96), end: at(100))])
@@ -96,23 +110,24 @@ struct ExhaustedStretchesTests {
         #expect(pieces.first?.isExhausted == false)
         #expect(pieces.first?.span == DateInterval(start: at(90), end: at(96)))
         #expect(pieces.last?.isExhausted == true)
-        #expect(pieces.last?.span == DateInterval(start: at(96), end: at(99)))
+        #expect(pieces.last?.span == DateInterval(start: at(96), end: at(100)))
     }
 
-    /// A session wholly inside a spent span is spent end to end — one piece,
-    /// not three empty ones.
-    @Test func aSessionInsideASpentSpanStaysWhole() {
+    /// A session wholly inside a spent span contributes no live piece at
+    /// all — the span already covers it.
+    @Test func aSessionInsideASpentSpanLeavesOnlyTheSpan() {
+        let span = DateInterval(start: at(96), end: at(100))
         let pieces = ExhaustedStretches.mark(
-            [DateInterval(start: at(97), end: at(99))],
-            exhausted: [DateInterval(start: at(96), end: at(100))])
+            [DateInterval(start: at(97), end: at(99))], exhausted: [span])
 
         #expect(pieces.count == 1)
         #expect(pieces.first?.isExhausted == true)
-        #expect(pieces.first?.span == DateInterval(start: at(97), end: at(99)))
+        #expect(pieces.first?.span == span)
     }
 
-    /// Two spent spans across one long session alternate live/spent/live.
-    @Test func multipleSpansAlternateAcrossOneSession() {
+    /// Two spent spans across one long session leave the live gaps between
+    /// them, and the result comes back in chronological order.
+    @Test func multipleSpansLeaveTheLiveGapsBetweenThem() {
         let pieces = ExhaustedStretches.mark(
             [DateInterval(start: at(90), end: at(120))],
             exhausted: [
@@ -121,19 +136,23 @@ struct ExhaustedStretchesTests {
             ])
 
         #expect(pieces.map(\.isExhausted) == [false, true, false, true, false])
-        #expect(pieces.first?.span.start == at(90))
+        #expect(pieces.map(\.span.start) == [at(90), at(95), at(100), at(110), at(115)])
         #expect(pieces.last?.span.end == at(120))
     }
 
-    /// Untouched sessions come back whole and live — no spurious splitting.
+    /// A session clear of every span comes back whole and live — no
+    /// spurious splitting. The span still appears alongside it, because the
+    /// strip draws a spent span whether or not anything ran in it.
     @Test func sessionsClearOfEverySpanAreUntouched() {
         let session = DateInterval(start: at(80), end: at(85))
-        let pieces = ExhaustedStretches.mark(
-            [session], exhausted: [DateInterval(start: at(96), end: at(100))])
+        let span = DateInterval(start: at(96), end: at(100))
+        let pieces = ExhaustedStretches.mark([session], exhausted: [span])
 
-        #expect(pieces.count == 1)
+        #expect(pieces.count == 2)
         #expect(pieces.first?.isExhausted == false)
         #expect(pieces.first?.span == session)
+        #expect(pieces.last?.isExhausted == true)
+        #expect(pieces.last?.span == span)
     }
 
     /// A meter with no reading for this label can't have run out.

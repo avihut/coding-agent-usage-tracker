@@ -23,45 +23,47 @@ public enum ExhaustedStretches {
         }
     }
 
-    /// Re-cuts activity stretches against the spans the limit was spent
-    /// through, so one that straddles the moment the meter ran out comes
-    /// back as two pieces. The crossing lands mid-session far more often
-    /// than on a stretch boundary, and a whole session flipped red on
-    /// account of its last minute would misreport when work stopped
-    /// landing.
+    /// Lays the activity stretches and the spent spans onto one strip.
     ///
-    /// `spans` must be chronological and disjoint — one forward walk per
-    /// stretch is what keeps this linear.
+    /// A spent span draws CONTINUOUSLY, whether or not anything ran during
+    /// it — being locked out is the fact the strip is reporting, and the
+    /// red must be the same length as the red region above it. (The strip
+    /// already treats the PROJECTED dead zone this way: one nub across the
+    /// whole unreachable stretch.) Activity keeps only what lies outside
+    /// those spans, so a session straddling the crossing still shows the
+    /// part that landed while the limit was live, and nothing double-draws.
+    ///
+    /// `spans` must be chronological and disjoint.
     public static func mark(
         _ stretches: [DateInterval], exhausted spans: [DateInterval]
     ) -> [Stretch] {
         guard !spans.isEmpty else {
             return stretches.map { Stretch(span: $0, isExhausted: false) }
         }
-        return stretches.flatMap { stretch -> [Stretch] in
-            var pieces: [Stretch] = []
-            var cursor = stretch.start
-            for span in spans where span.end > stretch.start && span.start < stretch.end {
-                let spentStart = max(span.start, stretch.start)
-                let spentEnd = min(span.end, stretch.end)
-                if spentStart > cursor {
-                    pieces.append(Stretch(
-                        span: DateInterval(start: cursor, end: spentStart),
-                        isExhausted: false))
-                }
-                pieces.append(Stretch(
-                    span: DateInterval(start: spentStart, end: spentEnd),
-                    isExhausted: true))
-                cursor = spentEnd
-            }
-            if pieces.isEmpty { return [Stretch(span: stretch, isExhausted: false)] }
-            if cursor < stretch.end {
-                pieces.append(Stretch(
-                    span: DateInterval(start: cursor, end: stretch.end),
-                    isExhausted: false))
-            }
-            return pieces
+        let live = stretches.flatMap { stretch in
+            subtracting(spans, from: stretch).map { Stretch(span: $0, isExhausted: false) }
         }
+        let spent = spans.map { Stretch(span: $0, isExhausted: true) }
+        return (live + spent).sorted { $0.span.start < $1.span.start }
+    }
+
+    /// What remains of `stretch` once every span is cut out of it. Spans are
+    /// chronological and disjoint, so one forward walk suffices.
+    private static func subtracting(
+        _ spans: [DateInterval], from stretch: DateInterval
+    ) -> [DateInterval] {
+        var remaining: [DateInterval] = []
+        var cursor = stretch.start
+        for span in spans where span.end > stretch.start && span.start < stretch.end {
+            if span.start > cursor {
+                remaining.append(DateInterval(start: cursor, end: span.start))
+            }
+            cursor = max(cursor, span.end)
+        }
+        if cursor < stretch.end {
+            remaining.append(DateInterval(start: cursor, end: stretch.end))
+        }
+        return remaining
     }
 
     /// One stretch per closed window that reached its limit, clipped to

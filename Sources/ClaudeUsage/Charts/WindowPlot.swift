@@ -65,18 +65,49 @@ enum WindowPlot {
         return nub == hovered ? 1 : 0.25
     }
 
-    /// The spans the limit was already spent through, tinted red behind the
-    /// data. Drawn BEFORE the trace so the percent line stays readable on
-    /// top of it — the region is ground, not a mark.
-    @ChartContentBuilder
-    static func exhaustedRegions(
-        _ spans: [DateInterval], ceiling: Double
-    ) -> some ChartContent {
-        ForEach(spans, id: \.start) { span in
-            RectangleMark(
-                xStart: .value("Time", span.start), xEnd: .value("Time", span.end),
-                yStart: .value("Usage", 0), yEnd: .value("Usage", ceiling))
-                .foregroundStyle(Color.red.opacity(0.16))
+    /// Red diagonal hatching over the spans a limit was — or will be —
+    /// unusable. ONE painter for both: the forecast's dead zone past the
+    /// projected crossing and the windows that actually ran out and waited
+    /// out a reset. They mean the same thing to the user ("nothing could
+    /// land here"), so they must not look different; a flat tint for one
+    /// and hatching for the other reads as two unrelated features.
+    ///
+    /// A `chartBackground` painter rather than marks, because the stripes
+    /// are screen geometry — a fixed 6pt pitch at a fixed angle, whatever
+    /// the domain — and no mark can carry that.
+    @ViewBuilder
+    static func unusableHatching(
+        _ spans: [DateInterval], proxy: ChartProxy, geometry: GeometryProxy
+    ) -> some View {
+        if let plotFrame = proxy.plotFrame,
+           let yTop = proxy.position(forY: 100),
+           let yBottom = proxy.position(forY: 0) {
+            let plot = geometry[plotFrame]
+            Canvas { context, _ in
+                for span in spans {
+                    guard let xStart = proxy.position(forX: span.start),
+                          let xEnd = proxy.position(forX: span.end),
+                          xEnd > xStart
+                    else { continue }
+                    let region = CGRect(
+                        x: plot.minX + xStart, y: plot.minY + yTop,
+                        width: xEnd - xStart, height: yBottom - yTop)
+                    context.drawLayer { layer in
+                        layer.clip(to: Path(region))
+                        layer.fill(Path(region), with: .color(.red.opacity(0.05)))
+                        // Start a full region-height to the left so the
+                        // first stripes still cross the region's top-left.
+                        var x = region.minX - region.height
+                        while x < region.maxX {
+                            var stripe = Path()
+                            stripe.move(to: CGPoint(x: x, y: region.maxY))
+                            stripe.addLine(to: CGPoint(x: x + region.height, y: region.minY))
+                            layer.stroke(stripe, with: .color(.red.opacity(0.13)), lineWidth: 1)
+                            x += 6
+                        }
+                    }
+                }
+            }
         }
     }
 

@@ -56,7 +56,6 @@ struct AuditWindowChart: View {
 
     private var chart: some View {
         Chart {
-            WindowPlot.exhaustedRegions(model.exhausted, ceiling: 100)
             ForEach(model.percent) { point in
                 AreaMark(
                     x: .value("Time", point.t), yStart: .value("Floor", 0),
@@ -123,6 +122,15 @@ struct AuditWindowChart: View {
                             .font(.caption2.weight(.semibold))
                     }
                 }
+            }
+        }
+        .chartBackground { proxy in
+            GeometryReader { geo in
+                // The same hatching the popover paints over a dead zone —
+                // history that ran out has to read the way a forecast that
+                // will run out reads.
+                WindowPlot.unusableHatching(
+                    model.exhausted, proxy: proxy, geometry: geo)
             }
         }
         .chartOverlay { proxy in
