@@ -1,5 +1,6 @@
 import Charts
 import SwiftUI
+import UsageCore
 
 /// The limit-window plot's shared vocabulary. The live meter popover and the
 /// read-only audit chart both draw a percent trace over a span with reset
@@ -62,6 +63,43 @@ enum WindowPlot {
     static func nubOpacity(_ nub: Nub, hovered: Nub?) -> Double {
         guard let hovered else { return 0.7 }
         return nub == hovered ? 1 : 0.25
+    }
+
+    /// The spans the limit was already spent through, tinted red behind the
+    /// data. Drawn BEFORE the trace so the percent line stays readable on
+    /// top of it — the region is ground, not a mark.
+    @ChartContentBuilder
+    static func exhaustedRegions(
+        _ spans: [DateInterval], ceiling: Double
+    ) -> some ChartContent {
+        ForEach(spans, id: \.start) { span in
+            RectangleMark(
+                xStart: .value("Time", span.start), xEnd: .value("Time", span.end),
+                yStart: .value("Usage", 0), yEnd: .value("Usage", ceiling))
+                .foregroundStyle(Color.red.opacity(0.16))
+        }
+    }
+
+    /// Re-cuts the strip's stretches against the spans the limit was spent
+    /// through, so a nub that straddles the moment the meter ran out is
+    /// drawn half accent, half red. The cutting itself is core's
+    /// (`ExhaustedStretches.mark`, where it is tested); this only carries
+    /// the nub's own `fullStart` onto the piece that still begins where the
+    /// nub did, so a frame-clipped session keeps reporting its true start.
+    static func marking(
+        _ nubs: [Nub], exhausted spans: [DateInterval]
+    ) -> [Nub] {
+        guard !spans.isEmpty else { return nubs }
+        return nubs.flatMap { nub in
+            ExhaustedStretches.mark([DateInterval(start: nub.start, end: nub.end)],
+                                    exhausted: spans)
+                .map { piece in
+                    Nub(
+                        start: piece.span.start, end: piece.span.end,
+                        kind: piece.isExhausted ? .exhausted : .active,
+                        fullStart: piece.span.start == nub.start ? nub.fullStart : nil)
+                }
+        }
     }
 
     /// Scaffolding under the data: a muted dashed vertical at each reset in

@@ -403,8 +403,9 @@ struct MeterHistoryView: View {
     ) -> some View {
         let (start, end) = domain
         let measuredEnd = min(end, now)
-        let segments = activitySegments(now: now)
         let series = percentSeries
+        let spent = spentStretches(series)
+        let segments = activitySegments(now: now, spent: spent)
         let drawnPercent = series.drawn
         // Y geometry scales from the tallest curve: the headroom band that
         // hosts the top labels is always 15% of the data ceiling, so the
@@ -419,6 +420,10 @@ struct MeterHistoryView: View {
         let nowLabelShown = hovered == nil
             && !nowEclipsed(by: focusedCurve, now: now, start: start, end: end)
         return Chart {
+            // Ground first: the stretches this frame already spent out. A
+            // closed window that ran out is history the chart owes the user,
+            // the same red the projected dead zone uses.
+            WindowPlot.exhaustedRegions(spent, ceiling: ceiling)
             // Activity strip, iStat-style: a band under the plot floor —
             // orange where transcripts logged tokens, a faint track where
             // they didn't. Future (right of now) stays empty.
@@ -960,7 +965,23 @@ struct MeterHistoryView: View {
     /// Contiguous stretches of the measured domain where transcripts logged
     /// tokens (scoped meters count only their own model), bucketed so a week
     /// of minute slots collapses to a handful of marks.
-    private func activitySegments(now: Date) -> [ActivitySegment] {
+    /// Spans in this frame the limit was already spent through, recalled
+    /// from the samples by the same rule the "spent at 15:04" caption uses.
+    /// Closed windows only — the live window's dead zone comes from the
+    /// prediction's own crossing, drawn as the hatched region.
+    ///
+    /// Takes the already-built series rather than reaching for
+    /// `percentSeries`: the render needs this twice (the ground region and
+    /// the strip's colouring) and that property rebuilds the whole cliff
+    /// walk each time it is touched.
+    private func spentStretches(_ series: PercentSeries) -> [DateInterval] {
+        let (start, end) = domain
+        return ExhaustedStretches.build(
+            resets: series.resets, window: window, meterLabel: meter.label,
+            samples: samples, domain: DateInterval(start: start, end: end))
+    }
+
+    private func activitySegments(now: Date, spent: [DateInterval]) -> [ActivitySegment] {
         // Month scale: sessions are minutes-to-hours wide — sub-pixel
         // slivers or misleading bucket-wide blobs at this zoom. The strip
         // goes quiet rather than cluttered; the heatmap owns that scale.
@@ -1005,6 +1026,10 @@ struct MeterHistoryView: View {
         segments = ActivityGrace.holdOpen(
             stitched, until: min(end, exhaustDate ?? end), grace: graceSeconds
         ).map { ActivitySegment(start: $0.start, end: $0.end) }
+        // Windows that already CLOSED spent-out: the stretch between the
+        // crossing and the reset reads red, so a frame holding several
+        // windows shows every one it ran out of, not just the live one.
+        segments = WindowPlot.marking(segments, exhausted: spent)
         // A session the frame clips at its left edge is longer than its
         // nub: walk the timeline before the domain (same grace bridging)
         // for its true start, so hover reports the whole session.

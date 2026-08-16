@@ -33,15 +33,22 @@ public struct AuditWindowModel: Sendable, Equatable {
     /// Highest in-span drawn percent; nil when no samples cover the span.
     public let peakPercent: Int?
 
+    /// Spans this meter spent already exhausted, waiting out a reset it
+    /// had no way to hurry — recalled, never projected. See
+    /// `ExhaustedStretches`.
+    public let exhausted: [DateInterval]
+
     public init(
         percent: [PercentPoint], resets: [Date], nubs: [DateInterval],
-        outcomes: [WindowOutcome], peakPercent: Int?
+        outcomes: [WindowOutcome], peakPercent: Int?,
+        exhausted: [DateInterval] = []
     ) {
         self.percent = percent
         self.resets = resets
         self.nubs = nubs
         self.outcomes = outcomes
         self.peakPercent = peakPercent
+        self.exhausted = exhausted
     }
 
     public var isEmpty: Bool {
@@ -100,12 +107,16 @@ public enum AuditWindow {
             .filter { $0.label == meterLabel && $0.end > domain.start && $0.end <= domain.end }
             .sorted { $0.end < $1.end }
 
+        let resets = cliffs.map(\.at).filter { $0 >= domain.start }
         return AuditWindowModel(
             percent: drawn,
-            resets: cliffs.map(\.at).filter { $0 >= domain.start },
+            resets: resets,
             nubs: merged(clipped),
             outcomes: closed,
-            peakPercent: drawn.filter { $0.t >= domain.start }.map(\.percent).max())
+            peakPercent: drawn.filter { $0.t >= domain.start }.map(\.percent).max(),
+            exhausted: ExhaustedStretches.build(
+                resets: resets, window: window, meterLabel: meterLabel,
+                samples: samples, domain: domain))
     }
 
     /// Sweep-union of possibly-overlapping intervals (concurrent sessions

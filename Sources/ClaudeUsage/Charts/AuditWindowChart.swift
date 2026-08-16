@@ -25,11 +25,13 @@ struct AuditWindowChart: View {
     /// everything else curtains.
     @State private var hoveredNub: WindowPlot.Nub?
 
-    /// The ledger's plain intervals in the strip's shared shape. Kind is
-    /// `.active` throughout for now — a remembered spent-through stretch is
-    /// task #130, and it lands here without touching the drawing.
+    /// The ledger's plain intervals in the strip's shared shape, re-cut
+    /// against the spans the limit was already spent through so those
+    /// stretches read red.
     private var nubs: [WindowPlot.Nub] {
-        model.nubs.map { WindowPlot.Nub(start: $0.start, end: $0.end) }
+        WindowPlot.marking(
+            model.nubs.map { WindowPlot.Nub(start: $0.start, end: $0.end) },
+            exhausted: model.exhausted)
     }
 
     /// Strip space below the percent floor, the meter chart's idiom.
@@ -54,6 +56,7 @@ struct AuditWindowChart: View {
 
     private var chart: some View {
         Chart {
+            WindowPlot.exhaustedRegions(model.exhausted, ceiling: 100)
             ForEach(model.percent) { point in
                 AreaMark(
                     x: .value("Time", point.t), yStart: .value("Floor", 0),

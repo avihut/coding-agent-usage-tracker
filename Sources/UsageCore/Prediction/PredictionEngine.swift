@@ -167,11 +167,18 @@ public enum PredictionEngine {
     /// `since` is the current window's start where the meter knows it —
     /// the only reliable boundary, since an unwitnessed reset leaves no
     /// drop for the tail seam to find.
+    ///
+    /// `until` closes the range for a window that has already ended, so the
+    /// audit can ask the same question of a CLOSED window and get that
+    /// window's own crossing rather than the newest one. Nil (the live
+    /// window's case) leaves the range open-ended and the tail seam below
+    /// is what finds the boundary.
     public static func spentAt(
-        samples: [UsageSample], label: String, since: Date? = nil
+        samples: [UsageSample], label: String, since: Date? = nil, until: Date? = nil
     ) -> Date? {
         let points = samples
             .filter { sample in since.map { sample.t >= $0 } ?? true }
+            .filter { sample in until.map { sample.t <= $0 } ?? true }
             .compactMap { sample in sample.percents[label].map { (sample.t, $0) } }
             .sorted { $0.0 < $1.0 }
         guard !points.isEmpty else { return nil }
