@@ -436,6 +436,21 @@ the README rather than silently deviating.
   this machine's digest (read-only cache use, zero network, no
   Keychain). Dollars never sync: viewers price tallies with their own
   feed.
+- LIMIT-WINDOW PLOT: `Charts/WindowPlot.swift` (v0.77.0, 7cf5180) is the
+  ONE vocabulary for the percent-over-a-span charts — reset dashes, reset
+  curtain, nub curtain, `Nub` (start/end/kind/fullStart), nub colour +
+  hover opacity, reset hit-testing — exposed as composable
+  `@ChartContentBuilder` pieces. `MeterHistoryView` (live popover) and
+  `AuditWindowChart` (read-only day/week audit) BOTH draw through it; a
+  new behaviour goes here, never into one chart. User-directed after they
+  twice reported the two charts drifting apart ("it's like the component
+  is not reused properly or at all"). Deliberately NOT shared, since
+  unifying would change what ships in one of them: the y-scale (popover
+  scales from the tallest model curve, +15% headroom band; audit chart
+  pins 0…100) and the strip geometry (band vs round-capped rule); also
+  `liveNub`'s midpoint re-anchoring, which only the popover's re-anchoring
+  sliding domain needs. Curtains stop at y=0 so the strip dims by its own
+  opacity, never twice.
 - CHART MARK COLORS: inside a `Chart`, ALWAYS spell it `Color.primary` /
   `Color.secondary` / `Color.quaternary`. The bare hierarchical `.primary`
   does NOT mean the label color there — it resolves against the plot's own
