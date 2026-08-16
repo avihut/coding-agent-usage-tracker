@@ -53,7 +53,7 @@ public enum UsageFormatting {
 
     /// The scoped meter's one-letter menu bar tag, from its model name as
     /// DATA (`scopedModelName`) — never parsed out of the display label.
-    static func scopedTag(for meter: Meter?) -> String {
+    public static func scopedTag(for meter: Meter?) -> String {
         guard let meter else { return "M" }
         let name = meter.scopedModelName ?? meter.label
         return name.first.map { String($0).uppercased() } ?? "M"

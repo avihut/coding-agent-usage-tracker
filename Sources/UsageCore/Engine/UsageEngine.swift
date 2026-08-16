@@ -18,6 +18,13 @@ public final class UsageEngine {
         case launch, timer, wake, networkRestored, manual, activity
     }
 
+    /// Which kind of process hosts the engine — stamped into the published
+    /// digest so consumers (and the future host broker) can tell who is
+    /// running the show.
+    public enum Host: String, Sendable {
+        case app, daemon
+    }
+
     public private(set) var state: DisplayState = .loading
     public private(set) var isRefreshing = false
     /// Poll interval while the agent is actively in use — the user's setting.
@@ -56,6 +63,10 @@ public final class UsageEngine {
     /// to an implicit `.standard` (the daemon has no standard domain worth
     /// sharing with the app).
     private let defaults: UserDefaults
+    private let hostKind: Host
+    /// Publishes live-state.json after every landing point — consumer
+    /// interfaces (the TUI, a client-mode app) render from that file.
+    private let publisher: StatePublisher
     private let service: UsageService
     private let history: UsageHistory
     private let windowLedger: WindowLedger
@@ -95,13 +106,16 @@ public final class UsageEngine {
         provider: any UsageProvider = ClaudeProvider(),
         service: UsageService? = nil,
         defaults: UserDefaults = .standard,
-        bundleID: String? = nil
+        bundleID: String? = nil,
+        host: Host = .app
     ) {
         let bundleID = bundleID ?? Bundle.main.bundleIdentifier ?? "com.avihu.ClaudeUsage"
         let support = StorageScope.supportDirectory(bundleID: bundleID, providerID: provider.id)
         let caches = StorageScope.cachesDirectory(bundleID: bundleID, providerID: provider.id)
         self.provider = provider
         self.defaults = defaults
+        self.hostKind = host
+        self.publisher = StatePublisher(fileURL: LiveState.fileURL(bundleID: bundleID))
         self.localActivity = provider.makeLocalActivity(cacheDirectory: support)
         self.service = service
             ?? UsageService(provider: provider, cache: UsageCache(directory: caches))
@@ -203,8 +217,39 @@ public final class UsageEngine {
                 samples = history.append(snapshot, existing: samples)
                 recomputePredictions(for: snapshot)
             }
+            // The heartbeat: every completed cycle rewrites the digest, so
+            // its freshness IS the engine's liveness signal.
+            publishState()
             await refreshPricingIfNeeded()
         }
+    }
+
+    /// Snapshots the whole renderable state into live-state.json. Cheap on
+    /// the main actor (array mirrors and per-meter assembly over capped
+    /// series); encoding and IO happen on the publisher's own queue.
+    private func publishState(now: Date = Date()) {
+        guard !isShutDown else { return }
+        let grace = defaults.object(forKey: ActivityGrace.storageKey) == nil
+            ? ActivityGrace.defaultSeconds
+            : defaults.double(forKey: ActivityGrace.storageKey)
+        let digest = LiveStateBuilder.build(
+            provider: provider,
+            host: hostKind.rawValue,
+            pid: Int(ProcessInfo.processInfo.processIdentifier),
+            appVersion: AppIdentity.version,
+            state: state,
+            predictions: predictions,
+            samples: samples,
+            timeline: tokenTimeline,
+            activity: activity,
+            pricing: pricing,
+            colorLedger: ModelColorLedger.load(from: defaults, providerID: provider.id),
+            graceSeconds: grace,
+            nextPollAt: nextRefreshAt,
+            backoffUntil: cadence.backoffUntil,
+            apiBudget: isLocalProvider ? nil : (ledger.used(at: now), ledger.ceiling),
+            now: now)
+        publisher.publish(digest)
     }
 
     /// How close the last hour of requests is to the endpoint's estimated
@@ -239,6 +284,7 @@ public final class UsageEngine {
         case .loading, .unavailable:
             break
         }
+        publishState()
     }
 
     /// Piggybacks on usage refreshes: at most one feed fetch attempt per
@@ -250,6 +296,7 @@ public final class UsageEngine {
         lastPricingAttempt = now
         if let fresh = await pricingService.refreshIfStale(now: now) {
             pricing = fresh
+            publishState()
         }
     }
 
@@ -263,6 +310,7 @@ public final class UsageEngine {
         Task {
             do {
                 pricing = try await pricingService.refreshNow()
+                publishState()
             } catch let error as PricingFeedError {
                 pricingRefreshError = error.shortText
             } catch {
@@ -331,6 +379,7 @@ public final class UsageEngine {
                 // After the seed, so no render observes sessions first.
                 self.sessions = scan.sessions
                 self.isScanningActivity = false
+                self.publishState()
             }
         }
     }
@@ -404,6 +453,7 @@ public final class UsageEngine {
                 guard let self else { return }
                 self.profiles = profiles
                 self.predictions = fresh
+                self.publishState()
             }
         }
     }
@@ -425,5 +475,6 @@ public final class UsageEngine {
         cadence.activeInterval = clamped
         defaults.set(clamped, forKey: Self.intervalKey)
         scheduleNext()
+        publishState()
     }
 }

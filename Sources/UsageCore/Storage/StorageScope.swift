@@ -9,6 +9,13 @@ import Foundation
 /// every provider owns its own files; never share one of these directories
 /// between providers.
 public enum StorageScope {
+    /// `~/Library/Application Support/<bundleID>/` — the bundle root above
+    /// the provider scopes, for artifacts that describe the ENGINE rather
+    /// than one provider's data (live-state.json).
+    public static func rootSupportDirectory(bundleID: String) -> URL {
+        base(.applicationSupportDirectory).appending(path: bundleID)
+    }
+
     /// `~/Library/Application Support/<bundleID>/<providerID>/` —
     /// history.json, activity-cache.json, pricing.json.
     public static func supportDirectory(bundleID: String, providerID: String) -> URL {

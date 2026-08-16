@@ -1,0 +1,283 @@
+{
+  "activity" : {
+    "days" : [
+      {
+        "dayKey" : "2026-08-14",
+        "prompts" : 4,
+        "tokens" : 0
+      },
+      {
+        "cost" : 0.065,
+        "dayKey" : "2026-08-15",
+        "prompts" : 6,
+        "tokens" : 9000
+      },
+      {
+        "cost" : 0.004,
+        "dayKey" : "2026-08-16",
+        "prompts" : 2,
+        "tokens" : 535
+      }
+    ],
+    "hourDays" : [
+      {
+        "dayKey" : "2026-08-16",
+        "hours" : [
+          {
+            "cost" : 0.004,
+            "hour" : 10,
+            "tokens" : 480
+          },
+          {
+            "hour" : 11,
+            "tokens" : 55
+          }
+        ]
+      }
+    ],
+    "modelDays" : [
+      {
+        "dayKey" : "2026-08-15",
+        "models" : [
+          {
+            "color" : {
+              "blue" : 0.341,
+              "green" : 0.467,
+              "red" : 0.851
+            },
+            "cost" : 0.065,
+            "displayName" : "Fable 5",
+            "id" : "claude-fable-5",
+            "tally" : {
+              "cacheCreation" : 0,
+              "cacheCreation1h" : 0,
+              "cacheRead" : 0,
+              "input" : 8000,
+              "output" : 1000
+            }
+          }
+        ]
+      },
+      {
+        "dayKey" : "2026-08-16",
+        "models" : [
+          {
+            "color" : {
+              "blue" : 0.341,
+              "green" : 0.467,
+              "red" : 0.851
+            },
+            "cost" : 0.004,
+            "displayName" : "Fable 5",
+            "id" : "claude-fable-5",
+            "tally" : {
+              "cacheCreation" : 0,
+              "cacheCreation1h" : 0,
+              "cacheRead" : 0,
+              "input" : 400,
+              "output" : 80
+            }
+          },
+          {
+            "color" : {
+              "blue" : 0.341,
+              "green" : 0.467,
+              "red" : 0.851
+            },
+            "displayName" : "mystery-model",
+            "id" : "mystery-model",
+            "tally" : {
+              "cacheCreation" : 0,
+              "cacheCreation1h" : 0,
+              "cacheRead" : 0,
+              "input" : 50,
+              "output" : 5
+            }
+          }
+        ]
+      }
+    ],
+    "timeZone" : "GMT",
+    "todayCost" : 0.004,
+    "todayHours" : [
+      {
+        "cost" : 0.004,
+        "hour" : 10,
+        "tokens" : 480
+      },
+      {
+        "hour" : 11,
+        "tokens" : 55
+      }
+    ],
+    "todayPrompts" : 2,
+    "todayTokens" : 535
+  },
+  "engine" : {
+    "accent" : {
+      "blue" : 0.341,
+      "green" : 0.467,
+      "red" : 0.851
+    },
+    "agentName" : "Claude Code",
+    "apiBudgetCeiling" : 20,
+    "apiBudgetUsed" : 7,
+    "appVersion" : "0.65.0",
+    "fetchedAt" : "2026-08-16T11:58:00Z",
+    "gateFloorSeconds" : 180,
+    "generatedAt" : "2026-08-16T12:00:00Z",
+    "glyph" : "✳︎",
+    "host" : "app",
+    "isLocalProvider" : false,
+    "nextPollAt" : "2026-08-16T12:03:00Z",
+    "pid" : 4242,
+    "planLabel" : "Max plan · 1x",
+    "providerID" : "claude",
+    "serviceName" : "Claude",
+    "stale" : false
+  },
+  "menuBar" : [
+    {
+      "level" : "normal",
+      "percent" : 53,
+      "risk" : {
+        "blue" : 0.1142,
+        "green" : 0.6118,
+        "red" : 1
+      },
+      "severity" : 0.4,
+      "tag" : "S"
+    },
+    {
+      "level" : "warning",
+      "tag" : "W"
+    },
+    {
+      "level" : "normal",
+      "tag" : "M"
+    }
+  ],
+  "meters" : [
+    {
+      "forecast" : {
+        "curve" : [
+          {
+            "percent" : 53,
+            "t" : "2026-08-16T12:00:00Z"
+          },
+          {
+            "percent" : 78,
+            "t" : "2026-08-16T14:00:00Z"
+          }
+        ],
+        "projectedAtReset" : 78,
+        "severity" : 0.4,
+        "verdict" : "green"
+      },
+      "id" : "session",
+      "label" : "Session (5h)",
+      "level" : "normal",
+      "limitWindow" : 18000,
+      "percent" : 53,
+      "resetCaption" : "resets in 2h",
+      "resetsAt" : "2026-08-16T14:00:00Z",
+      "risk" : {
+        "blue" : 0.1142,
+        "green" : 0.6118,
+        "red" : 1
+      },
+      "series" : [
+        {
+          "percent" : 91,
+          "t" : "2026-08-16T09:30:00Z"
+        },
+        {
+          "percent" : 91,
+          "t" : "2026-08-16T09:40:00Z"
+        },
+        {
+          "percent" : 0,
+          "t" : "2026-08-16T09:40:01Z"
+        },
+        {
+          "percent" : 12,
+          "t" : "2026-08-16T10:00:00Z"
+        },
+        {
+          "percent" : 53,
+          "t" : "2026-08-16T11:58:00Z"
+        }
+      ],
+      "stretches" : [
+        {
+          "end" : "2026-08-16T10:02:00Z",
+          "exhausted" : false,
+          "start" : "2026-08-16T10:00:00Z"
+        },
+        {
+          "end" : "2026-08-16T11:31:00Z",
+          "exhausted" : false,
+          "start" : "2026-08-16T11:30:00Z"
+        }
+      ],
+      "tag" : "S"
+    },
+    {
+      "id" : "weekly_all",
+      "label" : "Weekly (all)",
+      "level" : "warning",
+      "series" : [
+
+      ],
+      "stretches" : [
+        {
+          "end" : "2026-08-16T10:02:00Z",
+          "exhausted" : false,
+          "start" : "2026-08-16T10:00:00Z"
+        },
+        {
+          "end" : "2026-08-16T11:31:00Z",
+          "exhausted" : false,
+          "start" : "2026-08-16T11:30:00Z"
+        }
+      ],
+      "tag" : "W"
+    }
+  ],
+  "models" : [
+    {
+      "color" : {
+        "blue" : 0.341,
+        "green" : 0.467,
+        "red" : 0.851
+      },
+      "cost" : 0.004,
+      "displayName" : "Fable 5",
+      "id" : "claude-fable-5",
+      "tally" : {
+        "cacheCreation" : 0,
+        "cacheCreation1h" : 0,
+        "cacheRead" : 0,
+        "input" : 400,
+        "output" : 80
+      }
+    },
+    {
+      "color" : {
+        "blue" : 0.341,
+        "green" : 0.467,
+        "red" : 0.851
+      },
+      "displayName" : "mystery-model",
+      "id" : "mystery-model",
+      "tally" : {
+        "cacheCreation" : 0,
+        "cacheCreation1h" : 0,
+        "cacheRead" : 0,
+        "input" : 50,
+        "output" : 5
+      }
+    }
+  ],
+  "schemaVersion" : 1
+}

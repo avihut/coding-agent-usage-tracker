@@ -1,11 +1,11 @@
 import SwiftUI
+import UsageCore
 
-/// The continuous exhaustion-risk ramp: nil while the forecast is clean,
-/// pure yellow where the projection touches the warning threshold, sliding
-/// linearly to pure red where the limit is spent. Every risk surface —
-/// meter bars, captions, the chart's projection curve and axis label —
-/// blends through this one function.
+/// The exhaustion-risk ramp, as SwiftUI: a one-line wrapper over core
+/// `RiskRamp`, which owns the math and the pinned endpoint colors — the
+/// panel, the menu bar, and the digest all blend identically through it.
 func riskColor(severity: Double) -> Color? {
-    guard severity > 0 else { return nil }
-    return Color.yellow.mix(with: .red, by: severity)
+    RiskRamp.color(severity: severity).map {
+        Color(red: $0.red, green: $0.green, blue: $0.blue)
+    }
 }

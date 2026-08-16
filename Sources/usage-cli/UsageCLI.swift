@@ -13,6 +13,10 @@ import UsageCore
 /// `usage-cli sync-digest [--provider <id>]` prints the CloudKit sync digest
 /// this machine would publish (docs/SYNC.md) — same read-only cache rules,
 /// zero network.
+///
+/// `usage-cli state` prints the engine's published live-state digest
+/// (docs/DAEMON.md) exactly as it sits on disk — the file every consumer
+/// interface renders from.
 @main
 struct UsageCLI {
     static func main() async {
@@ -23,6 +27,10 @@ struct UsageCLI {
         }
         if arguments.contains("sync-digest") {
             runSyncDigest(providerID: value(after: "--provider", in: arguments))
+            return
+        }
+        if arguments.contains("state") {
+            runState()
             return
         }
 
@@ -193,6 +201,31 @@ struct UsageCLI {
         } catch {
             die("digest failed to encode: \(type(of: error))", code: 12)
         }
+    }
+
+    // MARK: - state mode
+
+    /// Prints live-state.json verbatim — no re-encoding, so what you pipe
+    /// into jq is byte-for-byte what the engine's publisher wrote.
+    private static func runState() {
+        let fileURL = LiveState.fileURL(bundleID: "com.avihu.ClaudeUsage")
+        guard let data = FileManager.default.contents(atPath: fileURL.path) else {
+            die(
+                "no live-state digest at \(fileURL.path) — launch the app (or usaged) so the engine publishes one",
+                code: 13)
+        }
+        // A decode pass first: corrupt state should fail loudly here, not
+        // in a consumer.
+        do {
+            let state = try LiveState.decoder().decode(LiveState.self, from: data)
+            note("live-state: schema v\(state.schemaVersion), host \(state.engine.host) "
+                + "pid \(state.engine.pid), \(state.meters.count) meters, "
+                + "\(state.activity.days.count) days, \(data.count) bytes")
+        } catch {
+            note("WARNING: file does not decode as LiveState (\(type(of: error))) — printing raw bytes anyway")
+        }
+        FileHandle.standardOutput.write(data)
+        FileHandle.standardOutput.write(Data("\n".utf8))
     }
 
     private static func value(after flag: String, in arguments: [String]) -> String? {

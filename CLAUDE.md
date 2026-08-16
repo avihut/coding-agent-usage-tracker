@@ -59,6 +59,25 @@ the README rather than silently deviating.
   noteWake(). ModelColorLedger owns the ONE ledger write path
   (provider-scoped key, `grow(_:defaults:providerID:)`); app ModelPalette
   only maps stored slots → SwiftUI Colors.
+- LIVE-STATE DIGEST (2026-08-16 v0.65.0, phase D1): the engine publishes
+  its whole renderable state to `<App Support>/com.avihu.ClaudeUsage/
+  live-state.json` (bundle root, above provider scopes) after every
+  landing point — fetch (the heartbeat), prediction pass, scan, pricing,
+  settings — via Engine/StatePublisher.swift (atomic temp+rename, serial
+  utility queue). Schema `LiveState` (Digests/LiveState.swift): FROZEN,
+  additive-only forever, SyncDigest discipline; absent ≠ zero (unpriced
+  cost / unreported percent = null, NEVER 0). Golden fixtures in
+  Tests/UsageCoreTests/Fixtures/digest/ are decoded by BOTH
+  LiveStateTests and (from v0.67.0) the Rust TUI's serde contract tests —
+  regenerate ONLY with `UPDATE_GOLDENS=1 swift test --filter LiveState`
+  and read the diff. Consumers render, never compute: pre-phrased
+  captions, resolved colors. Color/risk math is core now:
+  `RiskRamp` (Formatting/RiskRamp.swift, pinned dark-appearance
+  yellow→red, panel riskColor + menu bar + digest all blend through it)
+  and `ModelColorMath` (pure HSB, slot 0 = provider accent; app
+  ModelPalette wraps it). `usage-cli state` prints the file verbatim.
+  docs/DAEMON.md holds the architecture + DRAFT §10 amendment — NOT in
+  force until the daemon ships (SYNC.md precedent).
 - PROVIDER SEAM (2026-08-15 v0.25.0, user-directed decoupling): everything
   vendor-specific sits behind `UsageProvider` (Providers/UsageProvider.swift) —
   identity (serviceName/agentName/menuBarGlyph/links/networkDestinations),
