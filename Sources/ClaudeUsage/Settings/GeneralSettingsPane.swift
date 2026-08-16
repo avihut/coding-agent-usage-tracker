@@ -42,6 +42,44 @@ enum SettingsBindings {
             }
         )
     }
+
+    /// The background engine's off-switch. Off is sticky: it removes the
+    /// agent AND disarms auto-install, so no entry point quietly brings it
+    /// back; on re-arms and converges immediately. (The running app keeps
+    /// rendering either way — it re-hosts the engine embedded within
+    /// minutes of the daemon disappearing.)
+    @MainActor
+    static func backgroundDaemon() -> Binding<Bool> {
+        Binding(
+            get: { DaemonItemState.shared.installed },
+            set: { enabled in
+                LaunchAgentInstaller.setAutoInstall(enabled, defaults: .standard)
+                if enabled {
+                    let embedded = Bundle.main.bundleURL
+                        .appending(path: "Contents/MacOS/usaged")
+                    let binary = FileManager.default.fileExists(atPath: embedded.path)
+                        ? embedded : nil
+                    LaunchAgentInstaller.ensure(binary: binary, defaults: .standard)
+                } else {
+                    LaunchAgentInstaller.uninstall()
+                }
+                DaemonItemState.shared.refresh()
+            }
+        )
+    }
+}
+
+/// Observable mirror of the launch-agent registration, for the same
+/// reason LoginItemState exists: a Binding computed off the filesystem
+/// never invalidates SwiftUI on its own.
+@MainActor @Observable
+final class DaemonItemState {
+    static let shared = DaemonItemState()
+    private(set) var installed = LaunchAgentInstaller.isInstalled()
+
+    func refresh() {
+        installed = LaunchAgentInstaller.isInstalled()
+    }
 }
 
 /// Observable mirror of the login-item registration. SMAppService posts no
@@ -264,6 +302,14 @@ struct GeneralSettingsPane: View {
                 Toggle("Launch at login", isOn: SettingsBindings.launchAtLogin())
                     .toggleStyle(.switch)
                     .controlSize(.small)
+                Divider()
+                Toggle("Background metering engine", isOn: SettingsBindings.backgroundDaemon())
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                if store.isDigestClient {
+                    infoRow("Engine", "running as the background agent")
+                }
+                note("Runs the engine as a launch agent (com.avihu.usaged), so the meters, the terminal dashboard, and the tmux status line keep updating with the app closed. It installs itself when missing; off is sticky — the agent is removed and stays away until this is turned back on.")
             }
             SettingsCard("About") {
                 infoRow("Version", "v\(AppIdentity.version)")
@@ -280,6 +326,7 @@ struct GeneralSettingsPane: View {
         }
         .onAppear {
             LoginItemState.shared.refresh()
+            DaemonItemState.shared.refresh()
             let thresholds = UsageStore.currentThresholds()
             warningPercent = thresholds.warningPercent
             criticalPercent = thresholds.criticalPercent

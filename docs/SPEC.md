@@ -312,7 +312,10 @@ Non-negotiable; flag rather than work around:
 - The token is never logged, persisted, or included in an error surface.
 - No sandbox entitlement, and no request for entitlements we don't need.
 - Don't install or register anything (login items, launch agents) without asking me
-  first in the session.
+  first in the session. Amendment 2026-08-16 (user-directed): the
+  `com.avihu.usaged` launch agent below is the one standing exception —
+  the UI entry points install it automatically when absent, under the
+  sticky opt-out described there.
 - Engine host + consumer interfaces (amendment 2026-08-16, v0.66.0;
   design in docs/DAEMON.md):
   - The app family may materialize exactly ONE engine-state artifact above
@@ -327,10 +330,17 @@ Non-negotiable; flag rather than work around:
     `engine.lock` (flock) and `daemon.alive` (liveness marker).
   - Exactly one launch agent, `com.avihu.usaged`, running the same engine
     code under every rule in this section (read-only trees, the two
-    network destinations, Keychain conduct, the 180s floor). It is
-    installed ONLY by the user running `usage-cli daemon install`
-    (honoring the ask-first rule above), and
-    `usage-cli daemon uninstall` removes it completely.
+    network destinations, Keychain conduct, the 180s floor).
+    Re-amendment 2026-08-16 (user-directed, v0.70.0; supersedes
+    "installed only by the user typing install"): installation is
+    automatic — the menu bar app converges the agent at every launch
+    (install when absent, repoint when the app moved, restart a
+    stale-version daemon), and the TUI spawns `usaged ensure` when it
+    finds no engine publishing. The user's control is the sticky opt-out
+    `daemonAutoInstall`: `usage-cli daemon uninstall` and the Settings
+    toggle both remove the agent AND set it false, which every
+    auto-install path honors; `daemon install` or toggling back on
+    re-arms it. Uninstall always removes the agent completely.
   - Single-writer rule: whichever process holds `engine.lock` is the only
     writer of usage caches, history, ledgers, and the digest. Every other
     process — usage-cli, the TUI, the app in client mode — reads only

@@ -1,6 +1,10 @@
 //! usage-tui: a full-screen terminal face for the metering engine — reads
 //! the live-state digest, computes nothing, fetches nothing, writes
-//! nothing, holds no credential (docs/DAEMON.md). Sized for a tmux pane:
+//! nothing itself, holds no credential (docs/DAEMON.md). The one thing it
+//! may start: finding no engine at all, it spawns the app's own
+//! `usaged ensure` so the engine registers itself — the installer applies
+//! the user's sticky opt-out, so policy stays in one place. Sized for a
+//! tmux pane:
 //! the layout re-plans itself from the pane's shape on every draw, and the
 //! mouse is first-class (hover readouts, click-to-drill, wheel paging).
 
@@ -17,7 +21,7 @@ use ratatui::crossterm::event::{
     MouseEventKind,
 };
 use ratatui::crossterm::execute;
-use state::{App, Hit, Surface};
+use state::{App, Freshness, Hit, Surface};
 use std::path::PathBuf;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -26,6 +30,57 @@ use time::{OffsetDateTime, UtcOffset};
 fn support_root() -> PathBuf {
     let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
     home.join("Library/Application Support/com.avihu.ClaudeUsage")
+}
+
+/// The usaged binary embedded in ClaudeUsage.app: the standard install
+/// spots first, then Spotlight's LaunchServices view for unusual homes.
+fn find_usaged() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+    let candidates = [
+        home.join("Applications/ClaudeUsage.app"),
+        PathBuf::from("/Applications/ClaudeUsage.app"),
+    ];
+    for app in candidates {
+        let binary = app.join("Contents/MacOS/usaged");
+        if binary.exists() {
+            return Some(binary);
+        }
+    }
+    let found = std::process::Command::new("/usr/bin/mdfind")
+        .arg("kMDItemCFBundleIdentifier == 'com.avihu.ClaudeUsage'")
+        .output()
+        .ok()?;
+    String::from_utf8_lossy(&found.stdout)
+        .lines()
+        .map(|line| PathBuf::from(line).join("Contents/MacOS/usaged"))
+        .find(|binary| binary.exists())
+}
+
+/// No engine anywhere? Ask usaged to register itself with launchd (spec
+/// §10 re-amendment: the UI entry points auto-install). The verb honors
+/// the user's sticky opt-out, so this is an idempotent nudge, not a
+/// policy decision — and the TUI itself still writes nothing: the
+/// engine's own installer does. Once per TUI run, off-thread.
+fn ensure_engine(reply_tx: &mpsc::Sender<String>) {
+    let tx = reply_tx.clone();
+    std::thread::spawn(move || {
+        let reply = match find_usaged() {
+            None => {
+                "no engine and no ClaudeUsage.app on this Mac — install the app once".to_owned()
+            }
+            Some(binary) => match std::process::Command::new(&binary).arg("ensure").output() {
+                Ok(output) => String::from_utf8_lossy(&output.stderr)
+                    .lines()
+                    .rev()
+                    .find(|line| !line.trim().is_empty())
+                    .unwrap_or("usaged ensure ran")
+                    .trim_start_matches("[usaged] ")
+                    .to_owned(),
+                Err(error) => format!("usaged ensure failed: {error}"),
+            },
+        };
+        let _ = tx.send(reply);
+    });
 }
 
 fn parse_args() -> Result<(PathBuf, PathBuf), String> {
@@ -102,6 +157,11 @@ fn run(mut terminal: ratatui::DefaultTerminal, mut app: App) -> std::io::Result<
     let (reply_tx, reply_rx) = mpsc::channel::<String>();
     let mut last_draw = Instant::now() - Duration::from_secs(1);
     let mut last_stat = Instant::now() - Duration::from_secs(1);
+
+    if app.freshness(OffsetDateTime::now_utc()) == Freshness::EngineOffline {
+        app.notice = Some("no engine running — asking usaged to set itself up…".into());
+        ensure_engine(&reply_tx);
+    }
 
     while !app.quit {
         let mut dirty = false;

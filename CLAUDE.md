@@ -20,6 +20,10 @@ the README rather than silently deviating.
 - No App Sandbox. No entitlements we don't need.
 - Never install or register anything (login items, launch agents) without
   asking the user in-session. Launch-at-login is a user-clicked toggle only.
+  ONE standing exception (user-directed 2026-08-16, v0.70.0): the
+  com.avihu.usaged launch agent auto-installs from the UI entry points via
+  core LaunchAgentInstaller, governed by the sticky `daemonAutoInstall`
+  opt-out (uninstall paths set it false; every auto-install honors it).
 - Honest `User-Agent` (`claude-usage-menubar/<version>` via `AppIdentity`);
   never impersonate Claude Code or the Claude app.
 - Every failure mode must render readable state. A blank or crashed menu bar
@@ -83,7 +87,16 @@ the README rather than silently deviating.
   Contents/MacOS/usaged) runs the engine headless under launchd
   (com.avihu.usaged: RunAtLoad, KeepAlive, ThrottleInterval 10; IOKit
   wake with sleep acknowledged immediately; daily redetect via shared
-  HarnessResolution). Install is USER-RUN ONLY: `usage-cli daemon
+  HarnessResolution). Install is AUTOMATIC since v0.70.0 (spec §10
+  re-amendment): core Engine/LaunchAgentInstaller.swift converges the
+  agent (install absent → repoint moved → bootstrap unloaded → kickstart
+  stale-version daemon, decision table `ensureAction` unit-tested); the
+  app runs `ensure` at every UsageStore init (detached, Bundle-relative
+  binary), the TUI spawns `usaged ensure` once when EngineOffline, and
+  usaged doubles as its own installer (`usaged install|ensure|uninstall`,
+  plist → argv[0]). Sticky opt-out `daemonAutoInstall`: uninstall verbs +
+  the Settings "Background metering engine" toggle set false, install/
+  toggle-on re-arm. CLI faces stay: `usage-cli daemon
   install|uninstall|start|stop|status` / `mise run daemon -- <verb>`.
   THE DAEMON WINS: Engine/EngineLease.swift (flock on engine.lock —
   kernel-released, stale-proof), daemon.alive 2s marker, Engine/
@@ -112,7 +125,9 @@ the README rather than silently deviating.
   (crossterm comes re-exported through ratatui so versions can't drift),
   Cargo.lock committed, rust pinned in mise [tools] (1.95, daft-style
   minimum_release_age 7d). The TUI is a FACE: reads live-state.json +
-  sends socket commands; no network, no credentials, no writes. Digest
+  sends socket commands; no network, no credentials, no writes of its
+  own (finding no engine it spawns `usaged ensure` ONCE — the installer
+  owns the policy, tui/src/main.rs find_usaged/ensure_engine). Digest
   mirrors live in tui/src/digest.rs with #![allow(dead_code)] (mirror
   completeness over usage) and MUST decode the same goldens as
   LiveStateTests — that pair of suites IS the schema freeze from here on

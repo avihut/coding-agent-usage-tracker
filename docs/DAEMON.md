@@ -1,9 +1,12 @@
 # The engine, its hosts, and consumer interfaces
 
-Status: **SHIPPED through v0.66.0** — digest (v0.65.0), then usaged +
-lease + control socket + app host/client modes (v0.66.0). The spec §10
+Status: **SHIPPED through v0.70.0** — digest (v0.65.0), then usaged +
+lease + control socket + app host/client modes (v0.66.0), the TUI
+(v0.67–0.69), then automatic installation (v0.70.0). The spec §10
 amendment is IN FORCE (docs/SPEC.md). Design decided 2026-08-16
-(user-directed). Install remains opt-in: `usage-cli daemon install`.
+(user-directed). Install is automatic from the UI entry points; the
+sticky `daemonAutoInstall` opt-out (Settings toggle,
+`usage-cli daemon uninstall`) keeps it away deliberately.
 
 ## Why
 
@@ -103,8 +106,18 @@ longer decodes). `usage-cli state | jq .menuBar` etc.
 - `usaged` (Sources/usaged/, embedded at ClaudeUsage.app/Contents/MacOS/):
   RunAtLoad + KeepAlive + ThrottleInterval 10, signed with the app's
   identity, IOKit sleep/wake (sleep acknowledged immediately), daily
-  auto-redetection. Installed ONLY by the user running
-  `usage-cli daemon install` / `mise run daemon -- install`.
+  auto-redetection. Since v0.70.0 installation is automatic (spec §10
+  re-amendment 2026-08-16): core `LaunchAgentInstaller` converges the
+  agent — the app runs it at every launch, the TUI spawns
+  `usaged ensure` when no engine publishes, and `usaged
+  install|ensure|uninstall` make the binary its own installer (the plist
+  points at whichever copy ran the verb). The sticky opt-out
+  `daemonAutoInstall` is set false by `usage-cli daemon uninstall` and
+  the Settings toggle, and every auto-install path honors it;
+  `daemon install` / the toggle re-arm it. `ensure` also self-heals: a
+  plist aimed at a missing or moved binary is rewritten, and a live
+  daemon publishing an older version is kickstarted into the current
+  one.
 - Client-mode reads are read-only everywhere: digest, history.json,
   window-ledger.json, pricing cache, and transcript scans via
   `scanTranscriptsReadOnly` (parse caches never written).
@@ -114,5 +127,7 @@ longer decodes). `usage-cli state | jq .menuBar` etc.
 IN FORCE since v0.66.0 — the authoritative text lives in docs/SPEC.md §10
 ("Engine host + consumer interfaces", 2026-08-16): one engine-state
 artifact (`live-state.json`), one control socket + the two arbitration
-artifacts, exactly one user-installed launch agent under all §10 rules,
-and the lease-holder-is-sole-writer rule.
+artifacts, exactly one launch agent under all §10 rules, and the
+lease-holder-is-sole-writer rule. Re-amended the same day at v0.70.0
+(user-directed): the launch agent auto-installs from the UI entry points,
+with `daemonAutoInstall` as the sticky opt-out.

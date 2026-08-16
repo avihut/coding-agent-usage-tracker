@@ -21,8 +21,25 @@ struct Usaged {
     static let bundleID = "com.avihu.ClaudeUsage"
 
     static func main() {
-        guard let defaults = UserDefaults(suiteName: bundleID) else {
+        // Embedded at Contents/MacOS, usaged inherits ClaudeUsage.app's
+        // bundle identity — and suiteName == your own bundle id is
+        // Foundation-nonsense (returns nil). There, `.standard` IS the
+        // com.avihu.ClaudeUsage domain. Run bare (dev builds), the suite
+        // reaches the same domain explicitly.
+        let defaults: UserDefaults
+        if Bundle.main.bundleIdentifier == bundleID {
+            defaults = .standard
+        } else if let suite = UserDefaults(suiteName: bundleID) {
+            defaults = suite
+        } else {
             fatalError("cannot open defaults suite \(bundleID)")
+        }
+        // With an argument, usaged is its own installer (spec §10
+        // re-amendment: the UI entry points auto-install by asking the
+        // embedded binary to register itself). No arguments — launchd's
+        // spelling — runs the engine.
+        if CommandLine.arguments.count > 1 {
+            runInstallerVerb(CommandLine.arguments[1], defaults: defaults)
         }
         // Pre-scope artifacts move exactly as the app would move them; on a
         // machine where the app already ran this is a marker-checked no-op.
@@ -36,6 +53,45 @@ struct Usaged {
         let host = DaemonHost(defaults: defaults)
         host.start()
         RunLoop.main.run()
+    }
+
+    /// `usaged install|ensure|uninstall`: the plist points at this very
+    /// executable, so whichever bundle's usaged runs the verb is the one
+    /// launchd keeps. `ensure` is the auto-install entry (the TUI spawns
+    /// it) and honors the sticky opt-out; `install`/`uninstall` are
+    /// explicit user intent and re-arm/disarm it.
+    private static func runInstallerVerb(_ verb: String, defaults: UserDefaults) -> Never {
+        let ownBinary = URL(fileURLWithPath: CommandLine.arguments[0])
+            .standardizedFileURL.resolvingSymlinksInPath()
+        switch verb {
+        case "install":
+            LaunchAgentInstaller.setAutoInstall(true, defaults: defaults)
+            do {
+                try LaunchAgentInstaller.install(binary: ownBinary)
+                note("installed \(LaunchAgentInstaller.label) → \(ownBinary.path)")
+                exit(0)
+            } catch {
+                note("install failed: \(error)")
+                exit(1)
+            }
+        case "ensure":
+            let outcome = LaunchAgentInstaller.ensure(binary: ownBinary, defaults: defaults)
+            note("ensure: \(outcome)")
+            if case .failed = outcome { exit(1) }
+            exit(0)
+        case "uninstall":
+            LaunchAgentInstaller.setAutoInstall(false, defaults: defaults)
+            LaunchAgentInstaller.uninstall()
+            note("uninstalled \(LaunchAgentInstaller.label) (sticky: auto-install off)")
+            exit(0)
+        default:
+            note("unknown verb '\(verb)' — install|ensure|uninstall (no arguments runs the engine)")
+            exit(2)
+        }
+    }
+
+    private static func note(_ message: String) {
+        FileHandle.standardError.write(Data("[usaged] \(message)\n".utf8))
     }
 }
 

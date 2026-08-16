@@ -167,28 +167,35 @@ The digest schema is pinned on both sides of the language boundary: the
 Swift tests and the TUI's serde tests decode the same golden fixtures in
 `Tests/UsageCoreTests/Fixtures/digest/`.
 
-## The headless engine (optional daemon)
+## The headless engine (usaged)
 
-The metering engine can run as a launchd user agent, `usaged` (embedded in
-the app bundle), so consumer interfaces — the upcoming TUI, or the menu bar
-app itself — render with nothing else open. The daemon wins: while it runs,
+The metering engine runs as a launchd user agent, `usaged` (embedded in
+the app bundle), so consumer interfaces — the TUI, or the menu bar app
+itself — render with nothing else open. The daemon wins: while it runs,
 the app renders its published `live-state.json` digest and sends commands
 over a local socket; quit the daemon and the app hosts the engine embedded
 again within moments (`docs/DAEMON.md` has the full design).
 
+Installation is automatic: the app sets the agent up at launch (and heals
+it — a moved bundle is repointed, an outdated daemon restarted), and the
+TUI does the same when it finds no engine running. The only setup that is
+yours is the Keychain prompt on the daemon's first fetch — it reads the
+Claude Code token through the same signed identity as the app, so approve
+it once with "Always Allow" and it never asks again.
+
 ```sh
-mise run daemon -- install    # write + bootstrap com.avihu.usaged (asks launchd, nothing else)
 mise run daemon -- status     # launchd state, digest age, socket ping
 mise run daemon -- stop       # boot it out (plist kept)
-mise run daemon -- uninstall  # boot out + remove the plist
+mise run daemon -- uninstall  # remove it AND disarm auto-install (sticky)
+mise run daemon -- install    # re-arm + reinstall by hand
 usage-cli state | jq          # inspect the live digest
 ```
 
-Nothing installs itself: the launch agent exists only after you run
-`install`, and `uninstall` removes it completely. The daemon's first fetch
-reads the Claude Code token through the same signed identity as the app —
-approve the one Keychain prompt with "Always Allow" and it never asks
-again.
+Opting out is deliberate and sticky: `uninstall` (or the Settings toggle
+"Background metering engine") removes the agent and sets
+`daemonAutoInstall=false`, which every auto-install path honors — the app
+then simply hosts the engine embedded whenever it runs, exactly as before
+v0.66.0.
 
 Signing uses the local `Apple Development` identity so the Keychain ACL from
 "Always Allow" survives rebuilds (override with `CODESIGN_IDENTITY=...`). Those
@@ -222,6 +229,8 @@ The target Mac needs macOS 15+ and Claude Code installed **and signed in**: the
 app carries no token, it reads that machine's own login Keychain item, so nothing
 of mine travels inside the zip. On the first refresh macOS asks whether
 ClaudeUsage may read `Claude Code-credentials` — click **Always Allow** once.
+The first launch also sets up the background engine (`usaged`) by itself, which
+brings one more Always Allow prompt of its own — that's the whole install.
 
 Keep the bundle in `/Applications`: `SMAppService` registers the launch-at-login
 item by path, so moving the app afterwards breaks that toggle.

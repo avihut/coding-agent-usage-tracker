@@ -219,6 +219,25 @@ final class UsageStore {
         }
         timer.tolerance = 5
         roleTimer = timer
+
+        // Auto-install (spec §10 re-amendment 2026-08-16): every launch
+        // converges the usaged launch agent — install when absent, repoint
+        // when the app moved, restart a stale-version daemon — honoring
+        // the sticky opt-out. Detached: launchctl round-trips are process
+        // spawns. When the daemon comes up, the ordinary arbitration
+        // yields to it within ~30s; nothing here touches the mode.
+        let embedded = Self.embeddedUsagedBinary()
+        Task.detached(priority: .utility) {
+            LaunchAgentInstaller.ensure(
+                binary: embedded, defaults: .standard, bundleID: bundleID)
+        }
+    }
+
+    /// This bundle's own usaged; nil for unbundled dev runs, where ensure
+    /// falls back to whatever app copy LaunchServices knows about.
+    private static func embeddedUsagedBinary() -> URL? {
+        let embedded = Bundle.main.bundleURL.appending(path: "Contents/MacOS/usaged")
+        return FileManager.default.fileExists(atPath: embedded.path) ? embedded : nil
     }
 
     /// Retires this store: stops whichever mode runs, releases the lease
