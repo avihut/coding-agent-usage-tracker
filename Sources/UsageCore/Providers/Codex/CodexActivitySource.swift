@@ -22,6 +22,14 @@ public struct CodexActivitySource: LocalActivitySource {
     public var displayPath: String { "~/.codex/sessions" }
 
     public func scanTranscripts(now: Date) -> TranscriptScan {
+        scan(now: now, persistCache: true)
+    }
+
+    public func scanTranscriptsReadOnly(now: Date) -> TranscriptScan {
+        scan(now: now, persistCache: false)
+    }
+
+    private func scan(now: Date, persistCache: Bool) -> TranscriptScan {
         var cache = loadCache()
         var seen: Set<String> = []
         for url in CodexRollouts.rolloutFiles(root: root) {
@@ -38,7 +46,7 @@ public struct CodexActivitySource: LocalActivitySource {
             cache.files[path] = parse(url: url, mtime: mtime, size: size)
         }
         cache.files = cache.files.filter { seen.contains($0.key) }
-        saveCache(cache)
+        if persistCache { saveCache(cache) }
 
         var byDay: [Date: DailyActivity] = [:]
         var slots: [SlotKey: TokenTally] = [:]

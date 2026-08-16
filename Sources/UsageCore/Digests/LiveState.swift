@@ -107,6 +107,8 @@ public struct EngineStatus: Codable, Sendable, Equatable {
     public let apiBudgetFraction: Double?
     public let gateFloorSeconds: TimeInterval
     public let error: ErrorStatus?
+    /// The panel footer's enabled-credits line, when the provider sent one.
+    public let spend: SpendStatus?
 
     public init(
         providerID: String, serviceName: String, agentName: String, glyph: String,
@@ -116,7 +118,7 @@ public struct EngineStatus: Codable, Sendable, Equatable {
         backoffUntil: Date?, stale: Bool, isLocalProvider: Bool,
         activeIntervalSeconds: TimeInterval, paceMultiplier: Int,
         apiBudgetUsed: Int?, apiBudgetCeiling: Int?, apiBudgetFraction: Double?,
-        gateFloorSeconds: TimeInterval, error: ErrorStatus?
+        gateFloorSeconds: TimeInterval, error: ErrorStatus?, spend: SpendStatus?
     ) {
         self.providerID = providerID
         self.serviceName = serviceName
@@ -142,6 +144,23 @@ public struct EngineStatus: Codable, Sendable, Equatable {
         self.apiBudgetFraction = apiBudgetFraction
         self.gateFloorSeconds = gateFloorSeconds
         self.error = error
+        self.spend = spend
+    }
+}
+
+/// Mirror of SpendLine — minor units + currency, formatting stays with the
+/// reader.
+public struct SpendStatus: Codable, Sendable, Equatable {
+    public let usedMinor: Int
+    public let limitMinor: Int?
+    public let currency: String
+    public let exponent: Int
+
+    public init(usedMinor: Int, limitMinor: Int?, currency: String, exponent: Int) {
+        self.usedMinor = usedMinor
+        self.limitMinor = limitMinor
+        self.currency = currency
+        self.exponent = exponent
     }
 }
 
@@ -500,6 +519,11 @@ public enum LiveStateBuilder {
                     text: $0.shortText(agent: provider.agentName),
                     hint: $0.hint(agent: provider.agentName),
                     code: code.name, httpStatus: code.httpStatus)
+            },
+            spend: snapshot?.spendLine.map {
+                SpendStatus(
+                    usedMinor: $0.usedMinor, limitMinor: $0.limitMinor,
+                    currency: $0.currency, exponent: $0.exponent)
             })
 
         let meters = (snapshot?.meters ?? []).map { meter in

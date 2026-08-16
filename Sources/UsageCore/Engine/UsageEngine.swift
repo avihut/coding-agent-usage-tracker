@@ -156,6 +156,16 @@ public final class UsageEngine {
             self?.noteLocalAgentActivity()
         }
         refresh(.launch)
+        // A seeded gate can deny that launch poll (the previous host
+        // fetched moments ago — a takeover inside the floor; isRefreshing
+        // stays false on the denied path). The cache holds that same
+        // fetch: present it as live rather than a loading shell — the
+        // already-scheduled poll replaces it soon enough.
+        if !isRefreshing, case .loading = state,
+           let snapshot = self.service.cachedSnapshot(thresholds: currentThresholds()) {
+            state = .live(snapshot)
+            recomputePredictions(for: snapshot)
+        }
         scanActivity()
     }
 

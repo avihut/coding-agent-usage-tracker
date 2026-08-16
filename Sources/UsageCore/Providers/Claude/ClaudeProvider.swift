@@ -74,6 +74,10 @@ public struct ClaudeActivitySource: LocalActivitySource {
         transcripts.scan(now: now)
     }
 
+    public func scanTranscriptsReadOnly(now: Date) -> TranscriptScan {
+        transcripts.scan(now: now, persistCache: false)
+    }
+
     public func scanPromptDays() -> [Date: Int] {
         prompts.scan()
     }

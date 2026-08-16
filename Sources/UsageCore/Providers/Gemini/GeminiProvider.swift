@@ -215,6 +215,10 @@ public struct GeminiActivitySource: LocalActivitySource {
         TranscriptScan(daily: [], timeline: [])
     }
 
+    public func scanTranscriptsReadOnly(now: Date) -> TranscriptScan {
+        scanTranscripts(now: now)
+    }
+
     public func scanPromptDays() -> [Date: Int] {
         GeminiTraces.promptDays(root: root)
     }

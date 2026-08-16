@@ -140,6 +140,10 @@ public protocol LocalActivitySource: Sendable {
     /// Daily aggregates plus the recent per-minute timeline, from the
     /// agent's transcripts.
     func scanTranscripts(now: Date) -> TranscriptScan
+    /// The same scan with the parse cache never written — for read-only
+    /// consumers (usage-cli, the app rendering a daemon's digest), so the
+    /// engine host stays the sole cache writer.
+    func scanTranscriptsReadOnly(now: Date) -> TranscriptScan
     /// Per-day prompt counts from a log that outlives transcript cleanup;
     /// empty when the agent keeps no such log.
     func scanPromptDays() -> [Date: Int]

@@ -106,6 +106,14 @@ public struct SpendLine: Sendable, Equatable {
     public let currency: String
     public let exponent: Int
 
+    /// Public so a client-mode app can rebuild the line from the digest.
+    public init(usedMinor: Int, limitMinor: Int?, currency: String, exponent: Int) {
+        self.usedMinor = usedMinor
+        self.limitMinor = limitMinor
+        self.currency = currency
+        self.exponent = exponent
+    }
+
     public var formatted: String {
         guard let limitMinor else { return Self.format(usedMinor, currency, exponent) }
         return "\(Self.format(usedMinor, currency, exponent)) of \(Self.format(limitMinor, currency, exponent))"

@@ -57,6 +57,15 @@ public struct UsageService: Sendable {
         return .live(snapshot)
     }
 
+    /// The cached snapshot alone, no fetch — how a host taking over renders
+    /// instantly when its seeded gate (correctly) denies an immediate poll:
+    /// data the previous host fetched inside the floor IS current.
+    public func cachedSnapshot(thresholds: Thresholds = .standard) -> Snapshot? {
+        guard let (body, fetchedAt) = cache.load() else { return nil }
+        return try? provider.snapshot(
+            fromRawUsage: body, fetchedAt: fetchedAt, plan: nil, thresholds: thresholds)
+    }
+
     /// Exactly one retry, transport failures only — a 401 won't fix itself,
     /// and this runs unattended against an undocumented endpoint (spec §6).
     private func fetchWithOneRetry(token: String) async throws -> Data {
