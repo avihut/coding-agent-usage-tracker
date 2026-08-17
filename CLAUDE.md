@@ -611,6 +611,14 @@ the README rather than silently deviating.
   claims, then each part reads excluding what is claimed) so the detail
   ledger and the session card agree.
   Cache version 6 — every figure persisted under v5 undercounts.
+  BUMPING cacheVersion HAS AN OPERATIONAL COST, learned the hard way
+  here: a cold scan of this corpus is ~41s (warm is 0.2s), and only the
+  lease holder may persist a cache, so every `usage-cli` caller during
+  that window pays the full 41s and banks nothing. With a statusline
+  firing per render they pile up and starve the daemon that would have
+  ended it. Warm the cache with ONE lease-holding scan before letting
+  readers loose — restarting usaged on an already-warm cache is the whole
+  procedure. The call list also grew the cache 2.1MB -> 3.6MB.
   KNOWN, DELIBERATE 0.087% ABOVE ccusage: 1,510 lines state a
   `cache_creation_input_tokens` larger than their own 5m+1h breakdown; we
   bill the vendor's total, they bill the breakdown and drop the rest.
