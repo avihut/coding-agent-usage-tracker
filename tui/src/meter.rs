@@ -277,6 +277,7 @@ mod tests {
                 })
                 .collect(),
             stretches: vec![],
+            model_series: vec![],
         }
     }
 

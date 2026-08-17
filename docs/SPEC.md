@@ -322,7 +322,28 @@ Non-negotiable; flag rather than work around:
     the per-provider scopes: `live-state.json` at the scoped Application
     Support root (render-ready meters, forecasts, captions, activity
     rollups, resolved colors). Local-only; never transported; no
-    credentials, full filesystem paths, prompt text, or session titles.
+    credentials, full filesystem paths, or prompt text.
+    Re-amendment 2026-08-17 (user-directed, v0.80.0; supersedes the
+    original clause's blanket ban on "session titles"): the digest may
+    also carry a SESSIONS section — per session, its title, start,
+    duration, cost, token tally, prompt and call counts, model ids, and
+    a project label with git branch — so a TUI-class client can render
+    the sessions shortlist the app already shows. Scope of the relaxation,
+    exhaustively:
+    - Titles are the ones the session index already materializes under the
+      Sessions-browser amendment above: Claude Code's own `aiTitle`, or,
+      absent one, the ≤120-character first-prompt preview already scrubbed
+      of ANSI and data blobs. NOTHING new is derived from transcripts for
+      this, and full message text remains unpersisted anywhere.
+    - The project label is a DIRECTORY BASENAME only. The full-path ban
+      above is untouched and governs here: no parent path, no home
+      directory, no absolute path in any field.
+    - Everything else in this section still binds: local-only, never
+      transported, mode/scoping unchanged. The moment any transport is
+      proposed for this artifact (CloudKit or otherwise) this relaxation
+      does NOT travel with it — a transported digest needs its own
+      sign-off under SYNC.md, and titles are exactly the field that
+      review must re-examine first.
   - One unix-domain control socket (`control.sock`, mode 0600, same root)
     accepting only the enumerated `ControlCommand` verbs; every mutating
     command passes the same TriggerGate/backoff discipline as in-app

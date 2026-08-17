@@ -265,6 +265,7 @@ public final class UsageEngine {
             samples: samples,
             timeline: tokenTimeline,
             activity: activity,
+            sessions: sessions,
             pricing: pricing,
             colorLedger: ModelColorLedger.load(from: defaults, providerID: provider.id),
             graceSeconds: grace,

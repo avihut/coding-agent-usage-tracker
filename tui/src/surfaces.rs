@@ -150,7 +150,36 @@ pub fn render_meter(
         })
         .unwrap_or_default();
 
+    // Item 20: the popover's per-model curves. Clipped through the same
+    // view the percent trace uses, so a spanned/zoomed frame can't show a
+    // curve running past the plot's own domain. Colours come from the
+    // digest's ledger — the TUI never derives a model colour.
+    let model_curves: Vec<(String, crate::digest::Rgb, Vec<(f64, f64)>)> = meter
+        .model_series
+        .iter()
+        .map(|curve| {
+            let points: Vec<(f64, f64)> = curve
+                .points
+                .iter()
+                .filter(|point| view.holds(point.t))
+                .map(|point| (view.at(point.t), point.percent))
+                .collect();
+            (curve.display_name.clone(), curve.color, points)
+        })
+        .filter(|(_, _, points)| points.len() > 1)
+        .collect();
+
     let mut datasets = Vec::new();
+    // Behind the percent trace: they are context for it, not rivals.
+    for (_, color, points) in &model_curves {
+        datasets.push(
+            Dataset::default()
+                .marker(symbols::Marker::Braille)
+                .graph_type(GraphType::Line)
+                .style(crate::ui::ramp(*color, 0.55))
+                .data(points),
+        );
+    }
     if !hatch.is_empty() {
         datasets.push(
             Dataset::default()
@@ -299,6 +328,28 @@ pub fn render_meter(
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(text, crate::ui::style(DIM)))),
             Rect::new(rect.x, readout_y, rect.width, 1),
+        );
+    }
+
+    // Item 20's breakdown legend: which curve is which, in the curves' own
+    // ledger colours. Only when a row is free below the readout — the
+    // readout is load-bearing and never yields its line.
+    let legend_y = readout_y + 1;
+    if legend_y < rect.y + rect.height && !model_curves.is_empty() {
+        let mut cells: Vec<Span> = Vec::new();
+        for (name, color, points) in &model_curves {
+            let peak = points.last().map(|point| point.1).unwrap_or(0.0);
+            if !cells.is_empty() {
+                cells.push(Span::styled("  ", crate::ui::style(DIM)));
+            }
+            cells.push(Span::styled(
+                format!("{} {name} {peak:.0}%", glyphs().dot),
+                crate::ui::style(crate::ui::ramp(*color, 1.0)),
+            ));
+        }
+        frame.render_widget(
+            Paragraph::new(Line::from(cells)),
+            Rect::new(rect.x, legend_y, rect.width, 1),
         );
     }
 }

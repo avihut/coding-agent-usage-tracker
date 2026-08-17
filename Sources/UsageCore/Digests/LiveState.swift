@@ -34,10 +34,13 @@ public struct LiveState: Codable, Sendable, Equatable {
     /// Today's models, heaviest first — the dashboard's model rows.
     public let models: [ModelRow]
     public let activity: ActivityRollup
+    /// Recent sessions, newest first — the shortlist a client renders.
+    /// Permitted to carry titles by the dated 2026-08-17 §10 re-amendment.
+    public let sessions: [SessionCard]
 
     public init(
         engine: EngineStatus, meters: [LiveMeter], menuBar: [SegmentStatus],
-        models: [ModelRow], activity: ActivityRollup
+        models: [ModelRow], activity: ActivityRollup, sessions: [SessionCard] = []
     ) {
         self.schemaVersion = Self.schemaVersion
         self.engine = engine
@@ -45,6 +48,7 @@ public struct LiveState: Codable, Sendable, Equatable {
         self.menuBar = menuBar
         self.models = models
         self.activity = activity
+        self.sessions = sessions
     }
 
     /// `<App Support>/<bundleID>/live-state.json` — the bundle root, above
@@ -244,6 +248,74 @@ public struct SeriesPoint: Codable, Sendable, Equatable {
     }
 }
 
+/// One model's cumulative curve across a meter's window, laid on the SAME
+/// percent axis as the meter's own `series` — see core `ModelCurves` for
+/// why that axis needs a percent-gained-per-token anchor. The publisher
+/// resolves the color from the ledger; clients MUST NOT re-derive it.
+public struct ModelSeries: Codable, Sendable, Equatable, Identifiable {
+    public let model: String
+    public let displayName: String
+    public let color: RGBColor
+    /// Cumulative, monotonic, thinned to the same cap as `series`. Values
+    /// may exceed 100 when the window is a span holding more than one limit
+    /// — that overshoot is information, not an error.
+    public let points: [SeriesPoint]
+
+    public var id: String { model }
+
+    public init(
+        model: String, displayName: String, color: RGBColor, points: [SeriesPoint]
+    ) {
+        self.model = model
+        self.displayName = displayName
+        self.color = color
+        self.points = points
+    }
+}
+
+/// One recent session, render-ready — the sessions shortlist the app shows,
+/// for a TUI-class client. Carries a title and a project label under the
+/// dated 2026-08-17 §10 re-amendment: the title is the session index's
+/// already-materialized one (aiTitle, else the scrubbed ≤120-char first
+/// prompt), and `project` is a DIRECTORY BASENAME — the full-path ban still
+/// binds, so no path component above it may appear here.
+public struct SessionCard: Codable, Sendable, Equatable, Identifiable {
+    public let id: String
+    public let title: String
+    /// Basename only, never a path. Nil when the session records no cwd.
+    public let project: String?
+    public let branch: String?
+    public let startedAt: Date
+    /// Honest working time, not wall span.
+    public let activeSeconds: TimeInterval
+    /// Nil = nothing in the session was priceable — absent, never 0.
+    public let cost: Double?
+    public let tokens: Int
+    public let prompts: Int
+    public let apiCalls: Int
+    /// Ledger colors of the models this session used, heaviest first — the
+    /// shortlist's model dots.
+    public let modelColors: [RGBColor]
+
+    public init(
+        id: String, title: String, project: String?, branch: String?,
+        startedAt: Date, activeSeconds: TimeInterval, cost: Double?,
+        tokens: Int, prompts: Int, apiCalls: Int, modelColors: [RGBColor]
+    ) {
+        self.id = id
+        self.title = title
+        self.project = project
+        self.branch = branch
+        self.startedAt = startedAt
+        self.activeSeconds = activeSeconds
+        self.cost = cost
+        self.tokens = tokens
+        self.prompts = prompts
+        self.apiCalls = apiCalls
+        self.modelColors = modelColors
+    }
+}
+
 /// One grace-stitched activity stretch inside a meter's window.
 public struct Stretch: Codable, Sendable, Equatable {
     public let start: Date
@@ -327,14 +399,19 @@ public struct LiveMeter: Codable, Sendable, Equatable, Identifiable {
     /// entering at height, hold-then-fall pairs at reset cliffs.
     public let series: [SeriesPoint]
     public let stretches: [Stretch]
+    /// Per-model cumulative curves over this window, on `series`' axis.
+    /// Empty when the window holds no attributable model activity — absent,
+    /// never a set of flat zero lines.
+    public let modelSeries: [ModelSeries]
 
     public init(
         id: String, label: String, tag: String, percent: Int?, level: String,
         rank: Int, rateWindowSeconds: TimeInterval, forcesWarning: Bool,
         risk: RGBColor?, resetsAt: Date?, limitWindow: TimeInterval?,
         scopedModelName: String?, resetCaption: String?, forecast: MeterForecast?,
-        series: [SeriesPoint], stretches: [Stretch]
+        series: [SeriesPoint], stretches: [Stretch], modelSeries: [ModelSeries] = []
     ) {
+        self.modelSeries = modelSeries
         self.id = id
         self.label = label
         self.tag = tag
@@ -490,6 +567,8 @@ public enum LiveStateBuilder {
     public static let daysHorizon: TimeInterval = 366 * 86400
     public static let modelDaysHorizon: TimeInterval = 35 * 86400
     public static let seriesCap = 120
+    /// The shortlist's depth — what a dashboard section can show.
+    public static let sessionsCap = 8
     public static let curveCap = 48
 
     public static func build(
@@ -505,6 +584,9 @@ public enum LiveStateBuilder {
         samples: [UsageSample],
         timeline: [TokenSlot],
         activity: [DailyActivity],
+        /// Recent sessions for the shortlist; empty for providers with no
+        /// session index.
+        sessions: [SessionSummary] = [],
         pricing: PricingTable,
         colorLedger: ModelColorLedger,
         graceSeconds: TimeInterval,
@@ -586,6 +668,7 @@ public enum LiveStateBuilder {
             liveMeter(
                 meter, prediction: predictions[meter.label], samples: samples,
                 timeline: timeline, catalog: catalog, graceSeconds: graceSeconds,
+                colorLedger: colorLedger, accent: accent,
                 now: now, timeZone: calendar.timeZone, locale: locale)
         }
 
@@ -647,7 +730,10 @@ public enum LiveStateBuilder {
 
         return LiveState(
             engine: engine, meters: meters, menuBar: menuBar, models: models,
-            activity: activityRollup)
+            activity: activityRollup,
+            sessions: sessionCards(
+                sessions, pricing: pricing, catalog: catalog,
+                colorLedger: colorLedger, accent: accent))
     }
 
     // MARK: - Meters
@@ -655,6 +741,7 @@ public enum LiveStateBuilder {
     private static func liveMeter(
         _ meter: Meter, prediction: UsagePrediction?, samples: [UsageSample],
         timeline: [TokenSlot], catalog: ModelCatalog, graceSeconds: TimeInterval,
+        colorLedger: ModelColorLedger, accent: RGBColor,
         now: Date, timeZone: TimeZone, locale: Locale
     ) -> LiveMeter {
         // The popover's Window span when the meter knows its bounds, a
@@ -714,7 +801,107 @@ public enum LiveStateBuilder {
             series: series,
             stretches: stretches(
                 in: domain, meter: meter, timeline: timeline, catalog: catalog,
-                graceSeconds: graceSeconds, exhaustsAt: prediction?.exhaustsAt, now: now))
+                graceSeconds: graceSeconds, exhaustsAt: prediction?.exhaustsAt, now: now),
+            modelSeries: modelSeries(
+                in: domain, meter: meter, percents: audit.percent.map(\.percent),
+                timeline: timeline, catalog: catalog,
+                colorLedger: colorLedger, accent: accent))
+    }
+
+    /// The sessions shortlist, newest first and capped — a dashboard shows
+    /// a handful, and an unbounded list would grow the digest without end.
+    ///
+    /// §10 (re-amendment 2026-08-17) is enforced HERE, not by the caller:
+    /// `project` is the cwd's LAST path component and nothing else. The
+    /// full-path ban still binds, so this is the one place a path may be
+    /// touched, and only to throw the path away.
+    static func sessionCards(
+        _ sessions: [SessionSummary], pricing: PricingTable, catalog: ModelCatalog,
+        colorLedger: ModelColorLedger, accent: RGBColor
+    ) -> [SessionCard] {
+        sessions
+            .sorted { $0.end > $1.end }
+            .prefix(sessionsCap)
+            .map { session in
+                // Heaviest model first, so the dots read as a mix, not a list.
+                let ranked = session.models
+                    .sorted {
+                        $0.value.total != $1.value.total
+                            ? $0.value.total > $1.value.total : $0.key < $1.key
+                    }
+                let costs = ranked.compactMap { entry in
+                    pricing.rates(for: entry.key).map { $0.dollars(for: entry.value) }
+                }
+                return SessionCard(
+                    id: session.id,
+                    title: session.title,
+                    project: session.projectPath.map {
+                        URL(fileURLWithPath: $0).lastPathComponent
+                    },
+                    branch: session.gitBranch,
+                    startedAt: session.start,
+                    activeSeconds: session.activeSeconds,
+                    // Absent, never 0: nothing priceable means no number.
+                    cost: costs.isEmpty ? nil : costs.reduce(0, +),
+                    tokens: session.totalTokens,
+                    prompts: session.prompts,
+                    apiCalls: session.apiCalls,
+                    modelColors: ranked.map { entry in
+                        let slots = colorLedger.slots(
+                            for: entry.key, family: catalog.familyName(entry.key))
+                            ?? (hue: 0, shade: 0)
+                        return ModelColorMath.rgb(
+                            hueSlot: slots.hue, shadeSlot: slots.shade, accent: accent)
+                    })
+            }
+    }
+
+    /// Per-model cumulative curves over the meter's window, built by the
+    /// SAME core math the app's popover draws (`ModelCurves`), so the TUI
+    /// renders the app's curves rather than an approximation of them.
+    ///
+    /// Capped at 100 here because a meter's window IS one limit window —
+    /// the uncapped case belongs to the app's multi-window spans, which the
+    /// digest doesn't publish. Colors come resolved from the ledger; a
+    /// client re-deriving them would drift from the app.
+    private static func modelSeries(
+        in domain: DateInterval, meter: Meter, percents: [Int],
+        timeline: [TokenSlot], catalog: ModelCatalog,
+        colorLedger: ModelColorLedger, accent: RGBColor
+    ) -> [ModelSeries] {
+        let scoped = timeline.filter { slot in
+            guard domain.contains(slot.t) else { return false }
+            guard let needle = meter.scopedModelName?.lowercased() else { return true }
+            return slot.model.lowercased().contains(needle)
+        }
+        let models = Array(Set(scoped.map(\.model))).sorted()
+        guard !models.isEmpty else { return [] }
+        let anchor = ModelCurves.gainsPercentPerToken(
+            percents: percents, tokens: scoped.reduce(0) { $0 + $1.tally.total })
+        return ModelCurves.build(
+            models: models,
+            moments: scoped.map {
+                ModelCurves.Moment(model: $0.model, t: $0.t, amount: $0.tally.total)
+            },
+            start: domain.start, end: domain.end,
+            percentPerToken: anchor, cap: true
+        ).map { curve in
+            let slots = colorLedger.slots(
+                for: curve.model, family: catalog.familyName(curve.model))
+                ?? (hue: 0, shade: 0)
+            return ModelSeries(
+                model: curve.model,
+                displayName: catalog.displayName(curve.model),
+                color: ModelColorMath.rgb(
+                    hueSlot: slots.hue, shadeSlot: slots.shade, accent: accent),
+                // curveCap, not seriesCap: these are OVERLAY curves like the
+                // forecast trajectory, and they multiply by model count —
+                // 120 points per model per meter bloated the digest by ~2k
+                // lines for a plot no terminal can resolve that finely.
+                points: thin(
+                    curve.points.map { SeriesPoint(t: $0.t, percent: $0.value) },
+                    to: Self.curveCap))
+        }
     }
 
     /// The strip under the popover chart: minute slots (scoped meters keep

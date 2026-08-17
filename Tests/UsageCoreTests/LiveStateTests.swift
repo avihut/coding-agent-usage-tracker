@@ -109,6 +109,31 @@ struct LiveStateTests {
                 ]),
         ]
 
+        // One session with a project path (whose BASENAME is all §10 lets
+        // the digest carry) and one without, so the fixture pins both.
+        let fixtureSessions = [
+            SessionSummary(
+                id: "session-a", title: "Wire the digest's sessions section",
+                projectPath: "/Users/someone/Projects/claude-usage-menubar/main",
+                gitBranch: "main", agentVersion: "2.1.231", kind: .interactive,
+                start: date("2026-08-16T09:00:00Z"), end: date("2026-08-16T11:30:00Z"),
+                activeSeconds: 5400,
+                prompts: 12, apiCalls: 40, toolCalls: 30, subagentCount: 1,
+                compactions: 0,
+                models: [
+                    "claude-fable-5": TokenTally(input: 8400, output: 1080),
+                    "mystery-model": TokenTally(input: 50, output: 5),
+                ],
+                stretches: []),
+            SessionSummary(
+                id: "session-b", title: "A background run", projectPath: nil,
+                gitBranch: nil, agentVersion: nil, kind: .background,
+                start: date("2026-08-15T20:00:00Z"), end: date("2026-08-15T20:30:00Z"),
+                activeSeconds: 1800,
+                prompts: 1, apiCalls: 3, toolCalls: 0, subagentCount: 0,
+                compactions: 0, models: [:], stretches: []),
+        ]
+
         return LiveStateBuilder.build(
             provider: provider,
             host: "app",
@@ -121,6 +146,7 @@ struct LiveStateTests {
             samples: samples,
             timeline: timeline,
             activity: activity,
+            sessions: fixtureSessions,
             pricing: pricing,
             colorLedger: ledger,
             graceSeconds: 900,
@@ -313,5 +339,63 @@ struct LiveStateTests {
         let data = try Data(contentsOf: fixtureURL)
         let decoded = try LiveState.decoder().decode(LiveState.self, from: data)
         #expect(decoded == state)
+    }
+}
+
+extension LiveStateTests {
+    /// Item 20: the digest carries the popover's per-model curves, built by
+    /// the same core math, capped (a meter's window IS one limit window),
+    /// and coloured from the ledger so a client never re-derives them.
+    @Test func perModelWindowSeries() throws {
+        let state = buildFixture()
+        let meter = try #require(state.meters.first { $0.id == "session" })
+
+        #expect(!meter.modelSeries.isEmpty)
+        let curve = try #require(meter.modelSeries.first { $0.model == "claude-fable-5" })
+        #expect(curve.displayName.isEmpty == false)
+        // Cumulative, monotonic, and inside one limit.
+        let values = curve.points.map(\.percent)
+        #expect(zip(values, values.dropFirst()).allSatisfy { $0 <= $1 })
+        #expect(values.allSatisfy { $0 <= 100 })
+        // Same ledger colour the models table publishes — not a fresh guess.
+        let row = try #require(state.models.first { $0.id == "claude-fable-5" })
+        #expect(curve.color == row.color)
+    }
+
+    /// Item 25 under the dated §10 re-amendment: titles are permitted, the
+    /// project is a BASENAME, and no field may carry a path.
+    @Test func sessionsShortlistCarriesNoPaths() throws {
+        let state = buildFixture()
+        #expect(state.sessions.count == 2)
+
+        // Newest first.
+        let first = try #require(state.sessions.first)
+        #expect(first.id == "session-a")
+        #expect(first.title == "Wire the digest's sessions section")
+        // The cwd was "/Users/someone/Projects/claude-usage-menubar/main".
+        #expect(first.project == "main")
+        #expect(first.branch == "main")
+        #expect(first.prompts == 12)
+        #expect(first.apiCalls == 40)
+        #expect(first.tokens == 9535)
+        #expect(first.modelColors.count == 2)
+
+        // No field anywhere may contain a path separator or a home prefix.
+        for card in state.sessions {
+            for field in [card.title, card.project, card.branch].compactMap({ $0 }) {
+                #expect(!field.contains("/"))
+                #expect(!field.contains("~"))
+            }
+        }
+    }
+
+    /// A session with nothing priceable reports nil cost — absent, not $0.
+    @Test func anUnpricedSessionHasNoCost() throws {
+        let state = buildFixture()
+        let background = try #require(state.sessions.first { $0.id == "session-b" })
+
+        #expect(background.project == nil)
+        #expect(background.cost == nil)
+        #expect(background.tokens == 0)
     }
 }

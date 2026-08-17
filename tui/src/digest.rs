@@ -26,6 +26,31 @@ pub struct LiveState {
     pub menu_bar: Vec<SegmentStatus>,
     pub models: Vec<ModelRow>,
     pub activity: ActivityRollup,
+    /// Recent sessions, newest first. Default-empty so a digest from an
+    /// engine that predates the section still decodes.
+    #[serde(default)]
+    pub sessions: Vec<SessionCard>,
+}
+
+/// One recent session, render-ready. Titles and a basename-only project
+/// label are permitted by the digest's dated 2026-08-17 §10 re-amendment;
+/// no field here may carry a path, and the TUI never derives one.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionCard {
+    pub id: String,
+    pub title: String,
+    pub project: Option<String>,
+    pub branch: Option<String>,
+    #[serde(with = "time::serde::rfc3339")]
+    pub started_at: OffsetDateTime,
+    pub active_seconds: f64,
+    /// None = nothing priceable — absent, never 0.
+    pub cost: Option<f64>,
+    pub tokens: i64,
+    pub prompts: i64,
+    pub api_calls: i64,
+    pub model_colors: Vec<Rgb>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -129,6 +154,20 @@ pub struct LiveMeter {
     pub forecast: Option<MeterForecast>,
     pub series: Vec<SeriesPoint>,
     pub stretches: Vec<Stretch>,
+    /// Per-model cumulative curves over this window, on `series`' own
+    /// percent axis, coloured by the engine's ledger — never re-derived
+    /// here. Default-empty for engines that predate the field.
+    #[serde(default)]
+    pub model_series: Vec<ModelSeries>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelSeries {
+    pub model: String,
+    pub display_name: String,
+    pub color: Rgb,
+    pub points: Vec<SeriesPoint>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -358,5 +397,90 @@ mod tests {
         value["meters"][0]["futureMeterFact"] = serde_json::json!("yes");
         let bytes = serde_json::to_vec(&value).unwrap();
         LiveState::parse(&bytes).expect("unknown fields must not break decode");
+    }
+}
+
+#[cfg(test)]
+mod wave4_tests {
+    use super::*;
+
+    fn golden() -> LiveState {
+        let raw = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../Tests/UsageCoreTests/Fixtures/digest/live-state-v1.json"
+        ))
+        .expect("golden fixture");
+        serde_json::from_str(&raw).expect("golden decodes")
+    }
+
+    /// Item 20: the per-model curves arrive with the engine's ledger colour
+    /// attached, so the TUI paints the app's colours instead of guessing.
+    #[test]
+    fn per_model_series_arrive_coloured() {
+        let state = golden();
+        let meter = state
+            .meters
+            .iter()
+            .find(|m| m.id == "session")
+            .expect("session meter");
+
+        assert!(!meter.model_series.is_empty());
+        let curve = meter
+            .model_series
+            .iter()
+            .find(|c| c.model == "claude-fable-5")
+            .expect("fable curve");
+        assert!(!curve.display_name.is_empty());
+        assert!(!curve.points.is_empty());
+        // Cumulative and inside one limit — the engine caps a meter window.
+        let values: Vec<f64> = curve.points.iter().map(|p| p.percent).collect();
+        assert!(values.windows(2).all(|w| w[0] <= w[1]));
+        assert!(values.iter().all(|v| *v <= 100.0));
+        // The same colour the models table publishes.
+        let row = state
+            .models
+            .iter()
+            .find(|m| m.id == "claude-fable-5")
+            .expect("fable row");
+        assert_eq!(curve.color, row.color);
+    }
+
+    /// Item 25: sessions decode, and the §10 promise holds on the wire —
+    /// the project is a basename and nothing carries a path.
+    #[test]
+    fn sessions_decode_without_paths() {
+        let state = golden();
+        assert_eq!(state.sessions.len(), 2);
+
+        let first = &state.sessions[0];
+        assert_eq!(first.id, "session-a");
+        assert_eq!(first.project.as_deref(), Some("main"));
+        assert_eq!(first.tokens, 9535);
+        assert_eq!(first.prompts, 12);
+        assert!(!first.model_colors.is_empty());
+
+        for card in &state.sessions {
+            for field in [Some(card.title.clone()), card.project.clone(), card.branch.clone()]
+                .into_iter()
+                .flatten()
+            {
+                assert!(!field.contains('/'), "path leaked: {field}");
+                assert!(!field.contains('~'), "home leaked: {field}");
+            }
+        }
+    }
+
+    /// Absent is None, never 0 — an unpriced session reports no cost.
+    #[test]
+    fn an_unpriced_session_has_no_cost() {
+        let state = golden();
+        let background = state
+            .sessions
+            .iter()
+            .find(|s| s.id == "session-b")
+            .expect("background session");
+
+        assert!(background.cost.is_none());
+        assert!(background.project.is_none());
     }
 }
