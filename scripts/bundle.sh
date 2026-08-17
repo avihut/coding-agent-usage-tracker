@@ -9,6 +9,7 @@ CONFIG="${1:-release}"
 
 swift build -c "$CONFIG" --product ClaudeUsage --package-path "$ROOT"
 swift build -c "$CONFIG" --product usaged --package-path "$ROOT"
+swift build -c "$CONFIG" --product usage-cli --package-path "$ROOT"
 
 APP="$ROOT/ClaudeUsage.app"
 rm -rf "$APP"
@@ -20,6 +21,13 @@ cp "$ROOT/.build/$CONFIG/ClaudeUsage" "$APP/Contents/MacOS/ClaudeUsage"
 # the Keychain, so the stable identity matters (same ACL as the app).
 cp "$ROOT/.build/$CONFIG/usaged" "$APP/Contents/MacOS/usaged"
 "$ROOT/scripts/sign.sh" "$APP/Contents/MacOS/usaged"
+# The query CLI ships beside the daemon for the same one-copy reason —
+# scripts and the Claude Code status line need a path that stays stable
+# and CURRENT across releases. A dev-tree binary rots: a pre-v0.81.0
+# .build/release leftover routed `session … tokens` into the credentialed
+# bare fetch and hung a probe for two minutes.
+cp "$ROOT/.build/$CONFIG/usage-cli" "$APP/Contents/MacOS/usage-cli"
+"$ROOT/scripts/sign.sh" "$APP/Contents/MacOS/usage-cli"
 "$ROOT/scripts/icon.sh"
 cp "$ROOT/.build/icon/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 "$ROOT/scripts/sign.sh" "$APP"
