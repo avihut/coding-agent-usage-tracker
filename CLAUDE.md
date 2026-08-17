@@ -168,11 +168,11 @@ the README rather than silently deviating.
   3 under 76 cols, 5 at/above; gated ≥44 cols × ≥9 rows). Dashboard
   sections get a blank row between them when it costs no section
   (layout::pick gapped-vs-tight). v0.76.0 (parity wave 3): the meter
-  surface's span math lives in tui/src/meter.rs — Span Sliding/Window
-  (`s`; Window needs a live future reset, else the key says why), a
+  surface's span math lives in tui/src/meter.rs — Span History/Current
+  (`s`; Current needs a live future reset, else the key says why), a
   digest-BOUNDED zoom ladder (`z` zooms IN one rung per press, wrapping
   at the tightest; the digest publishes ONE window per meter, so
-  sliding is a sub-range of it — the ladder is capped by that window
+  history is a sub-range of it — the ladder is capped by that window
   and floored at 3× the MEDIAN gap between the meter's own published
   points, because 120 points thinned over 7 days would leave a 1h rung
   empty; median, not mean, so one outage can't strip usable rungs),
@@ -583,7 +583,7 @@ the README rather than silently deviating.
   heatmap cells; fetchedAt = count time (a zero count is FRESH info —
   unlike Codex this meter is never stale). `PricingFeedSelector` gained
   `normalizeKey` (gemini feed keys are "gemini/"-route-prefixed;
-  stripped so transcript ids match). SlidingFrame default tier: ≤6h →
+  stripped so transcript ids match). HistoryFrame default tier: ≤6h →
   .h5, ≤24h → .h24, else .d7. oauth_creds.json/google_accounts.json
   never read.
 - CODEX PROVIDER (2026-08-15 v0.27.0, first non-Claude harness):
@@ -742,12 +742,12 @@ the README rather than silently deviating.
   its color. Chart labels are LAYERED: strip duration > focused-model name >
   now — lower layers disappear while an upper one overlaps
   (nowEclipsed's track-space estimate). A
-  Sliding|Window span picker (hidden without a live reset; choice
+  History|Current span picker (hidden without a live reset; choice
   persisted per meter via @AppStorage `meterPopoverSpan-<id>`, since the
   shared popover would otherwise leak one meter's choice onto the next)
   switches the X domain between trailing-now and the limit window
   start-to-reset; the
-  Window span draws a 30s-ticking vertical now rule (labeled with the
+  Current span draws a 30s-ticking vertical now rule (labeled with the
   clock time — all axis/annotation labels on this chart are semibold) and
   the prediction engine's dashed trajectory in the risk ramp color, and
   hover readouts right of it report
@@ -937,7 +937,7 @@ the README rather than silently deviating.
   exists — no hard warning/critical cliff). The blend lives in ONE
   file-scope `riskColor(severity:)` (Panel/RiskColor.swift) — bars,
   captions, the chart's dashed trajectory and its Y-axis projection
-  label all call it. The Window chart labels the
+  label all call it. The Current-span chart labels the
   projected finish percent on the Y axis in that ramp color
   (only while finishing within limits; a standard mark it would eclipse
   is dropped, `axisLabelClearance` 12 domain units ≈ one label height);

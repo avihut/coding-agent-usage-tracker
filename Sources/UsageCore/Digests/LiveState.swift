@@ -744,7 +744,7 @@ public enum LiveStateBuilder {
         colorLedger: ModelColorLedger, accent: RGBColor,
         now: Date, timeZone: TimeZone, locale: Locale
     ) -> LiveMeter {
-        // The popover's Window span when the meter knows its bounds, a
+        // The popover's Current span when the meter knows its bounds, a
         // trailing span otherwise.
         let domain: DateInterval
         if let resetsAt = meter.resetsAt, let window = meter.limitWindow, resetsAt > now {

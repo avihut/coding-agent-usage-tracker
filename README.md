@@ -16,7 +16,7 @@ per-day totals / 30D calendar / all-time grid, each viewable by token
 volume or estimated cost) with one-line day tooltips, and click-to-drill
 day views — a model donut plus that day's usage table, animated push/pop with a
 back button; per-meter hover popovers graphing percent history overlaid
-with every model's cumulative token curve — a Sliding/Window span picker
+with every model's cumulative token curve — a History/Current span picker
 switches between the trailing window and the limit window start-to-reset,
 where a vertical now rule separates measured usage from the prediction engine's
 dashed projected trajectory, a red mark pins the moment the current pace

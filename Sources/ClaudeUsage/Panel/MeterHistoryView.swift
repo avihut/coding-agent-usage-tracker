@@ -4,7 +4,7 @@ import UsageCore
 
 /// Per-limit history and forecast: the meter's sampled percent overlaid with
 /// every model's cumulative token curve (normalized to the plot height), in
-/// either a sliding trailing window or the limit window start-to-reset — the
+/// either the History span's trailing window or the limit window start-to-reset — the
 /// latter with a now-notch separating measured from predicted, and the
 /// prediction engine's dashed trajectory to the reset. The breakdown table
 /// doubles as a legend: hovering a curve or its row focuses the pair and
@@ -22,13 +22,27 @@ struct MeterHistoryView: View {
     /// One-word span choices: a trailing window ending now, or the limit
     /// window itself, start to reset.
     enum Span: String, CaseIterable {
-        case sliding = "Sliding"
-        case window = "Window"
+        case history = "History"
+        case current = "Current"
+
+        /// Legacy tolerance: this popover's per-meter @AppStorage choice was
+        /// persisted as "Sliding"/"Window" before the rename — accept both
+        /// so an existing on-disk choice keeps meaning what it meant instead
+        /// of silently resetting to the default. The compiler still
+        /// synthesizes the `rawValue` getter from each case's literal, so
+        /// new choices persist as "History"/"Current".
+        init?(rawValue: String) {
+            switch rawValue {
+            case "History", "Sliding": self = .history
+            case "Current", "Window": self = .current
+            default: return nil
+            }
+        }
     }
 
-    /// The Sliding span's trailing frame. Week-to-date follows the
+    /// The History span's trailing frame. Week-to-date follows the
     /// calendar locale's first weekday (Sunday or Monday).
-    enum SlidingFrame: String, CaseIterable {
+    enum HistoryFrame: String, CaseIterable {
         case h5 = "5h"
         case h12 = "12h"
         case h24 = "24h"
@@ -66,9 +80,9 @@ struct MeterHistoryView: View {
     /// relaunches — the single shared popover would otherwise leak one
     /// meter's choice onto the next while sweeping rows.
     @AppStorage private var span: Span
-    /// The Sliding frame, remembered the same way; defaults to the
+    /// The History frame, remembered the same way; defaults to the
     /// meter's native window scale.
-    @AppStorage private var slidingFrame: SlidingFrame
+    @AppStorage private var historyFrame: HistoryFrame
     /// Idle tolerance for the activity strip — adjustable in Settings.
     @AppStorage(ActivityGrace.storageKey)
     private var graceSeconds = ActivityGrace.defaultSeconds
@@ -94,15 +108,15 @@ struct MeterHistoryView: View {
         // Meter.id is positional within one provider's snapshot — the
         // provider prefix keeps two harnesses' "0-session" prefs apart.
         _span = AppStorage(
-            wrappedValue: .sliding, "meterPopoverSpan-\(providerID).\(meter.id)")
-        _slidingFrame = AppStorage(
+            wrappedValue: .history, "meterPopoverSpan-\(providerID).\(meter.id)")
+        _historyFrame = AppStorage(
             wrappedValue: Self.defaultFrame(limitWindow: meter.limitWindow),
             "meterSlidingFrame-\(providerID).\(meter.id)")
     }
 
     /// A meter's native scale picks its default frame: 5h windows read at
     /// 5h, daily windows at 24h, weekly at 7d.
-    private static func defaultFrame(limitWindow: TimeInterval?) -> SlidingFrame {
+    private static func defaultFrame(limitWindow: TimeInterval?) -> HistoryFrame {
         let window = limitWindow ?? .infinity
         if window <= 6 * 3600 { return .h5 }
         if window <= 24 * 3600 { return .h24 }
@@ -150,28 +164,28 @@ struct MeterHistoryView: View {
     private var window: TimeInterval { meter.limitWindow ?? 7 * 86400 }
     private var orange: Color { ProviderStyle.accentColor }
 
-    /// A live future reset unlocks the Window span; without one (stale data,
-    /// missing reset) the picker hides and the view stays sliding.
+    /// A live future reset unlocks the Current span; without one (stale data,
+    /// missing reset) the picker hides and the view stays on History.
     private var liveReset: Date? {
         meter.resetsAt.flatMap { $0 > Date() ? $0 : nil }
     }
 
-    private var effectiveSpan: Span { liveReset == nil ? .sliding : span }
+    private var effectiveSpan: Span { liveReset == nil ? .history : span }
 
     private var domain: (start: Date, end: Date) {
-        if effectiveSpan == .window, let reset = liveReset {
+        if effectiveSpan == .current, let reset = liveReset {
             return (reset.addingTimeInterval(-window), reset)
         }
         let now = Date()
-        return (now.addingTimeInterval(-slidingFrame.length(now: now)), now)
+        return (now.addingTimeInterval(-historyFrame.length(now: now)), now)
     }
 
     private var spanLabel: String {
         switch effectiveSpan {
-        case .window:
+        case .current:
             meter.rank == 0 ? "this session"
                 : window >= 6 * 86400 ? "this week" : "this window"
-        case .sliding: slidingFrame.label
+        case .history: historyFrame.label
         }
     }
 
@@ -180,15 +194,15 @@ struct MeterHistoryView: View {
     /// default menu style wraps it in a bordered pull-down pill.
     private var framePicker: some View {
         Menu {
-            Picker("Frame", selection: $slidingFrame) {
-                ForEach(SlidingFrame.allCases, id: \.self) { frame in
+            Picker("Frame", selection: $historyFrame) {
+                ForEach(HistoryFrame.allCases, id: \.self) { frame in
                     Text(frame.label).tag(frame)
                 }
             }
             .pickerStyle(.inline)
         } label: {
             HStack(spacing: 2) {
-                Text(slidingFrame.rawValue)
+                Text(historyFrame.rawValue)
                     .font(.caption2.weight(.semibold))
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.system(size: 7, weight: .semibold))
@@ -313,10 +327,10 @@ struct MeterHistoryView: View {
             HStack(alignment: .firstTextBaseline) {
                 Text(meter.label).font(.caption.bold())
                 Spacer()
-                // The Sliding span picks its trailing frame from a compact
-                // dropdown beside the span picker; the Window span's frame
+                // The History span picks its trailing frame from a compact
+                // dropdown beside the span picker; the Current span's frame
                 // IS the limit window, so the dropdown hides there.
-                if effectiveSpan == .sliding {
+                if effectiveSpan == .history {
                     framePicker
                 }
                 if liveReset != nil {
@@ -409,7 +423,7 @@ struct MeterHistoryView: View {
         let drawnPercent = series.drawn
         // Y geometry scales from the tallest curve: the headroom band that
         // hosts the top labels is always 15% of the data ceiling, so the
-        // Window span keeps its familiar 100→115 shape and a Sliding frame
+        // Current span keeps its familiar 100→115 shape and a History frame
         // holding 2.6 limits gets 260→299 — labels never land on data.
         let ceiling = dataCeiling(curves)
         let plotTop = ceiling * 1.15
@@ -454,7 +468,7 @@ struct MeterHistoryView: View {
                     hoveredReset, window: window,
                     start: start, end: end, ceiling: ceiling)
             }
-            if effectiveSpan == .sliding,
+            if effectiveSpan == .history,
                ceiling > 100 || end.timeIntervalSince(start) > window * 1.01 {
                 RuleMark(y: .value("Usage", 100))
                     .foregroundStyle(.tertiary)
@@ -500,7 +514,7 @@ struct MeterHistoryView: View {
                 .foregroundStyle(orange.opacity(focusedModel == nil ? 1 : 0.3))
                 .interpolationMethod(.monotone)
             }
-            if effectiveSpan == .window {
+            if effectiveSpan == .current {
                 // The prediction engine's trajectory: dashed, measured side
                 // of the notch left alone. It speaks the risk ramp — accent
                 // while the forecast is clean, yellow-to-red as the
@@ -786,21 +800,21 @@ struct MeterHistoryView: View {
     private static let stripBottom: Double = -7
     private static let stripTop: Double = -2
 
-    /// The projected limit-crossing inside the Window span, if the current
+    /// The projected limit-crossing inside the Current span, if the current
     /// pace spends the meter before the window resets.
     private var exhaustDate: Date? {
-        guard effectiveSpan == .window,
+        guard effectiveSpan == .current,
               let exhaust = prediction?.exhaustsAt,
               exhaust > domain.start, exhaust < domain.end
         else { return nil }
         return exhaust
     }
 
-    /// The Window span's projected finish height for the Y axis — only
+    /// The Current span's projected finish height for the Y axis — only
     /// while the forecast stays within the limit (an exhausting one is the
     /// red rule's story) and the axis still speaks percent.
     private var axisProjection: Double? {
-        guard effectiveSpan == .window, focusedModel == nil,
+        guard effectiveSpan == .current, focusedModel == nil,
               let prediction, prediction.exhaustsAt == nil,
               let projected = prediction.projectedAtReset, projected < 100
         else { return nil }
@@ -973,7 +987,7 @@ struct MeterHistoryView: View {
         // Month scale: sessions are minutes-to-hours wide — sub-pixel
         // slivers or misleading bucket-wide blobs at this zoom. The strip
         // goes quiet rather than cluttered; the heatmap owns that scale.
-        if effectiveSpan == .sliding, slidingFrame == .d30 { return [] }
+        if effectiveSpan == .history, historyFrame == .d30 { return [] }
         let start = domain.start
         let end = min(domain.end, now)
         let span = end.timeIntervalSince(start)
@@ -1087,8 +1101,8 @@ struct MeterHistoryView: View {
     /// through a reset — curves then fall back to busiest-model scaling
     /// and the axis stays percent.
     private func percentPerToken(rows: [ModelTokenUsage]) -> Double? {
-        if effectiveSpan == .sliding {
-            return slidingPercentPerToken ?? frameGainsPercentPerToken(rows: rows)
+        if effectiveSpan == .history {
+            return historyPercentPerToken ?? frameGainsPercentPerToken(rows: rows)
         }
         let total = WindowTokens.total(rows).total
         guard total > 0, let first = points.first, let last = points.last else { return nil }
@@ -1097,13 +1111,13 @@ struct MeterHistoryView: View {
         return delta / Double(total)
     }
 
-    /// The Sliding span's anchor. Its frame can straddle resets, where
+    /// The History span's anchor. Its frame can straddle resets, where
     /// percent deltas lie, so one limit's worth of tokens is measured on
     /// the CURRENT live window instead: the live percent over the tokens
     /// spent since that window began. Curves normalized by it read as
     /// fractions of a single limit — and may honestly exceed it across a
     /// frame longer than one window.
-    private var slidingPercentPerToken: Double? {
+    private var historyPercentPerToken: Double? {
         guard let reset = liveReset, let percent = meter.percent, percent >= 1
         else { return nil }
         let windowStart = reset.addingTimeInterval(-window)
@@ -1146,9 +1160,9 @@ struct MeterHistoryView: View {
         return abs(xLabel - xNow) < (labelWidth + 18) / 2
     }
 
-    /// Colours the curves core built. The Window span is one window —
+    /// Colours the curves core built. The Current span is one window —
     /// nothing can honestly exceed one limit there, so the cap is a safety
-    /// net; a Sliding frame can span several windows and the overshoot IS
+    /// net; a History frame can span several windows and the overshoot IS
     /// the information.
     private func modelCurves(
         rows: [ModelTokenUsage], colors: [String: Color], percentPerToken: Double?
@@ -1160,7 +1174,7 @@ struct MeterHistoryView: View {
                 ModelCurves.Moment(model: $0.model, t: $0.t, amount: $0.tally.total)
             },
             start: domain.start, end: end,
-            percentPerToken: percentPerToken, cap: effectiveSpan == .window
+            percentPerToken: percentPerToken, cap: effectiveSpan == .current
         ).map { curve in
             ModelCurve(
                 model: curve.model,
@@ -1169,8 +1183,8 @@ struct MeterHistoryView: View {
         }
     }
 
-    /// The tallest drawn value: 100 in the Window span (curves cap there),
-    /// beyond it when a Sliding frame holds more than one limit's worth.
+    /// The tallest drawn value: 100 in the Current span (curves cap there),
+    /// beyond it when a History frame holds more than one limit's worth.
     /// The plot top and the label headroom band scale from it.
     private func dataCeiling(_ curves: [ModelCurve]) -> Double {
         max(100, curves.flatMap { $0.points }.map { $0.normalized }.max() ?? 100)
@@ -1191,14 +1205,14 @@ struct MeterHistoryView: View {
             ?? "Hover the graph for point details"
     }
 
-    /// Start and end of the visible domain under the chart — in Window span
+    /// Start and end of the visible domain under the chart — in Current span
     /// the end is the reset itself.
     private var domainLabels: some View {
         let (start, end) = domain
         return HStack {
             Text(timeLabel(start))
             Spacer()
-            Text(effectiveSpan == .window ? "resets \(timeLabel(end))" : "now")
+            Text(effectiveSpan == .current ? "resets \(timeLabel(end))" : "now")
         }
         .font(.caption2)
         .foregroundStyle(.tertiary)
@@ -1237,7 +1251,7 @@ struct MeterHistoryView: View {
         let now = Date()
         let (domainStart, domainEnd) = domain
         let t = min(max(hoverDate, domainStart), domainEnd)
-        if effectiveSpan == .window, t > now {
+        if effectiveSpan == .current, t > now {
             guard let prediction,
                   let projected = PredictionEngine.percent(onCurve: prediction.curve, at: t)
             else { return nil }

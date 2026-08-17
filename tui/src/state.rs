@@ -278,7 +278,7 @@ impl App {
     }
 
     /// The span and zoom rung in force for a meter — the app's own opening
-    /// state (sliding, at the meter's native scale) until `s`/`z` say
+    /// state (history, at the meter's native scale) until `s`/`z` say
     /// otherwise.
     pub fn meter_view(&self, meter: &crate::digest::LiveMeter) -> (crate::meter::Span, usize) {
         self.meter_span

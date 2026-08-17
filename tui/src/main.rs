@@ -346,9 +346,9 @@ fn focus_move(app: &mut App, dx: i32, dy: i32) {
     }
 }
 
-/// `s` swaps the open meter's span (sliding ↔ its limit window); `z` zooms
-/// the sliding frame in. Zooming out of the Window span means leaving it,
-/// so `z` there drops to sliding first — every press changes the view.
+/// `s` swaps the open meter's span (history ↔ its limit window); `z` zooms
+/// the history frame in. Zooming out of the Current span means leaving it,
+/// so `z` there drops to history first — every press changes the view.
 fn meter_span(app: &mut App, zoom: bool) {
     let Surface::Meter(index) = app.surface else {
         app.notice = Some("open a meter first (1-3 or click one)".into());
@@ -362,22 +362,22 @@ fn meter_span(app: &mut App, zoom: bool) {
     let rungs = meter::ladder(meter);
     let next = if zoom {
         match span {
-            meter::Span::Window => (meter::Span::Sliding, rung.min(rungs.len() - 1)),
+            meter::Span::Current => (meter::Span::History, rung.min(rungs.len() - 1)),
             // Zoom IN: each press tightens the frame, wrapping back out at
             // the end. Stepping the other way would make the first press on
             // every meter jump to the tightest rung — the least useful one,
             // and on a coarsely-sampled weekly meter a near-empty plot.
-            meter::Span::Sliding => (
+            meter::Span::History => (
                 span,
                 rung.min(rungs.len() - 1)
                     .checked_sub(1)
                     .unwrap_or(rungs.len() - 1),
             ),
         }
-    } else if span == meter::Span::Sliding && !meter::window_available(meter, now) {
+    } else if span == meter::Span::History && !meter::window_available(meter, now) {
         // No live reset means no window to show — the app hides the
         // picker in exactly this case, so say why instead of no-op'ing.
-        app.notice = Some("no live reset — this meter has only a sliding span".into());
+        app.notice = Some("no live reset — this meter has only a history span".into());
         return;
     } else {
         (span.toggled(), rung)

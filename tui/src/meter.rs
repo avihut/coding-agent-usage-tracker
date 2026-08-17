@@ -6,9 +6,9 @@
 //! the stretch track, the readout and the ←→ scrub all read this one slice,
 //! so a cursor can never land on a sample that isn't drawn.
 //!
-//! Parity note (`Panel/MeterHistoryView.swift`): the app's Sliding span
+//! Parity note (`Panel/MeterHistoryView.swift`): the app's History span
 //! reads 56 days of samples and can cross resets. The digest publishes ONE
-//! window per meter — so here Sliding is a trailing sub-range of that
+//! window per meter — so here History is a trailing sub-range of that
 //! window, and the zoom ladder is bounded at BOTH ends by it: capped by the
 //! window's length, floored by how far apart that window's 120 published
 //! points fall. That is why the ladder grows downward (1h/2h) where the
@@ -23,15 +23,15 @@ use time::{Duration, OffsetDateTime};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Span {
     #[default]
-    Sliding,
-    Window,
+    History,
+    Current,
 }
 
 impl Span {
     pub fn toggled(self) -> Self {
         match self {
-            Self::Sliding => Self::Window,
-            Self::Window => Self::Sliding,
+            Self::History => Self::Current,
+            Self::Current => Self::History,
         }
     }
 }
@@ -129,8 +129,8 @@ pub fn default_rung(meter: &LiveMeter) -> usize {
         .unwrap_or(rungs.len() - 1)
 }
 
-/// A live future reset is what unlocks the Window span — without one the
-/// app hides the picker and stays sliding, and so does the pane.
+/// A live future reset is what unlocks the Current span — without one the
+/// app hides the picker and stays on History, and so does the pane.
 pub fn window_available(meter: &LiveMeter, now: OffsetDateTime) -> bool {
     meter.limit_window.is_some() && meter.resets_at.is_some_and(|reset| reset > now)
 }
@@ -172,7 +172,7 @@ pub fn view<'a>(
     now: OffsetDateTime,
 ) -> View<'a> {
     let window = window_seconds(meter);
-    let (start, end, label) = if span == Span::Window && window_available(meter, now) {
+    let (start, end, label) = if span == Span::Current && window_available(meter, now) {
         let reset = meter.resets_at.expect("window_available checked the reset");
         let label = if meter.rank == 0 {
             "this session"
@@ -352,19 +352,19 @@ mod tests {
     }
 
     #[test]
-    fn the_window_span_needs_a_live_reset() {
+    fn the_current_span_needs_a_live_reset() {
         let now = datetime!(2026-08-16 12:00 UTC);
         let past = meter(Some(5.0 * 3600.0), Some(datetime!(2026-08-16 11:00 UTC)));
         assert!(!window_available(&past, now));
-        // Asked for Window anyway, it stays sliding — as the app does when
-        // it hides the picker.
-        let stale = view(&past, Span::Window, 2, now);
+        // Asked for Current anyway, it stays on History — as the app does
+        // when it hides the picker.
+        let stale = view(&past, Span::Current, 2, now);
         assert_eq!(stale.label, "last 5h");
         assert_eq!(stale.end, now);
 
         let live = meter(Some(5.0 * 3600.0), Some(datetime!(2026-08-16 14:00 UTC)));
         assert!(window_available(&live, now));
-        let framed = view(&live, Span::Window, 2, now);
+        let framed = view(&live, Span::Current, 2, now);
         assert_eq!(framed.start, datetime!(2026-08-16 09:00 UTC));
         assert_eq!(framed.end, datetime!(2026-08-16 14:00 UTC));
         assert_eq!(framed.label, "this session");
@@ -374,14 +374,14 @@ mod tests {
     fn the_visible_slice_is_what_scrub_indexes() {
         let now = datetime!(2026-08-16 12:00 UTC);
         let session = meter(Some(5.0 * 3600.0), Some(datetime!(2026-08-16 14:00 UTC)));
-        // Ten-minute samples 06:00–16:00; a 2h sliding frame holds
+        // Ten-minute samples 06:00–16:00; a 2h history frame holds
         // 10:00–12:00 inclusive.
-        let zoomed = view(&session, Span::Sliding, 1, now);
+        let zoomed = view(&session, Span::History, 1, now);
         assert_eq!(zoomed.points.len(), 13);
         assert_eq!(zoomed.points.first().unwrap().t, datetime!(2026-08-16 10:00 UTC));
         assert_eq!(zoomed.points.last().unwrap().t, now);
-        // The window span reaches back further AND forward to the reset.
-        let whole = view(&session, Span::Window, 1, now);
+        // The current span reaches back further AND forward to the reset.
+        let whole = view(&session, Span::Current, 1, now);
         // 09:00 through 14:00 inclusive.
         assert_eq!(whole.points.len(), 31);
         assert_eq!(whole.minutes(), 300.0);
@@ -391,7 +391,7 @@ mod tests {
         assert!(!whole.holds(datetime!(2026-08-16 20:00 UTC)));
         // A rung index carried over from a wider meter is clamped, never
         // panicking on the shorter ladder.
-        assert_eq!(view(&session, Span::Sliding, 99, now).label, "last 5h");
+        assert_eq!(view(&session, Span::History, 99, now).label, "last 5h");
     }
 
     #[test]
