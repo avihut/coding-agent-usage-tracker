@@ -17,6 +17,17 @@ public struct RGBColor: Codable, Sendable, Equatable {
     public init(_ accent: ProviderAccent) {
         self.init(red: accent.red, green: accent.green, blue: accent.blue)
     }
+
+    /// "#RRGGBB", uppercase — the wire/terminal color vocabulary (digest
+    /// JSON fields never carry hex; this is for text-only consumers: the
+    /// CLI's `get`/prompt rendering, any future non-Swift reader). Clamped
+    /// first since a caller's math (blends, ramps) can overshoot 0...1.
+    public var hexString: String {
+        func byte(_ component: Double) -> Int {
+            Int((min(1, max(0, component)) * 255).rounded())
+        }
+        return String(format: "#%02X%02X%02X", byte(red), byte(green), byte(blue))
+    }
 }
 
 /// The continuous exhaustion-risk ramp: nil while the forecast is clean,

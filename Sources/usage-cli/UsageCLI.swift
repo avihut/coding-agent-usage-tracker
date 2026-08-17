@@ -17,27 +17,56 @@ import UsageCore
 /// `usage-cli state` prints the engine's published live-state digest
 /// (docs/DAEMON.md) exactly as it sits on disk — the file every consumer
 /// interface renders from.
+///
+/// `usage-cli <noun> …` for any noun in `DigestQuery.nouns` (status, limits,
+/// limit, budget, spend, activity, cost, models, model, sessions, session,
+/// prompt, get) is the v0.81.0 query surface — the WHOLE grammar lives in
+/// core `DigestQuery`, this target only does file IO + process exit.
+/// `sessions` WITHOUT `--all` is one of those nouns (the digest shortlist);
+/// `sessions --all` keeps the legacy deep-scan path below, untouched, since
+/// the query surface's shortlist can't answer it (v0.82.0 replaces it).
+/// Routing below is by ARGUMENT COUNT, not noun recognition: anything past
+/// argv[0] is the grammar's noun position, typo or not, so `DigestQuery.run`
+/// itself returns the bad-query exit for an unrecognized one — a typo must
+/// never fall through to the credentialed fetch beneath it.
 @main
 struct UsageCLI {
     static func main() async {
         let arguments = CommandLine.arguments
-        if arguments.contains("sessions") {
+        // Modes are chosen by argv[1] ONLY — a mode name appearing later
+        // is somebody's flag VALUE (`sessions --branch state` must run the
+        // sessions query, not dump the digest), never a mode switch.
+        let mode = arguments.count > 1 ? arguments[1] : ""
+        if mode == "sessions", arguments.contains("--all") {
             runSessions(providerID: value(after: "--provider", in: arguments))
             return
         }
-        if arguments.contains("sync-digest") {
+        if mode == "sync-digest" {
             runSyncDigest(providerID: value(after: "--provider", in: arguments))
             return
         }
-        if arguments.contains("state") {
+        if mode == "state" {
             runState()
             return
         }
-        if let index = arguments.firstIndex(of: "daemon"),
-           arguments.indices.contains(index + 1) {
+        if mode == "daemon" {
+            guard arguments.indices.contains(2) else {
+                die("daemon needs a verb — install|uninstall|start|stop|status", code: 18)
+            }
             runDaemon(
-                verb: arguments[index + 1],
+                verb: arguments[2],
                 appOverride: value(after: "--app", in: arguments))
+            return
+        }
+        // Milestone-1's bare fetch is a single-argument debug invocation
+        // ONLY (`usage-cli`, nothing else) — any other argv[1] is the
+        // grammar's noun position, recognized or not, so a typo reaches
+        // `DigestQuery.run`'s own bad-query exit instead of silently
+        // falling through to a live credentialed fetch.
+        if arguments.count > 1 {
+            runQuery(
+                arguments: Array(arguments.dropFirst()),
+                digestPath: value(after: "--digest", in: arguments))
             return
         }
 
@@ -305,6 +334,44 @@ struct UsageCLI {
         }
         FileHandle.standardOutput.write(data)
         FileHandle.standardOutput.write(Data("\n".utf8))
+    }
+
+    // MARK: - query mode (v0.81.0)
+
+    /// `arguments` starts with the noun (the program path already dropped by
+    /// the caller) — the exact shape `DigestQuery.run` expects. `--digest`
+    /// is resolved here (file IO is this target's job) but ALSO left in
+    /// `arguments` for `DigestQuery` to parse — it recognizes the flag as
+    /// inert, one parser for the whole grammar rather than two.
+    private static func runQuery(arguments: [String], digestPath: String?) {
+        let fileURL = digestPath.map { URL(fileURLWithPath: $0) }
+            ?? LiveState.fileURL(bundleID: "com.avihu.ClaudeUsage")
+        guard let data = FileManager.default.contents(atPath: fileURL.path) else {
+            die(
+                "no live-state digest at \(fileURL.path) — launch the app (or usaged) so the engine publishes one",
+                code: 13)
+        }
+        let digest: LiveState
+        do {
+            digest = try LiveState.decoder().decode(LiveState.self, from: data)
+        } catch {
+            die(
+                "live-state digest at \(fileURL.path) does not decode (\(type(of: error))) — regenerate it",
+                code: 13)
+        }
+        let output = DigestQuery.run(
+            arguments: arguments, digest: digest, rawDigest: data,
+            environment: ProcessInfo.processInfo.environment, now: Date())
+        // Several exits are pinned to EMPTY stdout (`--check`, a
+        // `--max-age` miss) — the line terminator rides ALONG with real
+        // content instead of unconditionally, so those stay genuinely
+        // silent rather than silent-plus-one-newline-byte.
+        if !output.stdout.isEmpty {
+            FileHandle.standardOutput.write(Data(output.stdout.utf8))
+            FileHandle.standardOutput.write(Data("\n".utf8))
+        }
+        if let message = output.note { note(message) }
+        exit(output.exitCode)
     }
 
     private static func value(after flag: String, in arguments: [String]) -> String? {

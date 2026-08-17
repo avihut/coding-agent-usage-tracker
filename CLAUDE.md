@@ -436,6 +436,32 @@ the README rather than silently deviating.
   this machine's digest (read-only cache use, zero network, no
   Keychain). Dollars never sync: viewers price tallies with their own
   feed.
+- CLI QUERY SURFACE (2026-08-17 v0.81.0): `usage-cli <noun> [selector]
+  [field] [flags]` — Digests/DigestQuery{,Format,Nouns}.swift (UsageCore,
+  pure; the CLI target does file IO + exit only). 13 digest-backed nouns
+  (status limits limit budget spend activity cost models model sessions
+  session prompt get) answered from live-state.json ONLY; three registers
+  (human / --raw bare+TSV / --json via LiveState.encoder()); absent ≠
+  zero ON STDOUT ('—' / empty / null, never $0); exit codes are API:
+  0 ok (an absent VALUE is still 0), 13 no digest, 19 bad query,
+  20 selector matched nothing, 21 stale under --max-age. Range math runs
+  in the digest's OWN activity.timeZone — pinned by a Pacific/Kiritimati
+  (UTC+14) fixture so a Calendar.current regression fails on ANY host.
+  `get` walks the RAW JSON bytes, never the typed structs, so a field
+  added to the digest tomorrow resolves today; meters[<sel>] shares
+  limit's selector. Singular no-field summaries honor the registers like
+  the plurals (entity object / its one list row; non-entity --raw guides
+  to a field, exit 19). ROUTING: CLI modes are argv[1] ONLY — a flag
+  VALUE spelled "state" must never hijack — and everything else past
+  argv[0] goes to DigestQuery, so an unknown noun exits 19 and NEVER
+  falls through to the credentialed bare fetch (which survives only as
+  the zero-argument debug invocation). That routing gate lives in the
+  executable target where no unit test reaches — re-verify live after
+  touching main(). `sessions --all` keeps the legacy deep-scan dump until
+  the deep verbs land (windows/history/prices — plan M2). Numbers: every
+  float on stdout routes through JSONEncoder — NSNumber.stringValue and
+  JSONSerialization are NOT shortest-round-trip on Darwin (0.069 →
+  "0.06900000000000001").
 - LIMIT-WINDOW PLOT: `Charts/WindowPlot.swift` (v0.77.0, 7cf5180) is the
   ONE vocabulary for the percent-over-a-span charts — reset dashes, reset
   curtain, nub curtain, `Nub` (start/end/kind/fullStart), nub colour +
