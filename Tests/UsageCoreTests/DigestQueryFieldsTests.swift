@@ -42,6 +42,13 @@ struct DigestQueryFieldsTests {
         "session": ["session", "latest"],
     ]
 
+    /// M2 nouns whose walk lives with the fixture that can answer it
+    /// hermetically: `price` needs an injected pricing cache
+    /// (DeepQueryPricesTests), `windows` a ledger directory
+    /// (DeepQueryWindowsTests). Named here so a NEW catalogued noun can't
+    /// slip past the walk below by simply having no prefix.
+    static let coveredElsewhere: Set<String> = ["price", "windows"]
+
     // MARK: - The catalog is the vocabulary
 
     /// The table lives beside the switches rather than inside them, so it
@@ -51,7 +58,8 @@ struct DigestQueryFieldsTests {
     /// "add --all" diagnostic — what must never appear is "has no field".
     @Test("every catalogued field name resolves — no advertised field is unroutable")
     func catalogueMatchesTheSwitches() throws {
-        for (noun, fields) in DigestQuery.fieldCatalog {
+        #expect(Set(Self.nounPrefix.keys).union(Self.coveredElsewhere) == Set(DigestQuery.fieldCatalog.keys))
+        for (noun, fields) in DigestQuery.fieldCatalog where !Self.coveredElsewhere.contains(noun) {
             let prefix = try #require(Self.nounPrefix[noun])
             for name in fields.keys.sorted() {
                 let out = run(prefix + [name])

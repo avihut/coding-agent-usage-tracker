@@ -540,13 +540,16 @@ the README rather than silently deviating.
   silently becoming a ~140ms transcript walk); it contradicts `--all`
   (19), and with no digest at all is 13, not 20. `session <id> source`
   says which path answered (digest|scan).
-  (3) `--fields a,b,c` on every noun with a field catalog (status limit
-  budget spend activity model session) — one TSV row in the text
-  registers, `--header` names the columns, `--json` an object in the
+  (3) `--fields a,b,c` on `DigestQuery.multiFieldNouns` (status limit
+  budget spend activity model session + M2's price) — one TSV row in the
+  text registers, `--header` names the columns, `--json` an object in the
   REQUESTED order (the one deliberate departure from sortedKeys). A
   positional field AND `--fields` is 19; a failing cell fails the whole
   row (never a partial one). Registered per-noun in `flagOwners`, so
-  `sessions --fields` is still "unknown flag".
+  `sessions --fields` is still "unknown flag" — and `windows` is
+  catalogued but EXCLUDED (one field has nothing to combine with, and an
+  accepted-but-inert flag is the defect class M2's verify barrier caught
+  twice).
   (4) `--relative` on a SECONDS field prints `UsageFormatting.duration`,
   mirroring the pre-phrased-caption rule for dates (`--json` unaffected,
   negatives keep their sign); the `session` human summary line carries
@@ -556,12 +559,16 @@ the README rather than silently deviating.
   can never contain the separator. Titles were safe only by luck
   (`SessionMeta.scrub` collapses \s+); project/branch never pass through
   it and a macOS directory name may legally hold a tab.
-  (6) Field errors ENUMERATE: `DigestQuery.fieldCatalog` (name → scalar|
-  table, in Digests/DigestQueryFields.swift) backs both the "— fields: …"
-  list and `--fields` validation, so a table-shaped name is refused BY
-  NAME rather than by sniffing output. The catalog can drift from the
-  switches; `DigestQueryFieldsTests` walks every name and fails if one is
-  unroutable. Sessions nouns now live in Digests/DigestQuerySessions.swift
+  (6) Field errors ENUMERATE, M2 verbs included (price, windows):
+  `DigestQuery.fieldCatalog` (name → scalar|table, in
+  Digests/DigestQueryFields.swift) backs both the "— fields: …" list and
+  `--fields` validation, so a table-shaped name is refused BY NAME rather
+  than by sniffing output. The catalog can drift from the switches, so
+  every noun's names are WALKED: DigestQueryFieldsTests for the digest
+  nouns (and it asserts the catalog has no key without a walk), price's
+  in DeepQueryPricesTests, windows' in DeepQueryWindowsTests — the two
+  M2 verbs need injected fixtures the digest suite has no seam for.
+  Sessions nouns now live in Digests/DigestQuerySessions.swift
   (DigestQueryNouns.swift had passed the ~600-line split rule).
 - LIMIT-WINDOW PLOT: `Charts/WindowPlot.swift` (v0.77.0, 7cf5180) is the
   ONE vocabulary for the percent-over-a-span charts — reset dashes, reset

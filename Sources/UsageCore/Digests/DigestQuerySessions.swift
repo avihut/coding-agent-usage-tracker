@@ -140,10 +140,6 @@ extension DigestQuery {
         guard positionals.count <= 1 else { return badQuery("too many arguments") }
         if let rejection = rejectScanContradiction(parsed) { return rejection }
         let field = positionals.first
-        let raw = parsed.flags["raw"] != nil
-        let unix = parsed.flags["unix"] != nil
-        let relative = parsed.flags["relative"] != nil
-        let header = parsed.flags["header"] != nil
         let noScan = parsed.flags["no-scan"] != nil
 
         if parsed.flags["all"] == nil, let digest {
@@ -153,8 +149,8 @@ extension DigestQuery {
                 switch selectSession(selectorToken, in: sessions) {
                 case .found(let session):
                     return renderSession(
-                        session, deep: nil, parsed: parsed, field: field, json: json, raw: raw, unix: unix,
-                        relative: relative, header: header, stale: digest.engine.stale)
+                        session, deep: nil, parsed: parsed, field: field, json: json,
+                        stale: digest.engine.stale)
                 case .ambiguous(let ids):
                     return badQuery("ambiguous selector '\(selectorToken)' matches: \(ids.joined(separator: ", "))")
                 case .none:
@@ -197,8 +193,7 @@ extension DigestQuery {
             return badQuery("ambiguous selector '\(selectorToken)' matches: \(ids.joined(separator: ", "))")
         case .found(let entry):
             return renderSession(
-                DeepQuerySessions.card(entry), deep: entry, parsed: parsed, field: field, json: json, raw: raw,
-                unix: unix, relative: relative, header: header, stale: false)
+                DeepQuerySessions.card(entry), deep: entry, parsed: parsed, field: field, json: json, stale: false)
         }
     }
 
@@ -224,11 +219,13 @@ extension DigestQuery {
     /// whether `deep` (the scan's extra fields) is present.
     private static func renderSession(
         _ session: SessionCard, deep: DeepQuerySessions.Entry?, parsed: ParsedArgs, field: String?, json: Bool,
-        raw: Bool, unix: Bool, relative: Bool, header: Bool, stale: Bool
+        stale: Bool
     ) -> QueryOutput {
+        let header = parsed.flags["header"] != nil
         func resolve(_ name: String, asJSON: Bool) -> QueryOutput {
             sessionField(
-                name, session: session, deep: deep, json: asJSON, unix: unix, relative: relative, header: header)
+                name, session: session, deep: deep, json: asJSON, unix: parsed.flags["unix"] != nil,
+                relative: parsed.flags["relative"] != nil, header: header)
         }
         if let output = multiFieldOutput(
             noun: "session", parsed: parsed, positionalField: field, json: json, header: header, resolve: resolve) {
@@ -236,7 +233,7 @@ extension DigestQuery {
         }
         guard let field else {
             if json { return ok(DigestQueryFormat.jsonValue(session)) }
-            if raw {
+            if parsed.flags["raw"] != nil {
                 return ok(DigestQueryFormat.tsv([sessionRawRow(session)], header: header ? sessionColumns : nil))
             }
             let line = sessionSummaryLine(session)

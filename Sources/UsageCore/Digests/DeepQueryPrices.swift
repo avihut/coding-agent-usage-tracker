@@ -72,6 +72,16 @@ extension DeepQuery {
                 "no priced model matches '\(selectorToken)'\(candidateSuffix(selectorToken, in: table))")
         }
 
+        func resolve(_ name: String, asJSON: Bool) -> QueryOutput {
+            priceField(
+                name, rates: match.rates, table: table, listed: match.listed, json: asJSON,
+                unix: parsed.flags["unix"] != nil)
+        }
+        if let output = DigestQuery.multiFieldOutput(
+            noun: "price", parsed: parsed, positionalField: field, json: json, header: header,
+            resolve: resolve) {
+            return output
+        }
         guard let field else {
             if json {
                 return DigestQuery.ok(DigestQueryFormat.jsonValue(
@@ -83,9 +93,7 @@ extension DeepQuery {
             }
             return DigestQuery.ok(priceSummaryLine(id: match.id, rates: match.rates, table: table))
         }
-        return priceField(
-            field, rates: match.rates, table: table, listed: match.listed, json: json,
-            unix: parsed.flags["unix"] != nil)
+        return resolve(field, asJSON: json)
     }
 
     /// Mirrors exactly how `UsageCLI`/`UsageEngine` build a `PricingService`
@@ -286,7 +294,7 @@ extension DeepQuery {
             // to summary lines, not bare field values.
             return DigestQueryFormat.dateField(fetched, json: json, unix: unix, relative: false)
         case "listed": return DigestQueryFormat.boolField(listed, json: json)
-        default: return DigestQuery.badQuery("price has no field '\(field)'")
+        default: return DigestQuery.unknownField(noun: "price", field: field)
         }
     }
 }

@@ -86,9 +86,9 @@ public enum DigestQuery {
         "no-background": ["sessions"],
         "last": ["windows", "history"],
         "no-scan": ["sessions", "session"],
-        // Exactly the nouns with a `fieldCatalog` entry — a comma list is
-        // legal wherever a single field name is, and nowhere else.
-        "fields": Set(fieldCatalog.keys),
+        // A comma list is legal wherever a single field name is — and only
+        // where the noun actually renders one (`multiFieldNouns`).
+        "fields": multiFieldNouns,
     ]
 
     static func rejectInapplicableFlags(noun: String, parsed: ParsedArgs) -> QueryOutput? {

@@ -271,6 +271,31 @@ extension DeepQueryWindowsTests {
 // MARK: - hit-rate
 
 extension DeepQueryWindowsTests {
+    /// The catalogue walk for this noun (the digest nouns' lives in
+    /// `DigestQueryFieldsTests`, `price`'s in `DeepQueryPricesTests`):
+    /// `windows` advertises exactly one field, enumerates it on a typo like
+    /// everyone else, and deliberately does NOT take `--fields` — one field
+    /// has nothing to combine with, and an inert flag is worse than none.
+    @Test("windows enumerates its one field and refuses --fields outright")
+    func windowsFieldVocabulary() throws {
+        let directory = tempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        seed([outcome(end: "2026-08-16T00:00:00Z", last: 100, peak: 100)], in: directory)
+
+        #expect(DigestQuery.fieldCatalog["windows"]?.keys.sorted() == ["hit-rate"])
+        #expect(run(["session", "hit-rate"], digest: golden, directory: directory).exitCode == 0)
+
+        let typo = run(["session", "hit-rat"], digest: golden, directory: directory)
+        #expect(typo.exitCode == 19)
+        #expect(typo.note == "windows has no field 'hit-rat' — fields: hit-rate")
+
+        let fields = DeepQuery.run(
+            noun: "windows", arguments: ["session", "--fields", "hit-rate"], digest: golden,
+            environment: [:], now: DeepQueryWindowsTests.iso("2026-08-16T12:00:00Z"))
+        #expect(fields.exitCode == 19)
+        #expect(fields.note == "unknown flag '--fields'")
+    }
+
     @Test func hitRateIsTheObserved100Share() throws {
         let directory = tempDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }

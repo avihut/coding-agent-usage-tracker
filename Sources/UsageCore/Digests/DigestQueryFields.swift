@@ -52,7 +52,20 @@ extension DigestQuery {
             "id", "title", "project", "branch", "started", "end", "active", "cost", "tokens", "prompts",
             "api-calls", "source", "kind", "tool-calls", "subagents", "compactions", "agent-version",
         ]).merging(tables(["models"])) { lhs, _ in lhs },
+        // M2 verbs answer field names too, and enumerate them the same way.
+        "price": scalars([
+            "input", "output", "cache-read", "cache-write", "cache-write-1h", "context", "source", "fetched",
+            "listed",
+        ]),
+        "windows": scalars(["hit-rate"]),
     ]
+
+    /// Which nouns actually WIRE `--fields`. Not simply every catalogued
+    /// noun: `windows` has exactly one field, so the flag there would parse
+    /// and then do nothing — and a flag that's accepted but inert is the
+    /// defect class M2's verify barrier caught twice. It enumerates its
+    /// field like everyone else; it just can't combine one.
+    static let multiFieldNouns = Set(fieldCatalog.keys).subtracting(["windows"])
 
     private static func scalars(_ names: [String]) -> [String: FieldShape] {
         Dictionary(uniqueKeysWithValues: names.map { ($0, .scalar) })

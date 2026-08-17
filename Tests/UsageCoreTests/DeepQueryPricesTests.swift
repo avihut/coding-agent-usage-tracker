@@ -281,7 +281,29 @@ extension DeepQueryPricesTests {
         defer { cleanup(dir) }
         let out = run(["price", "claude-full-model", "bogus"], cacheDirectory: dir)
         #expect(out.exitCode == DigestQuery.exitBadQuery)
-        #expect(out.note == "price has no field 'bogus'")
+        // Enumerated like every other noun's (0.84.0) — a field-taking M2
+        // verb is not a second class of noun.
+        #expect(
+            out.note
+                == "price has no field 'bogus' — fields: cache-read, cache-write, cache-write-1h, context,"
+                + " fetched, input, listed, output, source")
+    }
+
+    /// `DigestQueryFieldsTests` walks the digest nouns' catalogue entries;
+    /// `price` needs this suite's injected cache, so its walk lives here.
+    @Test("every catalogued price field resolves, and --fields carries them in one row")
+    func catalogueMatchesTheSwitchesAndComposes() throws {
+        let dir = try makeCache()
+        defer { cleanup(dir) }
+        for name in (DigestQuery.fieldCatalog["price"] ?? [:]).keys.sorted() {
+            let out = run(["price", "claude-full-model", name], cacheDirectory: dir)
+            #expect(
+                out.note?.hasPrefix("price has no field") != true,
+                "price advertises '\(name)' but no switch answers it")
+        }
+        let row = run(["price", "claude-full-model", "--fields", "input,output,context"], cacheDirectory: dir)
+        #expect(row.exitCode == 0)
+        #expect(row.stdout == "3\t15\t200000")
     }
 
     @Test func tooManyArgumentsIsABadQuery() throws {

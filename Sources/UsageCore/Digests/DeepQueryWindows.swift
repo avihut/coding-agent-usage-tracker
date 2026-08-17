@@ -29,7 +29,7 @@ extension DeepQuery {
         guard positionals.count <= 1 else { return DigestQuery.badQuery("too many arguments") }
         let field = positionals.first
         if let field, field != "hit-rate" {
-            return DigestQuery.badQuery("windows has no field '\(field)'")
+            return DigestQuery.unknownField(noun: "windows", field: field)
         }
 
         let ledgerDirectory = directory ?? StorageScope.supportDirectory(
