@@ -570,6 +570,55 @@ the README rather than silently deviating.
   M2 verbs need injected fixtures the digest suite has no seam for.
   Sessions nouns now live in Digests/DigestQuerySessions.swift
   (DigestQueryNouns.swift had passed the ~600-line split rule).
+- HOW A CALL IS COUNTED (2026-08-17, v0.85.0): measured against ccusage
+  20.0.20 over the real 2,239-transcript corpus, our cost ran 7.4% LOW.
+  The pricing arithmetic was never the problem — same rates, same 1h-TTL
+  split, reproducing their per-day cost to the cent given the same tokens
+  — all three causes were ingestion, in `parseFile`. These are the rules
+  now; do not "simplify" any of them back.
+  (1) A STREAMED CALL COUNTS ONCE, AT ITS FINISHED SIZE. Claude Code
+  writes one call as SEVERAL lines sharing a request id, each restating
+  usage known so far (output_tokens climbing 4,4,4,4,739). Keeping the
+  FIRST lost 18.8M output tokens, 31% of the corpus's output. The winner
+  is the LARGEST record — sidechain rank decided BEFORE size — which is
+  why aggregation now waits for the end of the file instead of running
+  inline: days, slots, activeMinutes and the session's reach all take the
+  winner's own record and its own timestamp (a group straddling local
+  midnight buckets where it FINISHED). Rows still open at the group's
+  first line, and still accumulate every line's tool_use blocks — those
+  genuinely differ per line, the usage does not.
+  (2) `usage.iterations[]` IS PARSED. An `advisor_message` entry is a
+  separate API call to a separate model, ADDITIVE to the turn that
+  spawned it (proof: corpus input was 4.0M against 75.3M of advisor
+  input). Each counts as its own call under the parent's dedup key
+  suffixed `:advisor:<i>`, so the sibling lines that each restate the
+  whole array collapse. A `message` iteration is the turn restating
+  ITSELF — counting it would double the turn. This moves `messages` →
+  `SessionSummary.apiCalls` → the `api-calls` field: a session's call
+  count now includes its advisor calls.
+  (3) ONE CALL BELONGS TO ONE FILE, corpus-wide. A subagent transcript
+  opens with the parent turn that spawned it and a resumed session copies
+  its history forward, so 352 of 58,861 request ids appear in more than
+  one file; per-file dedup billed them twice. `FileEntry` now carries the
+  COMPLETE list of calls it holds (`encodeCalls`: 24 hex per call — an
+  FNV-1a hash of the dedup key plus a rank packing token total and
+  sidechain flag) plus the fingerprint of the exclusion set its
+  aggregates were built under. Never narrow that list by exclusion —
+  ownership must stay recomputable from cached entries alone, which is
+  what lets a file that owns everything fingerprint to 0 and never
+  reparse. FNV-1a, never `Hasher`: these are persisted and compared
+  across processes. `sessionDetail` applies the same rule directly (main
+  claims, then each part reads excluding what is claimed) so the detail
+  ledger and the session card agree.
+  Cache version 6 — every figure persisted under v5 undercounts.
+  KNOWN, DELIBERATE 0.087% ABOVE ccusage: 1,510 lines state a
+  `cache_creation_input_tokens` larger than their own 5m+1h breakdown; we
+  bill the vendor's total, they bill the breakdown and drop the rest.
+  NOT implemented and inert today: long-context (>200K) tiered rates —
+  `ModelRates` has no `*_above_200k` and `PricingFeedClient.decode` drops
+  those keys, so if the feed ever carries them for a model in use we
+  under-bill silently. Same for a `speed: "fast"` multiplier (every
+  entry in this corpus is `"standard"`).
 - LIMIT-WINDOW PLOT: `Charts/WindowPlot.swift` (v0.77.0, 7cf5180) is the
   ONE vocabulary for the percent-over-a-span charts — reset dashes, reset
   curtain, nub curtain, `Nub` (start/end/kind/fullStart), nub colour +
