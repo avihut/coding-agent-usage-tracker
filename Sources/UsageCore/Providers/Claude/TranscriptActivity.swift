@@ -119,6 +119,116 @@ public struct TranscriptScanner: Sendable {
         let days: [String: DayCount]
         let slots: [TokenSlot]
         let session: SessionFileSummary?
+        /// Every call this file contains, encoded by `encodeCalls` — ALWAYS
+        /// the complete list, never narrowed by `excluded`, so ownership
+        /// stays recomputable from cached entries alone.
+        let calls: String
+        /// Fingerprint of the exclusion set the aggregates above were built
+        /// under; 0 when the file owned everything it holds. Compared against
+        /// a freshly computed fingerprint to decide whether ownership moved
+        /// since this entry was written.
+        let excluded: UInt64
+    }
+
+    /// One kept call's identity for the cross-file pass.
+    struct CallKey: Sendable, Equatable {
+        let hash: UInt64
+        /// Token total with the high bit set when the record is NOT a
+        /// sidechain echo, so one integer comparison ranks both dimensions at
+        /// once: the parent's copy of a call outranks every echo, and among
+        /// equals the larger record wins.
+        let rank: UInt32
+
+        init(hash: UInt64, tokens: Int, sidechain: Bool) {
+            self.hash = hash
+            let capped = UInt32(min(max(tokens, 0), 0x7FFF_FFFF))
+            self.rank = sidechain ? capped : (capped | 0x8000_0000)
+        }
+
+        init(rawHash: UInt64, rawRank: UInt32) {
+            self.hash = rawHash
+            self.rank = rawRank
+        }
+    }
+
+    /// FNV-1a. Deterministic across processes and runs, which `Hasher` is
+    /// explicitly not — these hashes are persisted and compared between the
+    /// daemon's writes and the CLI's reads.
+    static func stableHash(_ text: String) -> UInt64 {
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in text.utf8 {
+            hash ^= UInt64(byte)
+            hash &*= 0x0000_0100_0000_01B3
+        }
+        return hash
+    }
+
+    private static let hexDigits = Array("0123456789abcdef".utf8)
+
+    /// 24 hex characters per call — 16 for the hash, 8 for the rank. One flat
+    /// string rather than an array of objects: this is the largest thing in
+    /// the cache by count, and JSON structure around every element would cost
+    /// more than the payload.
+    static func encodeCalls(_ calls: [CallKey]) -> String {
+        var bytes: [UInt8] = []
+        bytes.reserveCapacity(calls.count * 24)
+        for call in calls {
+            var shift = 60
+            while shift >= 0 {
+                bytes.append(hexDigits[Int((call.hash >> UInt64(shift)) & 0xF)])
+                shift -= 4
+            }
+            shift = 28
+            while shift >= 0 {
+                bytes.append(hexDigits[Int((call.rank >> UInt32(shift)) & 0xF)])
+                shift -= 4
+            }
+        }
+        return String(decoding: bytes, as: UTF8.self)
+    }
+
+    static func decodeCalls(_ blob: String) -> [CallKey] {
+        let bytes = Array(blob.utf8)
+        guard bytes.count % 24 == 0 else { return [] }
+        var calls: [CallKey] = []
+        calls.reserveCapacity(bytes.count / 24)
+        var index = 0
+        while index < bytes.count {
+            var hash: UInt64 = 0
+            var rank: UInt32 = 0
+            var ok = true
+            for offset in 0..<24 {
+                let digit: UInt8
+                switch bytes[index + offset] {
+                case 0x30...0x39: digit = bytes[index + offset] - 0x30
+                case 0x61...0x66: digit = bytes[index + offset] - 0x61 + 10
+                default: ok = false; digit = 0
+                }
+                if offset < 16 {
+                    hash = (hash << 4) | UInt64(digit)
+                } else {
+                    rank = (rank << 4) | UInt32(digit)
+                }
+            }
+            guard ok else { return [] }
+            calls.append(CallKey(rawHash: hash, rawRank: rank))
+            index += 24
+        }
+        return calls
+    }
+
+    /// Order-independent, so a set's fingerprint never depends on iteration
+    /// order. Zero for the empty set — the overwhelmingly common case, which
+    /// is therefore free to compare.
+    static func fingerprint(_ hashes: Set<UInt64>) -> UInt64 {
+        var mixed: UInt64 = 0
+        for hash in hashes {
+            // Mix before combining, or XOR would cancel unrelated pairs.
+            var value = hash &* 0xff51_afd7_ed55_8ccd
+            value ^= value >> 33
+            mixed ^= value
+        }
+        return mixed &+ UInt64(hashes.count)
     }
 
     private struct CacheFile: Codable {
@@ -344,14 +454,49 @@ public struct TranscriptScanner: Sendable {
                 let parsed = parseFile(item, collectRows: false) ?? FileParse()
                 entry = FileEntry(
                     mtime: mtime, size: size, days: parsed.days, slots: parsed.slots,
-                    session: parsed.session)
+                    session: parsed.session, calls: Self.encodeCalls(parsed.calls), excluded: 0)
             }
             // Every pass re-trims, so slots age out of unchanged files too.
             files[path] = FileEntry(
                 mtime: entry.mtime, size: entry.size, days: entry.days,
                 slots: entry.slots.filter { $0.t >= cutoff },
-                session: entry.session)
+                session: entry.session, calls: entry.calls, excluded: entry.excluded)
         }
+
+        // Second pass: one call can appear in several transcripts — echoed
+        // into every subagent forked from it, and copied forward when a
+        // session resumes. Exactly one file may count it, so ownership is
+        // settled across the whole corpus and the losers reparse without it.
+        // A file that owns everything it holds fingerprints to 0 and is
+        // untouched, which is all but a handful.
+        var owners: [UInt64: (rank: UInt32, path: String)] = [:]
+        for (path, entry) in files {
+            for call in Self.decodeCalls(entry.calls) {
+                guard let held = owners[call.hash] else {
+                    owners[call.hash] = (call.rank, path)
+                    continue
+                }
+                if call.rank > held.rank || (call.rank == held.rank && path < held.path) {
+                    owners[call.hash] = (call.rank, path)
+                }
+            }
+        }
+        var corrections: [String: FileEntry] = [:]
+        for (path, entry) in files {
+            var disowned = Set<UInt64>()
+            for call in Self.decodeCalls(entry.calls) where owners[call.hash]?.path != path {
+                disowned.insert(call.hash)
+            }
+            let mark = Self.fingerprint(disowned)
+            guard mark != entry.excluded else { continue }
+            let parsed = parseFile(
+                URL(fileURLWithPath: path), collectRows: false, excluding: disowned) ?? FileParse()
+            corrections[path] = FileEntry(
+                mtime: entry.mtime, size: entry.size, days: parsed.days,
+                slots: parsed.slots.filter { $0.t >= cutoff }, session: parsed.session,
+                calls: Self.encodeCalls(parsed.calls), excluded: mark)
+        }
+        for (path, entry) in corrections { files[path] = entry }
 
         if persistCache {
             saveCache(CacheFile(version: Self.cacheVersion, files: files))
@@ -406,8 +551,13 @@ public struct TranscriptScanner: Sendable {
     public func sessionDetail(id: String) -> SessionDetail? {
         guard let url = findTranscript(id: id) else { return nil }
         guard let parsed = parseFile(url, collectRows: true) else { return nil }
+        // The parent's copy of a call owns it; the echoes in its subagent
+        // transcripts are excluded as they're read, so the running ledger
+        // reaches the session's spend exactly once.
+        var claimed = Set(parsed.calls.map(\.hash))
         let mainEntry = FileEntry(
-            mtime: 0, size: 0, days: parsed.days, slots: [], session: parsed.session)
+            mtime: 0, size: 0, days: parsed.days, slots: [], session: parsed.session,
+            calls: "", excluded: 0)
 
         // (source, ordinal) breaks timestamp ties deterministically: main
         // rows first, then parts in stable path order, each in file order.
@@ -425,12 +575,14 @@ public struct TranscriptScanner: Sendable {
         var partEntries: [FileEntry] = []
         for (index, partURL) in subagentFiles(of: url, id: id).enumerated() {
             if Task.isCancelled { return nil }
-            guard let part = parseFile(partURL, collectRows: true) else {
+            guard let part = parseFile(partURL, collectRows: true, excluding: claimed) else {
                 if Task.isCancelled { return nil }
                 continue
             }
+            claimed.formUnion(part.calls.map(\.hash))
             partEntries.append(FileEntry(
-                mtime: 0, size: 0, days: part.days, slots: [], session: part.session))
+                mtime: 0, size: 0, days: part.days, slots: [], session: part.session,
+                calls: "", excluded: 0))
             truncated = truncated || part.truncated
             for row in part.rows {
                 pending.append(PendingRow(
@@ -610,6 +762,9 @@ public struct TranscriptScanner: Sendable {
         var session: SessionFileSummary?
         var rows: [SessionEvent] = []
         var truncated = false
+        /// Every call the file holds, whether or not it was aggregated —
+        /// the exclusion set narrows the tallies, never this list.
+        var calls: [CallKey] = []
     }
 
     /// One API call as a file will count it, held open until the file ends.
@@ -685,7 +840,16 @@ public struct TranscriptScanner: Sendable {
     /// keep-rule — `ai-title` records have no timestamp and user records no
     /// usage, so the guard that filters tally lines would eat them first.
     /// Returns nil only on task cancellation (checked when collecting rows).
-    private func parseFile(_ url: URL, collectRows: Bool) -> FileParse? {
+    ///
+    /// `excluding` names calls another file owns — one call is echoed
+    /// verbatim into every subagent transcript forked from it, and into a
+    /// resumed session's copy of its history, so the same request id can
+    /// legitimately appear in several files. Excluded calls are dropped from
+    /// every tally and row but still listed in `calls`, which is what keeps
+    /// ownership recomputable without reparsing.
+    private func parseFile(
+        _ url: URL, collectRows: Bool, excluding: Set<UInt64> = []
+    ) -> FileParse? {
         guard let data = try? Data(contentsOf: url) else { return FileParse() }
         let decoder = JSONDecoder()
         let formatter = dayFormatter
@@ -886,7 +1050,22 @@ public struct TranscriptScanner: Sendable {
             }
         }
 
-        for call in pending.values { aggregate(call) }
+        // Deterministic order so the encoded call list is byte-stable across
+        // runs — the cache compares it, and an unstable order would look like
+        // a change on every scan.
+        var disownedRows = Set<Int>()
+        for key in pending.keys.sorted() {
+            guard let call = pending[key] else { continue }
+            let hash = Self.stableHash(key)
+            result.calls.append(CallKey(
+                hash: hash, tokens: call.tally.total, sidechain: call.sidechain))
+            guard !excluding.contains(hash) else {
+                if let index = call.rowIndex { disownedRows.insert(index) }
+                continue
+            }
+            aggregate(call)
+        }
+        // A call with no id to collapse on can't be another file's copy.
         for call in unkeyed { aggregate(call) }
 
         // Prompt candidates resolve now that every parent link is known:
@@ -898,12 +1077,16 @@ public struct TranscriptScanner: Sendable {
         meta.prompts = survivors.count
         meta.firstPrompt = survivors.first?.preview
         for candidate in survivors { touch(candidate.t) }
-        if collectRows, survivors.count < promptCandidates.count {
-            let deadRows = Set(promptCandidates.enumerated()
-                .filter { !survivorIndexes.contains($0.offset) }
-                .compactMap { $0.element.rowIndex })
+        if collectRows {
+            // Dead retry siblings and calls another file owns leave the same
+            // way: one rebuild, so row.id == its index stays true.
+            var deadRows = disownedRows
+            if survivors.count < promptCandidates.count {
+                deadRows.formUnion(promptCandidates.enumerated()
+                    .filter { !survivorIndexes.contains($0.offset) }
+                    .compactMap { $0.element.rowIndex })
+            }
             if !deadRows.isEmpty {
-                // row.id == its index by construction; rebuild both.
                 var kept: [SessionEvent] = []
                 kept.reserveCapacity(result.rows.count - deadRows.count)
                 for row in result.rows where !deadRows.contains(row.id) {

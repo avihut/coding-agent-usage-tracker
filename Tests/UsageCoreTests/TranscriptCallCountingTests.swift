@@ -145,6 +145,149 @@ struct TranscriptCallCountingTests {
         #expect(scan.daily[0].messages == 1)
     }
 
+    // MARK: - One call, several transcripts
+
+    /// A subagent transcript opens with the parent turn that spawned it, so
+    /// the parent's call is echoed verbatim — same request id, same usage.
+    static func echoed(_ output: Int) -> String {
+        """
+        {"timestamp":"2026-08-02T09:00:00.000Z","requestId":"shared","message":{"id":"m1","model":"claude-opus-5","usage":{"input_tokens":10,"output_tokens":\(output),"cache_read_input_tokens":5000}}}
+        """
+    }
+
+    @Test("a call echoed into a subagent transcript is billed once, to the parent")
+    func crossFileEchoCountsOnce() throws {
+        let (scanner, root) = try makeScanner()
+        let id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        let subdir = root.appending(path: "\(id)/subagents")
+        try FileManager.default.createDirectory(at: subdir, withIntermediateDirectories: true)
+        try Self.echoed(400).write(
+            to: root.appending(path: "\(id).jsonl"), atomically: true, encoding: .utf8)
+        try Self.echoed(400).write(
+            to: subdir.appending(path: "agent-1.jsonl"), atomically: true, encoding: .utf8)
+
+        let scan = scanner.scan(now: Self.now)
+        #expect(scan.daily.count == 1)
+        #expect(scan.daily[0].messages == 1)
+        #expect(scan.daily[0].models == [
+            "claude-opus-5": TokenTally(input: 10, output: 400, cacheRead: 5000),
+        ])
+        // The session rolls up the same single call, not two.
+        #expect(scan.sessions.count == 1)
+        #expect(scan.sessions[0].apiCalls == 1)
+    }
+
+    @Test("the sidechain echo loses even when it carries more than the parent's copy")
+    func parentOutranksALargerEcho() throws {
+        let (scanner, root) = try makeScanner()
+        let id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        let subdir = root.appending(path: "\(id)/subagents")
+        try FileManager.default.createDirectory(at: subdir, withIntermediateDirectories: true)
+        try Self.echoed(400).write(
+            to: root.appending(path: "\(id).jsonl"), atomically: true, encoding: .utf8)
+        let bigger = """
+            {"timestamp":"2026-08-02T09:00:00.000Z","isSidechain":true,"requestId":"shared","message":{"id":"m1","model":"claude-opus-5","usage":{"input_tokens":10,"output_tokens":9999,"cache_read_input_tokens":5000}}}
+            """
+        try bigger.write(
+            to: subdir.appending(path: "agent-1.jsonl"), atomically: true, encoding: .utf8)
+
+        let scan = scanner.scan(now: Self.now)
+        #expect(scan.daily[0].models["claude-opus-5"]?.output == 400)
+    }
+
+    @Test("ownership survives the cache: a rescan of unchanged files is identical")
+    func ownershipIsStableAcrossScans() throws {
+        let (scanner, root) = try makeScanner()
+        let id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        let subdir = root.appending(path: "\(id)/subagents")
+        try FileManager.default.createDirectory(at: subdir, withIntermediateDirectories: true)
+        try Self.echoed(400).write(
+            to: root.appending(path: "\(id).jsonl"), atomically: true, encoding: .utf8)
+        try Self.echoed(400).write(
+            to: subdir.appending(path: "agent-1.jsonl"), atomically: true, encoding: .utf8)
+
+        let first = scanner.scan(now: Self.now)
+        let second = scanner.scan(now: Self.now)
+        #expect(first == second)
+        #expect(second.daily[0].messages == 1)
+    }
+
+    @Test("losing the owner returns the call to whoever is left")
+    func ownershipMovesWhenTheOwnerGoes() throws {
+        let (scanner, root) = try makeScanner()
+        let id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        let subdir = root.appending(path: "\(id)/subagents")
+        try FileManager.default.createDirectory(at: subdir, withIntermediateDirectories: true)
+        let main = root.appending(path: "\(id).jsonl")
+        try Self.echoed(400).write(to: main, atomically: true, encoding: .utf8)
+        try Self.echoed(400).write(
+            to: subdir.appending(path: "agent-1.jsonl"), atomically: true, encoding: .utf8)
+        #expect(scanner.scan(now: Self.now).daily[0].messages == 1)
+
+        // Claude Code's own cleanup can sweep the parent and leave the part.
+        try FileManager.default.removeItem(at: main)
+        let after = scanner.scan(now: Self.now)
+        #expect(after.daily.count == 1)
+        #expect(after.daily[0].messages == 1)
+        #expect(after.daily[0].models["claude-opus-5"]?.output == 400)
+    }
+
+    @Test("the detail ledger counts an echoed call once, like the card does")
+    func detailMatchesTheCard() throws {
+        let (scanner, root) = try makeScanner()
+        let id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        let subdir = root.appending(path: "\(id)/subagents")
+        try FileManager.default.createDirectory(at: subdir, withIntermediateDirectories: true)
+        try Self.echoed(400).write(
+            to: root.appending(path: "\(id).jsonl"), atomically: true, encoding: .utf8)
+        try Self.echoed(400).write(
+            to: subdir.appending(path: "agent-1.jsonl"), atomically: true, encoding: .utf8)
+
+        let detail = try #require(scanner.sessionDetail(id: id))
+        #expect(detail.summary.apiCalls == 1)
+        #expect(detail.rows.filter { if case .apiCall = $0.kind { true } else { false } }.count == 1)
+    }
+
+    // MARK: - The persisted call list
+
+    @Test("call keys survive the hex round trip, and a corrupt blob decodes to nothing")
+    func callBlobRoundTrips() {
+        let calls = [
+            TranscriptScanner.CallKey(hash: 0, tokens: 0, sidechain: false),
+            TranscriptScanner.CallKey(
+                hash: .max, tokens: Int(Int32.max), sidechain: true),
+            TranscriptScanner.CallKey(
+                hash: TranscriptScanner.stableHash("req_011CdBsEWMzVitz4hBfxaJdV"),
+                tokens: 17_317, sidechain: false),
+        ]
+        let blob = TranscriptScanner.encodeCalls(calls)
+        #expect(blob.count == calls.count * 24)
+        #expect(TranscriptScanner.decodeCalls(blob) == calls)
+        #expect(TranscriptScanner.decodeCalls("nonsense").isEmpty)
+        #expect(TranscriptScanner.decodeCalls(String(blob.dropLast())).isEmpty)
+        #expect(TranscriptScanner.decodeCalls("").isEmpty)
+    }
+
+    @Test("the hash is stable across runs — it is compared against what a past run persisted")
+    func hashIsStable() {
+        // Pinned literals: a per-process seed (Hasher) would silently
+        // invalidate every cached call list on every launch.
+        #expect(TranscriptScanner.stableHash("") == 0xcbf2_9ce4_8422_2325)
+        #expect(TranscriptScanner.stableHash("a") == 0xaf63_dc4c_8601_ec8c)
+        #expect(TranscriptScanner.stableHash("foobar") == 0x85944171f73967e8)
+    }
+
+    @Test("an exclusion fingerprint ignores order and separates near-identical sets")
+    func fingerprintIsOrderFree() {
+        let a: Set<UInt64> = [1, 2, 3]
+        let b: Set<UInt64> = [3, 1, 2]
+        #expect(TranscriptScanner.fingerprint(a) == TranscriptScanner.fingerprint(b))
+        #expect(TranscriptScanner.fingerprint([]) == 0)
+        #expect(TranscriptScanner.fingerprint([1, 2]) != TranscriptScanner.fingerprint([1, 2, 3]))
+        // XOR alone would cancel these to the same value.
+        #expect(TranscriptScanner.fingerprint([1, 1 ^ 2]) != TranscriptScanner.fingerprint([2]))
+    }
+
     // MARK: - Tool-use blocks still ride the whole group
 
     @Test("tool_use blocks accumulate across a group's lines onto the one row")
