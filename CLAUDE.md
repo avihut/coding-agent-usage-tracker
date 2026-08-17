@@ -113,8 +113,8 @@ the README rather than silently deviating.
   spend/typed errors) and reads history/ledger/pricing/transcripts
   READ-ONLY (scanTranscriptsReadOnly — lease holder is the sole cache
   writer, spec §10). Verified live: yield 10-14s, takeover ≤35s, no
-  double-poll, meters instant from cache. Keychain: usaged shares the
-  app's signing identity; its first fetch may prompt ONCE. The app-hosted
+  double-poll, meters instant from cache. Keychain reads are promptless
+  through /usr/bin/security since v0.82.1 (see Keychain bullet). The app-hosted
   engine ALSO runs the control socket (host trio travels together) — a
   TUI works identically against either host; app-side socket refuses
   setProvider/shutdown (registry owns switching; nobody kills an app
@@ -975,12 +975,19 @@ the README rather than silently deviating.
   must move to willClose notifications). Window controllers call
   `DockPresence.shared.adopt(window)` on every show, BEFORE `NSApp
   .activate()` so the menu bar rides along.
-- Any binary that reads the Keychain must be signed with the stable identity
-  via `scripts/sign.sh` BEFORE its first run (default identity
-  `Apple Development: Avihu Turzion`, override with `CODESIGN_IDENTITY`).
-  Ad-hoc signing changes identity every build and re-triggers Keychain
-  prompts — never ship or run an ad-hoc build against the Keychain.
-- Keychain query: login keychain, no `kSecUseDataProtectionKeychain`.
+- KEYCHAIN READS GO THROUGH `/usr/bin/security` (v0.82.1):
+  `KeychainCredentialSource` spawns `find-generic-password -w` instead of
+  calling `SecItemCopyMatching`. Claude Code writes the item with that same
+  Apple tool and REWRITES it on every token refresh, resetting the item's
+  ACL grants — so native reads re-prompted per refresh no matter how stable
+  our signing (the pre-v0.82.1 "constantly asks for permission" report).
+  Reading as the item's own client is permanently silent. Never reintroduce
+  a native SecItem read of Claude Code's item; the secret stays pipe→memory,
+  never argv/logs (spec §10 unchanged: read-only, access token only).
+- Binaries are still signed with the stable identity via `scripts/sign.sh`
+  BEFORE first run (default `Apple Development: Avihu Turzion`, override
+  with `CODESIGN_IDENTITY`) — launchd job identity and any future ACLs stay
+  stable across builds; never ship an ad-hoc build.
 - Menu bar rendering: height from `NSStatusBar.system.thickness` (never
   hardcoded), `monospacedDigitSystemFont` so width doesn't jitter,
   `isTemplate = false`. Since v0.21.0 the title is a DRAWN NSImage

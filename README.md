@@ -116,7 +116,10 @@ change.
 ## Credential rules (non-negotiable)
 
 - Read `~/.claude/.credentials.json` first, fall back to the login Keychain item
-  `Claude Code-credentials`.
+  `Claude Code-credentials` — read via `/usr/bin/security find-generic-password`,
+  the same Apple tool Claude Code writes it with, so the read never trips the
+  Keychain consent dialog (Claude Code rewrites the item on every token refresh,
+  which resets any per-app "Always Allow" a native read had earned).
 - Access token only. The refresh token is never read or used.
 - Never write to the Keychain. Never cache the token in memory or on disk —
   re-read every refresh cycle so Claude Code's own token refresh is picked up.
@@ -183,10 +186,10 @@ again within moments (`docs/DAEMON.md` has the full design).
 
 Installation is automatic: the app sets the agent up at launch (and heals
 it — a moved bundle is repointed, an outdated daemon restarted), and the
-TUI does the same when it finds no engine running. The only setup that is
-yours is the Keychain prompt on the daemon's first fetch — it reads the
-Claude Code token through the same signed identity as the app, so approve
-it once with "Always Allow" and it never asks again.
+TUI does the same when it finds no engine running. There is nothing to
+approve: the daemon reads the Claude Code token through Apple's own
+`security` tool — the same client Claude Code stores it with — so no
+Keychain consent dialog ever appears.
 
 ```sh
 mise run daemon -- status     # launchd state, digest age, socket ping
@@ -202,11 +205,11 @@ Opting out is deliberate and sticky: `uninstall` (or the Settings toggle
 then simply hosts the engine embedded whenever it runs, exactly as before
 v0.66.0.
 
-Signing uses the local `Apple Development` identity so the Keychain ACL from
-"Always Allow" survives rebuilds (override with `CODESIGN_IDENTITY=...`). Those
+Signing uses the local `Apple Development` identity so the binaries keep one
+stable identity across rebuilds (override with `CODESIGN_IDENTITY=...`). Those
 certificates last a year; when one expires, signing fails with "no identity
 found" — renew it in Xcode → Settings → Accounts → Manage Certificates. The
-name stays the same, so the ACL survives.
+name stays the same, so the identity survives.
 
 ## Install on another Mac
 
@@ -232,10 +235,10 @@ System Settings → Privacy & Security *after* a launch has already been blocked
 
 The target Mac needs macOS 15+ and Claude Code installed **and signed in**: the
 app carries no token, it reads that machine's own login Keychain item, so nothing
-of mine travels inside the zip. On the first refresh macOS asks whether
-ClaudeUsage may read `Claude Code-credentials` — click **Always Allow** once.
-The first launch also sets up the background engine (`usaged`) by itself, which
-brings one more Always Allow prompt of its own — that's the whole install.
+of mine travels inside the zip. There is no Keychain dialog to approve — the
+item is read through Apple's `security` tool, the same client Claude Code
+stores it with. The first launch sets up the background engine (`usaged`) by
+itself — that's the whole install.
 
 Keep the bundle in `/Applications`: `SMAppService` registers the launch-at-login
 item by path, so moving the app afterwards breaks that toggle.

@@ -53,7 +53,8 @@ public struct StaticCredentialSource: CredentialSource {
 public enum CredentialError: Error, Sendable {
     /// The source has no credentials at all (file missing, Keychain item absent).
     case notFound
-    /// The Keychain refused access (user denied the prompt, or ACL mismatch).
+    /// The Keychain refused the read (locked keychain, or its unlock dialog
+    /// was dismissed). Carries the `security` tool's exit status.
     case accessDenied(OSStatus)
     /// The source exists but its contents can't be understood. The associated
     /// string describes the problem and must never contain the contents.

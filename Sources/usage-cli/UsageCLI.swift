@@ -98,7 +98,7 @@ struct UsageCLI {
         case .notFound:
             die("no Claude Code credentials found (checked ~/.claude/.credentials.json and the login Keychain)", code: 2)
         case .accessDenied(let status):
-            die("keychain access denied (OSStatus \(status)) — approve the Keychain prompt, or click \"Always Allow\" to stop future prompts", code: 3)
+            die("keychain read refused (security exited \(status)) — unlock the login Keychain and retry", code: 3)
         case .unreadable(let reason):
             die("credentials unreadable: \(reason)", code: 7)
         }

@@ -33,7 +33,7 @@ public enum UsageError: Error, Sendable, Equatable {
     public func hint(agent: String) -> String? {
         switch self {
         case .noCredentials: "Sign in to \(agent), then refresh."
-        case .keychainDenied: "Approve the Keychain prompt on the next refresh — \"Always Allow\" stops future prompts."
+        case .keychainDenied: "The login Keychain refused the read — unlock it, then refresh."
         case .signInExpired: "Open \(agent) once; it refreshes the token automatically."
         case .rateLimited: "The API asked for a pause. Checks back off and resume on their own."
         case .schema: "The undocumented API may have changed shape."
