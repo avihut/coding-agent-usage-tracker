@@ -476,7 +476,15 @@ the README rather than silently deviating.
   pins 0…100) and the strip geometry (band vs round-capped rule); also
   `liveNub`'s midpoint re-anchoring, which only the popover's re-anchoring
   sliding domain needs. Curtains stop at y=0 so the strip dims by its own
-  opacity, never twice.
+  opacity, never twice. v0.82.0 (1b42044): `marking` hands the WHOLE strip
+  to `ExhaustedStretches.mark` in one call (per-nub calls file each
+  remembered spent span once per nub, and none over a quiet strip;
+  spans-file-once is core-tested), and `liveNub` resolves by midpoint
+  containment among SAME-KIND segments (nearest-peer fallback only for
+  exhausted, whose forecast boundary drifts) — "first exhausted" let a
+  ~1-min remembered sliver at the window's left edge (prev window closed
+  pegged; detected cliff lags resets_at by a sample cadence) hijack the
+  forecast nub's hover into a corner-pinned red "1 min".
 - CHART MARK COLORS: inside a `Chart`, ALWAYS spell it `Color.primary` /
   `Color.secondary` / `Color.quaternary`. The bare hierarchical `.primary`
   does NOT mean the label color there — it resolves against the plot's own
