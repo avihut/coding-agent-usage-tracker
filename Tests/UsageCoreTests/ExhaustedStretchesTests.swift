@@ -155,6 +155,27 @@ struct ExhaustedStretchesTests {
         #expect(pieces.last?.span == span)
     }
 
+    /// Several sessions against one span still file the span exactly once,
+    /// in chronological place. The single-call shape is what
+    /// `WindowPlot.marking` leans on: fed one session at a time, `mark`
+    /// re-files the span per call, and the popover's exhausted hover
+    /// anchored to a stray copy (v0.82.0).
+    @Test func severalSessionsFileEachSpanOnce() {
+        let span = DateInterval(start: at(96), end: at(100))
+        let pieces = ExhaustedStretches.mark(
+            [
+                DateInterval(start: at(80), end: at(85)),
+                DateInterval(start: at(88), end: at(93)),
+                DateInterval(start: at(101), end: at(105)),
+            ],
+            exhausted: [span])
+
+        let spent = pieces.filter(\.isExhausted)
+        #expect(spent.count == 1)
+        #expect(spent.first?.span == span)
+        #expect(pieces.map(\.span.start) == [at(80), at(88), at(96), at(101)])
+    }
+
     /// A meter with no reading for this label can't have run out.
     @Test func anotherMetersReadingsAreNotOurs() {
         let samples = [UsageSample(t: at(96), percents: ["session": 100])]

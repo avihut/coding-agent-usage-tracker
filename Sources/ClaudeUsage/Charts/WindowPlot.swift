@@ -114,23 +114,26 @@ enum WindowPlot {
     /// Re-cuts the strip's stretches against the spans the limit was spent
     /// through, so a nub that straddles the moment the meter ran out is
     /// drawn half accent, half red. The cutting itself is core's
-    /// (`ExhaustedStretches.mark`, where it is tested); this only carries
-    /// the nub's own `fullStart` onto the piece that still begins where the
+    /// (`ExhaustedStretches.mark`, where it is tested), and it runs ONCE
+    /// over the whole strip: `mark` files every spent span alongside the
+    /// cut, so the per-nub loop this replaced filed the same span once per
+    /// nub — and filed none at all over a quiet strip. This only carries a
+    /// nub's `fullStart` onto the live piece that still begins where the
     /// nub did, so a frame-clipped session keeps reporting its true start.
     static func marking(
         _ nubs: [Nub], exhausted spans: [DateInterval]
     ) -> [Nub] {
         guard !spans.isEmpty else { return nubs }
-        return nubs.flatMap { nub in
-            ExhaustedStretches.mark([DateInterval(start: nub.start, end: nub.end)],
-                                    exhausted: spans)
-                .map { piece in
-                    Nub(
-                        start: piece.span.start, end: piece.span.end,
-                        kind: piece.isExhausted ? .exhausted : .active,
-                        fullStart: piece.span.start == nub.start ? nub.fullStart : nil)
-                }
-        }
+        return ExhaustedStretches.mark(
+            nubs.map { DateInterval(start: $0.start, end: $0.end) },
+            exhausted: spans)
+            .map { piece in
+                Nub(
+                    start: piece.span.start, end: piece.span.end,
+                    kind: piece.isExhausted ? .exhausted : .active,
+                    fullStart: piece.isExhausted ? nil
+                        : nubs.first { $0.start == piece.span.start }?.fullStart)
+            }
     }
 
     /// Scaffolding under the data: a muted dashed vertical at each reset in

@@ -900,16 +900,31 @@ struct MeterHistoryView: View {
     /// field survives a rebuild — the sliding domain re-anchors at Date()
     /// every render, shifting every bucket boundary, and the trailing end /
     /// exhausted start move with time — so equality on any of them orphans
-    /// the hover. The stored nub's midpoint finding the segment that
-    /// contains it is drift-proof (drift is micro/30s-scale, nubs are
-    /// minutes wide).
+    /// the hover. The stored nub's midpoint finding the same-kind segment
+    /// that contains it is drift-proof (drift is micro/30s-scale, nubs are
+    /// minutes wide) — and it must be containment, not "the first
+    /// exhausted": a remembered spent sliver peeping in at the domain's
+    /// left edge once hijacked the forecast nub's hover, pinning a "1 min"
+    /// readout to the far corner (v0.82.0). Only the exhausted hover then
+    /// hunts for the nearest peer: its forecast boundary swings with every
+    /// pace re-estimate (54 minutes in under a wall-clock minute,
+    /// observed), far enough to orphan containment mid-hover. An orphaned
+    /// active nub just drops the hover.
     private func liveNub(
         for stored: ActivitySegment, in segments: [ActivitySegment]
     ) -> ActivitySegment? {
-        if stored.kind == .exhausted { return segments.first { $0.kind == .exhausted } }
         let mid = stored.start.addingTimeInterval(
             stored.end.timeIntervalSince(stored.start) / 2)
-        return segments.first { $0.kind == .active && $0.start <= mid && mid <= $0.end }
+        let peers = segments.filter { $0.kind == stored.kind }
+        if let held = peers.first(where: { $0.contains(mid) }) { return held }
+        guard stored.kind == .exhausted else { return nil }
+        return peers.min { gap($0, to: mid) < gap($1, to: mid) }
+    }
+
+    /// How far a moment sits outside a segment (0 inside it).
+    private func gap(_ segment: ActivitySegment, to moment: Date) -> TimeInterval {
+        min(abs(segment.start.timeIntervalSince(moment)),
+            abs(segment.end.timeIntervalSince(moment)))
     }
 
     /// `hovered` is the live-resolved nub, an element of the same array being
