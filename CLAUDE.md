@@ -234,6 +234,26 @@ the README rather than silently deviating.
   provider later = a new UsageProvider implementation + a spec §10
   amendment for its hosts (and for any local trees it reads); the engine,
   history, charts, and panel need zero changes.
+- SESSIONS RENAME + SEARCH/SORT (2026-08-17): titles are click-to-rename
+  in the sidebar cards AND the detail header (SessionRow's affordance is
+  OPT-IN via handlers — the panel shortlist passes none, its rows are
+  click-to-open; Escape cancels BEFORE the focus-loss commit, which the
+  owners drop as stale). Custom names are an app-side OVERLAY:
+  `SessionRenames` (core, tested) persists `session-renames.json` in the
+  app's provider support dir (§10-clean; orphans kept — pruning against a
+  partial scan could drop live renames), applied in `UsageStore.sessions`
+  so every app surface agrees; the DIGEST keeps derived titles (TUI/CLI
+  parity for custom names is a deliberate follow-up). Empty or
+  derived-equal commit clears the override; detail header reads
+  `customSessionName ?? parse title` so live re-parses can't wash a
+  rename away. Sidebar search+sort: `SessionOrdering` (core, tested) —
+  match over title/path/branch/id; axes recency/name/tokens/cost
+  (@AppStorage keys `sessionsSortKey`/`sessionsSortAscending`, FROZEN),
+  ties break newest-first, absent cost (unpriced-only, the "—" cards)
+  sinks to the END in BOTH directions, day sections exist ONLY on the
+  recency axis (`SessionDayGroup.build` needs newest-first input;
+  ascending reverses groups + members), navigator requests clear the
+  query so a landing can't be hidden by a stale filter.
 - SESSIONS BROWSER (2026-08-15 v0.30.0, user-directed "axis 3"): a
   dedicated Sessions NSWindow (SessionsWindowController — the exact
   SettingsWindowController contract: lazy first-show,

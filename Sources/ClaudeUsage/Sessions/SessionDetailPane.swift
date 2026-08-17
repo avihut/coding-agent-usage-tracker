@@ -32,6 +32,10 @@ struct SessionDetailPane: View {
     /// The id chip's copied flash; symbol-only feedback, reset on selection.
     @State private var idCopied = false
     @State private var idHovered = false
+    /// The header title's rename state; reset on selection switch.
+    @State private var editingTitle = false
+    @State private var titleDraft = ""
+    @FocusState private var titleFocused: Bool
 
     private struct DetailKey: Equatable {
         let id: String
@@ -66,6 +70,7 @@ struct SessionDetailPane: View {
                 flashRow = nil
                 costRow = nil
                 vanished = false
+                editingTitle = false
             }
             let result = await store.sessionDetail(id: summary.id)
             if Task.isCancelled { return }
@@ -244,15 +249,49 @@ struct SessionDetailPane: View {
     private func header(_ summary: SessionSummary) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline, spacing: 16) {
-                Text(summary.title)
-                    .font(.title3.weight(.semibold))
-                    .lineLimit(2)
+                titleView(summary)
                 Spacer(minLength: 12)
                 costKPI(summary)
             }
             contextStrip(summary)
             statTiles(summary)
         }
+    }
+
+    /// Click-to-rename. `header` receives the parse's summary, whose title
+    /// is always the DERIVED one — the store's overlay is read here so a
+    /// custom name shows and live re-parses can't wash it away.
+    @ViewBuilder
+    private func titleView(_ summary: SessionSummary) -> some View {
+        let displayed = store.customSessionName(for: summary.id) ?? summary.title
+        if editingTitle {
+            TextField("Session name", text: $titleDraft)
+                .textFieldStyle(.plain)
+                .font(.title3.weight(.semibold))
+                .focused($titleFocused)
+                .onAppear {
+                    titleDraft = displayed
+                    titleFocused = true
+                }
+                .onSubmit { commitTitle(summary) }
+                // Escape drops editing FIRST, so the focus-loss commit
+                // below sees editingTitle == false and stays quiet.
+                .onExitCommand { editingTitle = false }
+                .onChange(of: titleFocused) { _, focused in
+                    if !focused, editingTitle { commitTitle(summary) }
+                }
+        } else {
+            Text(displayed)
+                .font(.title3.weight(.semibold))
+                .lineLimit(2)
+                .onTapGesture { editingTitle = true }
+                .help("Click to rename — an empty name restores the original title")
+        }
+    }
+
+    private func commitTitle(_ summary: SessionSummary) {
+        store.renameSession(id: summary.id, to: titleDraft)
+        editingTitle = false
     }
 
     /// The headline number the centered block used to carry, promoted to

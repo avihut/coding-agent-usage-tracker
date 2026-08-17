@@ -36,6 +36,14 @@ final class UsageStore {
     @ObservationIgnored private let bundleID: String
     @ObservationIgnored private let providerValue: any UsageProvider
     @ObservationIgnored private let serviceOverride: UsageService?
+    /// User-chosen session names, overlaid on derived titles in `sessions`.
+    /// Observable state: a rename re-renders every surface that shows the
+    /// title (sidebar, shortlist, detail header) in the same tick.
+    private var sessionNames: [String: String] = [:]
+    private var renamesFile: SessionRenames {
+        SessionRenames(directory: StorageScope.supportDirectory(
+            bundleID: bundleID, providerID: providerValue.id))
+    }
     @ObservationIgnored private var roleTimer: Timer?
     /// Stale numbers after lid-open are what make these widgets feel broken
     /// (spec §9) — refresh on wake. NSWorkspace is AppKit, so the observer
@@ -104,6 +112,13 @@ final class UsageStore {
         }
     }
     var sessions: [SessionSummary] {
+        guard !sessionNames.isEmpty else { return rawSessions }
+        return rawSessions.map { session in
+            sessionNames[session.id].map(session.renamed) ?? session
+        }
+    }
+    /// The scan's own summaries, derived titles intact.
+    private var rawSessions: [SessionSummary] {
         switch mode {
         case .hosting(let engine): engine.sessions
         case .client(let client): client.sessions
@@ -170,6 +185,30 @@ final class UsageStore {
         UsageEngine.thresholds(from: .standard)
     }
 
+    /// The scan's title for a session — what clearing a custom name
+    /// reverts to.
+    func derivedTitle(for id: String) -> String? {
+        rawSessions.first { $0.id == id }?.title
+    }
+
+    func customSessionName(for id: String) -> String? {
+        sessionNames[id]
+    }
+
+    /// Sets (or, for an empty/derived-equal name, clears) a session's
+    /// custom display name. A failed save keeps the name for this run —
+    /// the file lives in the app's own support dir, so failure means the
+    /// disk has bigger problems than a lost rename.
+    func renameSession(id: String, to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty || trimmed == derivedTitle(for: id) {
+            sessionNames.removeValue(forKey: id)
+        } else {
+            sessionNames[id] = trimmed
+        }
+        try? renamesFile.save(sessionNames)
+    }
+
     init(provider: any UsageProvider = ClaudeProvider(), service: UsageService? = nil) {
         let bundleID = Bundle.main.bundleIdentifier ?? "com.avihu.ClaudeUsage"
         self.bundleID = bundleID
@@ -220,6 +259,7 @@ final class UsageStore {
         }
         timer.tolerance = 5
         roleTimer = timer
+        sessionNames = renamesFile.load()
 
         // Auto-install (spec §10 re-amendment 2026-08-16): every launch
         // converges the usaged launch agent — install when absent, repoint
