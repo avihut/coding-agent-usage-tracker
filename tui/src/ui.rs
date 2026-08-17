@@ -496,6 +496,9 @@ fn render_dashboard(
             _ => render_heatmap(frame, app, digest, data, rect),
         }
     }
+    if let Some(rect) = plan.sessions {
+        frame.render_widget(sessions(digest, accent, rect), rect);
+    }
     if let Some(rect) = plan.footer {
         frame.render_widget(footer(digest, freshness, app, now), rect);
     }
@@ -1841,4 +1844,105 @@ mod tests {
         assert_eq!(paged.weeks.last().unwrap()[0], Some(date!(2026 - 07 - 13)));
         assert!(paged.has_newer);
     }
+}
+
+/// Item 25: the recent-sessions shortlist, the panel's strip in terminal
+/// form. Titles and a basename-only project label are what the digest is
+/// permitted to carry (§10 re-amendment 2026-08-17); this renders exactly
+/// those fields and derives nothing further.
+///
+/// The line degrades by width rather than truncating to nonsense: a narrow
+/// pane keeps the title and the cost, a roomier one earns duration, tokens
+/// and prompts, and the widest adds project·branch. Model dots ride at the
+/// left in the engine's ledger colours.
+fn sessions<'a>(digest: &'a LiveState, accent: Color, rect: Rect) -> Paragraph<'a> {
+    let cards = &digest.sessions;
+    let mut title = "SESSIONS".to_owned();
+    if !cards.is_empty() {
+        title.push_str(&format!("{}{} recent", glyphs().sep, cards.len()));
+    }
+    let mut lines = vec![section_title(&title)];
+
+    if cards.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "no sessions recorded yet",
+            style(DIM),
+        )));
+        return Paragraph::new(lines);
+    }
+
+    let seats = (rect.height as usize).saturating_sub(1);
+    let wide = rect.width >= 60;
+    let roomy = rect.width >= 44;
+
+    for card in cards.iter().take(seats) {
+        let mut cells: Vec<Span> = Vec::new();
+        // Up to three dots — beyond that they stop reading as a mix.
+        for color in card.model_colors.iter().take(3) {
+            cells.push(Span::styled(glyphs().dot.to_owned(), ramp(*color, 1.0)));
+        }
+        if card.model_colors.is_empty() {
+            cells.push(Span::styled(" ".to_owned(), style(DIM)));
+        }
+        cells.push(Span::styled(" ".to_owned(), style(DIM)));
+
+        let mut facts = String::new();
+        if roomy {
+            facts.push_str(&format!(
+                "{}{}",
+                glyphs().sep,
+                worked(card.active_seconds)
+            ));
+            facts.push_str(&format!("{}{}", glyphs().sep, compact(card.tokens)));
+        }
+        // Absent cost is absent — an unpriced session must not read "$0".
+        if let Some(cost) = card.cost {
+            facts.push_str(&format!("{}{}", glyphs().sep, money(cost)));
+        }
+        if wide {
+            if let Some(project) = &card.project {
+                facts.push_str(&format!("{}{}", glyphs().sep, project));
+                if let Some(branch) = &card.branch {
+                    facts.push_str(&format!("@{branch}"));
+                }
+            }
+        }
+        // The facts are measured BEFORE the title claims its room, never
+        // reserved by guess: a four-figure cost overflowed a guessed width
+        // and ratatui clipped it mid-number, so "$1,235.85" rendered as
+        // "$1," — a wrong number, not a shortened one. The title is the
+        // elastic part; the numbers are never cut.
+        let dots = card.model_colors.len().min(3).max(1);
+        let title_room = (rect.width as usize)
+            .saturating_sub(facts.chars().count() + dots + 1)
+            .max(8);
+        cells.insert(
+            dots + 1,
+            Span::styled(clip(&card.title, title_room), style(accent)),
+        );
+        cells.push(Span::styled(facts, style(DIM)));
+        lines.push(Line::from(cells));
+    }
+    Paragraph::new(lines)
+}
+
+/// A session's honest working time — "2h 15m", "45m". Not `countdown`,
+/// which measures toward a future instant and says "any moment" at zero.
+fn worked(seconds: f64) -> String {
+    let minutes = (seconds / 60.0).round() as i64;
+    if minutes >= 60 {
+        format!("{}h {}m", minutes / 60, minutes % 60)
+    } else {
+        format!("{}m", minutes.max(0))
+    }
+}
+
+/// Trims to `room` columns, marking the cut so a clipped title never looks
+/// like the whole one.
+fn clip(text: &str, room: usize) -> String {
+    if text.chars().count() <= room {
+        return text.to_owned();
+    }
+    let kept: String = text.chars().take(room.saturating_sub(1)).collect();
+    format!("{kept}{}", glyphs().ellipsis)
 }

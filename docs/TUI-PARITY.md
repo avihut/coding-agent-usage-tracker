@@ -1,7 +1,7 @@
 # TUI ↔ menu bar parity program
 
-Status: **WAVES 1–3 SHIPPED** (v0.73.0 / v0.74.0 / v0.76.0, 2026-08-16)
-— wave 4 queued.
+Status: **PROGRAM COMPLETE** — waves 1–4 shipped (v0.73.0 / v0.74.0 /
+v0.76.0 / v0.80.0, 2026-08-16 → 2026-08-17).
 This file is the source of truth for the program AND the context handoff
 for a fresh session: everything needed to execute lives here. Read it
 top to bottom before touching code.
@@ -39,7 +39,7 @@ Two decisions the USER made at program start (2026-08-16):
 | 1 | v0.73.0 | 1–9, 26–30 (layout truth, color parity, state parity) — **SHIPPED** |
 | 2 | v0.74.0 | 10–15, 21–24 (activity bar chart + picker, models table) — **SHIPPED** |
 | 3 | v0.76.0 | 16–19, 31 (meter-surface keys, forecast note, pace picks) — **SHIPPED** |
-| 4 | v0.80.0 | 20, 25 (both need digest extensions; 25 needs the §10 amendment) |
+| 4 | v0.80.0 | 20, 25 (digest extensions + the §10 amendment) — **SHIPPED** |
 
 v0.75.0 sits between waves 2 and 3: a user-reported bug (a limit at 100%
 still reading "runs out soon", its crossing never recorded) fixed
@@ -55,9 +55,18 @@ reset. v0.77.0 answers the root cause the user named twice — the two
 charts were separate implementations — by extracting Charts/WindowPlot.
 Wave 4 shifted three versions later.
 
-WAVE 4 IS WHAT REMAINS: items 20 + 25 at v0.80.0. Item 25 needs the
-dated, user-directed docs/SPEC.md §10 amendment written FIRST (D2 is
-already decided — session titles are allowed in the local-only digest).
+THE PROGRAM IS COMPLETE. Wave 4 shipped as v0.80.0: the §10
+re-amendment was written first (2026-08-17, user-directed — the digest may
+carry sessions WITH titles; the project label is a directory BASENAME and
+the full-path ban is untouched; the relaxation explicitly does not travel
+to any transported digest). Item 20 publishes LiveMeter.modelSeries built
+by the same core ModelCurves the app's popover draws, thinned to curveCap
+(they multiply by model count) and coloured from the ledger; the TUI draws
+them behind the percent trace with a breakdown legend whose row is
+RESERVED from the chart, since the readout already owns the last row.
+Item 25 publishes LiveState.sessions with the basename rule enforced in
+the builder, and the TUI seats the shortlist LAST in layout priority so it
+can never displace the meters or the activity chart.
 
 Verify each wave headlessly (protocol below) before shipping it.
 

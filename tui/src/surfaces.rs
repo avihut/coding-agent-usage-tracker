@@ -96,11 +96,17 @@ pub fn render_meter(
 
     // Chart body: measured series in braille, the forecast's trajectory in
     // dots, over the meter's own window.
+    // The track and readout always cost 2 rows; the breakdown legend costs a
+    // third, RESERVED here rather than claimed after the readout — the
+    // readout already sits on the last usable row, so a legend appended
+    // below it would never have anywhere to land.
+    let wants_legend = !meter.model_series.is_empty() && rect.height >= header_rows + 9;
     let chart_area = Rect::new(
         rect.x,
         rect.y + header_rows,
         rect.width,
-        rect.height.saturating_sub(header_rows + 2),
+        rect.height
+            .saturating_sub(header_rows + if wants_legend { 3 } else { 2 }),
     );
     if chart_area.height < 3 || meter.series.is_empty() {
         return;

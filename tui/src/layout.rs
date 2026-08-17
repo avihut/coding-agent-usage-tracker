@@ -41,8 +41,15 @@ pub struct Plan {
     pub today: Option<Rect>,
     pub models: Option<Rect>,
     pub heatmap: Option<Rect>,
+    /// The sessions shortlist — LAST in priority. It appears only where
+    /// rows survive every other section, so adding it can never displace
+    /// the meters or the activity chart on a small pane.
+    pub sessions: Option<Rect>,
     pub footer: Option<Rect>,
 }
+
+/// Title plus at least two rows; anything less reads as a stub.
+const SESSIONS_MIN_ROWS: u16 = 3;
 
 /// Rows each section wants — the count it will actually paint, title
 /// included. Callers know their own content (how many meters, whether a
@@ -114,7 +121,13 @@ fn portrait(area: Rect, want: &Wants, gap: u16, activity: u16) -> Plan {
     plan.models = take(want.models, &mut y);
     let remaining = (bottom - 1).saturating_sub(y);
     if remaining >= 6 {
-        plan.heatmap = Some(Rect::new(area.x, y, area.width, remaining.min(activity)));
+        let height = remaining.min(activity);
+        plan.heatmap = Some(Rect::new(area.x, y, area.width, height));
+        y += height + gap;
+    }
+    let leftover = (bottom - 1).saturating_sub(y);
+    if leftover >= SESSIONS_MIN_ROWS {
+        plan.sessions = Some(Rect::new(area.x, y, area.width, leftover));
     }
     plan.footer = Some(Rect::new(area.x, bottom - 1, area.width, 1));
     plan
@@ -148,6 +161,11 @@ fn wide_portrait(area: Rect, want: &Wants, gap: u16, activity: u16) -> Plan {
     let height = body_height.min(activity);
     if height >= 6 {
         plan.heatmap = Some(Rect::new(right.x, right.y, right.width, height));
+        let leftover = body_height.saturating_sub(height + gap);
+        if leftover >= SESSIONS_MIN_ROWS {
+            plan.sessions = Some(Rect::new(
+                right.x, right.y + height + gap, right.width, leftover));
+        }
     }
     plan.footer = Some(Rect::new(area.x, area.y + area.height - 1, area.width, 1));
     plan
@@ -190,6 +208,12 @@ fn landscape(area: Rect, want: &Wants, gap: u16, activity: u16) -> Plan {
     let remaining = right_bottom.saturating_sub(ry);
     if remaining >= 5 {
         plan.heatmap = Some(Rect::new(right.x, ry, right.width, remaining.min(activity)));
+    }
+    // Landscape puts the shortlist in the LEFT column's tail: the right one
+    // is already carrying models plus the activity chart.
+    let left_leftover = left_bottom.saturating_sub(y);
+    if left_leftover >= SESSIONS_MIN_ROWS {
+        plan.sessions = Some(Rect::new(left.x, y, left.width, left_leftover));
     }
     plan.footer = Some(Rect::new(
         area.x,
@@ -320,5 +344,45 @@ mod tests {
         // Below the wide threshold the single column keeps the pane.
         let narrow = super::plan(rect(60, 80), 4, 5, 56);
         assert_eq!(narrow.heatmap.unwrap().x, 0);
+    }
+}
+
+#[cfg(test)]
+mod sessions_slot_tests {
+    use super::*;
+
+    fn area(width: u16, height: u16) -> Rect {
+        Rect::new(0, 0, width, height)
+    }
+
+    /// The shortlist is LAST in priority: a pane too short for it must still
+    /// land the meters and the activity chart. Adding a section can never
+    /// cost an existing one its slot.
+    #[test]
+    fn a_short_pane_drops_sessions_before_anything_else() {
+        let plan = plan(area(46, 20), 3, 4, 8);
+        assert!(plan.meters.is_some());
+        assert!(plan.sessions.is_none() || plan.heatmap.is_some());
+    }
+
+    /// Given room, it lands — and never overlaps the footer or the chart.
+    #[test]
+    fn a_tall_pane_seats_sessions_clear_of_its_neighbours() {
+        let full = area(60, 60);
+        let plan = plan(full, 3, 4, 8);
+        let sessions = plan.sessions.expect("tall pane seats sessions");
+        let footer = plan.footer.expect("footer");
+
+        assert!(sessions.height >= SESSIONS_MIN_ROWS);
+        assert!(sessions.y + sessions.height <= footer.y);
+        if let Some(heat) = plan.heatmap {
+            assert!(sessions.y >= heat.y + heat.height, "overlaps the chart");
+        }
+    }
+
+    /// The strip tier has no dashboard at all, so it has no shortlist.
+    #[test]
+    fn the_strip_has_no_sessions() {
+        assert!(plan(area(38, 8), 3, 4, 8).sessions.is_none());
     }
 }
