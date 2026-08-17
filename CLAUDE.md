@@ -253,7 +253,17 @@ the README rather than silently deviating.
   sinks to the END in BOTH directions, day sections exist ONLY on the
   recency axis (`SessionDayGroup.build` needs newest-first input;
   ascending reverses groups + members), navigator requests clear the
-  query so a landing can't be hidden by a stale filter.
+  query so a landing can't be hidden by a stale filter. v0.83.0
+  refinements (user-directed): a rename click parks the caret on the
+  CLICKED character, never AppKit's select-all — `FieldEditorCursor`
+  maps the tap (window coords off NSApp.currentEvent) through the field
+  editor's characterIndexForInsertion, bounded retries, end-of-text
+  fallback; renameable titles wear the id-chip grammar (hover tint +
+  `.pointerStyle(.link)`); the card's top-right KPI presents the ACTIVE
+  SORT's value — the tokens sort promotes the token total there and
+  demotes cost to the caption line (`SessionRow.sortKey`; the shortlist
+  passes none → cost default), name/recency keep cost since their values
+  already own fixed prominent homes.
 - SESSIONS BROWSER (2026-08-15 v0.30.0, user-directed "axis 3"): a
   dedicated Sessions NSWindow (SessionsWindowController — the exact
   SettingsWindowController contract: lazy first-show,
@@ -477,11 +487,41 @@ the README rather than silently deviating.
   falls through to the credentialed bare fetch (which survives only as
   the zero-argument debug invocation). That routing gate lives in the
   executable target where no unit test reaches — re-verify live after
-  touching main(). `sessions --all` keeps the legacy deep-scan dump until
-  the deep verbs land (windows/history/prices — plan M2). Numbers: every
+  touching main(). Numbers: every
   float on stdout routes through JSONEncoder — NSNumber.stringValue and
   JSONSerialization are NOT shortest-round-trip on Darwin (0.069 →
   "0.06900000000000001").
+- USAGE-CLI M2 DEEP VERBS (2026-08-17, v0.83.0): four nouns that read
+  PAST the digest — `windows <meter> [hit-rate]` (window-ledger.json,
+  newest-first; hit-rate = reachedLimit share, absent over zero windows),
+  `history <meter>` (history.json label-keyed samples; TSV t⇥percent in
+  BOTH text registers), `prices`/`price <model> [field]` (pricing cache;
+  $/MTok = rate×1e6; answers with NO digest via the bundled floor) — plus
+  scan-backed `sessions --all` (shortlist columns + trailing `end` in
+  EVERY register, human leads with it) and `session …` deep fields
+  (end/kind/tool-calls/subagents/compactions/agent-version/models),
+  reachable via a shortlist miss OR `session <id> --all`, the escape
+  hatch that scans past a shortlist HIT (without it the ≤8 most-recent
+  sessions could never answer a deep field). Dispatcher: DeepQuery.run
+  (Digests/DeepQuery.swift); sessions/session route via
+  DeepQuerySessionsCLI with the scan injected as a closure
+  (buildIndex = persistCache:false, §10). Exit 11 = non-claude provider,
+  ahead of every verb body. GRAMMAR: one shared parser with PER-NOUN
+  APPLICABILITY — `DigestQuery.rejectInapplicableFlags` returns an M2
+  flag on a non-owner noun to exit 19 "unknown flag" exactly as pre-M2
+  (the M1 suite does NOT pin this itself; DeepQueryFlagsTests does — keep
+  it in mind when touching the shared flag sets). `--last` is
+  integer-count-or-duration (disjoint grammars, `DeepQuery.parseLast`) on
+  windows/history alike; `--since` is duration-or-yyyy-MM-dd
+  (`resolveSinceCutoff`, digest-calendar midnight) on
+  windows/history/sessions alike; `--background`/`--no-background`
+  REQUIRE `--all` (the shortlist doesn't know kind — refuse, never hand
+  back excluded rows). Deep verbs tolerate a nil digest (meter selectors
+  degrade to exact ledger/sample matching; worst/next need a digest).
+  windows human = the SAME five columns as raw (end start last peak hit;
+  a real `false` reads "miss" — the em-dash stays ABSENT-only). Built by
+  a 14-agent sonnet+opus workflow (wf_a6974ae9-76f); its verify barrier's
+  10 findings were closed by hand before release.
 - LIMIT-WINDOW PLOT: `Charts/WindowPlot.swift` (v0.77.0, 7cf5180) is the
   ONE vocabulary for the percent-over-a-span charts — reset dashes, reset
   curtain, nub curtain, `Nub` (start/end/kind/fullStart), nub colour +

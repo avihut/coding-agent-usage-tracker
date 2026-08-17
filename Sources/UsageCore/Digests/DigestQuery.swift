@@ -50,19 +50,49 @@ public enum DigestQuery {
         "sessions", "session", "prompt", "get",
     ]
 
+    /// `all`/`background`/`no-background` are M2 deep-verb flags —
+    /// registered here, in the ONE shared parser, so `DeepQuery.run`
+    /// doesn't duplicate a second grammar. Registration is not
+    /// applicability: `rejectInapplicableFlags` below returns them to
+    /// exit 19 on every noun that doesn't answer to them, exactly as an
+    /// unknown flag exited before M2 — a shipped noun's grammar must not
+    /// silently widen because a sibling verb learned a new flag.
     private static let booleanFlags: Set<String> = [
         "json", "raw", "iso", "unix", "relative", "no-color", "header",
-        "check", "no-glyph", "tmux",
+        "check", "no-glyph", "tmux", "all", "background", "no-background",
     ]
     /// `digest`/`provider` are recognized-but-inert here: the CLI already
     /// consumed `--digest` to choose which file to read, and digest verbs
     /// ignore `--provider` by design (the digest is single-provider). They
     /// still have to parse cleanly or every documented invocation in the
-    /// design doc would exit 19 on its own flags.
+    /// design doc would exit 19 on its own flags. `last` is the deep list
+    /// verbs' count-or-duration flag (`DeepQuery.parseLast`), registered
+    /// here for the same one-shared-parser reason as the booleans above.
     private static let valueFlags: Set<String> = [
         "max-age", "digest", "provider", "day", "range", "since", "limit",
-        "project", "branch",
+        "project", "branch", "last",
     ]
+
+    /// Which nouns each M2 flag is real for. Everything else gets the
+    /// pre-M2 answer — `unknown flag '--x'`, exit 19 — enforced at every
+    /// entry point (`run` here, `DeepQuery.run`,
+    /// `DeepQuerySessionsCLI.run`), so sharing one parser never loosens a
+    /// noun's own grammar. Sorted iteration keeps the reported flag
+    /// deterministic when several inapplicable ones appear at once.
+    private static let flagOwners: [String: Set<String>] = [
+        "all": ["sessions", "session"],
+        "background": ["sessions"],
+        "no-background": ["sessions"],
+        "last": ["windows", "history"],
+    ]
+
+    static func rejectInapplicableFlags(noun: String, parsed: ParsedArgs) -> QueryOutput? {
+        for (flag, owners) in flagOwners.sorted(by: { $0.key < $1.key })
+        where parsed.flags[flag] != nil && !owners.contains(noun) {
+            return badQuery("unknown flag '--\(flag)'")
+        }
+        return nil
+    }
 
     // MARK: - Entry point
 
@@ -78,6 +108,7 @@ public enum DigestQuery {
         }
         let parsed = parseArgs(Array(arguments.dropFirst()))
         if let error = parsed.error { return badQuery(error) }
+        if let rejection = rejectInapplicableFlags(noun: noun, parsed: parsed) { return rejection }
 
         if let maxAgeText = parsed.flags["max-age"] {
             guard let maxAge = parseDuration(maxAgeText) else {

@@ -5,11 +5,6 @@ import UsageCore
 /// the usage endpoint once, prints the raw JSON body to stdout. Diagnostics go
 /// to stderr and never contain the token.
 ///
-/// `usage-cli sessions [--provider <id>]` instead prints the session index —
-/// the sessions browser's data layer, verifiable headless. It READS the app's
-/// warm scan cache but never writes it (`persistCache: false`): the app stays
-/// the sole cache writer, so a CLI run can't race or clobber a live scan.
-///
 /// `usage-cli sync-digest [--provider <id>]` prints the CloudKit sync digest
 /// this machine would publish (docs/SYNC.md) — same read-only cache rules,
 /// zero network.
@@ -22,13 +17,21 @@ import UsageCore
 /// limit, budget, spend, activity, cost, models, model, sessions, session,
 /// prompt, get) is the v0.81.0 query surface — the WHOLE grammar lives in
 /// core `DigestQuery`, this target only does file IO + process exit.
-/// `sessions` WITHOUT `--all` is one of those nouns (the digest shortlist);
-/// `sessions --all` keeps the legacy deep-scan path below, untouched, since
-/// the query surface's shortlist can't answer it (v0.82.0 replaces it).
-/// Routing below is by ARGUMENT COUNT, not noun recognition: anything past
-/// argv[0] is the grammar's noun position, typo or not, so `DigestQuery.run`
-/// itself returns the bad-query exit for an unrecognized one — a typo must
-/// never fall through to the credentialed fetch beneath it.
+/// M2 adds a SECOND noun vocabulary, `DeepQuery.nouns` (windows, history,
+/// prices, price) — same grammar, but `DeepQuery.run` takes an OPTIONAL
+/// digest (`prices` answers with no digest and no daemon running at all,
+/// from the bundled pricing floor), so `runQuery` below checks noun
+/// membership BEFORE deciding whether a missing digest file is fatal.
+/// `sessions`/`session` stay `DigestQuery` nouns, but (v0.83.0) they too can
+/// answer without a digest: `sessions --all` and a `session <id-prefix>`
+/// shortlist-miss both fall through to a bare `TranscriptScanner` pass
+/// (`DeepQuerySessionsCLI`, core `Digests/DeepQuerySessions.swift`) — the
+/// noun grammar's own replacement for the old ad hoc `runSessions` dump this
+/// file used to carry. Routing below is by ARGUMENT COUNT, not noun
+/// recognition: anything past argv[0] is the grammar's noun position, typo
+/// or not, so `runQuery` itself returns the bad-query exit for an
+/// unrecognized one — a typo must never fall through to the credentialed
+/// fetch beneath it.
 @main
 struct UsageCLI {
     static func main() async {
@@ -37,10 +40,6 @@ struct UsageCLI {
         // is somebody's flag VALUE (`sessions --branch state` must run the
         // sessions query, not dump the digest), never a mode switch.
         let mode = arguments.count > 1 ? arguments[1] : ""
-        if mode == "sessions", arguments.contains("--all") {
-            runSessions(providerID: value(after: "--provider", in: arguments))
-            return
-        }
         if mode == "sync-digest" {
             runSyncDigest(providerID: value(after: "--provider", in: arguments))
             return
@@ -61,8 +60,9 @@ struct UsageCLI {
         // Milestone-1's bare fetch is a single-argument debug invocation
         // ONLY (`usage-cli`, nothing else) — any other argv[1] is the
         // grammar's noun position, recognized or not, so a typo reaches
-        // `DigestQuery.run`'s own bad-query exit instead of silently
-        // falling through to a live credentialed fetch.
+        // `runQuery`'s own bad-query exit (checked against BOTH noun
+        // vocabularies below) instead of silently falling through to a
+        // live credentialed fetch.
         if arguments.count > 1 {
             runQuery(
                 arguments: Array(arguments.dropFirst()),
@@ -122,58 +122,6 @@ struct UsageCLI {
         }
     }
 
-    // MARK: - sessions mode
-
-    private static func runSessions(providerID: String?) {
-        // The registry's persisted pick; "auto" means no explicit choice.
-        let stored = UserDefaults.standard.string(forKey: "activeProviderID")
-        let chosen = providerID ?? (stored == "auto" ? nil : stored) ?? "claude"
-        // A bare executable has no bundle identity — same fallback the app
-        // uses, so both read the same scoped cache.
-        let bundleID = "com.avihu.ClaudeUsage"
-        let support = StorageScope.supportDirectory(bundleID: bundleID, providerID: chosen)
-
-        guard chosen == "claude" else {
-            die("sessions are not wired for '\(chosen)' in the CLI yet", code: 11)
-        }
-        let root = FileManager.default.homeDirectoryForCurrentUser
-            .appending(path: ".claude/projects")
-        let scanner = TranscriptScanner(root: root, cacheDirectory: support)
-        let scan = scanner.scan(persistCache: false)
-        guard !scan.sessions.isEmpty else {
-            note("no sessions found under ~/.claude/projects")
-            return
-        }
-
-        let provider = ClaudeProvider()
-        let pricing = PricingService(
-            cacheDirectory: support, fallback: provider.bundledRates,
-            selector: provider.pricingSelector
-        ).current()
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd HH:mm"
-        note("\(scan.sessions.count) sessions (\(provider.agentName))")
-        for session in scan.sessions {
-            var dollars = 0.0
-            var unpriced = 0
-            for (model, tally) in session.models {
-                if let rates = pricing.rates(for: model) {
-                    dollars += rates.dollars(for: tally)
-                } else {
-                    unpriced += 1
-                }
-            }
-            let cost = unpriced > 0 && dollars == 0
-                ? "      —" : String(format: "%8.2f", dollars)
-            let badge = session.kind == .background ? " [bg]" : "     "
-            let line = "\(formatter.string(from: session.end))  $\(cost)  "
-                + "\(String(format: "%5d", session.apiCalls)) calls  "
-                + "\(TokenFormat.compact(session.totalTokens).padding(toLength: 7, withPad: " ", startingAt: 0))"
-                + "\(badge)  \(session.title)\n"
-            FileHandle.standardOutput.write(Data(line.utf8))
-        }
-    }
-
     // MARK: - sync-digest mode
 
     /// Prints the sync digest (docs/SYNC.md) this machine WOULD publish, as
@@ -184,8 +132,7 @@ struct UsageCLI {
     /// so `planLabel` (credential metadata) prints null here even though the
     /// app will publish it.
     private static func runSyncDigest(providerID: String?) {
-        let stored = UserDefaults.standard.string(forKey: "activeProviderID")
-        let chosen = providerID ?? (stored == "auto" ? nil : stored) ?? "claude"
+        let chosen = DeepQuery.resolveProviderID(flag: providerID)
         let bundleID = "com.avihu.ClaudeUsage"
         guard chosen == "claude" else {
             die("sync-digest is not wired for '\(chosen)' in the CLI yet", code: 11)
@@ -339,14 +286,57 @@ struct UsageCLI {
     // MARK: - query mode (v0.81.0)
 
     /// `arguments` starts with the noun (the program path already dropped by
-    /// the caller) — the exact shape `DigestQuery.run` expects. `--digest`
-    /// is resolved here (file IO is this target's job) but ALSO left in
-    /// `arguments` for `DigestQuery` to parse — it recognizes the flag as
-    /// inert, one parser for the whole grammar rather than two.
+    /// the caller) — the exact shape `DigestQuery.run` expects, and
+    /// `DeepQuery.run` takes the noun separately with the same remainder.
+    /// `--digest` is resolved here (file IO is this target's job) but ALSO
+    /// left in `arguments` for the query layer to parse — it recognizes the
+    /// flag as inert, one parser for the whole grammar rather than two.
+    ///
+    /// Noun recognition happens BEFORE the digest file is touched: an
+    /// unrecognized noun exits 19 regardless of whether a digest exists
+    /// (`DigestQuery.nouns` alone can't answer that — a digest-less machine
+    /// used to report exit 13 for a plain typo, which the M2 doc rule
+    /// ("an unknown noun exits 19") tightens here), and a `DeepQuery` noun
+    /// is dispatched with the digest OPTIONAL (`prices` answers with no
+    /// digest and no daemon at all) — only `DigestQuery`'s own nouns require
+    /// one to exist first.
     private static func runQuery(arguments: [String], digestPath: String?) {
+        let noun = arguments.first ?? ""
+        guard DigestQuery.nouns.contains(noun) || DeepQuery.nouns.contains(noun) else {
+            die(
+                "unknown noun '\(noun)' — usage-cli <noun> [selector] [field] [flags]; "
+                    + "nouns: \((DigestQuery.nouns.union(DeepQuery.nouns)).sorted().joined(separator: " "))",
+                code: 19)
+        }
+
         let fileURL = digestPath.map { URL(fileURLWithPath: $0) }
             ?? LiveState.fileURL(bundleID: "com.avihu.ClaudeUsage")
-        guard let data = FileManager.default.contents(atPath: fileURL.path) else {
+        let digestData = FileManager.default.contents(atPath: fileURL.path)
+
+        if DeepQuery.nouns.contains(noun) {
+            let digest = digestData.flatMap { try? LiveState.decoder().decode(LiveState.self, from: $0) }
+            let output = DeepQuery.run(
+                noun: noun, arguments: Array(arguments.dropFirst()), digest: digest,
+                environment: ProcessInfo.processInfo.environment, now: Date())
+            emit(output)
+            return
+        }
+
+        // `sessions`/`session` route through `DeepQuerySessionsCLI`, not
+        // `DigestQuery.run` — only there can a shortlist miss / `--all` fall
+        // through to a real transcript scan (`DigestQuery.run` itself stays
+        // pure, per its own doc contract). A digest that exists but fails to
+        // decode degrades the same way as one that's simply absent: corrupt
+        // state is no more answerable than no state.
+        if noun == "sessions" || noun == "session" {
+            let digest = digestData.flatMap { try? LiveState.decoder().decode(LiveState.self, from: $0) }
+            let output = DeepQuerySessionsCLI.run(
+                noun: noun, arguments: Array(arguments.dropFirst()), digest: digest, now: Date())
+            emit(output)
+            return
+        }
+
+        guard let data = digestData else {
             die(
                 "no live-state digest at \(fileURL.path) — launch the app (or usaged) so the engine publishes one",
                 code: 13)
@@ -362,10 +352,14 @@ struct UsageCLI {
         let output = DigestQuery.run(
             arguments: arguments, digest: digest, rawDigest: data,
             environment: ProcessInfo.processInfo.environment, now: Date())
-        // Several exits are pinned to EMPTY stdout (`--check`, a
-        // `--max-age` miss) — the line terminator rides ALONG with real
-        // content instead of unconditionally, so those stay genuinely
-        // silent rather than silent-plus-one-newline-byte.
+        emit(output)
+    }
+
+    /// Shared by both query layers: several exits are pinned to EMPTY
+    /// stdout (`--check`, a `--max-age` miss) — the line terminator rides
+    /// ALONG with real content instead of unconditionally, so those stay
+    /// genuinely silent rather than silent-plus-one-newline-byte.
+    private static func emit(_ output: QueryOutput) {
         if !output.stdout.isEmpty {
             FileHandle.standardOutput.write(Data(output.stdout.utf8))
             FileHandle.standardOutput.write(Data("\n".utf8))
