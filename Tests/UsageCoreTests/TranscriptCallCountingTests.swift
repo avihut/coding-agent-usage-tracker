@@ -313,4 +313,23 @@ struct TranscriptCallCountingTests {
         #expect(toolUses == 2)
         #expect(detail?.summary.toolCalls == 2)
     }
+
+    @Test("an advisor call is drawn on the detail timeline — the ledger must reach the whole spend")
+    func advisorIsARowToo() throws {
+        let (scanner, root) = try makeScanner()
+        let id = "22222222-3333-4444-5555-666666666666"
+        try Self.withAdvisor.write(
+            to: root.appending(path: "\(id).jsonl"), atomically: true, encoding: .utf8)
+
+        let detail = try #require(scanner.sessionDetail(id: id))
+        let calls = detail.rows.compactMap { row -> (String, TokenTally)? in
+            guard case .apiCall(let model, let tally, _) = row.kind else { return nil }
+            return (model, tally)
+        }
+        #expect(calls.count == 2)
+        #expect(calls.contains { $0.0 == "claude-opus-5" && $0.1.input == 120_000 })
+        // What the rows sum to is what the card claims.
+        let drawn = calls.reduce(0) { $0 + $1.1.total }
+        #expect(drawn == detail.summary.models.values.reduce(0) { $0 + $1.total })
+    }
 }

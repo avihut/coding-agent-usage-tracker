@@ -607,18 +607,27 @@ the README rather than silently deviating.
   ownership must stay recomputable from cached entries alone, which is
   what lets a file that owns everything fingerprint to 0 and never
   reparse. FNV-1a, never `Hasher`: these are persisted and compared
-  across processes. `sessionDetail` applies the same rule directly (main
-  claims, then each part reads excluding what is claimed) so the detail
-  ledger and the session card agree.
+  across processes. `sessionDetail` dedups WITHIN the session group only
+  (main claims its calls, then each part reads excluding what is already
+  claimed) — deliberately not the global rule, since it parses fresh and
+  has no corpus to consult. That covers the 297 main↔subagent groups;
+  the residual is the ~55 sibling-session groups, where a call owned by
+  another session's file is excluded from this session's CARD but still
+  drawn in its DETAIL view.
   Cache version 6 — every figure persisted under v5 undercounts.
-  BUMPING cacheVersion HAS AN OPERATIONAL COST, learned the hard way
-  here: a cold scan of this corpus is ~41s (warm is 0.2s), and only the
-  lease holder may persist a cache, so every `usage-cli` caller during
-  that window pays the full 41s and banks nothing. With a statusline
-  firing per render they pile up and starve the daemon that would have
-  ended it. Warm the cache with ONE lease-holding scan before letting
-  readers loose — restarting usaged on an already-warm cache is the whole
-  procedure. The call list also grew the cache 2.1MB -> 3.6MB.
+  A COLD CACHE CAN STAMPEDE — hit during this rollout, and the mechanism
+  is confirmed, not guessed. A cold scan of this corpus is ~41s (warm:
+  0.2s). An empty digest means an empty sessions shortlist, so every
+  `usage-cli session <id> <field>` MISSES and escalates through
+  `DeepQuerySessions.swift`'s `TranscriptScanner(...).scan(persistCache:
+  false)` — a FULL corpus scan that banks nothing. The statusline runs
+  exactly that per render, so the misses pile up and starve the daemon
+  whose scan would have ended them. (The v0.84.0 "~140ms miss" figure is
+  a WARM miss; cold it is the whole 41s.) This fires on a cacheVersion
+  bump AND on first install — any empty-digest window. Warm the cache
+  with ONE lease-holding scan, then start usaged; `--no-scan` is the
+  per-caller guard for anything polling on a timer. The call list also
+  grew the cache 2.1MB -> 3.6MB.
   KNOWN, DELIBERATE 0.087% ABOVE ccusage: 1,510 lines state a
   `cache_creation_input_tokens` larger than their own 5m+1h breakdown; we
   bill the vendor's total, they bill the breakdown and drop the rest.
