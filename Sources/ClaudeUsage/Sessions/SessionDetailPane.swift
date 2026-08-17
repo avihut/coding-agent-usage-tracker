@@ -1,3 +1,4 @@
+import AppKit
 import Charts
 import SwiftUI
 import UsageCore
@@ -28,6 +29,9 @@ struct SessionDetailPane: View {
     /// The chart's context-size overlay — a display preference, so it
     /// survives selection switches and relaunches.
     @AppStorage("sessionsShowContext") private var showContext = false
+    /// The id chip's copied flash; symbol-only feedback, reset on selection.
+    @State private var idCopied = false
+    @State private var idHovered = false
 
     private struct DetailKey: Equatable {
         let id: String
@@ -284,8 +288,9 @@ struct SessionDetailPane: View {
                 summary.agentVersion.map { "\(store.provider.agentName) \($0)" }
                     ?? store.provider.agentName)
             // The id's tail: rollout stems share their whole prefix,
-            // and a uuid's last block is as unique as its first.
-            chip("number", String(summary.id.suffix(8)), mono: true)
+            // and a uuid's last block is as unique as its first. The chip
+            // shows the tail; clicking it copies the WHOLE id.
+            idChip(summary)
         }
     }
 
@@ -300,6 +305,49 @@ struct SessionDetailPane: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
         }
+    }
+
+    /// The number chip, click-to-copy. Feedback swaps the SYMBOL only, in a
+    /// pinned frame — the text (and so the FlowLayout) never reflows under
+    /// the cursor; the wash draws outside the bounds for the same reason.
+    private func idChip(_ summary: SessionSummary) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: idCopied ? "checkmark" : "number")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(
+                    idCopied
+                        ? AnyShapeStyle(ProviderStyle.accentColor)
+                        : AnyShapeStyle(.tertiary))
+                .frame(width: 11)
+            Text(String(summary.id.suffix(8)))
+                .font(.caption.monospaced())
+                .foregroundStyle(idHovered ? .primary : .secondary)
+                .lineLimit(1)
+        }
+        .contentShape(Rectangle())
+        .background(
+            RoundedRectangle(cornerRadius: 5)
+                .fill(Color.primary.opacity(idHovered ? 0.07 : 0))
+                .padding(-3))
+        .pointerStyle(.link)
+        .onHover { idHovered = $0 }
+        .onTapGesture {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(summary.id, forType: .string)
+            withAnimation(.easeOut(duration: 0.12)) { idCopied = true }
+        }
+        .task(id: idCopied) {
+            guard idCopied else { return }
+            try? await Task.sleep(for: .seconds(1.2))
+            withAnimation(.easeOut(duration: 0.3)) { idCopied = false }
+        }
+        .onChange(of: summary.id) {
+            idCopied = false
+            idHovered = false
+        }
+        .help("Copy session ID")
+        .accessibilityLabel("Session ID \(summary.id)")
+        .accessibilityHint("Copies the full session ID")
     }
 
     /// One row, six tiles, equal stretch — the grid always spans the full
