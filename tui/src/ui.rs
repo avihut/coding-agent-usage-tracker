@@ -1873,61 +1873,132 @@ fn sessions<'a>(digest: &'a LiveState, accent: Color, rect: Rect) -> Paragraph<'
 
     let seats = (rect.height as usize).saturating_sub(1);
     let wide = rect.width >= 60;
-    let roomy = rect.width >= 44;
+    let shown: Vec<_> = cards.iter().take(seats).collect();
 
-    for card in cards.iter().take(seats) {
-        let mut facts: Vec<String> = Vec::new();
-        if roomy {
-            facts.push(worked(card.active_seconds));
-            facts.push(compact(card.tokens));
-        }
-        // Absent cost is absent — an unpriced session must not read "$0".
-        if let Some(cost) = card.cost {
-            facts.push(money(cost));
-        }
-        if wide {
-            if let Some(project) = &card.project {
-                facts.push(match &card.branch {
-                    Some(branch) => format!("{project}@{branch}"),
-                    None => project.clone(),
-                });
-            }
-        }
-        let facts = facts.join(glyphs().sep);
+    // Column layout, right-anchored: the cost sits flush right in a fixed
+    // column, the model dots right-align in their own column beside it
+    // (up to three — beyond that they stop reading as a mix), and the
+    // title owns what is left, clipping at the dots. Widths come from the
+    // cards on screen, never from a guess: a guessed width once clipped
+    // "$1,235.85" to "$1," — a wrong number, not a shortened one.
+    let cost_w = shown
+        .iter()
+        .filter_map(|c| c.cost.map(|v| money(v).chars().count()))
+        .max()
+        .unwrap_or(0);
+    let worked_w = shown
+        .iter()
+        .map(|c| worked(c.active_seconds).chars().count())
+        .max()
+        .unwrap_or(0);
+    let tokens_w = shown
+        .iter()
+        .map(|c| compact(c.tokens).chars().count())
+        .max()
+        .unwrap_or(0);
+    let dots_w = shown
+        .iter()
+        .map(|c| c.model_colors.len().min(3))
+        .max()
+        .unwrap_or(0);
 
-        // The model dots TRAIL the title and stand in for its first
-        // separator — they are the sep's own glyph, colored where it is
-        // dim. Leading dots indented every title by its model count.
-        // Facts are still measured BEFORE the title claims its room,
-        // never reserved by guess: a four-figure cost overflowed a
-        // guessed width and ratatui clipped it mid-number, so "$1,235.85"
-        // rendered as "$1," — a wrong number, not a shortened one. The
-        // title is the elastic part; the numbers are never cut.
+    let block = |facts: bool| {
+        let mut t = 0usize;
+        if facts {
+            t += 2 + worked_w + 2 + tokens_w;
+        }
+        if dots_w > 0 {
+            t += 1 + dots_w;
+        }
+        if cost_w > 0 {
+            t += 1 + cost_w;
+        }
+        t
+    };
+    // The time and token columns ride along only while the title keeps a
+    // readable zone.
+    let facts = rect.width >= 44 && (rect.width as usize) >= block(true) + 12;
+    let tail = block(facts);
+
+    for card in shown {
         let dot_count = card.model_colors.len().min(3);
-        let tail = match (dot_count, facts.is_empty()) {
-            (0, true) => 0,
-            (0, false) => glyphs().sep.chars().count() + facts.chars().count(),
-            (n, true) => 1 + n,
-            (n, false) => 1 + n + 1 + facts.chars().count(),
+        // A row with nothing on its right keeps the whole width — a blank
+        // reserved grid would shorten a bare title for nothing.
+        let tailed = facts || dot_count > 0 || card.cost.is_some();
+        let zone = if tailed {
+            (rect.width as usize).saturating_sub(tail).max(8)
+        } else {
+            rect.width as usize
         };
-        let title_room = (rect.width as usize).saturating_sub(tail).max(8);
 
         let mut cells: Vec<Span> = Vec::new();
-        cells.push(Span::styled(clip(&card.title, title_room), style(accent)));
-        if dot_count > 0 {
-            cells.push(Span::styled(" ".to_owned(), style(DIM)));
-            // Up to three dots — beyond that they stop reading as a mix.
-            for color in card.model_colors.iter().take(3) {
-                cells.push(Span::styled(glyphs().dot.to_owned(), ramp(*color, 1.0)));
+        // wide: the project rides dim after the title, and only when it
+        // fits WHOLE — clipping the title to seat a branch name reads
+        // worse than omitting the branch.
+        let project = if wide {
+            card.project.as_ref().map(|p| match &card.branch {
+                Some(branch) => format!("{p}@{branch}"),
+                None => p.clone(),
+            })
+        } else {
+            None
+        };
+        let title_len = card.title.chars().count();
+        let used = match project {
+            Some(pb)
+                if title_len + glyphs().sep.chars().count() + pb.chars().count()
+                    <= zone =>
+            {
+                cells.push(Span::styled(card.title.clone(), style(accent)));
+                cells.push(Span::styled(format!("{}{pb}", glyphs().sep), style(DIM)));
+                title_len + glyphs().sep.chars().count() + pb.chars().count()
             }
-            if !facts.is_empty() {
-                cells.push(Span::styled(format!(" {facts}"), style(DIM)));
+            _ => {
+                let visible = clip(&card.title, zone);
+                let used = visible.chars().count();
+                cells.push(Span::styled(visible, style(accent)));
+                used
             }
-        } else if !facts.is_empty() {
+        };
+        if tailed {
             cells.push(Span::styled(
-                format!("{}{facts}", glyphs().sep),
+                " ".repeat(zone.saturating_sub(used)),
                 style(DIM),
             ));
+            if facts {
+                cells.push(Span::styled(
+                    format!(
+                        "  {:>ww$}  {:>tw$}",
+                        worked(card.active_seconds),
+                        compact(card.tokens),
+                        ww = worked_w,
+                        tw = tokens_w
+                    ),
+                    style(DIM),
+                ));
+            }
+            if dots_w > 0 {
+                cells.push(Span::styled(
+                    " ".repeat(1 + dots_w - dot_count),
+                    style(DIM),
+                ));
+                for color in card.model_colors.iter().take(3) {
+                    cells.push(Span::styled(glyphs().dot.to_owned(), ramp(*color, 1.0)));
+                }
+            }
+            if cost_w > 0 {
+                match card.cost {
+                    Some(cost) => cells.push(Span::styled(
+                        format!(" {:>cw$}", money(cost), cw = cost_w),
+                        style(DIM),
+                    )),
+                    // Absent cost is absent — blank, never "$0".
+                    None => cells.push(Span::styled(
+                        " ".repeat(1 + cost_w),
+                        style(DIM),
+                    )),
+                }
+            }
         }
         lines.push(Line::from(cells));
     }
