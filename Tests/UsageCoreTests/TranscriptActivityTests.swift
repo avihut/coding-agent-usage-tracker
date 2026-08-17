@@ -23,9 +23,12 @@ struct TranscriptScannerTests {
         return (scanner, root)
     }
 
+    /// `r1` is ONE streamed call written as two lines: the first states the
+    /// usage known mid-stream, the second the finished figure. Counting the
+    /// first would bill 151 tokens for a 200-token call.
     static let transcript = """
-        {"timestamp":"2026-08-01T10:00:00.000Z","requestId":"r1","message":{"id":"m1","usage":{"input_tokens":100,"output_tokens":50,"cache_creation_input_tokens":10,"cache_read_input_tokens":40}}}
-        {"timestamp":"2026-08-01T11:00:00.000Z","requestId":"r1","message":{"id":"m1b","usage":{"input_tokens":999,"output_tokens":999}}}
+        {"timestamp":"2026-08-01T10:00:00.000Z","requestId":"r1","message":{"id":"m1","usage":{"input_tokens":100,"output_tokens":1,"cache_creation_input_tokens":10,"cache_read_input_tokens":40}}}
+        {"timestamp":"2026-08-01T10:00:02.000Z","requestId":"r1","message":{"id":"m1","usage":{"input_tokens":100,"output_tokens":50,"cache_creation_input_tokens":10,"cache_read_input_tokens":40}}}
         {"timestamp":"2026-08-01T12:00:00.000Z","requestId":"r2","message":{"id":"m2","usage":{"input_tokens":300,"output_tokens":100}}}
         {"timestamp":"2026-08-02T09:00:00.000Z","requestId":"r3","message":{"id":"m3","usage":{"input_tokens":1000,"output_tokens":500}}}
         {"timestamp":"2026-08-02T09:05:00.000Z","type":"user-message-no-usage"}
@@ -40,7 +43,7 @@ struct TranscriptScannerTests {
         FlexibleISO8601.date(from: iso)!
     }
 
-    @Test("aggregates per day, sums all token kinds, dedups repeated requestIds")
+    @Test("aggregates per day, sums all token kinds, counts a streamed call once and whole")
     func aggregates() throws {
         let (scanner, root) = try makeScanner()
         try Self.transcript.write(to: root.appending(path: "a.jsonl"), atomically: true, encoding: .utf8)
@@ -48,7 +51,8 @@ struct TranscriptScannerTests {
         let activity = scanner.scan(now: Self.scanNow).daily
 
         #expect(activity.count == 2)
-        // Day 1: r1 counted once (200 total incl. cache tokens), r2 = 400.
+        // Day 1: r1 once at its FINISHED size (200 incl. cache tokens, not the
+        // mid-stream 151), r2 = 400.
         #expect(activity[0].tokens == 600)
         #expect(activity[0].messages == 2)
         #expect(activity[1].tokens == 1500)
@@ -100,10 +104,10 @@ struct TranscriptScannerTests {
     func timeline() throws {
         let (scanner, root) = try makeScanner()
         let a = """
-            {"timestamp":"2026-08-02T09:00:10.000Z","requestId":"t1","message":{"id":"n1","model":"claude-fable-5","usage":{"input_tokens":10,"output_tokens":5,"cache_creation_input_tokens":100,"cache_read_input_tokens":1000}}}
+            {"timestamp":"2026-08-02T09:00:10.000Z","requestId":"t1","message":{"id":"n1","model":"claude-fable-5","usage":{"input_tokens":10,"output_tokens":1,"cache_creation_input_tokens":100,"cache_read_input_tokens":1000}}}
             {"timestamp":"2026-08-02T09:00:40.000Z","requestId":"t2","message":{"id":"n2","model":"claude-fable-5","usage":{"input_tokens":1,"output_tokens":2}}}
             {"timestamp":"2026-08-02T09:00:50.000Z","requestId":"t3","message":{"id":"n3","model":"claude-haiku-4-5-20251001","usage":{"input_tokens":7,"output_tokens":3}}}
-            {"timestamp":"2026-08-02T09:01:10.000Z","requestId":"t1","message":{"id":"n4","model":"claude-fable-5","usage":{"input_tokens":999,"output_tokens":999}}}
+            {"timestamp":"2026-08-02T09:00:11.000Z","requestId":"t1","message":{"id":"n1","model":"claude-fable-5","usage":{"input_tokens":10,"output_tokens":5,"cache_creation_input_tokens":100,"cache_read_input_tokens":1000}}}
             {"timestamp":"2026-08-02T10:30:00.000Z","requestId":"t5","message":{"id":"n6","usage":{"input_tokens":4,"output_tokens":4}}}
             """
         let b = """
@@ -122,8 +126,8 @@ struct TranscriptScannerTests {
         ])
 
         #expect(scan.timeline == [
-            // Same minute: t1 + t2 from file a, u1 from file b; the duplicate
-            // t1 retry is dropped.
+            // Same minute: t1 + t2 from file a, u1 from file b. t1's two
+            // streamed lines collapse to the finished one (output 5, not 1).
             TokenSlot(
                 t: Self.minute("2026-08-02T09:00:00.000Z"), model: "claude-fable-5",
                 tally: TokenTally(input: 13, output: 8, cacheCreation: 100, cacheRead: 1000)),

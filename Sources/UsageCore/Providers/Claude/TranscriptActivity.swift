@@ -71,10 +71,11 @@ public struct TranscriptScanner: Sendable {
     /// slots from growing the cache without limit.
     public static let timelineRetention: TimeInterval = 8 * 86400
 
-    /// v5 (0.53.0): April-era duplicate sibling prompts dedup at parse time —
-    /// prompt counts persisted under v4 are inflated for those files. Bumping
-    /// this discards older caches wholesale — one deliberate full reparse.
-    private static let cacheVersion = 5
+    /// v6 (0.85.0): a streamed call now counts its LARGEST record rather than
+    /// its first, and advisor sub-calls count at all — every token and cost
+    /// figure persisted under v5 undercounts. Bumping this discards older
+    /// caches wholesale — one deliberate full reparse.
+    private static let cacheVersion = 6
 
     /// Detail rows are bounded only defensively — the largest transcript on
     /// record yields ~1.4K rows; this cap exists for pathological files.
@@ -190,6 +191,10 @@ public struct TranscriptScanner: Sendable {
             let cacheCreationInputTokens: Int?
             let cacheReadInputTokens: Int?
             let cacheCreation: CacheCreation?
+            /// Sub-calls the harness made while serving this turn. Their
+            /// tokens are ADDITIVE to the enclosing `usage` block, never a
+            /// restatement of it — see `advisorTallies`.
+            let iterations: [Iteration]?
 
             struct CacheCreation: Decodable {
                 let ephemeral1h: Int?
@@ -199,17 +204,67 @@ public struct TranscriptScanner: Sendable {
                 }
             }
 
+            /// One entry of `usage.iterations`. `type` distinguishes the
+            /// turn's own restatement ("message") from a genuinely separate
+            /// billable call ("advisor_message"), which carries its own model.
+            struct Iteration: Decodable {
+                let type: String?
+                let model: String?
+                let inputTokens: Int?
+                let outputTokens: Int?
+                let cacheCreationInputTokens: Int?
+                let cacheReadInputTokens: Int?
+                let cacheCreation: CacheCreation?
+
+                private enum CodingKeys: String, CodingKey {
+                    case type
+                    case model
+                    case inputTokens = "input_tokens"
+                    case outputTokens = "output_tokens"
+                    case cacheCreationInputTokens = "cache_creation_input_tokens"
+                    case cacheReadInputTokens = "cache_read_input_tokens"
+                    case cacheCreation = "cache_creation"
+                }
+
+                var tally: TokenTally {
+                    TokenTally(
+                        input: inputTokens ?? 0,
+                        output: outputTokens ?? 0,
+                        cacheCreation: cacheCreationInputTokens ?? 0,
+                        cacheRead: cacheReadInputTokens ?? 0,
+                        cacheCreation1h: cacheCreation?.ephemeral1h ?? 0)
+                }
+            }
+
             private enum CodingKeys: String, CodingKey {
                 case inputTokens = "input_tokens"
                 case outputTokens = "output_tokens"
                 case cacheCreationInputTokens = "cache_creation_input_tokens"
                 case cacheReadInputTokens = "cache_read_input_tokens"
                 case cacheCreation = "cache_creation"
+                case iterations
             }
 
-            var total: Int {
-                (inputTokens ?? 0) + (outputTokens ?? 0)
-                    + (cacheCreationInputTokens ?? 0) + (cacheReadInputTokens ?? 0)
+            var tally: TokenTally {
+                TokenTally(
+                    input: inputTokens ?? 0,
+                    output: outputTokens ?? 0,
+                    cacheCreation: cacheCreationInputTokens ?? 0,
+                    cacheRead: cacheReadInputTokens ?? 0,
+                    cacheCreation1h: cacheCreation?.ephemeral1h ?? 0)
+            }
+
+            /// The separately-billed sub-calls, in file order, each with the
+            /// model that served it. Only `advisor_message` qualifies: a
+            /// "message" iteration restates the turn's own usage and counting
+            /// it would double the turn.
+            var advisorTallies: [(model: String, tally: TokenTally)] {
+                (iterations ?? []).compactMap { iteration in
+                    guard iteration.type == "advisor_message",
+                          let model = iteration.model, !model.isEmpty
+                    else { return nil }
+                    return (model, iteration.tally)
+                }
             }
         }
     }
@@ -474,8 +529,9 @@ public struct TranscriptScanner: Sendable {
         var models: [String: TokenTally] = [:]
         for entry in group {
             for count in entry.days.values {
-                // DayCount.messages counts exactly the deduped kept lines —
-                // the API-call count, derived instead of stored twice.
+                // DayCount.messages counts exactly the calls kept after
+                // dedup, advisor sub-calls among them — the API-call count,
+                // derived instead of stored twice.
                 apiCalls += count.messages
                 for (model, tally) in count.models {
                     var merged = models[model] ?? TokenTally()
@@ -556,6 +612,31 @@ public struct TranscriptScanner: Sendable {
         var truncated = false
     }
 
+    /// One API call as a file will count it, held open until the file ends.
+    /// Claude Code writes a streamed call as SEVERAL lines sharing one request
+    /// id, each restating the usage known so far — `output_tokens` climbing
+    /// 4, 4, 4, 4, 739 across the group — so the record to keep is the
+    /// largest, never the first one seen.
+    private struct PendingCall {
+        var t: Date
+        var model: String
+        var tally: TokenTally
+        var sidechain: Bool
+        var rowIndex: Int?
+        var toolUses: Int
+    }
+
+    /// Does this record outrank the one already held for its call? Sidechain
+    /// rank is decided before size: one call is echoed verbatim into every
+    /// subagent transcript forked from it, and the parent's copy is the
+    /// billable one even when an echo happens to carry more.
+    private static func outranks(
+        tally: TokenTally, sidechain: Bool, existing: PendingCall
+    ) -> Bool {
+        if sidechain != existing.sidechain { return existing.sidechain }
+        return tally.total > existing.tally.total
+    }
+
     /// A user prompt as first seen in the stream — countable only once the
     /// whole file's parent links are known (see `survivingPromptIndexes`).
     private struct PromptCandidate {
@@ -611,16 +692,20 @@ public struct TranscriptScanner: Sendable {
         var result = FileParse()
         var days: [String: DayCount] = [:]
         var slots: [SlotKey: TokenTally] = [:]
-        var seen = Set<String>()
         var meta = SessionFileSummary()
         var aiTitle: String?
         var legacyTitle: String?
         var toolUseIDs = Set<String>()
         var activeMinutes = Set<Date>()
-        var rowIndexByKey: [String: Int] = [:]
         var promptCandidates: [PromptCandidate] = []
         var allParentUuids = Set<String>()
         var lineNumber = 0
+        // Winners by dedup key, resolved only once the file is exhausted.
+        // `unkeyed` holds the records that carry no id to collapse on — they
+        // can't be duplicates of anything, and must never share a synthetic
+        // key, which would collapse them against each other.
+        var pending: [String: PendingCall] = [:]
+        var unkeyed: [PendingCall] = []
 
         func touch(_ date: Date) {
             if meta.start.map({ date < $0 }) ?? true { meta.start = date }
@@ -636,6 +721,72 @@ public struct TranscriptScanner: Sendable {
             let index = result.rows.count
             result.rows.append(SessionEvent(id: index, t: t, kind: kind))
             return index
+        }
+
+        /// Files the record under its call, keeping the ranking record. The
+        /// row is created once, at the call's FIRST line so the detail
+        /// timeline keeps file order, and restated in place as later lines
+        /// raise the tally or add tool_use blocks.
+        func record(
+            key: String?, t: Date, model: String, tally: TokenTally, sidechain: Bool,
+            toolUses: Int
+        ) {
+            guard tally.total > 0 else { return }
+            let fresh = PendingCall(
+                t: t, model: model, tally: tally, sidechain: sidechain,
+                rowIndex: nil, toolUses: toolUses)
+            guard let key else {
+                var call = fresh
+                call.rowIndex = appendRow(
+                    t, .apiCall(model: model, tally: tally, toolUses: toolUses))
+                unkeyed.append(call)
+                return
+            }
+            guard var existing = pending[key] else {
+                var call = fresh
+                call.rowIndex = appendRow(
+                    t, .apiCall(model: model, tally: tally, toolUses: toolUses))
+                pending[key] = call
+                return
+            }
+            // Distinct tool_use blocks ride distinct streamed lines of one
+            // call, so they accumulate across the group — winner or not.
+            existing.toolUses += toolUses
+            if Self.outranks(tally: tally, sidechain: sidechain, existing: existing) {
+                existing.t = t
+                existing.model = model
+                existing.tally = tally
+                existing.sidechain = sidechain
+            }
+            pending[key] = existing
+            if let index = existing.rowIndex {
+                result.rows[index] = SessionEvent(
+                    id: index, t: result.rows[index].t,
+                    kind: .apiCall(
+                        model: existing.model, tally: existing.tally,
+                        toolUses: existing.toolUses))
+            }
+        }
+
+        func aggregate(_ call: PendingCall) {
+            let key = formatter.string(from: call.t)
+            var count = days[key] ?? DayCount(tokens: 0, messages: 0)
+            count.tokens += call.tally.total
+            count.messages += 1
+            var modelTally = count.models[call.model] ?? TokenTally()
+            modelTally.add(call.tally)
+            count.models[call.model] = modelTally
+            days[key] = count
+
+            let minute = Date(
+                timeIntervalSince1970: (call.t.timeIntervalSince1970 / 60).rounded(.down) * 60)
+            let slotKey = SlotKey(t: minute, model: call.model)
+            var tally = slots[slotKey] ?? TokenTally()
+            tally.add(call.tally)
+            slots[slotKey] = tally
+
+            touch(call.t)
+            activeMinutes.insert(minute)
         }
 
         for rawLine in data.split(separator: UInt8(ascii: "\n")) {
@@ -714,57 +865,29 @@ public struct TranscriptScanner: Sendable {
                 }
             }
 
-            // The original keep-rule, predicate unchanged: only timestamped
-            // lines with net token movement count toward tallies.
-            guard let usage = line.message?.usage,
-                  let date,
-                  usage.total > 0
-            else { continue }
-            // Retries/continuations repeat the same request — count it once.
-            if let dedupKey = line.requestId ?? line.message?.id {
-                guard seen.insert(dedupKey).inserted else {
-                    // A later streamed line of an already-counted call: its
-                    // tool_use blocks still belong on that call's row.
-                    if collectRows, lineToolUses > 0, let index = rowIndexByKey[dedupKey],
-                       case .apiCall(let model, let tally, let toolUses) = result.rows[index].kind {
-                        result.rows[index] = SessionEvent(
-                            id: index, t: result.rows[index].t,
-                            kind: .apiCall(model: model, tally: tally, toolUses: toolUses + lineToolUses))
-                    }
-                    continue
-                }
-            }
-            let model = line.message?.model ?? "unknown"
-            let recordTally = TokenTally(
-                input: usage.inputTokens ?? 0,
-                output: usage.outputTokens ?? 0,
-                cacheCreation: usage.cacheCreationInputTokens ?? 0,
-                cacheRead: usage.cacheReadInputTokens ?? 0,
-                cacheCreation1h: usage.cacheCreation?.ephemeral1h ?? 0)
-
-            let key = formatter.string(from: date)
-            var count = days[key] ?? DayCount(tokens: 0, messages: 0)
-            count.tokens += usage.total
-            count.messages += 1
-            var modelTally = count.models[model] ?? TokenTally()
-            modelTally.add(recordTally)
-            count.models[model] = modelTally
-            days[key] = count
-
-            let minute = Date(timeIntervalSince1970: (date.timeIntervalSince1970 / 60).rounded(.down) * 60)
-            let slotKey = SlotKey(t: minute, model: model)
-            var tally = slots[slotKey] ?? TokenTally()
-            tally.add(recordTally)
-            slots[slotKey] = tally
-
-            touch(date)
-            activeMinutes.insert(minute)
-            if let index = appendRow(
-                date, .apiCall(model: model, tally: recordTally, toolUses: lineToolUses)),
-               let dedupKey = line.requestId ?? line.message?.id {
-                rowIndexByKey[dedupKey] = index
+            // Only timestamped lines carrying usage can move tallies; whether
+            // a record actually moved any is `record`'s own guard, so a turn
+            // whose own usage is empty still surrenders its sub-calls.
+            guard let usage = line.message?.usage, let date else { continue }
+            let dedupKey = line.requestId ?? line.message?.id
+            let sidechain = line.isSidechain == true
+            record(
+                key: dedupKey, t: date, model: line.message?.model ?? "unknown",
+                tally: usage.tally, sidechain: sidechain, toolUses: lineToolUses)
+            // An advisor sub-call is a separate call to a separate model,
+            // billed on top of the line's own usage. It takes the line's
+            // dedup key suffixed by position, so the sibling lines that each
+            // restate the whole iterations array collapse onto one record.
+            for (index, advisor) in usage.advisorTallies.enumerated() {
+                record(
+                    key: dedupKey.map { "\($0):advisor:\(index)" }, t: date,
+                    model: advisor.model, tally: advisor.tally, sidechain: sidechain,
+                    toolUses: 0)
             }
         }
+
+        for call in pending.values { aggregate(call) }
+        for call in unkeyed { aggregate(call) }
 
         // Prompt candidates resolve now that every parent link is known:
         // dead retry siblings drop from counts, the first prompt, start/end
