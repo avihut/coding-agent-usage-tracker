@@ -376,7 +376,7 @@ struct SessionFallbackTests {
     @Test("a shortlist HIT never consults the scan closure at all")
     func shortlistHitNeverInvokesScan() throws {
         let session = SessionCard(
-            id: "aaaa1111", title: "Shortlisted", project: nil, branch: nil, startedAt: fixtureNow,
+            id: "aaaa1111", title: "Shortlisted", project: nil, branch: nil, startedAt: fixtureNow, end: fixtureNow,
             activeSeconds: 0, cost: nil, tokens: 0, prompts: 0, apiCalls: 0, modelColors: [])
         let digest = DigestQueryTests.minimalState(
             engine: DigestQueryTests.minimalEngine(), sessions: [session])
@@ -432,13 +432,32 @@ struct SessionDeepFieldTests {
         defer { fixture.tearDown() }
 
         let session = SessionCard(
-            id: "aaaa1111", title: "t", project: nil, branch: nil, startedAt: fixtureNow, activeSeconds: 0,
-            cost: nil, tokens: 0, prompts: 0, apiCalls: 0, modelColors: [])
+            id: "aaaa1111", title: "t", project: nil, branch: nil, startedAt: fixtureNow, end: fixtureNow,
+            activeSeconds: 0, cost: nil, tokens: 0, prompts: 0, apiCalls: 0, modelColors: [])
         let digest = DigestQueryTests.minimalState(engine: DigestQueryTests.minimalEngine(), sessions: [session])
-        let parsed = DigestQuery.parseArgs(["aaaa1111", "end"])
+        let parsed = DigestQuery.parseArgs(["aaaa1111", "kind"])
         let out = DigestQuery.runSession(
             parsed: parsed, digest: digest, now: fixtureNow, calendar: utcCalendar, json: false, scan: { entries })
         #expect(out.exitCode == 19)
+    }
+
+    /// `end` LEFT the deep group in 0.84.0 — it's the one field a liveness
+    /// check needs, and paying a full transcript scan per sample for it was
+    /// the whole complaint. A shortlist hit answers it without the scan
+    /// closure ever being called.
+    @Test("'session <id> end' resolves from the shortlist card, never the scan")
+    func endResolvesFromTheShortlistCard() {
+        let end = DigestQueryTests.iso("2026-08-16T12:30:00Z")
+        let session = SessionCard(
+            id: "aaaa1111", title: "t", project: nil, branch: nil, startedAt: fixtureNow, end: end,
+            activeSeconds: 0, cost: nil, tokens: 0, prompts: 0, apiCalls: 0, modelColors: [])
+        let digest = DigestQueryTests.minimalState(engine: DigestQueryTests.minimalEngine(), sessions: [session])
+        let out = DigestQuery.runSession(
+            parsed: DigestQuery.parseArgs(["aaaa1111", "end"]), digest: digest, now: fixtureNow,
+            calendar: utcCalendar, json: false,
+            scan: { Issue.record("the scan ran for a field the shortlist now publishes"); return [] })
+        #expect(out.exitCode == 0)
+        #expect(out.stdout == DigestQueryFormat.iso(end))
     }
 
     @Test("models field: priced and unpriced rows, sorted by tokens, header + raw")
@@ -528,7 +547,7 @@ struct DeepQuerySessionsCLITests {
     func singularSessionStillGatesOnMaxAge() {
         let now = DigestQueryTests.iso("2026-08-16T13:00:00Z")
         let card = SessionCard(
-            id: "aaaa1111", title: "t", project: nil, branch: nil, startedAt: now, activeSeconds: 0,
+            id: "aaaa1111", title: "t", project: nil, branch: nil, startedAt: now, end: now, activeSeconds: 0,
             cost: nil, tokens: 0, prompts: 0, apiCalls: 0, modelColors: [])
         let digest = staleDigest(sessions: [card])
         let out = DeepQuerySessionsCLI.run(
@@ -562,7 +581,7 @@ struct DeepQuerySessionsCLITests {
     func sessionAllForcesTheScanPastAShortlistHit() {
         let now = DigestQueryTests.iso("2026-08-16T13:00:00Z")
         let card = SessionCard(
-            id: "aaaa1111", title: "t", project: nil, branch: nil, startedAt: now, activeSeconds: 0,
+            id: "aaaa1111", title: "t", project: nil, branch: nil, startedAt: now, end: now, activeSeconds: 0,
             cost: nil, tokens: 0, prompts: 0, apiCalls: 0, modelColors: [])
         let digest = staleDigest(sessions: [card])
         // Without --all the shortlist answers this id directly.
@@ -578,11 +597,80 @@ struct DeepQuerySessionsCLITests {
         #expect(scanned.exitCode == 11)
     }
 
+    /// A sampler on a debounce needs "answer from the digest or don't
+    /// answer": the silent 10ms→140ms escalation on a shortlist miss is the
+    /// cost it can't see coming.
+    @Test("--no-scan turns a shortlist miss into a plain no-match instead of a transcript walk")
+    func noScanForbidsTheEscalation() {
+        let now = DigestQueryTests.iso("2026-08-16T13:00:00Z")
+        let card = SessionCard(
+            id: "aaaa1111", title: "t", project: nil, branch: nil, startedAt: now, end: now, activeSeconds: 0,
+            cost: nil, tokens: 0, prompts: 0, apiCalls: 0, modelColors: [])
+        let digest = staleDigest(sessions: [card])
+
+        let out = DeepQuerySessionsCLI.run(
+            noun: "session", arguments: ["nope", "--no-scan"], digest: digest, now: now)
+        #expect(out.exitCode == 20)
+        #expect(out.note == "no session matches 'nope' in the shortlist (≤8) — --no-scan forbids the transcript scan")
+
+        // Without it, the same miss escalates — proven by the scan closure's
+        // own wrong-provider exit, which a digest-only answer never reaches.
+        let escalated = DeepQuerySessionsCLI.run(
+            noun: "session", arguments: ["nope", "--provider", "not-a-real-provider"], digest: digest, now: now)
+        #expect(escalated.exitCode == 11)
+    }
+
+    @Test("--no-scan with no digest at all is exit 13, not a no-match — nothing was allowed to answer")
+    func noScanWithoutADigestIsNoDigest() {
+        let out = DeepQuerySessionsCLI.run(
+            noun: "session", arguments: ["aaaa1111", "--no-scan"], digest: nil,
+            now: DigestQueryTests.iso("2026-08-16T13:00:00Z"))
+        #expect(out.exitCode == 13)
+        #expect(out.note == "no live-state digest — --no-scan forbids the transcript scan that would have answered")
+    }
+
+    @Test("--no-scan and --all contradict on both nouns")
+    func noScanAndAllContradict() {
+        let now = DigestQueryTests.iso("2026-08-16T13:00:00Z")
+        for arguments in [["aaaa1111", "--all", "--no-scan"], ["aaaa1111", "--no-scan", "--all"]] {
+            let out = DeepQuerySessionsCLI.run(
+                noun: "session", arguments: arguments, digest: staleDigest(), now: now)
+            #expect(out.exitCode == 19)
+            #expect(out.note == "--no-scan and --all contradict — one forbids the transcript scan, the other demands it")
+        }
+        let plural = DeepQuerySessionsCLI.run(
+            noun: "sessions", arguments: ["--all", "--no-scan"], digest: staleDigest(), now: now)
+        #expect(plural.exitCode == 19)
+        #expect(plural.note == "--no-scan and --all contradict — one forbids the transcript scan, the other demands it")
+    }
+
+    /// Which path answered used to be knowable only by timing the call.
+    @Test("the source field names the path that answered: digest for a shortlist hit, scan past it")
+    func sourceFieldNamesThePath() throws {
+        let (fixture, entries) = try buildFixtureEntries()
+        defer { fixture.tearDown() }
+
+        let card = SessionCard(
+            id: "aaaa1111", title: "t", project: nil, branch: nil, startedAt: fixtureNow, end: fixtureNow,
+            activeSeconds: 0, cost: nil, tokens: 0, prompts: 0, apiCalls: 0, modelColors: [])
+        let digest = DigestQueryTests.minimalState(engine: DigestQueryTests.minimalEngine(), sessions: [card])
+
+        let shortlist = DigestQuery.runSession(
+            parsed: DigestQuery.parseArgs(["aaaa1111", "source"]), digest: digest, now: fixtureNow,
+            calendar: utcCalendar, json: false, scan: { entries })
+        #expect(shortlist.stdout == "digest")
+
+        let scanned = DigestQuery.runSession(
+            parsed: DigestQuery.parseArgs(["aaaa1111", "source", "--all"]), digest: digest, now: fixtureNow,
+            calendar: utcCalendar, json: false, scan: { entries })
+        #expect(scanned.stdout == "scan")
+    }
+
     @Test("the noun switch dispatches 'sessions' to the plural handler and 'session' to the singular one")
     func nounSwitchDispatchesCorrectly() {
         let now = DigestQueryTests.iso("2026-08-16T12:05:00Z")
         let card = SessionCard(
-            id: "aaaa1111", title: "Only Session", project: nil, branch: nil, startedAt: now, activeSeconds: 0,
+            id: "aaaa1111", title: "Only Session", project: nil, branch: nil, startedAt: now, end: now, activeSeconds: 0,
             cost: nil, tokens: 5, prompts: 1, apiCalls: 1, modelColors: [])
         let digest = staleDigest(sessions: [card])
 
@@ -600,7 +688,7 @@ struct DeepQuerySessionsCLITests {
     func rawFlagThreadsIntoSessionsList() {
         let now = DigestQueryTests.iso("2026-08-16T12:05:00Z")
         let card = SessionCard(
-            id: "aaaa1111", title: "Raw Row", project: "proj", branch: "main", startedAt: now, activeSeconds: 30,
+            id: "aaaa1111", title: "Raw Row", project: "proj", branch: "main", startedAt: now, end: now, activeSeconds: 30,
             cost: 0.5, tokens: 100, prompts: 2, apiCalls: 3, modelColors: [])
         let digest = staleDigest(sessions: [card])
         let out = DeepQuerySessionsCLI.run(noun: "sessions", arguments: ["--raw", "--header"], digest: digest, now: now)
@@ -624,7 +712,7 @@ struct DeepQuerySessionsCLITests {
         // excludes it instead.
         let startedAt = DigestQueryTests.iso("2026-08-15T22:00:00Z")
         let card = SessionCard(
-            id: "kiri1", title: "Kiritimati session", project: nil, branch: nil, startedAt: startedAt,
+            id: "kiri1", title: "Kiritimati session", project: nil, branch: nil, startedAt: startedAt, end: startedAt,
             activeSeconds: 0, cost: nil, tokens: 0, prompts: 0, apiCalls: 0, modelColors: [])
         let digest = staleDigest(timeZone: "Pacific/Kiritimati", sessions: [card])
         let now = DigestQueryTests.iso("2026-08-16T12:05:00Z")

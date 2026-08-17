@@ -91,6 +91,7 @@ enum DeepQuerySessions {
             project: entry.summary.projectPath.map { URL(fileURLWithPath: $0).lastPathComponent },
             branch: entry.summary.gitBranch,
             startedAt: entry.summary.start,
+            end: entry.summary.end,
             activeSeconds: entry.summary.activeSeconds,
             cost: entry.cost,
             tokens: entry.summary.totalTokens,

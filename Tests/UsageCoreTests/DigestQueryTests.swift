@@ -138,7 +138,9 @@ extension DigestQueryTests {
 
     @Test func sessionSingularSummary() {
         let out = run(["session", "latest"])
-        #expect(out.stdout == "Wire the digest's sessions section · main main · 9.5K tokens · $0.07")
+        #expect(
+            out.stdout
+                == "Wire the digest's sessions section · main main · 1 hr 30 min · 9.5K tokens · $0.07")
     }
 
     @Test func promptDefaultLine() {
@@ -787,17 +789,21 @@ extension DigestQueryTests {
     @Test func sessionsRawColumnsExactShapeAndOrder() {
         let out = run(["sessions", "--raw", "--header"])
         let rows = out.stdout.components(separatedBy: "\n")
-        #expect(rows[0] == "id\ttitle\tproject\tbranch\tstarted\tactive\tcost\ttokens\tprompts\tapi-calls")
+        // `end` is the 0.84.0 addition and sits LAST: the raw register is
+        // positional, so every column a consumer already indexes keeps its
+        // place and a new one may only grow off the right edge.
+        #expect(rows[0] == "id\ttitle\tproject\tbranch\tstarted\tactive\tcost\ttokens\tprompts\tapi-calls\tend")
         let sessionA = rows[1].components(separatedBy: "\t")
         #expect(sessionA[0] == "session-a")
         #expect(sessionA[4] == "2026-08-16T09:00:00Z")
         #expect(sessionA[5] == "5400")
         #expect(sessionA[6] == "0.069")
+        #expect(sessionA[10] == "2026-08-16T11:30:00Z")
         let sessionB = rows[2].components(separatedBy: "\t")
         #expect(sessionB[2] == "")
         #expect(sessionB[3] == "")
         #expect(sessionB[6] == "")
-        #expect(sessionB.count == 10)
+        #expect(sessionB.count == 11)
     }
 
     @Test func sessionsJSONIsDigestFieldNames() throws {
@@ -829,15 +835,19 @@ extension DigestQueryTests {
         #expect(run(["session", "latest", "branch"]).stdout == "main")
         #expect(run(["session", "latest", "active"]).stdout == "5400")
         #expect(run(["session", "latest", "api-calls"]).stdout == "40")
+        // `end` and `source` answer straight from the shortlist: the first
+        // is what a liveness check reads, the second is which path answered.
+        #expect(run(["session", "latest", "end"]).stdout == "2026-08-16T11:30:00Z")
+        #expect(run(["session", "latest", "source"]).stdout == "digest")
         // A deep field (only reachable via --all in M2) is a bad query, not
         // an absent value — the shortlist genuinely doesn't carry it.
-        let deep = run(["session", "latest", "end"])
+        let deep = run(["session", "latest", "kind"])
         #expect(deep.exitCode == 19)
     }
 
     @Test func sessionWithNoProjectOrBranchOmitsThePlaceClauseInSummary() {
         let out = run(["session", "2"])
-        #expect(out.stdout == "A background run · 0 tokens · —")
+        #expect(out.stdout == "A background run · 30 min · 0 tokens · —")
     }
 
     @Test func sessionsFilters() {
@@ -869,6 +879,7 @@ extension DigestQueryTests {
         let session = SessionCard(
             id: "s1", title: "t", project: nil, branch: nil,
             startedAt: DigestQueryTests.iso("2026-08-15T06:00:00Z"),
+            end: DigestQueryTests.iso("2026-08-15T06:30:00Z"),
             activeSeconds: 60, cost: nil, tokens: 0, prompts: 0, apiCalls: 0, modelColors: [])
         let state = DigestQueryTests.minimalState(
             engine: engine, sessions: [session], timeZone: "America/Los_Angeles")

@@ -60,6 +60,7 @@ public enum DigestQuery {
     private static let booleanFlags: Set<String> = [
         "json", "raw", "iso", "unix", "relative", "no-color", "header",
         "check", "no-glyph", "tmux", "all", "background", "no-background",
+        "no-scan",
     ]
     /// `digest`/`provider` are recognized-but-inert here: the CLI already
     /// consumed `--digest` to choose which file to read, and digest verbs
@@ -70,7 +71,7 @@ public enum DigestQuery {
     /// here for the same one-shared-parser reason as the booleans above.
     private static let valueFlags: Set<String> = [
         "max-age", "digest", "provider", "day", "range", "since", "limit",
-        "project", "branch", "last",
+        "project", "branch", "last", "fields",
     ]
 
     /// Which nouns each M2 flag is real for. Everything else gets the
@@ -84,6 +85,10 @@ public enum DigestQuery {
         "background": ["sessions"],
         "no-background": ["sessions"],
         "last": ["windows", "history"],
+        "no-scan": ["sessions", "session"],
+        // Exactly the nouns with a `fieldCatalog` entry — a comma list is
+        // legal wherever a single field name is, and nowhere else.
+        "fields": Set(fieldCatalog.keys),
     ]
 
     static func rejectInapplicableFlags(noun: String, parsed: ParsedArgs) -> QueryOutput? {

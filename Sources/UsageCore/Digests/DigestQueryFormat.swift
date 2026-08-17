@@ -36,10 +36,23 @@ enum DigestQueryFormat {
     }
 
     /// Raw = bare integer seconds (may be negative — an exhaustion already
-    /// past is honest data, not an error).
-    static func secondsField(_ value: TimeInterval?, json: Bool) -> QueryOutput {
+    /// past is honest data, not an error). `--relative` prints the house
+    /// duration phrase instead, exactly as it makes `dateField` print a
+    /// pre-phrased caption: money and tokens arrive pre-formatted, and a
+    /// duration had been the one quantity every consumer was left to
+    /// re-format (and drift) on its own. `--json` ignores it — a seconds
+    /// field stays a number, so scripts can rely on the shape.
+    static func secondsField(_ value: TimeInterval?, json: Bool, relative: Bool) -> QueryOutput {
         let seconds = value.map { Int($0) }
-        return QueryOutput(stdout: json ? jsonValue(seconds) : rawInt(seconds), exitCode: 0)
+        guard !json, relative else {
+            return QueryOutput(stdout: json ? jsonValue(seconds) : rawInt(seconds), exitCode: 0)
+        }
+        guard let seconds else { return QueryOutput(stdout: "", exitCode: 0) }
+        // `UsageFormatting.duration` phrases magnitudes only (it floors at
+        // "1 min"), so a negative — a reset already past — carries its sign
+        // here rather than reading as its own opposite.
+        let text = UsageFormatting.duration(TimeInterval(abs(seconds)))
+        return QueryOutput(stdout: seconds < 0 ? "-\(text)" : text, exitCode: 0)
     }
 
     static func hexField(_ value: RGBColor?, json: Bool) -> QueryOutput {
@@ -122,9 +135,29 @@ enum DigestQueryFormat {
     /// (test or CLI) controls line termination once, in one place.
     static func tsv(_ rows: [[String]], header: [String]?) -> String {
         var lines: [String] = []
-        if let header { lines.append(header.joined(separator: "\t")) }
-        lines.append(contentsOf: rows.map { $0.joined(separator: "\t") })
+        if let header { lines.append(header.map(sanitizeCell).joined(separator: "\t")) }
+        lines.append(contentsOf: rows.map { $0.map(sanitizeCell).joined(separator: "\t") })
         return lines.joined(separator: "\n")
+    }
+
+    /// A cell can NEVER contain the separator. `--raw` is the register
+    /// machines read positionally, and its cells carry free text nothing
+    /// upstream sanitizes for this purpose: `SessionMeta.scrub` collapses
+    /// whitespace in a title (so titles are safe only by luck), while
+    /// `project` and `branch` never pass through it at all — and a macOS
+    /// directory name may legally contain a tab. One such character used to
+    /// shift every later column, silently. Control characters collapse to a
+    /// space each, 1:1 so a cell keeps its length; JSON is untouched, having
+    /// its own escaping.
+    static func sanitizeCell(_ text: String) -> String {
+        guard text.unicodeScalars.contains(where: isControl) else { return text }
+        var scalars = String.UnicodeScalarView()
+        for scalar in text.unicodeScalars { scalars.append(isControl(scalar) ? " " : scalar) }
+        return String(scalars)
+    }
+
+    private static func isControl(_ scalar: Unicode.Scalar) -> Bool {
+        scalar.value < 0x20 || scalar.value == 0x7F
     }
 
     /// Space-padded columns, " · " between them (house style) — the human
@@ -134,7 +167,7 @@ enum DigestQueryFormat {
     /// caption must vanish, not leave a dangling " · " pointing at nothing.
     static func table(_ rows: [[String]]) -> String {
         let trimmed = rows.map { row -> [String] in
-            var row = row
+            var row = row.map(sanitizeCell)
             while row.last == "" { row.removeLast() }
             return row
         }

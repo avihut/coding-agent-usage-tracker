@@ -37,12 +37,18 @@ public struct LiveState: Codable, Sendable, Equatable {
     /// Recent sessions, newest first — the shortlist a client renders.
     /// Permitted to carry titles by the dated 2026-08-17 §10 re-amendment.
     public let sessions: [SessionCard]
+    /// The cap `sessions` was truncated at, stamped by the WRITER like
+    /// `schemaVersion` — a reader must never substitute its own build-time
+    /// constant here, which is the exact lie publishing it prevents. Nil
+    /// only in a digest written before 0.84.0.
+    public let sessionsCap: Int?
 
     public init(
         engine: EngineStatus, meters: [LiveMeter], menuBar: [SegmentStatus],
         models: [ModelRow], activity: ActivityRollup, sessions: [SessionCard] = []
     ) {
         self.schemaVersion = Self.schemaVersion
+        self.sessionsCap = LiveStateBuilder.sessionsCap
         self.engine = engine
         self.meters = meters
         self.menuBar = menuBar
@@ -286,6 +292,13 @@ public struct SessionCard: Codable, Sendable, Equatable, Identifiable {
     public let project: String?
     public let branch: String?
     public let startedAt: Date
+    /// The last recorded activity — the shortlist's own sort key, and the
+    /// one field a liveness check needs (a consumer without it invents a
+    /// proxy, and every available proxy is wrong). Optional ONLY for
+    /// backward tolerance: a digest written before 0.84.0 has no such key,
+    /// and a non-optional would fail the whole decode rather than one field,
+    /// blanking every noun until the daemon republishes.
+    public let end: Date?
     /// Honest working time, not wall span.
     public let activeSeconds: TimeInterval
     /// Nil = nothing in the session was priceable — absent, never 0.
@@ -299,7 +312,7 @@ public struct SessionCard: Codable, Sendable, Equatable, Identifiable {
 
     public init(
         id: String, title: String, project: String?, branch: String?,
-        startedAt: Date, activeSeconds: TimeInterval, cost: Double?,
+        startedAt: Date, end: Date?, activeSeconds: TimeInterval, cost: Double?,
         tokens: Int, prompts: Int, apiCalls: Int, modelColors: [RGBColor]
     ) {
         self.id = id
@@ -307,6 +320,7 @@ public struct SessionCard: Codable, Sendable, Equatable, Identifiable {
         self.project = project
         self.branch = branch
         self.startedAt = startedAt
+        self.end = end
         self.activeSeconds = activeSeconds
         self.cost = cost
         self.tokens = tokens
@@ -567,7 +581,10 @@ public enum LiveStateBuilder {
     public static let daysHorizon: TimeInterval = 366 * 86400
     public static let modelDaysHorizon: TimeInterval = 35 * 86400
     public static let seriesCap = 120
-    /// The shortlist's depth — what a dashboard section can show.
+    /// The shortlist's depth — what a dashboard section can show. Stamped
+    /// into every digest as `LiveState.sessionsCap`, so a client can tell a
+    /// truncated shortlist from an exhaustive one without knowing this
+    /// number itself.
     public static let sessionsCap = 8
     public static let curveCap = 48
 
@@ -840,6 +857,7 @@ public enum LiveStateBuilder {
                     },
                     branch: session.gitBranch,
                     startedAt: session.start,
+                    end: session.end,
                     activeSeconds: session.activeSeconds,
                     // Absent, never 0: nothing priceable means no number.
                     cost: costs.isEmpty ? nil : costs.reduce(0, +),

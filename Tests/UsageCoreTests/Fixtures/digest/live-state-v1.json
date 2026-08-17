@@ -1129,6 +1129,7 @@
       "apiCalls" : 40,
       "branch" : "main",
       "cost" : 0.069,
+      "end" : "2026-08-16T11:30:00Z",
       "id" : "session-a",
       "modelColors" : [
         {
@@ -1151,6 +1152,7 @@
     {
       "activeSeconds" : 1800,
       "apiCalls" : 3,
+      "end" : "2026-08-15T20:30:00Z",
       "id" : "session-b",
       "modelColors" : [
 
@@ -1160,5 +1162,6 @@
       "title" : "A background run",
       "tokens" : 0
     }
-  ]
+  ],
+  "sessionsCap" : 8
 }

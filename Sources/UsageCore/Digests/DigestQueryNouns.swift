@@ -22,6 +22,16 @@ extension DigestQuery {
             return QueryOutput(stdout: "", exitCode: digest.engine.stale ? exitStale : exitOK)
         }
         let engine = digest.engine
+        let unix = parsed.flags["unix"] != nil
+        let relative = parsed.flags["relative"] != nil
+        func resolve(_ field: String, asJSON: Bool) -> QueryOutput {
+            statusField(field, digest: digest, now: now, json: asJSON, unix: unix, relative: relative)
+        }
+        if let output = multiFieldOutput(
+            noun: "status", parsed: parsed, positionalField: parsed.positionals.first, json: json,
+            header: parsed.flags["header"] != nil, resolve: resolve) {
+            return output
+        }
         guard let field = parsed.positionals.first else {
             guard parsed.positionals.isEmpty else { return badQuery("too many arguments") }
             // Singular no-field summaries honor the registers like the
@@ -45,7 +55,13 @@ extension DigestQuery {
             return ok(withStaleSuffix(parts.joined(separator: " · "), digest: digest))
         }
         guard parsed.positionals.count == 1 else { return badQuery("too many arguments") }
-        let unix = parsed.flags["unix"] != nil
+        return resolve(field, asJSON: json)
+    }
+
+    private static func statusField(
+        _ field: String, digest: LiveState, now: Date, json: Bool, unix: Bool, relative: Bool
+    ) -> QueryOutput {
+        let engine = digest.engine
         switch field {
         case "provider": return DigestQueryFormat.textField(engine.providerID, json: json)
         case "service": return DigestQueryFormat.textField(engine.serviceName, json: json)
@@ -58,6 +74,13 @@ extension DigestQuery {
         case "pid": return DigestQueryFormat.intField(engine.pid, json: json)
         case "version": return DigestQueryFormat.textField(engine.appVersion, json: json)
         case "schema": return DigestQueryFormat.intField(digest.schemaVersion, json: json)
+        case "sessions-cap":
+            // The WRITER's cap, straight off the digest — never this build's
+            // own `LiveStateBuilder.sessionsCap`, which would report the
+            // reader's truncation rule for somebody else's list. Absent from
+            // a digest published before 0.84.0, and honestly so: the answer
+            // is unknown, not 8.
+            return DigestQueryFormat.intField(digest.sessionsCap, json: json)
         case "generated": return DigestQueryFormat.dateField(engine.generatedAt, json: json, unix: unix, relative: false)
         case "fetched": return DigestQueryFormat.dateField(engine.fetchedAt, json: json, unix: unix, relative: false)
         case "age":
@@ -65,13 +88,13 @@ extension DigestQuery {
             // freshness `--max-age` itself judges off generatedAt instead
             // (the digest's own publish time, not the upstream fetch).
             let age = engine.fetchedAt.map { now.timeIntervalSince($0) }
-            return DigestQueryFormat.secondsField(age, json: json)
+            return DigestQueryFormat.secondsField(age, json: json, relative: relative)
         case "next-poll": return DigestQueryFormat.dateField(engine.nextPollAt, json: json, unix: unix, relative: false)
         case "backoff": return DigestQueryFormat.dateField(engine.backoffUntil, json: json, unix: unix, relative: false)
-        case "gate-floor": return DigestQueryFormat.secondsField(engine.gateFloorSeconds, json: json)
+        case "gate-floor": return DigestQueryFormat.secondsField(engine.gateFloorSeconds, json: json, relative: relative)
         case "stale": return DigestQueryFormat.boolField(engine.stale, json: json)
         case "local": return DigestQueryFormat.boolField(engine.isLocalProvider, json: json)
-        case "pace": return DigestQueryFormat.secondsField(engine.activeIntervalSeconds, json: json)
+        case "pace": return DigestQueryFormat.secondsField(engine.activeIntervalSeconds, json: json, relative: relative)
         case "pace.multiplier": return DigestQueryFormat.intField(engine.paceMultiplier, json: json)
         case "error": return DigestQueryFormat.textField(engine.error?.text, json: json)
         case "error.code": return DigestQueryFormat.textField(engine.error?.code, json: json)
@@ -80,10 +103,12 @@ extension DigestQuery {
         case "accent": return DigestQueryFormat.textField(engine.accent.hexString, json: json)
         case "system-accent": return DigestQueryFormat.textField(engine.systemAccent?.hexString, json: json)
         case "forecast.ready": return DigestQueryFormat.boolField(engine.forecastProfile?.isReady, json: json)
-        case "forecast.remaining": return DigestQueryFormat.secondsField(engine.forecastProfile?.remainingSeconds, json: json)
+        case "forecast.remaining":
+            return DigestQueryFormat.secondsField(
+                engine.forecastProfile?.remainingSeconds, json: json, relative: relative)
         case "forecast.caption": return DigestQueryFormat.textField(engine.forecastProfile?.caption, json: json)
         case "timezone": return DigestQueryFormat.textField(digest.activity.timeZone, json: json)
-        default: return badQuery("status has no field '\(field)'")
+        default: return unknownField(noun: "status", field: field)
         }
     }
 
@@ -129,6 +154,17 @@ extension DigestQuery {
         case .ambiguous(let ids):
             return badQuery("ambiguous selector '\(selectorToken)' matches: \(ids.joined(separator: ", "))")
         case .found(let meter):
+            func resolve(_ name: String, asJSON: Bool) -> QueryOutput {
+                meterField(
+                    name, meter: meter, now: now, json: asJSON,
+                    unix: parsed.flags["unix"] != nil, relative: parsed.flags["relative"] != nil,
+                    header: parsed.flags["header"] != nil)
+            }
+            if let output = multiFieldOutput(
+                noun: "limit", parsed: parsed, positionalField: field, json: json,
+                header: parsed.flags["header"] != nil, resolve: resolve) {
+                return output
+            }
             guard let field else {
                 if json { return ok(DigestQueryFormat.jsonValue(meter)) }
                 if parsed.flags["raw"] != nil {
@@ -138,10 +174,7 @@ extension DigestQuery {
                 }
                 return ok(withStaleSuffix(meterSummaryLine(meter), digest: digest))
             }
-            return meterField(
-                field, meter: meter, now: now, json: json,
-                unix: parsed.flags["unix"] != nil, relative: parsed.flags["relative"] != nil,
-                header: parsed.flags["header"] != nil)
+            return resolve(field, asJSON: json)
         }
     }
 
@@ -176,10 +209,12 @@ extension DigestQuery {
             return DigestQueryFormat.dateField(
                 meter.resetsAt, json: json, unix: unix, relative: relative, caption: meter.resetCaption)
         case "resets-in":
-            return DigestQueryFormat.secondsField(meter.resetsAt.map { $0.timeIntervalSince(now) }, json: json)
+            return DigestQueryFormat.secondsField(
+                meter.resetsAt.map { $0.timeIntervalSince(now) }, json: json, relative: relative)
         case "caption": return DigestQueryFormat.textField(meter.resetCaption, json: json)
-        case "window": return DigestQueryFormat.secondsField(meter.limitWindow, json: json)
-        case "rate-window": return DigestQueryFormat.secondsField(meter.rateWindowSeconds, json: json)
+        case "window": return DigestQueryFormat.secondsField(meter.limitWindow, json: json, relative: relative)
+        case "rate-window":
+            return DigestQueryFormat.secondsField(meter.rateWindowSeconds, json: json, relative: relative)
         case "forces-warning": return DigestQueryFormat.boolField(meter.forcesWarning, json: json)
         case "scoped-model": return DigestQueryFormat.textField(meter.scopedModelName, json: json)
         case "exhausted":
@@ -195,7 +230,8 @@ extension DigestQuery {
                 meter.forecast?.exhaustsAt, json: json, unix: unix, relative: relative,
                 caption: meter.forecast?.caption)
         case "forecast.exhausts-in":
-            return DigestQueryFormat.secondsField(meter.forecast?.exhaustsAt.map { $0.timeIntervalSince(now) }, json: json)
+            return DigestQueryFormat.secondsField(
+                meter.forecast?.exhaustsAt.map { $0.timeIntervalSince(now) }, json: json, relative: relative)
         case "forecast.verdict": return DigestQueryFormat.textField(meter.forecast?.verdict, json: json)
         case "forecast.raw-verdict": return DigestQueryFormat.textField(meter.forecast?.rawVerdict, json: json)
         case "forecast.rate": return DigestQueryFormat.numberField(meter.forecast?.ratePerHour, json: json)
@@ -207,7 +243,7 @@ extension DigestQuery {
         case "curve": return seriesOutput(meter.forecast?.curve ?? [], json: json, header: header)
         case "stretches": return stretchesOutput(meter.stretches, json: json, header: header)
         case "models": return modelSeriesOutput(meter.modelSeries, json: json, header: header)
-        default: return badQuery("limit has no field '\(field)'")
+        default: return unknownField(noun: "limit", field: field)
         }
     }
 
@@ -244,6 +280,14 @@ extension DigestQuery {
     static func runBudget(parsed: ParsedArgs, digest: LiveState, json: Bool) -> QueryOutput {
         guard parsed.positionals.count <= 1 else { return badQuery("too many arguments") }
         let engine = digest.engine
+        func resolve(_ name: String, asJSON: Bool) -> QueryOutput {
+            budgetField(name, engine: engine, json: asJSON)
+        }
+        if let output = multiFieldOutput(
+            noun: "budget", parsed: parsed, positionalField: parsed.positionals.first, json: json,
+            header: parsed.flags["header"] != nil, resolve: resolve) {
+            return output
+        }
         guard let field = parsed.positionals.first else {
             // Local providers carry no budget gauge at all — absent, not a
             // fabricated "0 of 0 requests" line.
@@ -270,6 +314,10 @@ extension DigestQuery {
             if let fraction = engine.apiBudgetFraction { line += " (\(Int((fraction * 100).rounded()))%)" }
             return ok(withStaleSuffix(line, digest: digest))
         }
+        return resolve(field, asJSON: json)
+    }
+
+    private static func budgetField(_ field: String, engine: EngineStatus, json: Bool) -> QueryOutput {
         switch field {
         case "used": return DigestQueryFormat.intField(engine.apiBudgetUsed, json: json)
         case "ceiling": return DigestQueryFormat.intField(engine.apiBudgetCeiling, json: json)
@@ -280,7 +328,7 @@ extension DigestQuery {
             }()
             return DigestQueryFormat.intField(left, json: json)
         case "fraction": return DigestQueryFormat.numberField(engine.apiBudgetFraction, json: json)
-        default: return badQuery("budget has no field '\(field)'")
+        default: return unknownField(noun: "budget", field: field)
         }
     }
 
@@ -288,40 +336,53 @@ extension DigestQuery {
 
     static func runSpend(parsed: ParsedArgs, digest: LiveState, json: Bool) -> QueryOutput {
         guard parsed.positionals.count <= 1 else { return badQuery("too many arguments") }
-        guard let spend = digest.engine.spend else {
-            // No spend line for this provider — the same "entirely absent"
-            // shape `budget` uses for a local provider's missing gauge: a
-            // KNOWN field still resolves (absent value, exit 0); only an
-            // unrecognized field name is a bad query. Previously this
-            // guard short-circuited every field to exit 19, which made an
-            // absent VALUE indistinguishable from a typo — a hard-rule
-            // violation caught by the test suite.
-            guard let field = parsed.positionals.first else { return ok(json ? "null" : "") }
-            switch field {
-            case "used", "limit", "left": return DigestQueryFormat.numberField(nil, json: json)
-            case "currency": return DigestQueryFormat.textField(nil, json: json)
-            default: return badQuery("spend has no field '\(field)'")
-            }
+        let spend = digest.engine.spend
+        func resolve(_ name: String, asJSON: Bool) -> QueryOutput {
+            spendField(name, spend: spend, json: asJSON)
         }
-        let scale = pow(10.0, Double(spend.exponent))
-        let used = Double(spend.usedMinor) / scale
-        let limit = spend.limitMinor.map { Double($0) / scale }
+        if let output = multiFieldOutput(
+            noun: "spend", parsed: parsed, positionalField: parsed.positionals.first, json: json,
+            header: parsed.flags["header"] != nil, resolve: resolve) {
+            return output
+        }
         guard let field = parsed.positionals.first else {
+            guard let spend else { return ok(json ? "null" : "") }
             if json { return ok(DigestQueryFormat.jsonValue(spend)) }
             if parsed.flags["raw"] != nil {
                 return badQuery("raw needs a field — e.g. `spend used`")
             }
-            var line = UsageFormatting.money(used)
-            if let limit { line += " of \(UsageFormatting.money(limit))" }
+            let scale = pow(10.0, Double(spend.exponent))
+            var line = UsageFormatting.money(Double(spend.usedMinor) / scale)
+            if let limitMinor = spend.limitMinor {
+                line += " of \(UsageFormatting.money(Double(limitMinor) / scale))"
+            }
             line += " \(spend.currency)"
             return ok(withStaleSuffix(line, digest: digest))
+        }
+        return resolve(field, asJSON: json)
+    }
+
+    /// `spend` is optional here on purpose: no spend line for this provider
+    /// is the same "entirely absent" shape `budget` uses for a local
+    /// provider's missing gauge — a KNOWN field still resolves (absent
+    /// value, exit 0); only an unrecognized name is a bad query. An earlier
+    /// guard short-circuited every field to exit 19 instead, which made an
+    /// absent VALUE indistinguishable from a typo.
+    private static func spendField(_ field: String, spend: SpendStatus?, json: Bool) -> QueryOutput {
+        var used: Double?
+        var limit: Double?
+        if let spend {
+            let scale = pow(10.0, Double(spend.exponent))
+            used = Double(spend.usedMinor) / scale
+            limit = spend.limitMinor.map { Double($0) / scale }
         }
         switch field {
         case "used": return DigestQueryFormat.numberField(used, json: json)
         case "limit": return DigestQueryFormat.numberField(limit, json: json)
-        case "left": return DigestQueryFormat.numberField(limit.map { $0 - used }, json: json)
-        case "currency": return DigestQueryFormat.textField(spend.currency, json: json)
-        default: return badQuery("spend has no field '\(field)'")
+        case "left":
+            return DigestQueryFormat.numberField(limit.flatMap { total in used.map { total - $0 } }, json: json)
+        case "currency": return DigestQueryFormat.textField(spend?.currency, json: json)
+        default: return unknownField(noun: "spend", field: field)
         }
     }
 
@@ -376,6 +437,35 @@ extension DigestQuery {
             if raw { return ok(DigestQueryFormat.rawMoney(cost)) }
             return ok(withStaleSuffix(DigestQueryFormat.humanMoney(cost), digest: digest))
         }
+        let header = parsed.flags["header"] != nil
+        func resolve(_ name: String, asJSON: Bool) -> QueryOutput {
+            switch name {
+            case "tokens": return DigestQueryFormat.intField(tokens, json: asJSON)
+            case "prompts": return DigestQueryFormat.intField(prompts, json: asJSON)
+            case "cost": return DigestQueryFormat.numberField(cost, json: asJSON)
+            case "days":
+                let matched = digest.activity.days.filter { $0.dayKey >= window.start && $0.dayKey <= window.end }
+                return dayRollupOutput(matched, json: asJSON, raw: raw, header: header)
+            case "hours":
+                let matched = digest.activity.hourDays.filter { $0.dayKey >= window.start && $0.dayKey <= window.end }
+                guard !matched.isEmpty else {
+                    return noMatch("no hourly data for '\(rangeToken)' — beyond the ~8-day timeline retention")
+                }
+                return hourBucketOutput(matched, json: asJSON, raw: raw, header: header)
+            case "models":
+                let matched = digest.activity.modelDays.filter { $0.dayKey >= window.start && $0.dayKey <= window.end }
+                guard !matched.isEmpty else {
+                    return noMatch("no per-model data for '\(rangeToken)' — beyond the ~35-day model horizon")
+                }
+                return modelRowsOutput(aggregateModels(matched), json: asJSON, raw: raw, header: header)
+            default: return unknownField(noun: "activity", field: name)
+            }
+        }
+        if let output = multiFieldOutput(
+            noun: "activity", parsed: parsed, positionalField: field, json: json, header: header,
+            resolve: resolve) {
+            return output
+        }
         guard let field else {
             if json {
                 struct Box: Encodable {
@@ -393,28 +483,7 @@ extension DigestQuery {
                 + " · \(DigestQueryFormat.humanMoney(cost))"
             return ok(withStaleSuffix(line, digest: digest))
         }
-        let header = parsed.flags["header"] != nil
-        switch field {
-        case "tokens": return DigestQueryFormat.intField(tokens, json: json)
-        case "prompts": return DigestQueryFormat.intField(prompts, json: json)
-        case "cost": return DigestQueryFormat.numberField(cost, json: json)
-        case "days":
-            let matched = digest.activity.days.filter { $0.dayKey >= window.start && $0.dayKey <= window.end }
-            return dayRollupOutput(matched, json: json, raw: raw, header: header)
-        case "hours":
-            let matched = digest.activity.hourDays.filter { $0.dayKey >= window.start && $0.dayKey <= window.end }
-            guard !matched.isEmpty else {
-                return noMatch("no hourly data for '\(rangeToken)' — beyond the ~8-day timeline retention")
-            }
-            return hourBucketOutput(matched, json: json, raw: raw, header: header)
-        case "models":
-            let matched = digest.activity.modelDays.filter { $0.dayKey >= window.start && $0.dayKey <= window.end }
-            guard !matched.isEmpty else {
-                return noMatch("no per-model data for '\(rangeToken)' — beyond the ~35-day model horizon")
-            }
-            return modelRowsOutput(aggregateModels(matched), json: json, raw: raw, header: header)
-        default: return badQuery("activity has no field '\(field)'")
-        }
+        return resolve(field, asJSON: json)
     }
 
     private static func dayRollupOutput(_ days: [DayRollup], json: Bool, raw: Bool, header: Bool) -> QueryOutput {
@@ -489,6 +558,15 @@ extension DigestQuery {
             case .ambiguous(let ids):
                 return badQuery("ambiguous selector '\(selectorToken)' matches: \(ids.joined(separator: ", "))")
             case .found(let model):
+                let scopeTotal = models.reduce(0) { $0 + $1.tally.total }
+                func resolve(_ name: String, asJSON: Bool) -> QueryOutput {
+                    modelField(name, model: model, scopeTotal: scopeTotal, json: asJSON)
+                }
+                if let output = multiFieldOutput(
+                    noun: "model", parsed: parsed, positionalField: field, json: json,
+                    header: parsed.flags["header"] != nil, resolve: resolve) {
+                    return output
+                }
                 guard let field else {
                     if json { return ok(DigestQueryFormat.jsonValue(model)) }
                     if parsed.flags["raw"] != nil {
@@ -500,8 +578,7 @@ extension DigestQuery {
                         + " · \(DigestQueryFormat.humanMoney(model.cost))"
                     return ok(withStaleSuffix(line, digest: digest))
                 }
-                let scopeTotal = models.reduce(0) { $0 + $1.tally.total }
-                return modelField(field, model: model, scopeTotal: scopeTotal, json: json)
+                return resolve(field, asJSON: json)
             }
         }
     }
@@ -550,7 +627,7 @@ extension DigestQuery {
         case "tokens.uncached-input": return DigestQueryFormat.intField(model.tally.uncachedInput, json: json)
         case "tokens.input-side": return DigestQueryFormat.intField(model.tally.inputSide, json: json)
         case "tokens.cached-share": return DigestQueryFormat.numberField(model.tally.cachedShare, json: json)
-        default: return badQuery("model has no field '\(field)'")
+        default: return unknownField(noun: "model", field: field)
         }
     }
 }

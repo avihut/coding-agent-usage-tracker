@@ -497,12 +497,14 @@ the README rather than silently deviating.
   `history <meter>` (history.json label-keyed samples; TSV t⇥percent in
   BOTH text registers), `prices`/`price <model> [field]` (pricing cache;
   $/MTok = rate×1e6; answers with NO digest via the bundled floor) — plus
-  scan-backed `sessions --all` (shortlist columns + trailing `end` in
-  EVERY register, human leads with it) and `session …` deep fields
-  (end/kind/tool-calls/subagents/compactions/agent-version/models),
-  reachable via a shortlist miss OR `session <id> --all`, the escape
-  hatch that scans past a shortlist HIT (without it the ≤8 most-recent
-  sessions could never answer a deep field). Dispatcher: DeepQuery.run
+  scan-backed `sessions --all` (the SAME shortlist columns, `end` among
+  them since 0.84.0; human leads with it) and `session …` deep fields
+  (kind/tool-calls/subagents/compactions/agent-version/models — `end`
+  left this group in 0.84.0), reachable via a shortlist miss OR
+  `session <id> --all`, the escape hatch that scans past a shortlist HIT
+  (without it the ≤8 most-recent sessions could never answer a deep
+  field); a deep name on a shortlist hit is exit 19 "isn't in the
+  shortlist", worded APART from "has no field" on purpose. Dispatcher: DeepQuery.run
   (Digests/DeepQuery.swift); sessions/session route via
   DeepQuerySessionsCLI with the scan injected as a closure
   (buildIndex = persistCache:false, §10). Exit 11 = non-claude provider,
@@ -522,6 +524,45 @@ the README rather than silently deviating.
   a real `false` reads "miss" — the em-dash stays ABSENT-only). Built by
   a 14-agent sonnet+opus workflow (wf_a6974ae9-76f); its verify barrier's
   10 findings were closed by hand before release.
+- CLI CONSUMER ERGONOMICS (2026-08-17, v0.84.0): six fixes from an
+  outside consumer's review of the shipped query surface — read it as
+  the standing contract for anything new here.
+  (1) SessionCard.end SHIPS IN THE DIGEST (`Date?`, appended last in
+  `sessionColumns`): the shortlist already sorted by it and then threw it
+  away, so every liveness check either scanned transcripts per sample or
+  invented a proxy. Optional ONLY for backward tolerance — a
+  non-optional makes a 0.83-written live-state.json fail to decode
+  WHOLESALE, blanking every noun until usaged republishes. Same rule for
+  `LiveState.sessionsCap`, stamped by the WRITER like `schemaVersion`:
+  `status sessions-cap` reports what truncated THAT list, and stays
+  absent for an older digest — never this build's own constant.
+  (2) `--no-scan` forbids the shortlist-miss escalation (a ~10ms read
+  silently becoming a ~140ms transcript walk); it contradicts `--all`
+  (19), and with no digest at all is 13, not 20. `session <id> source`
+  says which path answered (digest|scan).
+  (3) `--fields a,b,c` on every noun with a field catalog (status limit
+  budget spend activity model session) — one TSV row in the text
+  registers, `--header` names the columns, `--json` an object in the
+  REQUESTED order (the one deliberate departure from sortedKeys). A
+  positional field AND `--fields` is 19; a failing cell fails the whole
+  row (never a partial one). Registered per-noun in `flagOwners`, so
+  `sessions --fields` is still "unknown flag".
+  (4) `--relative` on a SECONDS field prints `UsageFormatting.duration`,
+  mirroring the pre-phrased-caption rule for dates (`--json` unaffected,
+  negatives keep their sign); the `session` human summary line carries
+  its active duration. Money and tokens were already pre-formatted;
+  durations were the inconsistency.
+  (5) `DigestQueryFormat.sanitizeCell` at the tsv()/table() JOIN: a cell
+  can never contain the separator. Titles were safe only by luck
+  (`SessionMeta.scrub` collapses \s+); project/branch never pass through
+  it and a macOS directory name may legally hold a tab.
+  (6) Field errors ENUMERATE: `DigestQuery.fieldCatalog` (name → scalar|
+  table, in Digests/DigestQueryFields.swift) backs both the "— fields: …"
+  list and `--fields` validation, so a table-shaped name is refused BY
+  NAME rather than by sniffing output. The catalog can drift from the
+  switches; `DigestQueryFieldsTests` walks every name and fails if one is
+  unroutable. Sessions nouns now live in Digests/DigestQuerySessions.swift
+  (DigestQueryNouns.swift had passed the ~600-line split rule).
 - LIMIT-WINDOW PLOT: `Charts/WindowPlot.swift` (v0.77.0, 7cf5180) is the
   ONE vocabulary for the percent-over-a-span charts — reset dashes, reset
   curtain, nub curtain, `Nub` (start/end/kind/fullStart), nub colour +

@@ -42,6 +42,7 @@ extension DigestQuery {
            parsed.flags["background"] != nil || parsed.flags["no-background"] != nil {
             return badQuery("--background/--no-background need --all — the shortlist doesn't know a session's kind")
         }
+        if let rejection = rejectScanContradiction(parsed) { return rejection }
         if parsed.flags["all"] != nil {
             guard let scan else {
                 return badQuery("sessions --all needs the CLI's scan capability, not available through this entry point")
@@ -97,51 +98,16 @@ extension DigestQuery {
         } else if parsed.flags["no-background"] != nil, parsed.flags["background"] == nil {
             filtered = filtered.filter { $0.summary.kind == .interactive }
         }
-        // `SessionCard` (the shortlist's own shape, shared here for one
-        // formatting path) carries only `startedAt` — but the full index is
-        // sorted by `end` (`TranscriptScanner`'s own sort key), and `end` is
-        // what a scan-backed listing spanning many days needs on screen to
-        // read as sorted. Captured by id before the card conversion drops it,
-        // since ids are unique per entry.
-        let endByID = Dictionary(uniqueKeysWithValues: filtered.map { ($0.summary.id, $0.summary.end) })
-        let cards = filtered.map(DeepQuerySessions.card)
-        switch filterSessions(cards, parsed: parsed, now: now, calendar: calendar) {
+        switch filterSessions(filtered.map(DeepQuerySessions.card), parsed: parsed, now: now, calendar: calendar) {
         case .failure(let output): return output
         case .success(let sessions):
-            if json {
-                return ok(DigestQueryFormat.jsonValue(sessions.map {
-                    SessionAllRow(card: $0, end: endByID[$0.id] ?? $0.startedAt)
-                }))
-            }
+            if json { return ok(DigestQueryFormat.jsonValue(sessions)) }
             guard !sessions.isEmpty else { return ok("") }
             if raw {
-                let rows = sessions.map {
-                    sessionRawRow($0) + [DigestQueryFormat.iso(endByID[$0.id] ?? $0.startedAt)]
-                }
                 return ok(DigestQueryFormat.tsv(
-                    rows, header: parsed.flags["header"] != nil ? sessionColumns + ["end"] : nil))
+                    sessions.map(sessionRawRow), header: parsed.flags["header"] != nil ? sessionColumns : nil))
             }
-            return ok(DigestQueryFormat.table(sessions.map {
-                sessionAllHumanRow($0, end: endByID[$0.id] ?? $0.startedAt, timeZone: calendar.timeZone)
-            }))
-        }
-    }
-
-    /// `--all`'s own register row: the shortlist's `SessionCard` keys plus
-    /// the scan's `end` — the sort key the human table leads with must
-    /// exist in raw/json too, or the registers stop presenting one fact
-    /// three ways. Flat on purpose (card keys and `end` side by side),
-    /// matching the TSV row's trailing `end` column.
-    private struct SessionAllRow: Encodable {
-        let card: SessionCard
-        let end: Date
-
-        private enum CodingKeys: String, CodingKey { case end }
-
-        func encode(to encoder: Encoder) throws {
-            try card.encode(to: encoder)
-            var container = encoder.container(keyedBy: CodingKeys.self)
-            try container.encode(end, forKey: .end)
+            return ok(DigestQueryFormat.table(sessions.map { sessionAllHumanRow($0, timeZone: calendar.timeZone) }))
         }
     }
 
@@ -151,11 +117,17 @@ extension DigestQuery {
     /// error — falls through to the scan ONLY when `scan` was actually
     /// injected; a nil digest skips the shortlist entirely and goes
     /// straight there, and `--all` skips it BY REQUEST — the escape hatch
-    /// that makes the deep fields reachable for the ≤8 sessions the
+    /// that makes the deep fields reachable for the shortlisted sessions the
     /// shortlist would otherwise always answer for. `DigestQuery.run` (no
     /// `scan` closure) therefore keeps its documented "live-state.json
     /// ONLY" contract: a miss there is a clean, fast, machine-independent
     /// exit 20 — never a disk walk.
+    ///
+    /// `--no-scan` is the OTHER side of `--all`: a sampler on a debounce
+    /// needs "answer from the digest or don't answer", since the escalation
+    /// it can't see coming is a ~10ms read turning into a ~140ms transcript
+    /// walk. It forbids the fallback rather than choosing between sources,
+    /// so the two flags contradict each other outright.
     static func runSession(
         parsed: ParsedArgs, digest: LiveState?, now: Date, calendar: Calendar, json: Bool,
         scan: (() -> [DeepQuerySessions.Entry]?)? = nil
@@ -166,10 +138,13 @@ extension DigestQuery {
         }
         let selectorToken = positionals.removeFirst()
         guard positionals.count <= 1 else { return badQuery("too many arguments") }
+        if let rejection = rejectScanContradiction(parsed) { return rejection }
         let field = positionals.first
         let raw = parsed.flags["raw"] != nil
         let unix = parsed.flags["unix"] != nil
+        let relative = parsed.flags["relative"] != nil
         let header = parsed.flags["header"] != nil
+        let noScan = parsed.flags["no-scan"] != nil
 
         if parsed.flags["all"] == nil, let digest {
             switch filterSessions(digest.sessions, parsed: parsed, now: now, calendar: calendar) {
@@ -178,8 +153,8 @@ extension DigestQuery {
                 switch selectSession(selectorToken, in: sessions) {
                 case .found(let session):
                     return renderSession(
-                        session, deep: nil, field: field, json: json, raw: raw, unix: unix, header: header,
-                        stale: digest.engine.stale)
+                        session, deep: nil, parsed: parsed, field: field, json: json, raw: raw, unix: unix,
+                        relative: relative, header: header, stale: digest.engine.stale)
                 case .ambiguous(let ids):
                     return badQuery("ambiguous selector '\(selectorToken)' matches: \(ids.joined(separator: ", "))")
                 case .none:
@@ -188,11 +163,26 @@ extension DigestQuery {
             }
         }
 
+        if noScan {
+            // Two different failures, told apart: a digest answered and had
+            // no such session (20, a real no-match), versus no digest to ask
+            // at all (13, the same code every other noun gives for it) — the
+            // scan that would have covered both is forbidden by request.
+            guard digest != nil else {
+                return QueryOutput(
+                    stdout: "",
+                    note: "no live-state digest — --no-scan forbids the transcript scan that would have answered",
+                    exitCode: 13)
+            }
+            return noMatch(
+                "no session matches '\(selectorToken)'\(shortlistNote(digest))"
+                    + " — --no-scan forbids the transcript scan")
+        }
         guard let scan else {
             if parsed.flags["all"] != nil {
                 return badQuery("session --all needs the CLI's scan capability, not available through this entry point")
             }
-            return noMatch("no session matches '\(selectorToken)' in the shortlist (≤8)")
+            return noMatch("no session matches '\(selectorToken)'\(shortlistNote(digest))")
         }
         guard let entries = scan() else {
             return QueryOutput(
@@ -201,23 +191,49 @@ extension DigestQuery {
         }
         switch DeepQuerySessions.select(selectorToken, in: entries) {
         case .none:
-            return noMatch("no session matches '\(selectorToken)' in the shortlist (≤8) or the full transcript scan")
+            return noMatch(
+                "no session matches '\(selectorToken)'\(shortlistNote(digest)) or the full transcript scan")
         case .ambiguous(let ids):
             return badQuery("ambiguous selector '\(selectorToken)' matches: \(ids.joined(separator: ", "))")
         case .found(let entry):
             return renderSession(
-                DeepQuerySessions.card(entry), deep: entry, field: field, json: json, raw: raw, unix: unix,
-                header: header, stale: false)
+                DeepQuerySessions.card(entry), deep: entry, parsed: parsed, field: field, json: json, raw: raw,
+                unix: unix, relative: relative, header: header, stale: false)
         }
+    }
+
+    /// `--no-scan` forbids the escalation; `--all` demands it. Neither is a
+    /// modifier of the other, so asking for both is a bad query rather than
+    /// a precedence rule nobody would remember.
+    private static func rejectScanContradiction(_ parsed: ParsedArgs) -> QueryOutput? {
+        guard parsed.flags["all"] != nil, parsed.flags["no-scan"] != nil else { return nil }
+        return badQuery("--no-scan and --all contradict — one forbids the transcript scan, the other demands it")
+    }
+
+    /// " in the shortlist (≤8)" — the cap comes from the DIGEST that
+    /// answered, never this build's own constant (which would misreport a
+    /// digest published by a different version). Silent when there's no
+    /// digest, or when it predates the published cap.
+    private static func shortlistNote(_ digest: LiveState?) -> String {
+        guard let cap = digest?.sessionsCap else { return "" }
+        return " in the shortlist (≤\(cap))"
     }
 
     /// The "no field" vs "named field" fork, shared by both the shortlist
     /// hit and the scan hit — the only difference between the two sources is
     /// whether `deep` (the scan's extra fields) is present.
     private static func renderSession(
-        _ session: SessionCard, deep: DeepQuerySessions.Entry?, field: String?, json: Bool, raw: Bool, unix: Bool,
-        header: Bool, stale: Bool
+        _ session: SessionCard, deep: DeepQuerySessions.Entry?, parsed: ParsedArgs, field: String?, json: Bool,
+        raw: Bool, unix: Bool, relative: Bool, header: Bool, stale: Bool
     ) -> QueryOutput {
+        func resolve(_ name: String, asJSON: Bool) -> QueryOutput {
+            sessionField(
+                name, session: session, deep: deep, json: asJSON, unix: unix, relative: relative, header: header)
+        }
+        if let output = multiFieldOutput(
+            noun: "session", parsed: parsed, positionalField: field, json: json, header: header, resolve: resolve) {
+            return output
+        }
         guard let field else {
             if json { return ok(DigestQueryFormat.jsonValue(session)) }
             if raw {
@@ -226,11 +242,16 @@ extension DigestQuery {
             let line = sessionSummaryLine(session)
             return ok(stale ? "\(line) · stale" : line)
         }
-        return sessionField(field, session: session, deep: deep, json: json, unix: unix, header: header)
+        return resolve(field, asJSON: json)
     }
 
+    /// `end` is APPENDED, never inserted: the raw register is positional, so
+    /// a new column may only ever grow off the right edge — a consumer
+    /// indexing `$7` keeps reading the same fact it read before 0.84.0, and
+    /// `sessions --all` (which already carried a trailing `end` of its own)
+    /// comes out byte-identical, now from the card rather than a side table.
     private static let sessionColumns = [
-        "id", "title", "project", "branch", "started", "active", "cost", "tokens", "prompts", "api-calls",
+        "id", "title", "project", "branch", "started", "active", "cost", "tokens", "prompts", "api-calls", "end",
     ]
 
     private static func sessionRawRow(_ session: SessionCard) -> [String] {
@@ -238,7 +259,7 @@ extension DigestQuery {
             session.id, session.title, session.project ?? "", session.branch ?? "",
             DigestQueryFormat.iso(session.startedAt), String(Int(session.activeSeconds)),
             DigestQueryFormat.rawMoney(session.cost), String(session.tokens), String(session.prompts),
-            String(session.apiCalls),
+            String(session.apiCalls), session.end.map(DigestQueryFormat.iso) ?? "",
         ]
     }
 
@@ -259,12 +280,12 @@ extension DigestQuery {
     /// `end`, dated, matching both the sort key and the legacy dump's own
     /// "yyyy-MM-dd HH:mm" this noun replaces. Every other column is
     /// `sessionHumanRow`'s, unforked.
-    private static func sessionAllHumanRow(_ session: SessionCard, end: Date, timeZone: TimeZone) -> [String] {
+    private static func sessionAllHumanRow(_ session: SessionCard, timeZone: TimeZone) -> [String] {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = timeZone
         formatter.dateFormat = "yyyy-MM-dd HH:mm"
-        let time = formatter.string(from: end)
+        let time = formatter.string(from: session.end ?? session.startedAt)
         let place = [session.project, session.branch].compactMap { $0 }.joined(separator: " ")
         return [
             time, place, DigestQueryFormat.humanMoney(session.cost), TokenFormat.compact(session.tokens),
@@ -272,25 +293,35 @@ extension DigestQuery {
         ]
     }
 
+    /// Carries the active DURATION, house-formatted: the human register is
+    /// the one place a caller shouldn't have to divide seconds itself, and
+    /// this line previously omitted the number the Sessions browser leads
+    /// with. `active --relative` prints the same phrase for a script.
     private static func sessionSummaryLine(_ session: SessionCard) -> String {
         var parts = [session.title]
         let place = [session.project, session.branch].compactMap { $0 }.joined(separator: " ")
         if !place.isEmpty { parts.append(place) }
+        parts.append(UsageFormatting.duration(session.activeSeconds))
         parts.append("\(TokenFormat.compact(session.tokens)) tokens")
         parts.append(DigestQueryFormat.humanMoney(session.cost))
         return parts.joined(separator: " · ")
     }
 
-    /// `deep` carries the M2 fields (end/kind/tool-calls/subagents/
-    /// compactions/agent-version/models) — present only when `session`
-    /// resolved through the transcript scan; nil from a shortlist hit. A
-    /// deep field name stays a BAD QUERY (not absent) when `deep` is nil —
-    /// the shortlist genuinely has no such field, same as before M2; once a
-    /// session DID come from the scan, each deep field's own VALUE follows
-    /// absent discipline (a session with no recorded agent version reads
-    /// absent, never an error).
+    /// `deep` carries the M2 fields (kind/tool-calls/subagents/compactions/
+    /// agent-version/models) — present only when `session` resolved through
+    /// the transcript scan; nil from a shortlist hit. A deep field name stays
+    /// a BAD QUERY (not absent) when `deep` is nil — the shortlist genuinely
+    /// has no such field, same as before M2; once a session DID come from the
+    /// scan, each deep field's own VALUE follows absent discipline (a session
+    /// with no recorded agent version reads absent, never an error).
+    ///
+    /// `end` LEFT that group in 0.84.0: the shortlist publishes it now, so
+    /// the one field a liveness check needs no longer costs a full scan.
+    /// `source` never belonged to it — which path answered is knowable from
+    /// either.
     private static func sessionField(
-        _ field: String, session: SessionCard, deep: DeepQuerySessions.Entry?, json: Bool, unix: Bool, header: Bool
+        _ field: String, session: SessionCard, deep: DeepQuerySessions.Entry?, json: Bool, unix: Bool,
+        relative: Bool, header: Bool
     ) -> QueryOutput {
         switch field {
         case "id": return DigestQueryFormat.textField(session.id, json: json)
@@ -298,34 +329,44 @@ extension DigestQuery {
         case "project": return DigestQueryFormat.textField(session.project, json: json)
         case "branch": return DigestQueryFormat.textField(session.branch, json: json)
         case "started": return DigestQueryFormat.dateField(session.startedAt, json: json, unix: unix, relative: false)
-        case "active": return DigestQueryFormat.secondsField(session.activeSeconds, json: json)
+        case "end":
+            // The card's own value, with the scan's as a fallback for the
+            // one case it can be absent: a pre-0.84.0 digest answering a
+            // shortlist hit (nil `deep`) prints absent, honestly.
+            return DigestQueryFormat.dateField(
+                session.end ?? deep?.summary.end, json: json, unix: unix, relative: false)
+        case "source":
+            return DigestQueryFormat.textField(deep == nil ? "digest" : "scan", json: json)
+        case "active": return DigestQueryFormat.secondsField(session.activeSeconds, json: json, relative: relative)
         case "cost": return DigestQueryFormat.numberField(session.cost, json: json)
         case "tokens": return DigestQueryFormat.intField(session.tokens, json: json)
         case "prompts": return DigestQueryFormat.intField(session.prompts, json: json)
         case "api-calls": return DigestQueryFormat.intField(session.apiCalls, json: json)
-        case "end", "kind", "tool-calls", "subagents", "compactions", "agent-version", "models":
+        case "kind", "tool-calls", "subagents", "compactions", "agent-version", "models":
             guard let deep else {
+                // Deliberately NOT "has no field": the field is real and
+                // catalogued, it's the SOURCE that can't answer it. Sharing
+                // the unknown-name wording sent people looking for a typo.
                 return badQuery(
-                    "session has no field '\(field)' in the shortlist — add --all to resolve through the scan")
+                    "session field '\(field)' isn't in the shortlist — add --all to resolve it through the scan")
             }
-            return deepSessionField(field, deep: deep, json: json, unix: unix, header: header)
+            return deepSessionField(field, deep: deep, json: json, header: header)
         default:
-            return badQuery("session has no field '\(field)'")
+            return unknownField(noun: "session", field: field)
         }
     }
 
     private static func deepSessionField(
-        _ field: String, deep: DeepQuerySessions.Entry, json: Bool, unix: Bool, header: Bool
+        _ field: String, deep: DeepQuerySessions.Entry, json: Bool, header: Bool
     ) -> QueryOutput {
         switch field {
-        case "end": return DigestQueryFormat.dateField(deep.summary.end, json: json, unix: unix, relative: false)
         case "kind": return DigestQueryFormat.textField(deep.summary.kind.rawValue, json: json)
         case "tool-calls": return DigestQueryFormat.intField(deep.summary.toolCalls, json: json)
         case "subagents": return DigestQueryFormat.intField(deep.summary.subagentCount, json: json)
         case "compactions": return DigestQueryFormat.intField(deep.summary.compactions, json: json)
         case "agent-version": return DigestQueryFormat.textField(deep.summary.agentVersion, json: json)
         case "models": return sessionModelsOutput(deep, json: json, header: header)
-        default: return badQuery("session has no field '\(field)'")
+        default: return unknownField(noun: "session", field: field)
         }
     }
 
