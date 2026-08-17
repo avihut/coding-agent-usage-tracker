@@ -1876,51 +1876,59 @@ fn sessions<'a>(digest: &'a LiveState, accent: Color, rect: Rect) -> Paragraph<'
     let roomy = rect.width >= 44;
 
     for card in cards.iter().take(seats) {
-        let mut cells: Vec<Span> = Vec::new();
-        // Up to three dots — beyond that they stop reading as a mix.
-        for color in card.model_colors.iter().take(3) {
-            cells.push(Span::styled(glyphs().dot.to_owned(), ramp(*color, 1.0)));
-        }
-        if card.model_colors.is_empty() {
-            cells.push(Span::styled(" ".to_owned(), style(DIM)));
-        }
-        cells.push(Span::styled(" ".to_owned(), style(DIM)));
-
-        let mut facts = String::new();
+        let mut facts: Vec<String> = Vec::new();
         if roomy {
-            facts.push_str(&format!(
-                "{}{}",
-                glyphs().sep,
-                worked(card.active_seconds)
-            ));
-            facts.push_str(&format!("{}{}", glyphs().sep, compact(card.tokens)));
+            facts.push(worked(card.active_seconds));
+            facts.push(compact(card.tokens));
         }
         // Absent cost is absent — an unpriced session must not read "$0".
         if let Some(cost) = card.cost {
-            facts.push_str(&format!("{}{}", glyphs().sep, money(cost)));
+            facts.push(money(cost));
         }
         if wide {
             if let Some(project) = &card.project {
-                facts.push_str(&format!("{}{}", glyphs().sep, project));
-                if let Some(branch) = &card.branch {
-                    facts.push_str(&format!("@{branch}"));
-                }
+                facts.push(match &card.branch {
+                    Some(branch) => format!("{project}@{branch}"),
+                    None => project.clone(),
+                });
             }
         }
-        // The facts are measured BEFORE the title claims its room, never
-        // reserved by guess: a four-figure cost overflowed a guessed width
-        // and ratatui clipped it mid-number, so "$1,235.85" rendered as
-        // "$1," — a wrong number, not a shortened one. The title is the
-        // elastic part; the numbers are never cut.
-        let dots = card.model_colors.len().min(3).max(1);
-        let title_room = (rect.width as usize)
-            .saturating_sub(facts.chars().count() + dots + 1)
-            .max(8);
-        cells.insert(
-            dots + 1,
-            Span::styled(clip(&card.title, title_room), style(accent)),
-        );
-        cells.push(Span::styled(facts, style(DIM)));
+        let facts = facts.join(glyphs().sep);
+
+        // The model dots TRAIL the title and stand in for its first
+        // separator — they are the sep's own glyph, colored where it is
+        // dim. Leading dots indented every title by its model count.
+        // Facts are still measured BEFORE the title claims its room,
+        // never reserved by guess: a four-figure cost overflowed a
+        // guessed width and ratatui clipped it mid-number, so "$1,235.85"
+        // rendered as "$1," — a wrong number, not a shortened one. The
+        // title is the elastic part; the numbers are never cut.
+        let dot_count = card.model_colors.len().min(3);
+        let tail = match (dot_count, facts.is_empty()) {
+            (0, true) => 0,
+            (0, false) => glyphs().sep.chars().count() + facts.chars().count(),
+            (n, true) => 1 + n,
+            (n, false) => 1 + n + 1 + facts.chars().count(),
+        };
+        let title_room = (rect.width as usize).saturating_sub(tail).max(8);
+
+        let mut cells: Vec<Span> = Vec::new();
+        cells.push(Span::styled(clip(&card.title, title_room), style(accent)));
+        if dot_count > 0 {
+            cells.push(Span::styled(" ".to_owned(), style(DIM)));
+            // Up to three dots — beyond that they stop reading as a mix.
+            for color in card.model_colors.iter().take(3) {
+                cells.push(Span::styled(glyphs().dot.to_owned(), ramp(*color, 1.0)));
+            }
+            if !facts.is_empty() {
+                cells.push(Span::styled(format!(" {facts}"), style(DIM)));
+            }
+        } else if !facts.is_empty() {
+            cells.push(Span::styled(
+                format!("{}{facts}", glyphs().sep),
+                style(DIM),
+            ));
+        }
         lines.push(Line::from(cells));
     }
     Paragraph::new(lines)
