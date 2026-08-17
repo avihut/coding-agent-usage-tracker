@@ -189,6 +189,7 @@ struct SessionsView: View {
             session: session,
             cost: Self.cost(of: session, pricing: store.pricing),
             colors: colors,
+            sortKey: sortKey,
             isEditingTitle: editingID == session.id,
             onBeginRename: { editingID = session.id },
             onCommitRename: { name in

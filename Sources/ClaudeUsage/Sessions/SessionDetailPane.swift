@@ -36,6 +36,10 @@ struct SessionDetailPane: View {
     @State private var editingTitle = false
     @State private var titleDraft = ""
     @FocusState private var titleFocused: Bool
+    @State private var titleHovered = false
+    /// The rename click, window coordinates — the caret lands on the
+    /// clicked character once the text field takes focus.
+    @State private var titleClickPoint: CGPoint?
 
     private struct DetailKey: Equatable {
         let id: String
@@ -71,6 +75,7 @@ struct SessionDetailPane: View {
                 costRow = nil
                 vanished = false
                 editingTitle = false
+                titleHovered = false
             }
             let result = await store.sessionDetail(id: summary.id)
             if Task.isCancelled { return }
@@ -278,13 +283,27 @@ struct SessionDetailPane: View {
                 // below sees editingTitle == false and stays quiet.
                 .onExitCommand { editingTitle = false }
                 .onChange(of: titleFocused) { _, focused in
-                    if !focused, editingTitle { commitTitle(summary) }
+                    if focused {
+                        FieldEditorCursor.place(near: titleClickPoint)
+                    } else if editingTitle {
+                        commitTitle(summary)
+                    }
                 }
         } else {
             Text(displayed)
                 .font(.title3.weight(.semibold))
                 .lineLimit(2)
-                .onTapGesture { editingTitle = true }
+                .background(
+                    RoundedRectangle(cornerRadius: 5)
+                        .fill(Color.primary.opacity(titleHovered ? 0.07 : 0))
+                        .padding(-3))
+                .pointerStyle(.link)
+                .onHover { titleHovered = $0 }
+                .onTapGesture {
+                    titleClickPoint = NSApp.currentEvent?.locationInWindow
+                    titleHovered = false
+                    editingTitle = true
+                }
                 .help("Click to rename — an empty name restores the original title")
         }
     }

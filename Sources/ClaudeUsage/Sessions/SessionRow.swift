@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import UsageCore
 
@@ -14,6 +15,10 @@ struct SessionRow: View {
     let session: SessionSummary
     let cost: (dollars: Double, unpricedModels: Int)
     let colors: [String: Color]
+    /// The list's active sort axis. The card's top-right KPI presents it,
+    /// so comparing along the sort never requires reading the fine print;
+    /// surfaces without an ordering (the shortlist) default to cost.
+    var sortKey: SessionSortKey = .recency
     var isEditingTitle = false
     var onBeginRename: (() -> Void)? = nil
     var onCommitRename: ((String) -> Void)? = nil
@@ -21,15 +26,17 @@ struct SessionRow: View {
 
     @State private var draft = ""
     @FocusState private var titleFocused: Bool
+    @State private var titleHovered = false
+    /// The rename click, window coordinates — the caret lands on the
+    /// clicked character once the text field takes focus.
+    @State private var clickPoint: CGPoint?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 title
                 Spacer(minLength: 4)
-                Text(costText)
-                    .font(.callout.weight(.bold))
-                    .monospacedDigit()
+                keyValue
             }
             HStack(spacing: 6) {
                 Text(place)
@@ -49,7 +56,9 @@ struct SessionRow: View {
                             .frame(width: 7, height: 7)
                     }
                 }
-                Text("\(TokenFormat.compact(session.totalTokens)) tokens")
+                Text(sortKey == .tokens
+                    ? costText
+                    : "\(TokenFormat.compact(session.totalTokens)) tokens")
                 Text("\(plural(session.prompts, "prompt")) · \(plural(session.apiCalls, "call"))")
                 Spacer(minLength: 0)
                 if session.kind == .background {
@@ -84,18 +93,54 @@ struct SessionRow: View {
                 // there.
                 .onExitCommand { onCancelRename?() }
                 .onChange(of: titleFocused) { _, focused in
-                    if !focused { onCommitRename?(draft) }
+                    if focused {
+                        FieldEditorCursor.place(near: clickPoint)
+                    } else {
+                        onCommitRename?(draft)
+                    }
                 }
         } else if let onBeginRename {
             Text(session.title)
                 .font(.callout.weight(.semibold))
                 .lineLimit(1)
-                .onTapGesture(perform: onBeginRename)
+                .background(
+                    RoundedRectangle(cornerRadius: 5)
+                        .fill(Color.primary.opacity(titleHovered ? 0.07 : 0))
+                        .padding(-3))
+                .pointerStyle(.link)
+                .onHover { titleHovered = $0 }
+                .onTapGesture {
+                    clickPoint = NSApp.currentEvent?.locationInWindow
+                    titleHovered = false
+                    onBeginRename()
+                }
                 .help("Click to rename — an empty name restores the original title")
         } else {
             Text(session.title)
                 .font(.callout.weight(.semibold))
                 .lineLimit(1)
+        }
+    }
+
+    /// The KPI slot: the sorted-by value when that value is a number
+    /// (tokens, cost), cost otherwise — name and recency already own
+    /// prominent fixed homes in the card. The demoted number moves to the
+    /// caption line, so the swap never loses information.
+    @ViewBuilder
+    private var keyValue: some View {
+        if sortKey == .tokens {
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                Text(TokenFormat.compact(session.totalTokens))
+                    .font(.callout.weight(.bold))
+                    .monospacedDigit()
+                Text("tokens")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        } else {
+            Text(costText)
+                .font(.callout.weight(.bold))
+                .monospacedDigit()
         }
     }
 
