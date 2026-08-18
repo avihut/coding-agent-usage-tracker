@@ -34,6 +34,7 @@ struct DigestQueryFieldsTests {
     /// The selector each noun needs before a field name, on this fixture.
     static let nounPrefix: [String: [String]] = [
         "status": ["status"],
+        "health": ["health"],
         "limit": ["limit", "session"],
         "budget": ["budget"],
         "spend": ["spend"],

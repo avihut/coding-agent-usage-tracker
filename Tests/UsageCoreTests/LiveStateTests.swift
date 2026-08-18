@@ -173,8 +173,10 @@ struct LiveStateTests {
             pageURL: "https://status.claude.com",
             indicator: "minor",
             descriptionText: "Partially Degraded Service",
-            checkedAt: date("2026-08-16T12:01:30Z"),
-            okAt: date("2026-08-16T12:01:30Z"),
+            // Before the digest's own `now` (12:00): a card cannot have been
+            // read after the digest that carries it was written.
+            checkedAt: date("2026-08-16T11:58:30Z"),
+            okAt: date("2026-08-16T11:58:30Z"),
             stale: false,
             components: [
                 StatusComponent(name: "claude.ai", status: "degraded_performance"),

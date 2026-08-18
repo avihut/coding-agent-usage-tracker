@@ -39,6 +39,11 @@ extension DigestQuery {
             "forecast.verdict", "forecast.raw-verdict", "forecast.rate", "forecast.baseline", "forecast.pace",
             "forecast.basis", "forecast.caption",
         ]).merging(tables(["series", "curve", "stretches", "models"])) { lhs, _ in lhs },
+        "health": scalars([
+            "indicator", "description", "page", "page-url", "ok", "stale", "checked", "age",
+            "incident", "impact", "phase", "started", "duration", "message", "message-at",
+            "incident-url",
+        ]).merging(tables(["components", "incidents", "resolved", "maintenances"])) { lhs, _ in lhs },
         "budget": scalars(["used", "ceiling", "left", "fraction"]),
         "spend": scalars(["used", "limit", "left", "currency"]),
         "activity": scalars(["tokens", "prompts", "cost"])

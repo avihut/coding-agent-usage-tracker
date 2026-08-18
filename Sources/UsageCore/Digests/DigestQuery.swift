@@ -45,7 +45,7 @@ public enum DigestQuery {
     /// anything else); public so a caller can enumerate it without a
     /// second copy of the list.
     public static let nouns: Set<String> = [
-        "status", "limits", "limit", "budget", "spend",
+        "status", "health", "limits", "limit", "budget", "spend",
         "activity", "cost", "models", "model",
         "sessions", "session", "prompt", "get",
     ]
@@ -136,6 +136,7 @@ public enum DigestQuery {
 
         switch noun {
         case "status": return runStatus(parsed: parsed, digest: digest, now: now, json: json)
+        case "health": return runHealth(parsed: parsed, digest: digest, now: now, json: json)
         case "limits": return runLimits(parsed: parsed, digest: digest, json: json, raw: raw)
         case "limit": return runLimit(parsed: parsed, digest: digest, now: now, json: json)
         case "budget": return runBudget(parsed: parsed, digest: digest, json: json)
