@@ -65,6 +65,21 @@ public struct ServiceStatusCard: Codable, Sendable, Equatable {
     /// True when something unresolved is happening — the badge/banner gate.
     public var hasIncident: Bool { !incidents.isEmpty }
 
+    /// The impact the LOUD surfaces should wear — the menu bar badge, the
+    /// TUI's banner rungs — or nil when nothing should shout.
+    ///
+    /// This is decision D2 in one place, because three faces have to agree
+    /// on it: any unresolved incident counts, minor included (a "minor" that
+    /// degrades a model for two hours is exactly when a glance should tell
+    /// you), while maintenance and `unknown` never do. Maintenance is
+    /// expected, and not knowing is not an emergency.
+    public var alarmingImpact: Indicator? {
+        switch activeIncident?.impactValue {
+        case .minor, .major, .critical: activeIncident?.impactValue
+        default: nil
+        }
+    }
+
     /// The severity ladder, as the loud surfaces rank it. Raw values are the
     /// wire vocabulary; `unknown` sits OUTSIDE the ladder (grey, never
     /// alarming) and `maintenance` below every real impact.

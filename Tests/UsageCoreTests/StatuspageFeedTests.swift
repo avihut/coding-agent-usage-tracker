@@ -187,6 +187,36 @@ struct StatuspageFeedTests {
         #expect(ServiceStatusCard.Indicator.minor.rank > ServiceStatusCard.Indicator.maintenance.rank)
     }
 
+    /// Decision D2, pinned where all three faces read it: any unresolved
+    /// incident shouts (minor included), and nothing else does.
+    @Test("only unresolved incidents are loud enough to badge")
+    func alarmingImpact() throws {
+        #expect(try Self.card("summary-healthy").alarmingImpact == nil)
+        #expect(try Self.card("summary-incident").alarmingImpact == .minor)
+        // Expected work is not an alarm, and neither is a failed reading.
+        #expect(try Self.card("summary-maintenance").alarmingImpact == nil)
+
+        let unknown = ServiceStatusCard(
+            providerID: "claude", pageName: "Claude", pageURL: "u",
+            indicator: "unknown", descriptionText: "", checkedAt: Date(), okAt: nil,
+            stale: true, components: [], incidents: [])
+        #expect(unknown.alarmingImpact == nil)
+
+        for impact in ["minor", "major", "critical"] {
+            let card = ServiceStatusCard(
+                providerID: "claude", pageName: "Claude", pageURL: "u",
+                indicator: impact, descriptionText: "", checkedAt: Date(), okAt: Date(),
+                stale: false, components: [],
+                incidents: [
+                    StatusIncident(
+                        id: "i", name: "n", impact: impact, phase: "investigating",
+                        startedAt: Date(), lastUpdateAt: nil, lastMessage: nil, url: nil,
+                        componentNames: [])
+                ])
+            #expect(card.alarmingImpact == ServiceStatusCard.Indicator.parse(impact))
+        }
+    }
+
     @Test("the feed asks exactly one endpoint")
     func endpoint() {
         let feed = StatuspageFeed(base: URL(string: "https://status.claude.com")!)

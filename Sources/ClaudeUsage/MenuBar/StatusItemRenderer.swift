@@ -33,14 +33,9 @@ enum StatusItemRenderer {
         for state: DisplayState, predictions: [String: UsagePrediction] = [:],
         glyph: String = "✳︎", serviceStatus: ServiceStatusCard? = nil
     ) -> Model {
-        let incident = serviceStatus?.activeIncident?.impactValue
-        // Only real impacts badge. `none` never does, and neither does
-        // `unknown` — not knowing is not an emergency (decision D3).
-        let alarming: ServiceStatusCard.Indicator? =
-            switch incident {
-            case .minor, .major, .critical: incident
-            default: nil
-            }
+        // Which impacts are loud enough to badge is decision D2, and it lives
+        // on the card so the TUI's rungs and this badge can't drift apart.
+        let alarming = serviceStatus?.alarmingImpact
         guard let snapshot = state.snapshot else {
             return Model(segments: nil, stale: true, glyph: glyph, incident: alarming)
         }
