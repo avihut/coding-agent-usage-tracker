@@ -330,6 +330,9 @@ final class UsageStore {
             case .scanNow:
                 engine.scanActivity(force: true)
                 return ControlReply(ok: true)
+            case .refreshStatus:
+                engine.refreshServiceStatus()
+                return ControlReply(ok: true)
             case .setProvider, .shutdown:
                 return ControlReply(
                     ok: false, message: "not while the app hosts — use the app's Metering menu")

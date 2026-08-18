@@ -17,6 +17,12 @@ public struct ClaudeProvider: UsageProvider {
     /// Anthropic terracotta #D97757.
     public let accent = ProviderAccent(red: 0.851, green: 0.467, blue: 0.341)
     public let networkDestinations = ["api.anthropic.com"]
+    /// Anthropic's public status page (spec §10 amendment 2026-08-19).
+    /// `status.anthropic.com` 301-redirects here, so the daemon polls the
+    /// final host directly and skips the hop on every request.
+    public let statusFeed: StatusFeed? = .statuspage(
+        base: URL(string: "https://status.claude.com")!,
+        pageURL: URL(string: "https://status.claude.com")!)
     public let credentials: CredentialChain
     private let client: UsageClient
 

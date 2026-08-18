@@ -33,6 +33,16 @@ public protocol UsageProvider: Sendable {
     /// feed host) — adding a destination is a spec §10 amendment, not a
     /// code detail.
     var networkDestinations: [String] { get }
+    /// This provider's public status page, when it publishes one. Nil means
+    /// the provider ships no status tracking at all — every status surface
+    /// simply doesn't exist for it.
+    ///
+    /// Deliberately NOT part of `networkDestinations`: that list's emptiness
+    /// is what makes a provider "local" (no budget gauge, refresh = rescan),
+    /// and a status feed must never flip that classification. The privacy
+    /// card renders this host on its own line instead. Adding one is a spec
+    /// §10 amendment, same as any other destination.
+    var statusFeed: StatusFeed? { get }
 
     /// Read-only places the agent's access token can be found. Read fresh
     /// every refresh cycle, never cached, never written back (spec §5/§10).
@@ -74,6 +84,31 @@ public protocol UsageProvider: Sendable {
 
 extension UsageProvider {
     public var preferences: [ProviderPreference] { [] }
+    /// Opt-in: a provider without a declared feed tracks no status.
+    public var statusFeed: StatusFeed? { nil }
+}
+
+/// Where a provider's service health can be read. One case today — the
+/// Atlassian Statuspage format nearly every vendor runs — but a kind, not a
+/// bare URL, so a provider on a different format is a new case here rather
+/// than a special path through the poller.
+public enum StatusFeed: Sendable, Equatable {
+    /// `base` is the API root (`https://status.claude.com`); `pageURL` is
+    /// where a human is sent.
+    case statuspage(base: URL, pageURL: URL)
+
+    /// The host the privacy card names — the §10 declaration, rendered.
+    public var host: String {
+        switch self {
+        case .statuspage(let base, _): base.host() ?? base.absoluteString
+        }
+    }
+
+    public var pageURL: URL {
+        switch self {
+        case .statuspage(_, let pageURL): pageURL
+        }
+    }
 }
 
 /// One provider-declared numeric preference. `key` is the full UserDefaults

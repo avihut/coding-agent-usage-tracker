@@ -30,6 +30,121 @@ pub struct LiveState {
     /// engine that predates the section still decodes.
     #[serde(default)]
     pub sessions: Vec<SessionCard>,
+    /// The provider's service health. `None` means this engine tracks no
+    /// status (no feed declared, or a digest older than 0.86.0) — ABSENT IS
+    /// NOT HEALTHY, so a renderer must show nothing rather than a green dot.
+    #[serde(default)]
+    pub service_status: Option<ServiceStatusCard>,
+}
+
+/// Mirror of `ServiceStatusCard` — what the provider's own status page says,
+/// normalized by the engine. The TUI renders this and polls nothing.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceStatusCard {
+    #[serde(rename = "providerID")]
+    pub provider_id: String,
+    pub page_name: String,
+    /// Swift spells the property `pageURL`, and camelCase would look for
+    /// `pageUrl` — the same acronym trap `providerID` above sidesteps.
+    #[serde(rename = "pageURL")]
+    pub page_url: String,
+    /// "none" | "minor" | "major" | "critical" | "maintenance" | "unknown".
+    /// A String, not an enum: an indicator this build has never heard of must
+    /// decode and render quietly rather than fail the whole digest.
+    pub indicator: String,
+    /// The page's own words ("All Systems Operational").
+    pub description_text: String,
+    #[serde(with = "time::serde::rfc3339")]
+    pub checked_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339::option", default)]
+    pub ok_at: Option<OffsetDateTime>,
+    pub stale: bool,
+    #[serde(default)]
+    pub components: Vec<StatusComponent>,
+    /// Unresolved, worst impact first.
+    #[serde(default)]
+    pub incidents: Vec<StatusIncident>,
+    /// Resolved within the last hour — the quiet "all clear".
+    #[serde(default)]
+    pub recently_resolved: Vec<StatusIncident>,
+    #[serde(default)]
+    pub maintenances: Vec<StatusMaintenance>,
+}
+
+impl ServiceStatusCard {
+    /// The incident driving the loud surfaces; maintenance is never one.
+    pub fn active_incident(&self) -> Option<&StatusIncident> {
+        self.incidents.first()
+    }
+
+    pub fn has_incident(&self) -> bool {
+        !self.incidents.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StatusComponent {
+    pub name: String,
+    /// The feed's own vocabulary: operational, degraded_performance,
+    /// partial_outage, major_outage, under_maintenance.
+    pub status: String,
+}
+
+impl StatusComponent {
+    pub fn is_operational(&self) -> bool {
+        self.status == "operational"
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StatusIncident {
+    pub id: String,
+    pub name: String,
+    /// "none" | "minor" | "major" | "critical".
+    pub impact: String,
+    /// "investigating" | "identified" | "monitoring" | "resolved".
+    pub phase: String,
+    #[serde(with = "time::serde::rfc3339")]
+    pub started_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339::option", default)]
+    pub last_update_at: Option<OffsetDateTime>,
+    pub last_message: Option<String>,
+    pub url: Option<String>,
+    #[serde(default)]
+    pub component_names: Vec<String>,
+    #[serde(with = "time::serde::rfc3339::option", default)]
+    pub resolved_at: Option<OffsetDateTime>,
+}
+
+impl StatusIncident {
+    /// Seconds since it started — to resolution if it got there, else to
+    /// `now`. The banner's "going 1h 12m".
+    pub fn duration_seconds(&self, now: OffsetDateTime) -> f64 {
+        let end = self.resolved_at.unwrap_or(now);
+        (end - self.started_at).as_seconds_f64().max(0.0)
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StatusMaintenance {
+    pub id: String,
+    pub name: String,
+    /// "scheduled" | "in_progress" | "verifying" | "completed".
+    pub phase: String,
+    #[serde(with = "time::serde::rfc3339::option", default)]
+    pub window_start: Option<OffsetDateTime>,
+    #[serde(with = "time::serde::rfc3339::option", default)]
+    pub window_end: Option<OffsetDateTime>,
+}
+
+impl StatusMaintenance {
+    pub fn is_active(&self) -> bool {
+        self.phase == "in_progress" || self.phase == "verifying"
+    }
 }
 
 /// One recent session, render-ready. Titles and a basename-only project
@@ -404,13 +519,16 @@ mod tests {
 mod wave4_tests {
     use super::*;
 
-    fn golden() -> LiveState {
-        let raw = std::fs::read_to_string(concat!(
+    fn golden_bytes() -> Vec<u8> {
+        std::fs::read(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../Tests/UsageCoreTests/Fixtures/digest/live-state-v1.json"
         ))
-        .expect("golden fixture");
-        serde_json::from_str(&raw).expect("golden decodes")
+        .expect("golden fixture")
+    }
+
+    fn golden() -> LiveState {
+        serde_json::from_slice(&golden_bytes()).expect("golden decodes")
     }
 
     /// Item 20: the per-model curves arrive with the engine's ledger colour
@@ -468,6 +586,69 @@ mod wave4_tests {
                 assert!(!field.contains('~'), "home leaked: {field}");
             }
         }
+    }
+
+    /// The status card crosses the language boundary whole — every arm the
+    /// Swift golden exercises has to arrive here too.
+    #[test]
+    fn service_status_decodes_with_every_arm() {
+        let state = golden();
+        let card = state
+            .service_status
+            .as_ref()
+            .expect("golden carries serviceStatus");
+
+        assert_eq!(card.indicator, "minor");
+        assert_eq!(card.description_text, "Partially Degraded Service");
+        assert_eq!(card.page_url, "https://status.claude.com");
+        assert!(!card.stale);
+        assert!(card.has_incident());
+
+        let incident = card.active_incident().expect("active incident");
+        assert_eq!(incident.name, "Degraded performance for multiple models");
+        assert_eq!(incident.phase, "monitoring");
+        assert!(incident
+            .last_message
+            .as_deref()
+            .unwrap()
+            .starts_with("A fix has been implemented"));
+        assert_eq!(incident.component_names, vec!["claude.ai"]);
+        assert!(incident.resolved_at.is_none());
+        // Going 1h 12m at the digest's own `now`.
+        let now = OffsetDateTime::parse(
+            "2026-08-16T12:01:00Z",
+            &time::format_description::well_known::Rfc3339,
+        )
+        .unwrap();
+        assert_eq!(incident.duration_seconds(now), 4320.0);
+
+        // A degraded component and an operational one both arrive.
+        assert_eq!(card.components.len(), 3);
+        assert!(!card.components[0].is_operational());
+        assert!(card.components[1].is_operational());
+
+        // The hour-long resolved memory is separate from the active list.
+        assert_eq!(card.recently_resolved.len(), 1);
+        assert!(card.recently_resolved[0].resolved_at.is_some());
+
+        // A scheduled (not in-progress) maintenance is not active.
+        assert_eq!(card.maintenances.len(), 1);
+        assert!(!card.maintenances[0].is_active());
+    }
+
+    /// A digest from before the feature must decode with no card at all —
+    /// and a missing card is NOT a healthy one.
+    #[test]
+    fn an_absent_status_card_is_none_not_healthy() {
+        let mut value: serde_json::Value = serde_json::from_slice(&golden_bytes()).unwrap();
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("serviceStatus")
+            .expect("golden had one to remove");
+        let bytes = serde_json::to_vec(&value).unwrap();
+        let state = LiveState::parse(&bytes).expect("older digests still decode");
+        assert!(state.service_status.is_none());
     }
 
     /// Absent is None, never 0 — an unpriced session reports no cost.

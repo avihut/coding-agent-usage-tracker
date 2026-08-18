@@ -52,6 +52,9 @@ public final class UsageEngine {
     public private(set) var isRefreshingPricing = false
     /// Last manual pricing-refresh failure; cleared on the next attempt.
     public private(set) var pricingRefreshError: String?
+    /// The provider's service health, or nil when it declares no status feed
+    /// (absent is not healthy — see `ServiceStatusCard`).
+    public private(set) var serviceStatus: ServiceStatusCard?
 
     /// The one metered service this instance tracks. Everything
     /// vendor-specific — endpoints, paths, names, links — flows from here.
@@ -81,6 +84,10 @@ public final class UsageEngine {
     private var cadence: AdaptiveCadence
     private var ledger: RequestLedger
     private var watcher: AgentActivityWatcher?
+    /// Polls the provider's status page; nil when the provider declares no
+    /// feed. Its cadence is entirely its own — status has nothing to do with
+    /// the usage poll's gate, backoff, or activity signal.
+    private var statusPoller: StatusPoller?
     private var lastActivityScan: Date?
     /// Single-flight for transcript scans: a window-open force-scan must not
     /// overlap an FSEvents-triggered one — two concurrent scans race their
@@ -162,6 +169,20 @@ public final class UsageEngine {
         ) { [weak self] in
             self?.noteLocalAgentActivity()
         }
+        if case .statuspage(let base, let pageURL) = provider.statusFeed {
+            let poller = StatusPoller(
+                feed: StatuspageFeed(base: base), providerID: provider.id,
+                pageURL: pageURL.absoluteString)
+            poller.onCard = { [weak self] card in
+                guard let self, !self.isShutDown else { return }
+                self.serviceStatus = card
+                // A card change is a landing point like any other — consumers
+                // learn about an incident from the digest, not from polling.
+                self.publishState()
+            }
+            statusPoller = poller
+            poller.start()
+        }
         refresh(.launch)
         // A seeded gate can deny that launch poll (the previous host
         // fetched moments ago — a takeover inside the floor; isRefreshing
@@ -185,14 +206,26 @@ public final class UsageEngine {
         isShutDown = true
         scheduler.stop()
         watcher = nil
+        statusPoller?.stop()
+        statusPoller = nil
         nextRefreshAt = nil
     }
 
     /// A wake impulse from the host process — the app's NSWorkspace
     /// observer, the daemon's IOKit power callback. Stale numbers after
-    /// lid-open are what make these widgets feel broken (spec §9).
+    /// lid-open are what make these widgets feel broken (spec §9) — and a
+    /// status card from before the lid closed is stale in exactly the same
+    /// way, so both refresh here.
     public func noteWake() {
         refresh(.wake)
+        statusPoller?.pollNow()
+    }
+
+    /// An out-of-band status read — the control socket's `refreshStatus`,
+    /// which the app fires when a panel opens on an aging card. Rationed by
+    /// the feed's own CDN spacing, so poking is always safe.
+    public func refreshServiceStatus() {
+        statusPoller?.pollNow()
     }
 
     public func refresh(_ reason: RefreshReason) {
@@ -275,6 +308,7 @@ public final class UsageEngine {
             backoffUntil: cadence.backoffUntil,
             apiBudget: isLocalProvider ? nil : apiBudget(now: now),
             systemAccent: systemAccent,
+            serviceStatus: serviceStatus,
             now: now)
         publisher.publish(digest)
     }

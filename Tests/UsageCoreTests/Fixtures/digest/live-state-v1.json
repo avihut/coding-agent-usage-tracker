@@ -1123,6 +1123,69 @@
     }
   ],
   "schemaVersion" : 1,
+  "serviceStatus" : {
+    "checkedAt" : "2026-08-16T12:01:30Z",
+    "components" : [
+      {
+        "name" : "claude.ai",
+        "status" : "degraded_performance"
+      },
+      {
+        "name" : "Claude API (api.anthropic.com)",
+        "status" : "operational"
+      },
+      {
+        "name" : "Claude Code",
+        "status" : "operational"
+      }
+    ],
+    "descriptionText" : "Partially Degraded Service",
+    "incidents" : [
+      {
+        "componentNames" : [
+          "claude.ai"
+        ],
+        "id" : "q7txxvbsftgq",
+        "impact" : "minor",
+        "lastMessage" : "A fix has been implemented and we are monitoring the results.",
+        "lastUpdateAt" : "2026-08-16T11:55:00Z",
+        "name" : "Degraded performance for multiple models",
+        "phase" : "monitoring",
+        "startedAt" : "2026-08-16T10:49:00Z",
+        "url" : "https:\/\/stspg.io\/tcsfmtc03xgm"
+      }
+    ],
+    "indicator" : "minor",
+    "maintenances" : [
+      {
+        "id" : "mnt7k2p9wq11",
+        "name" : "Scheduled infrastructure maintenance",
+        "phase" : "scheduled",
+        "windowEnd" : "2026-08-20T04:00:00Z",
+        "windowStart" : "2026-08-20T02:00:00Z"
+      }
+    ],
+    "okAt" : "2026-08-16T12:01:30Z",
+    "pageName" : "Claude",
+    "pageURL" : "https:\/\/status.claude.com",
+    "providerID" : "claude",
+    "recentlyResolved" : [
+      {
+        "componentNames" : [
+          "Claude Code"
+        ],
+        "id" : "earlier-blip",
+        "impact" : "minor",
+        "lastMessage" : "This incident has been resolved.",
+        "lastUpdateAt" : "2026-08-16T09:40:00Z",
+        "name" : "Elevated error rates",
+        "phase" : "resolved",
+        "resolvedAt" : "2026-08-16T09:40:00Z",
+        "startedAt" : "2026-08-16T09:00:00Z"
+      }
+    ],
+    "stale" : false
+  },
   "sessions" : [
     {
       "activeSeconds" : 5400,

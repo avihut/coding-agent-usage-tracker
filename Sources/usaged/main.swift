@@ -236,6 +236,9 @@ final class DaemonHost {
         case .scanNow:
             engine.scanActivity(force: true)
             return ControlReply(ok: true)
+        case .refreshStatus:
+            engine.refreshServiceStatus()
+            return ControlReply(ok: true)
         case .shutdown:
             log("shutdown by socket command")
             engine.shutdown()

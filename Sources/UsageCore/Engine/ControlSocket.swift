@@ -15,6 +15,10 @@ public enum ControlCommand: Codable, Sendable, Equatable {
     case settingsChanged
     case refreshPricing
     case scanNow
+    /// Re-read the provider's status page now — a consumer opening a window
+    /// on an aging card. The feed's CDN spacing rations it, so an eager
+    /// caller can't turn this into a hot loop.
+    case refreshStatus
     case shutdown
 }
 

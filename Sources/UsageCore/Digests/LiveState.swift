@@ -42,10 +42,16 @@ public struct LiveState: Codable, Sendable, Equatable {
     /// constant here, which is the exact lie publishing it prevents. Nil
     /// only in a digest written before 0.84.0.
     public let sessionsCap: Int?
+    /// The provider's own service health (spec §10 amendment 2026-08-19).
+    /// Nil means this engine tracks no status — the provider declares no
+    /// feed, or the digest predates 0.86.0. ABSENT IS NOT HEALTHY: a reader
+    /// showing green for a nil card would invent a fact nobody reported.
+    public let serviceStatus: ServiceStatusCard?
 
     public init(
         engine: EngineStatus, meters: [LiveMeter], menuBar: [SegmentStatus],
-        models: [ModelRow], activity: ActivityRollup, sessions: [SessionCard] = []
+        models: [ModelRow], activity: ActivityRollup, sessions: [SessionCard] = [],
+        serviceStatus: ServiceStatusCard? = nil
     ) {
         self.schemaVersion = Self.schemaVersion
         self.sessionsCap = LiveStateBuilder.sessionsCap
@@ -55,6 +61,7 @@ public struct LiveState: Codable, Sendable, Equatable {
         self.models = models
         self.activity = activity
         self.sessions = sessions
+        self.serviceStatus = serviceStatus
     }
 
     /// `<App Support>/<bundleID>/live-state.json` — the bundle root, above
@@ -613,6 +620,8 @@ public enum LiveStateBuilder {
         backoffUntil: Date?,
         apiBudget: (used: Int, ceiling: Int, fraction: Double)?,
         systemAccent: RGBColor? = nil,
+        /// The status poller's latest card, or nil when nothing tracks status.
+        serviceStatus: ServiceStatusCard? = nil,
         now: Date,
         calendar: Calendar = .current,
         locale: Locale = .current
@@ -750,7 +759,8 @@ public enum LiveStateBuilder {
             activity: activityRollup,
             sessions: sessionCards(
                 sessions, pricing: pricing, catalog: catalog,
-                colorLedger: colorLedger, accent: accent))
+                colorLedger: colorLedger, accent: accent),
+            serviceStatus: serviceStatus)
     }
 
     // MARK: - Meters

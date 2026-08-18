@@ -156,9 +156,64 @@ struct LiveStateTests {
             backoffUntil: nil,
             apiBudget: (used: 7, ceiling: 20, fraction: 0.35),
             systemAccent: SystemAccentPalette.color(appleAccentColor: 4),
+            serviceStatus: fixtureServiceStatus,
             now: now,
             calendar: utc,
             locale: posix)
+    }
+
+    /// A card in its LOUD state — an unresolved incident with a message and
+    /// affected components, one already-resolved incident in the hour-long
+    /// memory, and a scheduled maintenance. The golden has to exercise every
+    /// arm, because the Rust mirror decodes this same file.
+    private var fixtureServiceStatus: ServiceStatusCard {
+        ServiceStatusCard(
+            providerID: "claude",
+            pageName: "Claude",
+            pageURL: "https://status.claude.com",
+            indicator: "minor",
+            descriptionText: "Partially Degraded Service",
+            checkedAt: date("2026-08-16T12:01:30Z"),
+            okAt: date("2026-08-16T12:01:30Z"),
+            stale: false,
+            components: [
+                StatusComponent(name: "claude.ai", status: "degraded_performance"),
+                StatusComponent(name: "Claude API (api.anthropic.com)", status: "operational"),
+                StatusComponent(name: "Claude Code", status: "operational"),
+            ],
+            incidents: [
+                StatusIncident(
+                    id: "q7txxvbsftgq",
+                    name: "Degraded performance for multiple models",
+                    impact: "minor",
+                    phase: "monitoring",
+                    startedAt: date("2026-08-16T10:49:00Z"),
+                    lastUpdateAt: date("2026-08-16T11:55:00Z"),
+                    lastMessage: "A fix has been implemented and we are monitoring the results.",
+                    url: "https://stspg.io/tcsfmtc03xgm",
+                    componentNames: ["claude.ai"])
+            ],
+            recentlyResolved: [
+                StatusIncident(
+                    id: "earlier-blip",
+                    name: "Elevated error rates",
+                    impact: "minor",
+                    phase: "resolved",
+                    startedAt: date("2026-08-16T09:00:00Z"),
+                    lastUpdateAt: date("2026-08-16T09:40:00Z"),
+                    lastMessage: "This incident has been resolved.",
+                    url: nil,
+                    componentNames: ["Claude Code"],
+                    resolvedAt: date("2026-08-16T09:40:00Z"))
+            ],
+            maintenances: [
+                StatusMaintenance(
+                    id: "mnt7k2p9wq11",
+                    name: "Scheduled infrastructure maintenance",
+                    phase: "scheduled",
+                    windowStart: date("2026-08-20T02:00:00Z"),
+                    windowEnd: date("2026-08-20T04:00:00Z"))
+            ])
     }
 
     @Test("engine status carries identity, freshness, and the budget gauge")
@@ -300,6 +355,42 @@ struct LiveStateTests {
         #expect(state.menuBar[1].tag == "W")
         #expect(state.menuBar[1].level == "warning")
         #expect(state.menuBar[1].risk == nil)
+    }
+
+    @Test("the service status card rides the digest whole")
+    func serviceStatus() throws {
+        let card = try #require(buildFixture().serviceStatus)
+        #expect(card.indicatorValue == .minor)
+        #expect(card.descriptionText == "Partially Degraded Service")
+        #expect(card.hasIncident)
+        #expect(!card.stale)
+
+        let incident = try #require(card.activeIncident)
+        #expect(incident.name == "Degraded performance for multiple models")
+        #expect(incident.phase == "monitoring")
+        #expect(incident.lastMessage?.hasPrefix("A fix has been implemented") == true)
+        #expect(incident.componentNames == ["claude.ai"])
+        // Going 1h 12m at the digest's `now`.
+        #expect(incident.duration(now: date("2026-08-16T12:01:00Z")) == 4_320)
+
+        // The hour-long memory rides along, and it is NOT active.
+        #expect(card.recentlyResolved.count == 1)
+        #expect(card.recentlyResolved.first?.resolvedAt != nil)
+        #expect(card.maintenances.count == 1)
+        #expect(card.maintenances.first?.isActive == false)
+    }
+
+    /// A digest written before the feature has no card at all — and a reader
+    /// must read that as "nothing tracks status", never as "all clear".
+    @Test("an absent card decodes as nil, not as healthy")
+    func absentCardIsNotHealthy() throws {
+        var object = try #require(
+            try JSONSerialization.jsonObject(
+                with: try LiveState.encoder().encode(buildFixture())) as? [String: Any])
+        object.removeValue(forKey: "serviceStatus")
+        let data = try JSONSerialization.data(withJSONObject: object)
+        let revived = try LiveState.decoder().decode(LiveState.self, from: data)
+        #expect(revived.serviceStatus == nil)
     }
 
     @Test("series thinning caps points and keeps both endpoints")
