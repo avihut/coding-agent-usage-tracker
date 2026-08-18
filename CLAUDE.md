@@ -13,10 +13,18 @@ the README rather than silently deviating.
   token only, re-read on every refresh cycle, never cached in memory or disk.
 - The token is never logged, persisted, placed in a URL, or included in any
   error surface. Cache response bodies only.
-- Exactly two network destinations: `api.anthropic.com` (usage, with the
-  OAuth token) and `raw.githubusercontent.com` (LiteLLM pricing feed —
-  plain GET, never any credential or account data attached; user-directed
-  spec §10 amendment, 2026-08-13, see README). No analytics, no telemetry.
+- Three network destinations, and no others: `api.anthropic.com` (usage, with
+  the OAuth token), `raw.githubusercontent.com` (LiteLLM pricing feed — plain
+  GET, never any credential or account data attached; user-directed spec §10
+  amendment, 2026-08-13, see README), and the active provider's declared
+  status feed (`status.claude.com` for Claude; §10 amendment 2026-08-19,
+  v0.86.0 — anonymous conditional GET, ephemeral cookie-less session). No
+  analytics, no telemetry.
+- A status feed is declared by `UsageProvider.statusFeed`, NOT added to
+  `networkDestinations`: that list being empty is what makes a provider
+  "local" (`isLocalProvider` — no budget gauge, refresh = rescan), so folding
+  a status host in would silently reclassify Codex/Gemini the day they get
+  feeds. The privacy card renders it on its own line.
 - No App Sandbox. No entitlements we don't need.
 - Never install or register anything (login items, launch agents) without
   asking the user in-session. Launch-at-login is a user-clicked toggle only.
@@ -1198,6 +1206,41 @@ the README rather than silently deviating.
   `RequestLedger` tracks the trailing hour against an estimated budget
   (learned tighter from real 429s) so the panel can warn before manual
   refreshes trip the limiter.
+
+## Service status (v0.86.0)
+
+- The engine polls the active provider's public status page and publishes a
+  normalized `LiveState.serviceStatus` card; every face renders that card and
+  polls nothing. `UsageCore/Status/` holds the three pieces: `StatuspageFeed`
+  (one endpoint, `/api/v2/summary.json`, conditional GET), `StatusCadence`
+  (pure state machine), `StatusPoller` (timer, ETag, resolved-memory).
+- Cadence, measured not guessed — CloudFront serves the feed with
+  `max-age=10`, so nothing below that can return new bytes: **300s healthy /
+  60s while an incident is open / 120s for ten minutes after it resolves /
+  60→900s doubling when the feed itself fails**, ±10% jitter. Out-of-band
+  pokes (wake, panel open on a card older than 90s, `refreshStatus` over the
+  control socket) all pass through the same 10s floor.
+- **Absent is not healthy.** A nil card means "nothing tracks status here",
+  and every surface must render nothing rather than a green dot. Likewise a
+  fetch failure never becomes an incident: three consecutive misses reach the
+  grey `unknown` indicator, which is quiet, and `health ok` goes ABSENT
+  rather than true.
+- Loudness (decision D2): any unresolved incident — minor included — badges
+  the menu bar glyph and shows the banners. Maintenance stays quiet: blue
+  footer dot and a popover row, never a badge.
+- Surfaces: footer dot + hover-pinned popover (`ServiceStatusViews.swift`),
+  the provider glyph on an incident-colored capsule
+  (`StatusItemRenderer.glyphBadge`), a panel banner above the meters, the
+  same banner atop the menu-bar hover popover, and the TUI's four-rung
+  ladder (`ui.rs status_rungs`: footer cell → footer text → banner row →
+  banner + message; `layout.rs plan_with_status` yields the banner rather
+  than the meters).
+- `usage-cli health` is the scriptable face — `--check` exits **22** while
+  something is open. Named `health` because `status` already answers about
+  the engine.
+- Verify the UI with `--fake-status <none|minor|major|critical|maintenance|
+  unknown|resolved>`: a real outage can't be scheduled, and the hatch carries
+  the real 2026-08-18 incident's copy.
 
 ## Testing
 

@@ -104,6 +104,24 @@ pricing table bundled at build time keeps estimates rendering, marked as such.
 Estimates are list-price counterfactuals ("what would this have cost on the
 API") — subscription plans don't bill per token.
 
+### Third network destination: the status page
+
+The app shows whether Claude itself is up, so it reads Anthropic's own public
+status page — `status.claude.com` (an Atlassian Statuspage;
+`status.anthropic.com` redirects there). One endpoint,
+`/api/v2/summary.json`, roughly 2 KB, as a plain anonymous GET on a
+cookie-less session with an `If-None-Match` header and nothing else: no
+sign-in, no account data, no query parameters. It is the same page anyone can
+open in a browser, and the request says no more about me than opening it
+would.
+
+Polling idles at five minutes and tightens to one minute only while an
+incident is open, so the all-clear arrives promptly without ever asking more
+often than the page's own ten-second CDN cache could answer. Nothing fetched
+is written to disk. This amends spec §10 (2026-08-19); a status host is
+declared per provider and shown on the settings privacy card, and providers
+that declare none stay entirely offline.
+
 ## Known risk: undocumented endpoint
 
 `/api/oauth/usage` is not in the public API docs and may change shape or go away

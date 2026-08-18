@@ -309,6 +309,25 @@ Non-negotiable; flag rather than work around:
   in-memory only. Full message text is never persisted anywhere, and
   nothing leaves the machine. `usage-cli sessions` reads that cache without
   ever writing it — the app remains the cache's sole writer.
+- Status feed (amendment 2026-08-19, v0.86.0): the engine may GET the active
+  provider's PUBLIC status page — for Claude, `status.claude.com` (an Atlassian
+  Statuspage; `status.anthropic.com` 301-redirects there, so the final host is
+  contacted directly). Exactly one endpoint, `/api/v2/summary.json`, on a
+  cadence that idles at 5 minutes and tightens to 60s only while an incident
+  is open. Plain anonymous GET with `If-None-Match` revalidation on an
+  ephemeral, cookie-less session: no credentials, no cookies, no query
+  parameters, nothing identifying — a poll tells the page nothing about the
+  user that reaching the page at all would not. Nothing from the feed is
+  written to disk; the normalized card rides in the digest like every other
+  rendered fact.
+
+  Status hosts are declared per provider via `UsageProvider.statusFeed` and
+  rendered on the settings privacy card on their own line — deliberately NOT
+  folded into `networkDestinations`, because that list's emptiness is what
+  makes a provider "local" (no budget gauge, refresh = rescan), and a status
+  page must never flip that classification. Codex and Gemini declare no feed
+  and remain zero-network; each future one is its own amendment naming its
+  host.
 - The token is never logged, persisted, or included in an error surface.
 - No sandbox entitlement, and no request for entitlements we don't need.
 - Don't install or register anything (login items, launch agents) without asking me
