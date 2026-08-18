@@ -318,10 +318,21 @@ struct GeneralSettingsPane: View {
                     "Network destinations",
                     (store.provider.networkDestinations + ["raw.githubusercontent.com"])
                         .joined(separator: " · "))
+                // Declared on its own line, not folded into the list above:
+                // the status feed is deliberately outside
+                // `networkDestinations` so a zero-network provider keeps its
+                // local-provider semantics (spec §10, amendment 2026-08-19).
+                if let statusFeed = store.provider.statusFeed {
+                    Divider()
+                    infoRow("Status feed", statusFeed.host)
+                }
                 note(
-                    store.isLocalProvider
+                    (store.isLocalProvider
                         ? "Everything comes from this Mac's local \(store.provider.agentName) session files, read-only — including the limit percentages \(store.provider.agentName) itself records. Nothing is fetched from \(store.provider.serviceName). No analytics, no telemetry."
                         : "Usage comes from \(store.provider.serviceName)'s own usage endpoint; activity and tokens from this Mac's local \(store.provider.agentName) transcripts, read-only. No analytics, no telemetry.")
+                        + (store.provider.statusFeed == nil
+                            ? ""
+                            : " The status feed is \(store.provider.serviceName)'s public status page, read with a plain request carrying no sign-in, no cookies, and nothing about you."))
             }
         }
         .onAppear {

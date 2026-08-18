@@ -21,6 +21,9 @@ final class DigestClient {
     private(set) var tokenTimeline: [TokenSlot] = []
     private(set) var sessions: [SessionSummary] = []
     private(set) var pricing: PricingTable
+    /// The host engine's status card, mirrored from the digest. Nil when the
+    /// host publishes none — absent is not healthy.
+    private(set) var serviceStatus: ServiceStatusCard?
     /// Optimistic: set when this process asks for a refresh, cleared when
     /// the next digest heartbeat lands.
     private(set) var isRefreshing = false
@@ -110,6 +113,14 @@ final class DigestClient {
         send(.setProvider(id: id))
     }
 
+    /// Asks the host for a fresher status card (decision D6). Only when one
+    /// exists and has aged: a host publishing no card has nothing to refresh,
+    /// and one just polled would answer with the same bytes.
+    func pokeServiceStatusIfAging() {
+        guard UsageStore.cardIsAging(serviceStatus) else { return }
+        send(.refreshStatus)
+    }
+
     private func send(_ command: ControlCommand) {
         let socketURL = socketURL
         Task.detached(priority: .utility) {
@@ -179,6 +190,7 @@ final class DigestClient {
 
     private func apply(_ digest: LiveState) {
         digestGeneratedAt = digest.engine.generatedAt
+        serviceStatus = digest.serviceStatus
         nextRefreshAt = digest.engine.nextPollAt
         activeInterval = digest.engine.activeIntervalSeconds
         paceMultiplierMirror = digest.engine.paceMultiplier

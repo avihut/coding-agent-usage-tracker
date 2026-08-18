@@ -35,11 +35,25 @@ struct UsagePanelView: View {
     /// Where the activity section is navigated to (paged window or drilled
     /// day); the Sessions strip below follows it.
     @State private var activityFocus: DateInterval?
+    /// Where the status popover is anchored, if it's up — the footer dot or
+    /// the incident banner. One popover, two attachment points, so the two
+    /// entry points can never both present at once.
+    @State private var statusAnchor: StatusAnchor?
+    /// Pointer inside the status popover or its dot; either keeps it open.
+    @State private var hoveringStatus = false
+    @State private var hoveringStatusDot = false
+
+    /// The status popover's two entry points (surfaces S1 and S4).
+    enum StatusAnchor: String, Identifiable {
+        case footer, banner
+        var id: String { rawValue }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
+                    serviceStatusSection
                     errorBlock
                     content
                     statusRow
@@ -93,6 +107,18 @@ struct UsagePanelView: View {
                     if !inside { scheduleHideIfLeft() }
                 }
         }
+        .popover(item: $statusAnchor, attachmentAnchor: statusAttachment, arrowEdge: .bottom) { _ in
+            if let card = store.serviceStatus {
+                ServiceStatusPopover(card: card)
+                    // Hover-pinned (surface S2): the pointer resting anywhere
+                    // inside keeps it up, so a user can read an incident
+                    // without racing a dismissal.
+                    .onHover { inside in
+                        hoveringStatus = inside
+                        if !inside { scheduleStatusHideIfLeft() }
+                    }
+            }
+        }
         .onAppear { store.scanActivity() }
         // Re-sync the login-item mirror between panel sessions: the user
         // can flip registration in Settings or System Settings while the
@@ -135,6 +161,68 @@ struct UsagePanelView: View {
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(350))
             if hoveredMeter == nil && !hoveringPopover { openMeter = nil }
+        }
+    }
+
+    /// The status popover hangs off whichever surface opened it: the footer
+    /// dot's measured frame, or the banner (panel bounds — it spans the top).
+    private var statusAttachment: PopoverAttachmentAnchor {
+        if statusAnchor == .footer, let frame = meterFrames[Self.statusDotFrameKey] {
+            return .rect(.rect(frame))
+        }
+        return .rect(.bounds)
+    }
+
+    /// Frame key for the footer dot, parked in the same preference dictionary
+    /// the meter rows use — one measurement channel for the whole panel.
+    static let statusDotFrameKey = "service-status-dot"
+
+    /// The status popover's own leave grace, mirroring the meter popover's:
+    /// travelling from the dot into the popover must never drop it (S2).
+    private func scheduleStatusHideIfLeft() {
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(350))
+            if !hoveringStatus && !hoveringStatusDot { statusAnchor = nil }
+        }
+    }
+
+    /// The incident section (surface S4) — absent entirely when healthy, so
+    /// a green day costs the panel no space at all. Maintenance stays out by
+    /// design (decision D2): the footer dot carries it.
+    @ViewBuilder private var serviceStatusSection: some View {
+        if let card = store.serviceStatus, card.hasIncident {
+            ServiceStatusBanner(card: card) {
+                statusAnchor = statusAnchor == .banner ? nil : .banner
+            }
+        }
+    }
+
+    /// The footer's dot (surface S1) plus its click target. Present whenever
+    /// a card exists; nil card renders nothing, because absent is not healthy.
+    @ViewBuilder private var serviceStatusControl: some View {
+        if let card = store.serviceStatus {
+            Button {
+                statusAnchor = statusAnchor == .footer ? nil : .footer
+            } label: {
+                ServiceStatusDot(indicator: card.indicatorValue)
+            }
+            .buttonStyle(.plain)
+            .pointerStyle(.link)
+            .onHover { inside in
+                hoveringStatusDot = inside
+                if !inside { scheduleStatusHideIfLeft() }
+            }
+            .background(
+                GeometryReader { proxy in
+                    Color.clear.preference(
+                        key: MeterFramePreference.self,
+                        value: [
+                            Self.statusDotFrameKey:
+                                proxy.frame(in: .named(Self.panelSpace))
+                        ])
+                }
+            )
+            .help(ServiceStatusStyle.headline(card))
         }
     }
 
@@ -269,6 +357,8 @@ struct UsagePanelView: View {
                 }
                 .help("Open \(usageSettings.host() ?? store.provider.serviceName) usage settings")
             }
+
+            serviceStatusControl
 
             Menu {
                 Picker("Refresh when active", selection: SettingsBindings.interval(store)) {

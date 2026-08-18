@@ -22,20 +22,34 @@ enum StatusItemRenderer {
         let stale: Bool
         /// The provider's mark ahead of the digits.
         let glyph: String
+        /// The service's own health, when an incident is running: the glyph
+        /// then rides a capsule in this color instead of standing alone.
+        /// Nil whenever the service is fine, unknown, or under maintenance —
+        /// the menu bar alarms for incidents only (decision D2).
+        var incident: ServiceStatusCard.Indicator?
     }
 
     static func model(
         for state: DisplayState, predictions: [String: UsagePrediction] = [:],
-        glyph: String = "✳︎"
+        glyph: String = "✳︎", serviceStatus: ServiceStatusCard? = nil
     ) -> Model {
+        let incident = serviceStatus?.activeIncident?.impactValue
+        // Only real impacts badge. `none` never does, and neither does
+        // `unknown` — not knowing is not an emergency (decision D3).
+        let alarming: ServiceStatusCard.Indicator? =
+            switch incident {
+            case .minor, .major, .critical: incident
+            default: nil
+            }
         guard let snapshot = state.snapshot else {
-            return Model(segments: nil, stale: true, glyph: glyph)
+            return Model(segments: nil, stale: true, glyph: glyph, incident: alarming)
         }
         return Model(
             segments: UsageFormatting.menuBarSegments(
                 from: snapshot.meters, predictions: predictions),
             stale: state.isStale,
-            glyph: glyph
+            glyph: glyph,
+            incident: alarming
         )
     }
 
@@ -89,6 +103,21 @@ enum StatusItemRenderer {
         case text(String, NSColor, NSFont)
         case dot(NSColor)
         case badge(String)
+        /// The provider glyph on an incident-colored capsule, drawn white —
+        /// same geometry as `badge`, its own fill, and the glyph's font so
+        /// the mark keeps its shape (surface S3).
+        case glyphBadge(String, NSColor)
+    }
+
+    /// Incident fills, a step deeper than the ramp's colors for the same
+    /// reason `badgeRed` is: white sits on these at real contrast, where
+    /// white on a bright system yellow would be unreadable.
+    private static func incidentFill(_ indicator: ServiceStatusCard.Indicator) -> NSColor {
+        switch indicator {
+        case .critical: NSColor(srgbRed: 0.85, green: 0.16, blue: 0.14, alpha: 1)
+        case .major: NSColor(srgbRed: 0.90, green: 0.49, blue: 0.05, alpha: 1)
+        default: NSColor(srgbRed: 0.78, green: 0.58, blue: 0.02, alpha: 1)
+        }
     }
 
     // Computed, not stored: NSFont isn't Sendable, and a stored static on a
@@ -147,6 +176,23 @@ enum StatusItemRenderer {
                     (string as NSString).draw(
                         at: NSPoint(x: x + badgePaddingX, y: (height - size.height) / 2),
                         withAttributes: attributes)
+                case .glyphBadge(let string, let fill):
+                    let attributes: [NSAttributedString.Key: Any] = [
+                        .font: font, .foregroundColor: NSColor.white,
+                    ]
+                    let size = (string as NSString).size(withAttributes: attributes)
+                    let rect = NSRect(
+                        x: x, y: (height - badgeHeight) / 2,
+                        width: size.width + 2 * badgePaddingX, height: badgeHeight)
+                    NSGraphicsContext.current?.saveGraphicsState()
+                    shadow.set()
+                    fill.setFill()
+                    NSBezierPath(roundedRect: rect, xRadius: badgeHeight / 2, yRadius: badgeHeight / 2)
+                        .fill()
+                    NSGraphicsContext.current?.restoreGraphicsState()
+                    (string as NSString).draw(
+                        at: NSPoint(x: x + badgePaddingX, y: (height - size.height) / 2),
+                        withAttributes: attributes)
                 }
                 x += runWidth(run)
             }
@@ -157,7 +203,13 @@ enum StatusItemRenderer {
     }
 
     private static func compose(_ model: Model) -> [Run] {
-        var runs: [Run] = [.text("\(model.glyph) ", model.stale ? staleColor : accent, font)]
+        // An incident dresses the provider's own mark — the agent indicator
+        // itself goes colored, which is what makes it readable at a glance
+        // without stealing the digits' meaning. Staleness never suppresses
+        // it: a stale usage number says nothing about the service's health.
+        var runs: [Run] = model.incident.map {
+            [.glyphBadge(model.glyph, incidentFill($0)), .text(" ", dim, font)]
+        } ?? [.text("\(model.glyph) ", model.stale ? staleColor : accent, font)]
         guard let segments = model.segments, !segments.isEmpty else {
             runs.append(.text("—", dim, font))
             return runs
@@ -196,6 +248,9 @@ enum StatusItemRenderer {
             return dotDiameter + 2 * dotGap
         case .badge(let string):
             let text = (string as NSString).size(withAttributes: [.font: badgeFont]).width
+            return text + 2 * badgePaddingX
+        case .glyphBadge(let string, _):
+            let text = (string as NSString).size(withAttributes: [.font: font]).width
             return text + 2 * badgePaddingX
         }
     }

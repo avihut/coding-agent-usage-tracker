@@ -113,6 +113,7 @@ final class StatusItemController: NSResponder {
         withObservationTracking {
             _ = observed.state
             _ = observed.predictions
+            _ = observed.serviceStatus
         } onChange: {
             Task { @MainActor [weak self] in
                 guard let self, self.store === observed else { return }
@@ -126,7 +127,8 @@ final class StatusItemController: NSResponder {
         guard let button = statusItem.button else { return }
         let model = StatusItemRenderer.model(
             for: store.state, predictions: store.predictions,
-            glyph: store.provider.menuBarGlyph)
+            glyph: store.provider.menuBarGlyph,
+            serviceStatus: store.serviceStatus)
         // Drawn as literal pixels, not attributedTitle: the dot and badge
         // are filled geometry no attributed string can carry. Fixed colors
         // keep the image immune to the appearance-context lies a tinted
@@ -153,12 +155,21 @@ final class StatusItemController: NSResponder {
             // clicking its row in the panel, so it wakes with the span
             // and frame pickers exactly as last set (they share the
             // per-meter @AppStorage keys).
-            let host = NSHostingController(rootView: MeterHistoryView(
+            //
+            // During an incident the panel's own banner rides on top
+            // (surface S5): the same view, so the phrasing and the ticking
+            // duration can never drift between the two popovers.
+            let history = MeterHistoryView(
                 meter: meter, samples: self.store.samples,
                 timeline: self.store.tokenTimeline, pricing: self.store.pricing,
                 prediction: self.store.predictions[meter.label],
                 agentName: self.store.provider.agentName,
-                providerID: self.store.provider.id))
+                providerID: self.store.provider.id)
+            let incidentCard = self.store.serviceStatus.flatMap {
+                $0.hasIncident ? $0 : nil
+            }
+            let host = NSHostingController(
+                rootView: HoverPopoverContent(card: incidentCard, history: history))
             host.sizingOptions = .preferredContentSize
             self.hoverPopover.contentViewController = host
             self.hoverPopover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
@@ -179,6 +190,12 @@ final class StatusItemController: NSResponder {
             popover.performClose(sender)
         } else if let button = statusItem.button {
             store.scanActivity()
+            // A window opening on an aging status card asks for a fresh one
+            // (decision D6). Fire-and-forget, and rationed by the feed's own
+            // cache window — this is here rather than in the panel's
+            // `onAppear` because the hosting view never leaves the hierarchy,
+            // so onAppear fires exactly once per app run.
+            store.pokeServiceStatus()
             NSApp.activate()
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             // Cooperative activation usually leaves this app inactive, and a
@@ -265,6 +282,27 @@ extension StatusItemController: NSPopoverDelegate {
         if let pendingStore {
             self.pendingStore = nil
             adopt(pendingStore)
+        }
+    }
+}
+
+/// The hover popover's content: the meter history, with the incident banner
+/// stacked above it while something is wrong (surface S5). A tiny wrapper
+/// type rather than an inline `AnyView` so the hosting controller keeps a
+/// concrete root view and its `preferredContentSize` sizing still works.
+private struct HoverPopoverContent: View {
+    let card: ServiceStatusCard?
+    let history: MeterHistoryView
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let card {
+                ServiceStatusBanner(card: card, compact: true)
+                    .padding(.horizontal, 10)
+                    .padding(.top, 10)
+                    .padding(.bottom, 2)
+            }
+            history
         }
     }
 }

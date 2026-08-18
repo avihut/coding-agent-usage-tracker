@@ -142,6 +142,21 @@ final class UsageStore {
         case .client: nil
         }
     }
+    /// The provider's service health, or nil when nothing tracks it (no
+    /// declared feed, or a daemon too old to publish one). Nil renders as
+    /// NOTHING — absent is not healthy.
+    var serviceStatus: ServiceStatusCard? {
+        if let fakeServiceStatus { return fakeServiceStatus }
+        switch mode {
+        case .hosting(let engine): return engine.serviceStatus
+        case .client(let client): return client.serviceStatus
+        }
+    }
+    /// Set only by the `--fake-status` launch hatch: the status surfaces
+    /// can't be verified by waiting for a real outage, and synthetic AX
+    /// clicks can't reach a popover. Nil in every ordinary run.
+    private var fakeServiceStatus: ServiceStatusCard?
+
     var provider: any UsageProvider { providerValue }
     var localActivity: (any LocalActivitySource)? {
         switch mode {
@@ -461,5 +476,34 @@ final class UsageStore {
         case .hosting(let engine): engine.setActiveInterval(interval)
         case .client(let client): client.setActiveInterval(interval)
         }
+    }
+
+    /// Asks for a fresher status card when the one on hand is aging — fired
+    /// as the panel opens (decision D6). Cheap and fire-and-forget: the
+    /// engine rations it against the feed's own cache window, and a daemon
+    /// too old to know the verb just refuses the command.
+    func pokeServiceStatus() {
+        guard fakeServiceStatus == nil else { return }
+        switch mode {
+        case .hosting(let engine):
+            guard Self.cardIsAging(serviceStatus) else { return }
+            engine.refreshServiceStatus()
+        case .client(let client):
+            client.pokeServiceStatusIfAging()
+        }
+    }
+
+    /// The card is old enough that a window opening on it should ask for a
+    /// fresh one. A nil card is NOT aging: nothing tracks status here.
+    static func cardIsAging(_ card: ServiceStatusCard?, now: Date = Date()) -> Bool {
+        guard let card else { return false }
+        return now.timeIntervalSince(card.checkedAt) > 90
+    }
+
+    /// Installs a synthetic card for the `--fake-status` hatch, so every
+    /// status surface can be clicked through without waiting for a real
+    /// outage. Never called in an ordinary launch.
+    func installFakeServiceStatus(_ card: ServiceStatusCard?) {
+        fakeServiceStatus = card
     }
 }
