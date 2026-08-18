@@ -145,7 +145,15 @@ struct UsagePanelView: View {
                 guard let openMeter else { return nil }
                 return store.state.snapshot?.meters.first { $0.id == openMeter }
             },
-            set: { openMeter = $0?.id })
+            set: { meter in
+                // Two popovers hosted on one view race each other exactly as
+                // the per-row modifiers did (see this view's opening note) —
+                // presenting one while the other is up loses, and SwiftUI
+                // writes the failure back through the binding. They are
+                // mutually exclusive here so the second one always wins.
+                if meter != nil { statusAnchor = nil }
+                openMeter = meter?.id
+            })
     }
 
     private var openAnchor: PopoverAttachmentAnchor {
@@ -192,6 +200,7 @@ struct UsagePanelView: View {
     @ViewBuilder private var serviceStatusSection: some View {
         if let card = store.serviceStatus, card.hasIncident {
             ServiceStatusBanner(card: card) {
+                openMeter = nil
                 statusAnchor = statusAnchor == .banner ? nil : .banner
             }
         }
@@ -202,6 +211,7 @@ struct UsagePanelView: View {
     @ViewBuilder private var serviceStatusControl: some View {
         if let card = store.serviceStatus {
             Button {
+                openMeter = nil
                 statusAnchor = statusAnchor == .footer ? nil : .footer
             } label: {
                 ServiceStatusDot(indicator: card.indicatorValue)

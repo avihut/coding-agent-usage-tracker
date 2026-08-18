@@ -176,9 +176,11 @@ struct ServiceStatusPopover: View {
                     .font(.callout.weight(.semibold))
                     .fixedSize(horizontal: false, vertical: true)
                 if card.indicatorValue == .unknown {
-                    Text(unreachableText)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                    TimelineView(.periodic(from: .now, by: 30)) { context in
+                        Text(unreachableText(now: context.date))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                 } else if card.hasIncident, !card.descriptionText.isEmpty {
                     Text(card.descriptionText)
                         .font(.caption2)
@@ -192,11 +194,11 @@ struct ServiceStatusPopover: View {
 
     /// A feed we couldn't reach says exactly that, with the age of the last
     /// real reading — never an invented all-clear (decision D3).
-    private var unreachableText: String {
+    private func unreachableText(now: Date) -> String {
         guard let okAt = card.okAt else {
             return "Couldn't reach the \(card.pageName) status page."
         }
-        let age = UsageFormatting.duration(max(0, Date().timeIntervalSince(okAt)))
+        let age = UsageFormatting.duration(max(0, now.timeIntervalSince(okAt)))
         return "Couldn't reach the status page · last read \(age) ago"
     }
 
@@ -230,9 +232,14 @@ struct ServiceStatusPopover: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             if let updated = incident.lastUpdateAt {
-                Text("Updated \(UsageFormatting.duration(max(0, Date().timeIntervalSince(updated)))) ago")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.tertiary)
+                TimelineView(.periodic(from: .now, by: 30)) { context in
+                    Text(
+                        "Updated "
+                            + UsageFormatting.duration(
+                                max(0, context.date.timeIntervalSince(updated))) + " ago")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.tertiary)
+                }
             }
         }
         .padding(.horizontal, 12)
@@ -317,11 +324,14 @@ struct ServiceStatusPopover: View {
                             .font(.caption)
                             .fixedSize(horizontal: false, vertical: true)
                         if let resolved = incident.resolvedAt {
-                            Text(
-                                UsageFormatting.duration(
-                                    max(0, Date().timeIntervalSince(resolved))) + " ago")
-                                .font(.system(size: 9))
-                                .foregroundStyle(.secondary)
+                            TimelineView(.periodic(from: .now, by: 30)) { context in
+                                Text(
+                                    UsageFormatting.duration(
+                                        max(0, context.date.timeIntervalSince(resolved)))
+                                        + " ago")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
                     Spacer(minLength: 0)
@@ -334,9 +344,14 @@ struct ServiceStatusPopover: View {
 
     private var footer: some View {
         HStack {
-            Text(checkedText)
-                .font(.system(size: 9))
-                .foregroundStyle(.secondary)
+            // Ticking, not stamped once: the popover is hover-pinned and can
+            // sit open for minutes, and a frozen "checked 4s ago" would be
+            // the one line here that lies.
+            TimelineView(.periodic(from: .now, by: 30)) { context in
+                Text(checkedText(now: context.date))
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+            }
             Spacer(minLength: 8)
             if let url = URL(string: card.pageURL) {
                 Link(destination: url) {
@@ -352,8 +367,8 @@ struct ServiceStatusPopover: View {
         .padding(.vertical, 7)
     }
 
-    private var checkedText: String {
-        let age = max(0, Date().timeIntervalSince(card.checkedAt))
+    private func checkedText(now: Date) -> String {
+        let age = max(0, now.timeIntervalSince(card.checkedAt))
         let phrase = "Checked \(UsageFormatting.duration(age)) ago"
         return card.stale ? phrase + " · stale" : phrase
     }
