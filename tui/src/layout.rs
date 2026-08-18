@@ -37,6 +37,11 @@ pub fn shape(area: Rect) -> Shape {
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Plan {
     pub header: Option<Rect>,
+    /// The incident banner, when the service is loud enough to earn rows
+    /// (rungs 2 and 3 of the prominence ladder). Sits directly under the
+    /// header — but never at the meters' expense: a pane that can't seat
+    /// both re-plans without it, and the footer rung still speaks.
+    pub status: Option<Rect>,
     pub meters: Option<Rect>,
     pub today: Option<Rect>,
     pub models: Option<Rect>,
@@ -56,13 +61,49 @@ const SESSIONS_MIN_ROWS: u16 = 3;
 /// credits line rides along, which activity form is up), so the layout
 /// never guesses and never reserves a row nothing fills.
 struct Wants {
+    status: u16,
     meters: u16,
     today: u16,
     models: u16,
 }
 
+/// The quiet-service form — every test that predates the status banner
+/// plans through here, which is also the assertion that adding the banner
+/// changed nothing about a healthy dashboard.
+#[cfg(test)]
 pub fn plan(area: Rect, meter_rows: u16, model_rows: u16, activity_rows: u16) -> Plan {
+    plan_with_status(area, 0, meter_rows, model_rows, activity_rows)
+}
+
+/// The planner proper. `status_rows` is what the incident banner would paint
+/// (0 when the service is quiet or only earns the footer rung).
+///
+/// Status is the one section that yields rather than displaces: if seating it
+/// would cost the meters their slot, the pane is re-planned without it. The
+/// user came for the meters, and the footer rung still carries the incident.
+pub fn plan_with_status(
+    area: Rect,
+    status_rows: u16,
+    meter_rows: u16,
+    model_rows: u16,
+    activity_rows: u16,
+) -> Plan {
+    let planned = plan_inner(area, status_rows, meter_rows, model_rows, activity_rows);
+    if status_rows > 0 && planned.meters.is_none() {
+        return plan_inner(area, 0, meter_rows, model_rows, activity_rows);
+    }
+    planned
+}
+
+fn plan_inner(
+    area: Rect,
+    status_rows: u16,
+    meter_rows: u16,
+    model_rows: u16,
+    activity_rows: u16,
+) -> Plan {
     let want = Wants {
+        status: status_rows,
         meters: meter_rows.max(2),
         today: 3, // title + spark + hour axis
         models: model_rows.max(2),
@@ -116,6 +157,9 @@ fn portrait(area: Rect, want: &Wants, gap: u16, activity: u16) -> Plan {
     };
 
     plan.header = take(2, &mut y);
+    if want.status > 0 {
+        plan.status = take(want.status, &mut y);
+    }
     plan.meters = take(want.meters, &mut y);
     plan.today = take(want.today, &mut y);
     plan.models = take(want.models, &mut y);
@@ -154,6 +198,9 @@ fn wide_portrait(area: Rect, want: &Wants, gap: u16, activity: u16) -> Plan {
         Some(rect)
     };
     plan.header = take(2, &mut y);
+    if want.status > 0 {
+        plan.status = take(want.status, &mut y);
+    }
     plan.meters = take(want.meters, &mut y);
     plan.today = take(want.today, &mut y);
     plan.models = take(want.models, &mut y);
@@ -196,6 +243,9 @@ fn landscape(area: Rect, want: &Wants, gap: u16, activity: u16) -> Plan {
         Some(rect)
     };
     plan.header = take(2, &mut y);
+    if want.status > 0 {
+        plan.status = take(want.status, &mut y);
+    }
     plan.meters = take(want.meters, &mut y);
     plan.today = take(want.today, &mut y);
 
@@ -348,6 +398,80 @@ mod tests {
 }
 
 #[cfg(test)]
+mod status_slot_tests {
+    use super::*;
+
+    fn area(width: u16, height: u16) -> Rect {
+        Rect::new(0, 0, width, height)
+    }
+
+    /// A quiet service costs the dashboard nothing at all.
+    #[test]
+    fn no_status_rows_leaves_the_plan_untouched() {
+        let quiet = plan(area(46, 30), 4, 5, 56);
+        let same = plan_with_status(area(46, 30), 0, 4, 5, 56);
+        assert!(quiet.status.is_none());
+        assert!(same.status.is_none());
+        assert_eq!(quiet.meters.unwrap(), same.meters.unwrap());
+    }
+
+    /// The banner sits directly under the header, above the meters, in every
+    /// shape — the incident is the first thing read, as in the app's panel.
+    #[test]
+    fn the_banner_sits_between_the_header_and_the_meters() {
+        for pane in [area(46, 30), area(95, 110), area(100, 27)] {
+            let plan = plan_with_status(pane, 2, 4, 5, 56);
+            let header = plan.header.expect("header");
+            let status = plan.status.expect("status banner");
+            let meters = plan.meters.expect("meters");
+            assert!(status.y >= header.y + header.height, "banner is below the header");
+            assert!(meters.y >= status.y + status.height, "meters are below the banner");
+            assert_eq!(status.height, 2);
+        }
+    }
+
+    /// D7: status yields rather than displaces. A pane that can seat the
+    /// meters without the banner must keep the meters.
+    #[test]
+    fn the_meters_outrank_the_banner_on_a_cramped_pane() {
+        // 40x20 portrait seats header+meters+today+models with 5 rows spare;
+        // asking for a 2-row banner would push the models off, and a big
+        // enough ask pushes the meters themselves — which is refused.
+        for rows in 1..=6u16 {
+            let plan = plan_with_status(area(40, 20), rows, 4, 5, 56);
+            assert!(
+                plan.meters.is_some(),
+                "a {rows}-row banner must never cost the meters their slot"
+            );
+        }
+    }
+
+    /// The activity chart is what the banner spends. At 46x22 the quiet plan
+    /// seats a 7-row heatmap; asking for two banner rows pushes it under its
+    /// 6-row minimum, so it drops WHOLE — while the meters, today and models
+    /// all keep their slots. That is the priority order working.
+    #[test]
+    fn the_banner_is_paid_for_out_of_the_chart() {
+        let quiet = plan(area(46, 22), 4, 5, 56);
+        assert!(quiet.heatmap.is_some(), "the quiet plan seats a chart");
+
+        let loud = plan_with_status(area(46, 22), 2, 4, 5, 56);
+        assert!(loud.status.is_some(), "the banner landed");
+        assert!(loud.heatmap.is_none(), "the chart paid for it");
+        assert!(loud.meters.is_some(), "the meters did not");
+        assert!(loud.today.is_some());
+        assert!(loud.models.is_some());
+    }
+
+    /// The strip tier has no dashboard, so it has no banner — the footer
+    /// rung is the whole story down there.
+    #[test]
+    fn the_strip_has_no_banner() {
+        assert!(plan_with_status(area(38, 8), 2, 3, 4, 8).status.is_none());
+    }
+}
+
+#[cfg(test)]
 mod sessions_slot_tests {
     use super::*;
 
@@ -386,3 +510,4 @@ mod sessions_slot_tests {
         assert!(plan(area(38, 8), 3, 4, 8).sessions.is_none());
     }
 }
+

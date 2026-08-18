@@ -6,7 +6,7 @@
 //! what was actually painted.
 
 use crate::activity::{self, ModelTotal};
-use crate::digest::{DayRollup, HourBucket, LiveState, Rgb};
+use crate::digest::{DayRollup, HourBucket, LiveState, Rgb, ServiceStatusCard};
 use crate::layout::{self, Plan, Shape};
 use crate::state::{App, Dimension, Freshness, Hit, Period, Surface};
 use crate::surfaces;
@@ -193,6 +193,148 @@ fn countdown(to: OffsetDateTime, now: OffsetDateTime) -> String {
     }
 }
 
+/// How loudly the service's health speaks, in rows of dashboard it earns.
+/// Severity buys prominence and quiet buys silence — the terminal's answer
+/// to the app's dot-then-badge-then-banner escalation.
+///
+/// 0 = the footer alone (a green cell when fine, a tinted note at minor);
+/// 1 = a banner row under the header; 2 = that plus the latest message.
+pub fn status_rungs(card: Option<&ServiceStatusCard>) -> u16 {
+    let Some(card) = card else { return 0 };
+    match card.active_incident().map(|incident| incident.impact.as_str()) {
+        Some("critical") => 2,
+        Some("major") => 1,
+        // Minor rides the footer; maintenance and unknown never take rows.
+        _ => 0,
+    }
+}
+
+/// The indicator's color. `unknown` is deliberately DIM rather than a
+/// warning tone: not knowing is not an alarm.
+fn status_color(indicator: &str) -> Color {
+    match indicator {
+        "none" => Color::Rgb(52, 199, 106),
+        "minor" => Color::Rgb(230, 197, 74),
+        "major" => WARNING,
+        "critical" => CRITICAL,
+        "maintenance" => Color::Rgb(77, 163, 245),
+        _ => DIM,
+    }
+}
+
+/// The monochrome dialect (design §5, as `status.rs` speaks it): with color
+/// off, severity has to arrive as text.
+fn status_marker(indicator: &str) -> &'static str {
+    match indicator {
+        "minor" => "[MINOR] ",
+        "major" => "[MAJOR] ",
+        "critical" => "[CRITICAL] ",
+        "maintenance" => "[MAINT] ",
+        "unknown" => "[?] ",
+        _ => "",
+    }
+}
+
+/// The incident banner (rungs 1 and 2). A colored rail, the impact, the
+/// name, its phase and how long it has run — and at rung 2 the latest
+/// update's text on a second row.
+fn status_banner<'a>(card: &'a ServiceStatusCard, now: OffsetDateTime, width: u16) -> Paragraph<'a> {
+    Paragraph::new(status_banner_lines(card, now, width))
+}
+
+/// The banner's rows, built pure so the ladder's shape is testable without
+/// a terminal: rung 1 is the headline alone, rung 2 adds the message.
+fn status_banner_lines<'a>(
+    card: &'a ServiceStatusCard,
+    now: OffsetDateTime,
+    width: u16,
+) -> Vec<Line<'a>> {
+    let Some(incident) = card.active_incident() else {
+        return Vec::new();
+    };
+    let color = status_color(&incident.impact);
+    let rail = if crate::state::look().ascii { "| " } else { "▍ " };
+
+    let mut head = vec![
+        Span::styled(rail.to_owned(), style(color)),
+        Span::styled(incident.impact.to_uppercase(), style(color).add_modifier(Modifier::BOLD)),
+        Span::styled("  ".to_owned(), style(DIM)),
+    ];
+    // The name gets whatever the fixed parts leave: rail + impact + phase and
+    // duration on the right, all of which must survive a narrow pane.
+    let tail = format!(
+        "{}{}{}",
+        incident.phase,
+        glyphs().sep,
+        worked(incident.duration_seconds(now))
+    );
+    let spent = rail.chars().count() + incident.impact.chars().count() + 2 + tail.chars().count() + 2;
+    let room = (width as usize).saturating_sub(spent);
+    // Bare bold, not a pinned color: the name inherits the terminal's own
+    // foreground, so it reads on any theme the user runs.
+    head.push(Span::styled(
+        truncate(&incident.name, room.max(8)),
+        Style::new().add_modifier(Modifier::BOLD),
+    ));
+    head.push(Span::styled("  ".to_owned(), style(DIM)));
+    head.push(Span::styled(tail, style(color)));
+
+    let mut lines = vec![Line::from(head)];
+    if status_rungs(Some(card)) >= 2 {
+        if let Some(message) = &incident.last_message {
+            // No marker here: the headline row above already spells the
+            // impact in plain text, colour or not.
+            let room = (width as usize).saturating_sub(rail.chars().count());
+            lines.push(Line::from(vec![
+                Span::styled(rail.to_owned(), style(color)),
+                Span::styled(truncate(message, room), style(DIM)),
+            ]));
+        }
+    }
+    lines
+}
+
+/// The footer's own rung — the terminal counterpart of the app's footer dot.
+/// A quiet service is one green cell; a minor incident borrows the footer's
+/// right half rather than taking a row of its own.
+fn status_footer_spans(card: Option<&ServiceStatusCard>, now: OffsetDateTime) -> Vec<Span<'static>> {
+    let Some(card) = card else { return Vec::new() };
+    let color = status_color(&card.indicator);
+    let mono = crate::state::look().no_color;
+    let mark = match card.indicator.as_str() {
+        "unknown" => glyphs().hollow.trim_end().to_owned(),
+        _ => glyphs().live.trim_end().to_owned(),
+    };
+
+    // Rungs 1 and 2 already carry the incident in the banner; the footer
+    // then stays a bare mark so the same words aren't printed twice.
+    let detail = match card.active_incident() {
+        Some(incident) if status_rungs(Some(card)) == 0 => Some(format!(
+            " {}{}{}",
+            truncate(&incident.name, 22),
+            glyphs().sep,
+            worked(incident.duration_seconds(now))
+        )),
+        _ => None,
+    };
+
+    if mono {
+        // Without colour a bare mark carries nothing, so the footer speaks
+        // only when it has words worth printing: a healthy service says
+        // nothing, and an incident already banner-ed above isn't repeated.
+        let Some(detail) = detail else { return Vec::new() };
+        return vec![Span::styled(
+            format!("  {}{}", status_marker(&card.indicator).trim_end(), detail),
+            style(DIM),
+        )];
+    }
+    let mut spans = vec![Span::styled(format!("  {mark}"), style(color))];
+    if let Some(detail) = detail {
+        spans.push(Span::styled(detail, style(color)));
+    }
+    spans
+}
+
 pub fn truncate(text: &str, width: usize) -> String {
     if text.chars().count() <= width {
         text.to_owned()
@@ -262,7 +404,13 @@ pub fn render(frame: &mut Frame, app: &mut App, now: OffsetDateTime) {
 
     match app.surface.clone() {
         Surface::Dashboard => {
-            let plan = layout::plan(area, data.meter_rows, data.model_rows, data.activity_rows);
+            let plan = layout::plan_with_status(
+                area,
+                status_rungs(digest.service_status.as_ref()),
+                data.meter_rows,
+                data.model_rows,
+                data.activity_rows,
+            );
             render_dashboard(frame, app, &digest, freshness, &plan, &data, now);
         }
         surface => {
@@ -277,8 +425,13 @@ pub fn render(frame: &mut Frame, app: &mut App, now: OffsetDateTime) {
                     area.width - left_width - 1,
                     area.height,
                 );
-                let plan =
-                    layout::plan(left, data.meter_rows, data.model_rows, data.activity_rows);
+                let plan = layout::plan_with_status(
+                    left,
+                    status_rungs(digest.service_status.as_ref()),
+                    data.meter_rows,
+                    data.model_rows,
+                    data.activity_rows,
+                );
                 render_dashboard(frame, app, &digest, freshness, &plan, &data, now);
                 render_surface(frame, app, &digest, &surface, right, false, now);
             } else {
@@ -499,8 +652,13 @@ fn render_dashboard(
     if let Some(rect) = plan.sessions {
         frame.render_widget(sessions(digest, accent, rect), rect);
     }
+    if let Some(rect) = plan.status {
+        if let Some(card) = digest.service_status.as_ref() {
+            frame.render_widget(status_banner(card, now, rect.width), rect);
+        }
+    }
     if let Some(rect) = plan.footer {
-        frame.render_widget(footer(digest, freshness, app, now), rect);
+        frame.render_widget(footer(digest, freshness, app, now, rect.width), rect);
     }
 }
 
@@ -1646,6 +1804,7 @@ fn footer<'a>(
     freshness: Freshness,
     app: &'a App,
     now: OffsetDateTime,
+    width: u16,
 ) -> Paragraph<'a> {
     let keys = match app.surface {
         Surface::Dashboard => "q quit / r refresh / v span / c cost / p pace / 1-3 meters / ? help",
@@ -1672,7 +1831,60 @@ fn footer<'a>(
             style(FAINT),
         ));
     }
+    // Rung 0: the service's health closes the footer, pushed flush right —
+    // one green cell when all is well, and the incident itself when it's
+    // minor enough not to have earned a banner row of its own. Right-aligned
+    // rather than appended, so it can't be the thing a narrow pane clips.
+    place_status_in_footer(
+        &mut spans,
+        status_footer_spans(digest.service_status.as_ref(), now),
+        width,
+    );
     Paragraph::new(Line::from(spans))
+}
+
+/// Seats the health mark at the footer's right edge and decides what gives
+/// when the row can't hold everything. Split out from `footer` so the width
+/// arithmetic is testable without a terminal.
+fn place_status_in_footer(spans: &mut Vec<Span<'_>>, status: Vec<Span<'static>>, width: u16) {
+    if !status.is_empty() {
+        let used: usize = spans.iter().map(|span| span.content.chars().count()).sum();
+        let claim: usize = status.iter().map(|span| span.content.chars().count()).sum();
+        let room = width as usize;
+        if used + claim <= room {
+            spans.push(Span::raw(" ".repeat(room - used - claim)));
+            spans.extend(status);
+        } else if claim < room {
+            // Too tight for both: drop from the TAIL — the host/version
+            // trailer goes before the key hints, which are how the pane is
+            // driven. A shortest-first pass would sacrifice exactly the
+            // wrong span.
+            let keep = room - claim;
+            let mut kept: usize = spans.iter().map(|s| s.content.chars().count()).sum();
+            while kept > keep && spans.len() > 1 {
+                if let Some(dropped) = spans.pop() {
+                    kept -= dropped.content.chars().count();
+                }
+            }
+            if kept > keep {
+                // One span left and still over: clip it rather than blank the
+                // row — losing "q quit" entirely to a one-column overrun
+                // would be a poor trade.
+                if let Some(last) = spans.pop() {
+                    let style = last.style;
+                    let text: String = last.content.chars().take(keep).collect();
+                    kept = text.chars().count();
+                    spans.push(Span::styled(text, style));
+                } else {
+                    kept = 0;
+                }
+            }
+            if keep > kept {
+                spans.push(Span::raw(" ".repeat(keep - kept)));
+            }
+            spans.extend(status);
+        }
+    }
 }
 
 /// Below the floor: one line that still says everything (design §3).
@@ -1795,7 +2007,141 @@ fn render_help(frame: &mut Frame, area: Rect) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::digest::StatusIncident;
     use time::macros::date;
+
+    fn incident(impact: &str) -> ServiceStatusCard {
+        card(impact, vec![StatusIncident {
+            id: "i".into(),
+            name: "Degraded performance for multiple models".into(),
+            impact: impact.into(),
+            phase: "monitoring".into(),
+            started_at: OffsetDateTime::UNIX_EPOCH,
+            last_update_at: None,
+            last_message: Some("A fix has been implemented.".into()),
+            url: None,
+            component_names: vec![],
+            resolved_at: None,
+        }])
+    }
+
+    fn card(indicator: &str, incidents: Vec<StatusIncident>) -> ServiceStatusCard {
+        ServiceStatusCard {
+            provider_id: "claude".into(),
+            page_name: "Claude".into(),
+            page_url: "https://status.claude.com".into(),
+            indicator: indicator.into(),
+            description_text: "".into(),
+            checked_at: OffsetDateTime::UNIX_EPOCH,
+            ok_at: None,
+            stale: false,
+            components: vec![],
+            incidents,
+            recently_resolved: vec![],
+            maintenances: vec![],
+        }
+    }
+
+    /// The prominence ladder (surface S6): severity buys rows, and quiet
+    /// buys silence. A minor incident deliberately earns none — it speaks
+    /// from the footer instead of pushing the dashboard down.
+    #[test]
+    fn severity_buys_dashboard_rows() {
+        assert_eq!(status_rungs(None), 0);
+        assert_eq!(status_rungs(Some(&card("none", vec![]))), 0);
+        assert_eq!(status_rungs(Some(&card("maintenance", vec![]))), 0);
+        assert_eq!(status_rungs(Some(&card("unknown", vec![]))), 0);
+        assert_eq!(status_rungs(Some(&incident("minor"))), 0);
+        assert_eq!(status_rungs(Some(&incident("major"))), 1);
+        assert_eq!(status_rungs(Some(&incident("critical"))), 2);
+    }
+
+    /// Only the top rung spends a row on the message text; a major incident
+    /// gets its name and phase, and nothing more.
+    #[test]
+    fn only_the_top_rung_carries_the_message() {
+        let now = OffsetDateTime::UNIX_EPOCH + time::Duration::minutes(72);
+
+        let major_card = incident("major");
+        assert_eq!(status_banner_lines(&major_card, now, 80).len(), 1);
+
+        let critical_card = incident("critical");
+        let critical = status_banner_lines(&critical_card, now, 80);
+        assert_eq!(critical.len(), 2);
+        let message: String = critical[1]
+            .spans
+            .iter()
+            .map(|span| span.content.to_string())
+            .collect();
+        assert!(message.contains("A fix has been implemented"));
+
+        // A card with nothing open paints no banner at all.
+        let quiet = card("none", vec![]);
+        assert!(status_banner_lines(&quiet, now, 80).is_empty());
+    }
+
+    /// A quiet service says nothing at all in the footer without color —
+    /// there is no news, and a bare mark would read as some.
+    #[test]
+    fn the_monochrome_footer_stays_silent_when_healthy() {
+        let now = OffsetDateTime::UNIX_EPOCH;
+        // The colored path always marks health; the mono path only speaks
+        // when something is worth saying.
+        let healthy = card("none", vec![]);
+        let spans = status_footer_spans(Some(&healthy), now);
+        if crate::state::look().no_color {
+            assert!(spans.is_empty());
+        } else {
+            assert_eq!(spans.len(), 1, "one green cell");
+        }
+        assert!(status_footer_spans(None, now).is_empty(), "no card, no cell");
+    }
+
+    /// The health mark owns the footer's right edge, and a pane too narrow
+    /// for both clips the key hints rather than losing the mark or blanking
+    /// the row.
+    #[test]
+    fn the_footer_keeps_the_mark_at_the_right_edge() {
+        let now = OffsetDateTime::UNIX_EPOCH + time::Duration::minutes(72);
+        let minor = incident("minor");
+        let claim: usize = status_footer_spans(Some(&minor), now)
+            .iter()
+            .map(|span| span.content.chars().count())
+            .sum();
+
+        for width in [claim as u16 + 4, 80, 100, 200] {
+            let mut spans = vec![Span::raw("q quit / r refresh / ? help".to_owned())];
+            place_status_in_footer(&mut spans, status_footer_spans(Some(&minor), now), width);
+            let painted: String = spans.iter().map(|s| s.content.to_string()).collect();
+            assert!(
+                painted.chars().count() <= width as usize,
+                "footer must never overrun {width} columns"
+            );
+            assert!(
+                painted.contains("1h 12m"),
+                "the incident keeps the tail at {width} columns"
+            );
+            assert!(painted.starts_with('q'), "the key hints keep the head");
+        }
+    }
+
+    /// Rungs that own a banner must not repeat themselves in the footer.
+    #[test]
+    fn the_footer_only_narrates_what_the_banner_does_not() {
+        let now = OffsetDateTime::UNIX_EPOCH + time::Duration::minutes(72);
+        let text = |card: &ServiceStatusCard| {
+            status_footer_spans(Some(card), now)
+                .iter()
+                .map(|span| span.content.to_string())
+                .collect::<String>()
+        };
+        // Minor owns no banner rows, so the footer carries the whole story.
+        assert!(text(&incident("minor")).contains("Degraded performance"));
+        assert!(text(&incident("minor")).contains("1h 12m"));
+        // Major and critical are already on screen above.
+        assert!(!text(&incident("major")).contains("Degraded performance"));
+        assert!(!text(&incident("critical")).contains("Degraded performance"));
+    }
 
     #[test]
     fn compact_matches_token_format_tiers() {
