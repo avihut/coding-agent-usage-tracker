@@ -15,6 +15,16 @@ APP="$ROOT/ClaudeUsage.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$ROOT/Support/Info.plist" "$APP/Contents/Info.plist"
+# AppIdentity.swift is the ONE version source (the release-bump sed path);
+# stamp the plist from it at bundle time. A hand-maintained plist version
+# drifted two releases behind before the updater made it load-bearing —
+# the self-updater verifies a downloaded bundle by this very key.
+VERSION=$(sed -n 's/.*static let version = "\(.*\)".*/\1/p' \
+    "$ROOT/Sources/UsageCore/AppIdentity.swift")
+/usr/libexec/PlistBuddy \
+    -c "Set :CFBundleShortVersionString $VERSION" \
+    -c "Set :CFBundleVersion $VERSION" \
+    "$APP/Contents/Info.plist"
 cp "$ROOT/.build/$CONFIG/ClaudeUsage" "$APP/Contents/MacOS/ClaudeUsage"
 # The launchd engine rides inside the bundle so there is exactly one
 # installed copy; sign it before the outer bundle seals over it. It reads

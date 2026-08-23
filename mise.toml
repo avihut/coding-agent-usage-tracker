@@ -26,6 +26,10 @@ run = [
 description = "Build a universal, signed, zipped app to install on another Mac"
 run = "scripts/dist.sh"
 
+[tasks.publish]
+description = "Publish the current tagged version as a GitHub release with the dist zip"
+run = "scripts/publish.sh"
+
 [tasks.app]
 description = "Build, bundle, sign, and launch the menu bar app"
 run = [
