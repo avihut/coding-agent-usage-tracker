@@ -362,10 +362,11 @@ struct HeatmapView: View {
             // fixed frame and the 30D calendar pads to six week rows.
             .animation(Self.drillAnimation, value: pageTick)
             // Two-finger swipes page like the arrows do (the value-keyed
-            // animation above morphs either way). The All grid's own
-            // horizontal scroller sits deeper and keeps its events;
-            // pageStep guards All anyway.
-            .background(HorizontalSwipeCatcher { direction in
+            // animation above morphs either way). Disabled on All: the
+            // monitor fires before ANY view gets the event, so an enabled
+            // catcher would eat the grid's own horizontal scrolling while
+            // pageStep no-ops — "deeper" never protected the scroller.
+            .background(HorizontalSwipeCatcher(enabled: period != .all) { direction in
                 pageStep(direction)
             })
             if period == .week {

@@ -9,18 +9,23 @@ import SwiftUI
 /// ScrollView (and 30D/All carry scroll views of their own), so a plain
 /// NSView never reliably sees the wheel events — siblings aren't in the
 /// responder chain, and an overlay that hit-tests steals clicks and hovers.
-/// The monitor sees every scroll event first, claims only gesture-phased,
-/// horizontally-dominant ones inside this view's bounds, and passes
-/// everything else through untouched (vertical panel scrolling, the All
-/// grid's own horizontal scroller when the cursor is there — its deeper
-/// scroll view never lets those reach us anyway).
+/// The monitor sees every scroll event BEFORE the window dispatches it to
+/// any view — depth never shields a scroll view from it. It claims only
+/// gesture-phased, horizontally-dominant events inside this view's bounds
+/// and passes everything else through untouched (vertical panel scrolling,
+/// momentum tails); a surface whose swipes have nothing to step must pass
+/// `enabled: false` so a scroller it covers keeps its events.
 struct HorizontalSwipeCatcher: NSViewRepresentable {
+    /// Inert while false — every event passes through. The All grid pages
+    /// nothing and scrolls itself, so its period disables the catcher.
+    var enabled: Bool = true
     /// +1 = fingers moved left, toward LATER content; -1 = fingers moved
     /// right, toward earlier — the pager arrows' sign convention.
     var onStep: (Int) -> Void
 
     func makeNSView(context: Context) -> SwipeView {
         let view = SwipeView()
+        view.enabled = enabled
         view.onStep = onStep
         return view
     }
@@ -28,10 +33,12 @@ struct HorizontalSwipeCatcher: NSViewRepresentable {
     func updateNSView(_ view: SwipeView, context: Context) {
         // The closure captures per-render state (the drilled day, its rows);
         // refresh it so a swipe never fires against a stale capture.
+        view.enabled = enabled
         view.onStep = onStep
     }
 
     final class SwipeView: NSView {
+        var enabled = true
         var onStep: ((Int) -> Void)?
 
         /// nonisolated(unsafe): every live access is main-actor
@@ -71,7 +78,7 @@ struct HorizontalSwipeCatcher: NSViewRepresentable {
         /// True when the event was ours — consumed so the panel's scroll
         /// view can't rubber-band sideways under the swipe.
         fileprivate func claim(_ event: NSEvent) -> Bool {
-            guard let window, event.window === window else { return false }
+            guard enabled, let window, event.window === window else { return false }
             guard bounds.contains(convert(event.locationInWindow, from: nil))
             else { return false }
             // Momentum tails and legacy mouse wheels never step; only the
