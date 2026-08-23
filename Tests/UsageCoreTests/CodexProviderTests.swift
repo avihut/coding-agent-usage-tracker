@@ -145,17 +145,24 @@ struct CodexProviderTests {
         defer { fixture.tearDown() }
         let now = Date()
         let reset = Int(now.timeIntervalSince1970) + 3600
-        let stamp = "2026-08-15T10:00:30.000Z"
+        // Stamps derive from `now`: the timeline keeps a TRAILING window,
+        // so a hardcoded date rots out of it and empties `scan.timeline`
+        // the day the calendar catches up (it did, on 2026-08-23).
+        // Minute-aligned so all four events share one slot by construction.
+        let base = Date(
+            timeIntervalSince1970: floor((now.timeIntervalSince1970 - 3600) / 60) * 60)
         try fixture.writeRollout(
-            "2026/08/15/rollout-a.jsonl",
+            "\(Self.rolloutDayPath(base))/rollout-a.jsonl",
             lines: [
-                Self.turnContextLine(stamp: "2026-08-15T10:00:00.000Z", model: "gpt-5.2-codex"),
-                Self.userMessageLine(stamp: "2026-08-15T10:00:10.000Z"),
+                Self.turnContextLine(stamp: Self.stamp(base), model: "gpt-5.2-codex"),
+                Self.userMessageLine(stamp: Self.stamp(base.addingTimeInterval(10))),
                 Self.tokenCountLine(
-                    stamp: stamp, primaryPercent: 1, primaryReset: reset,
+                    stamp: Self.stamp(base.addingTimeInterval(30)),
+                    primaryPercent: 1, primaryReset: reset,
                     secondaryPercent: 1, secondaryReset: reset),
                 Self.tokenCountLine(
-                    stamp: "2026-08-15T10:00:45.000Z", primaryPercent: 2, primaryReset: reset,
+                    stamp: Self.stamp(base.addingTimeInterval(45)),
+                    primaryPercent: 2, primaryReset: reset,
                     secondaryPercent: 2, secondaryReset: reset),
             ])
         let source = CodexActivitySource(
@@ -184,6 +191,24 @@ struct CodexProviderTests {
         let rescan = source.scanTranscripts(now: now)
         #expect(rescan.daily == scan.daily)
         #expect(rescan.timeline == scan.timeline)
+    }
+
+    /// The rollout line format's timestamp ("2026-08-15T10:00:30.000Z").
+    private static func stamp(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
+        return formatter.string(from: date)
+    }
+
+    /// The sessions tree's day directory for a date ("2026/08/15").
+    private static func rolloutDayPath(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy/MM/dd"
+        return formatter.string(from: date)
     }
 
     private static func sessionMetaLine(stamp: String, cwd: String) -> String {
