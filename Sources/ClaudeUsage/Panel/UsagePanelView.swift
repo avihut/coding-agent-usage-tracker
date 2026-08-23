@@ -42,6 +42,9 @@ struct UsagePanelView: View {
     /// Pointer inside the status popover or its dot; either keeps it open.
     @State private var hoveringStatus = false
     @State private var hoveringStatusDot = false
+    /// A release the user chose not to hear about again — quiets the chip
+    /// and menu item for exactly that version; the next one speaks.
+    @AppStorage("updateSkippedVersion") private var skippedUpdateVersion = ""
 
     /// The status popover's two entry points (surfaces S1 and S4).
     enum StatusAnchor: String, Identifiable {
@@ -335,6 +338,7 @@ struct UsagePanelView: View {
                 Text("v\(AppIdentity.version)")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
+                updateControl
             }
             Spacer()
             Button {
@@ -391,6 +395,13 @@ struct UsagePanelView: View {
                 }
                 Toggle("Launch at login", isOn: SettingsBindings.launchAtLogin())
                 Divider()
+                if let update = visibleUpdate {
+                    Button("Update to \(update.latestVersion)…") {
+                        AppUpdater.shared.resetFailure()
+                        AppUpdater.shared.install(update)
+                    }
+                    .disabled(AppUpdater.shared.isBusy)
+                }
                 if store.providesSessions {
                     Button("Sessions…") { onOpenSessions() }
                         .keyboardShortcut("1", modifiers: .command)
@@ -418,6 +429,55 @@ struct UsagePanelView: View {
         Binding(
             get: { registry.selection },
             set: { registry.select($0) })
+    }
+
+    /// The update chip's card, or nil while there is nothing to whisper
+    /// about: no card, nothing newer, a version the user skipped, or a
+    /// release this build already IS (the daemon lags one relaunch behind
+    /// right after an update, and its card must not re-offer it).
+    private var visibleUpdate: AppUpdateCard? {
+        guard let card = store.appUpdate, card.updateAvailable,
+              card.latestVersion != AppIdentity.version,
+              card.latestVersion != skippedUpdateVersion
+        else { return nil }
+        return card
+    }
+
+    /// As quiet as an update can get: a small accent arrow riding beside
+    /// the version label it would change. One click runs the whole install;
+    /// while it runs the arrow is a spinner, and a failure turns it amber
+    /// with the reason on hover — clicking again retries.
+    @ViewBuilder private var updateControl: some View {
+        if let update = visibleUpdate {
+            let updater = AppUpdater.shared
+            switch updater.phase {
+            case .downloading, .installing, .relaunching:
+                ProgressView()
+                    .controlSize(.mini)
+                    .help("Updating to \(update.latestVersion)…")
+            case .failed(let message):
+                Button {
+                    updater.resetFailure()
+                    updater.install(update)
+                } label: {
+                    Image(systemName: "exclamationmark.arrow.circlepath")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+                .buttonStyle(.borderless)
+                .help("\(message) Click to try again.")
+            case .idle:
+                Button {
+                    updater.install(update)
+                } label: {
+                    Image(systemName: "arrow.down.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(ProviderStyle.accentColor)
+                }
+                .buttonStyle(.borderless)
+                .help("Version \(update.latestVersion) is available — one click installs and relaunches")
+            }
+        }
     }
 
     /// The last few interactive sessions, one quiet line each — a shortcut

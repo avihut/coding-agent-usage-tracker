@@ -34,6 +34,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let fake = Self.launchFakeStatus() {
             registry.activeStore.installFakeServiceStatus(fake)
         }
+        // The updater's own hatch: `--fake-update <version|current>`
+        // installs a synthetic release card so the chip, menu item, and
+        // Settings card can be click-verified before the release they'd
+        // announce exists. No asset URL rides along, so a click on the fake
+        // opens the releases page instead of swapping anything.
+        if let fake = Self.launchFakeUpdate() {
+            registry.activeStore.installFakeAppUpdate(fake)
+        }
         // Verification hatches: `ClaudeUsage --settings [--pane-cost]` /
         // `--panel` open UI straight away (the ⋯ menu can't be scripted,
         // and AX row selection can't drive the sidebar); `--provider <id>`
@@ -54,6 +62,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
               arguments.indices.contains(flag + 1)
         else { return nil }
         return arguments[flag + 1]
+    }
+
+    /// Builds the `--fake-update` card: `current` renders the up-to-date
+    /// Settings card, any version string renders the offer.
+    private static func launchFakeUpdate() -> AppUpdateCard? {
+        let arguments = CommandLine.arguments
+        guard let flag = arguments.firstIndex(of: "--fake-update"),
+              arguments.indices.contains(flag + 1)
+        else { return nil }
+        let version = arguments[flag + 1]
+        let now = Date()
+        if version == "current" {
+            return AppUpdateCard(
+                latestVersion: AppIdentity.version,
+                url: "\(AppIdentity.releasesPage)/tag/v\(AppIdentity.version)",
+                publishedAt: now.addingTimeInterval(-86_400), assetName: nil,
+                assetURL: nil, assetBytes: nil, checkedAt: now.addingTimeInterval(-120),
+                updateAvailable: false)
+        }
+        return AppUpdateCard(
+            latestVersion: version,
+            url: "\(AppIdentity.releasesPage)/tag/v\(version)",
+            publishedAt: now.addingTimeInterval(-3_600), assetName: nil,
+            assetURL: nil, assetBytes: nil, checkedAt: now.addingTimeInterval(-120),
+            updateAvailable: true)
     }
 
     /// Builds the `--fake-status` card. The copy is the real 2026-08-18

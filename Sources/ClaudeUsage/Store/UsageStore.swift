@@ -156,6 +156,20 @@ final class UsageStore {
     /// can't be verified by waiting for a real outage, and synthetic AX
     /// clicks can't reach a popover. Nil in every ordinary run.
     private var fakeServiceStatus: ServiceStatusCard?
+    /// The app's newest published release, or nil when no updater runs
+    /// (a source-managed build) or the daemon predates it. Nil renders as
+    /// NOTHING — absent is never "up to date".
+    var appUpdate: AppUpdateCard? {
+        if let fakeAppUpdate { return fakeAppUpdate }
+        switch mode {
+        case .hosting(let engine): return engine.appUpdate
+        case .client(let client): return client.appUpdate
+        }
+    }
+    /// Set only by the `--fake-update` launch hatch — the chip, menu item,
+    /// and Settings card can't be verified against a release that doesn't
+    /// exist yet. Nil in every ordinary run.
+    private var fakeAppUpdate: AppUpdateCard?
 
     var provider: any UsageProvider { providerValue }
     var localActivity: (any LocalActivitySource)? {
@@ -348,6 +362,9 @@ final class UsageStore {
             case .refreshStatus:
                 engine.refreshServiceStatus()
                 return ControlReply(ok: true)
+            case .checkUpdates:
+                engine.checkForUpdates()
+                return ControlReply(ok: true)
             case .setProvider, .shutdown:
                 return ControlReply(
                     ok: false, message: "not while the app hosts — use the app's Metering menu")
@@ -505,5 +522,22 @@ final class UsageStore {
     /// outage. Never called in an ordinary launch.
     func installFakeServiceStatus(_ card: ServiceStatusCard?) {
         fakeServiceStatus = card
+    }
+
+    /// Installs a synthetic release card for the `--fake-update` hatch.
+    func installFakeAppUpdate(_ card: AppUpdateCard?) {
+        fakeAppUpdate = card
+    }
+
+    /// A user-asked release check — Settings' "Check Now". Hosting engines
+    /// check directly; a client asks the daemon over the socket (an old
+    /// daemon just refuses the verb, and the button's caption stays honest
+    /// because the card's `checkedAt` won't move).
+    func checkForUpdates() {
+        guard fakeAppUpdate == nil else { return }
+        switch mode {
+        case .hosting(let engine): engine.checkForUpdates()
+        case .client(let client): client.requestUpdateCheck()
+        }
     }
 }

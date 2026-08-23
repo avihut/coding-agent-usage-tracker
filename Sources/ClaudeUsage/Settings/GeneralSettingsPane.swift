@@ -158,6 +158,9 @@ struct GeneralSettingsPane: View {
     /// appearance; edits write through and re-classify the live snapshot.
     @State private var warningPercent = Thresholds.standard.warningPercent
     @State private var criticalPercent = Thresholds.standard.criticalPercent
+    /// A release the user chose not to hear about again — shared with the
+    /// panel's chip through the one defaults key.
+    @AppStorage("updateSkippedVersion") private var skippedUpdateVersion = ""
 
     private var meteringSelection: Binding<String> {
         Binding(
@@ -311,6 +314,13 @@ struct GeneralSettingsPane: View {
                 }
                 note("Runs the engine as a launch agent (com.avihu.usaged), so the meters, the terminal dashboard, and the tmux status line keep updating with the app closed. It installs itself when missing; off is sticky — the agent is removed and stays away until this is turned back on.")
             }
+            // Present only where an updater runs at all: a source-managed
+            // build updates through git and publishes no card.
+            if let update = store.appUpdate {
+                SettingsCard("Updates") {
+                    updatesCardBody(update)
+                }
+            }
             SettingsCard("About") {
                 infoRow("Version", "v\(AppIdentity.version)")
                 Divider()
@@ -325,6 +335,13 @@ struct GeneralSettingsPane: View {
                 if let statusFeed = store.provider.statusFeed {
                     Divider()
                     infoRow("Status feed", statusFeed.host)
+                }
+                // Same reasoning as the status feed: the update check is
+                // APP-scoped, not a provider destination, and runs only for
+                // standalone installs (spec §10, amendment 2026-08-23).
+                if store.appUpdate != nil {
+                    Divider()
+                    infoRow("Update check", "api.github.com")
                 }
                 note(
                     (store.isLocalProvider
@@ -352,6 +369,103 @@ struct GeneralSettingsPane: View {
                 }
             }
         }
+    }
+
+    /// The Updates card: the offer (or the all-clear), the install button,
+    /// and the check controls. Age strings tick with the popover idiom —
+    /// a settings window left open must not read "checked 1 min ago" all
+    /// afternoon.
+    @ViewBuilder private func updatesCardBody(_ update: AppUpdateCard) -> some View {
+        TimelineView(.periodic(from: .now, by: 30)) { context in
+            let offering = update.updateAvailable
+                && update.latestVersion != AppIdentity.version
+            VStack(alignment: .leading, spacing: 8) {
+                if offering {
+                    HStack(alignment: .firstTextBaseline) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Version \(update.latestVersion) is available")
+                                .font(.callout.weight(.semibold))
+                            if let published = update.publishedAt {
+                                Text("Published \(UsageFormatting.duration(context.date.timeIntervalSince(published))) ago")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                        installControls(update)
+                    }
+                    if case .failed(let message) = AppUpdater.shared.phase {
+                        Text(message)
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    HStack(spacing: 12) {
+                        if let page = URL(string: update.url) {
+                            Link("What's new", destination: page)
+                                .font(.caption)
+                        }
+                        if skippedUpdateVersion == update.latestVersion {
+                            Button("Offer again") { skippedUpdateVersion = "" }
+                                .buttonStyle(.link)
+                                .font(.caption)
+                        } else {
+                            Button("Skip this version") {
+                                skippedUpdateVersion = update.latestVersion
+                            }
+                            .buttonStyle(.link)
+                            .font(.caption)
+                        }
+                    }
+                } else {
+                    infoRow("Latest release", "v\(update.latestVersion) — you're up to date")
+                }
+                Divider()
+                HStack {
+                    Toggle("Check automatically", isOn: Self.updateAutoCheck)
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                    Spacer()
+                    Button("Check Now") { store.checkForUpdates() }
+                        .controlSize(.small)
+                }
+                note(
+                    "Checked \(UsageFormatting.duration(context.date.timeIntervalSince(update.checkedAt))) ago. Releases come from this app's GitHub repository over a plain anonymous request; installing swaps the app bundle in place and relaunches.")
+            }
+        }
+    }
+
+    @ViewBuilder private func installControls(_ update: AppUpdateCard) -> some View {
+        switch AppUpdater.shared.phase {
+        case .downloading, .installing, .relaunching:
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text(AppUpdater.shared.phase == .downloading ? "Downloading…" : "Installing…")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        case .failed:
+            Button("Try Again") {
+                AppUpdater.shared.resetFailure()
+                AppUpdater.shared.install(update)
+            }
+            .controlSize(.small)
+        case .idle:
+            Button("Install and Relaunch") { AppUpdater.shared.install(update) }
+                .controlSize(.small)
+        }
+    }
+
+    /// The background clock's opt-out. Read live by whichever host runs the
+    /// checker — app and daemon share the defaults domain, so one switch
+    /// governs both. Absent means on.
+    private static var updateAutoCheck: Binding<Bool> {
+        Binding(
+            get: {
+                UserDefaults.standard.object(forKey: UpdateChecker.autoCheckKey) == nil
+                    || UserDefaults.standard.bool(forKey: UpdateChecker.autoCheckKey)
+            },
+            set: { UserDefaults.standard.set($0, forKey: UpdateChecker.autoCheckKey) })
     }
 
     private static let byteFormatter: ByteCountFormatter = {

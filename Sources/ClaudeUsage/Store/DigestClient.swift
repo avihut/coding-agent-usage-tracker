@@ -24,6 +24,9 @@ final class DigestClient {
     /// The host engine's status card, mirrored from the digest. Nil when the
     /// host publishes none — absent is not healthy.
     private(set) var serviceStatus: ServiceStatusCard?
+    /// The host engine's release card, mirrored from the digest. Nil when
+    /// the host runs no updater — absent is never "up to date".
+    private(set) var appUpdate: AppUpdateCard?
     /// Optimistic: set when this process asks for a refresh, cleared when
     /// the next digest heartbeat lands.
     private(set) var isRefreshing = false
@@ -121,6 +124,11 @@ final class DigestClient {
         send(.refreshStatus)
     }
 
+    /// Asks the host to check the release feed now (Settings' "Check Now").
+    func requestUpdateCheck() {
+        send(.checkUpdates)
+    }
+
     private func send(_ command: ControlCommand) {
         let socketURL = socketURL
         Task.detached(priority: .utility) {
@@ -191,6 +199,7 @@ final class DigestClient {
     private func apply(_ digest: LiveState) {
         digestGeneratedAt = digest.engine.generatedAt
         serviceStatus = digest.serviceStatus
+        appUpdate = digest.appUpdate
         nextRefreshAt = digest.engine.nextPollAt
         activeInterval = digest.engine.activeIntervalSeconds
         paceMultiplierMirror = digest.engine.paceMultiplier
