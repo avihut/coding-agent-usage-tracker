@@ -91,9 +91,10 @@ public final class UsageEngine {
     /// feed. Its cadence is entirely its own — status has nothing to do with
     /// the usage poll's gate, backoff, or activity signal.
     private var statusPoller: StatusPoller?
-    /// Checks this app's own release feed; nil for source-managed builds
-    /// and bare executables (`InstallKind`). App-scoped, so it neither
-    /// rides the provider seam nor cares which harness is metered.
+    /// Checks the distribution channel's release feed; nil when the install
+    /// belongs to no channel (bare executables) or its channel declares no
+    /// feed (`Distribution`). App-scoped, so it neither rides the provider
+    /// seam nor cares which harness is metered.
     private var updateChecker: UpdateChecker?
     private var lastActivityScan: Date?
     /// Single-flight for transcript scans: a window-open force-scan must not
@@ -190,14 +191,15 @@ public final class UsageEngine {
             statusPoller = poller
             poller.start()
         }
-        let installKind = InstallKind.detect(bundleURL: Bundle.main.bundleURL)
+        // Both GitHub flavors poll the feed — a source checkout can't
+        // self-install but still deserves to know it's behind. The drill's
+        // override both supplies the URL and forces the checker on.
+        let channel = Distribution.channel(for: Bundle.main.bundleURL)
         let feedOverride = defaults.string(forKey: UpdateChecker.feedOverrideKey)
             .flatMap(URL.init(string:))
-        if installKind == .standaloneApp || feedOverride != nil {
+        if let feedURL = feedOverride ?? channel?.updateFeedURL {
             let checker = UpdateChecker(
-                feed: UpdateFeed(
-                    latestReleaseURL: feedOverride
-                        ?? UpdateFeed.latestURL(repository: AppIdentity.repository)),
+                feed: UpdateFeed(latestReleaseURL: feedURL),
                 currentVersion: AppIdentity.version, defaults: defaults)
             checker.onCard = { [weak self] card in
                 guard let self, !self.isShutDown else { return }

@@ -1264,7 +1264,7 @@ the README rather than silently deviating.
   unknown|resolved>`: a real outage can't be scheduled, and the hatch carries
   the real 2026-08-18 incident's copy.
 
-## Self-update (v0.87.0)
+## Self-update & distribution channels (v0.87.0, channels v0.88.0)
 
 - Distribution is GitHub Releases; `mise run publish` builds the dist zip
   (universal, timestamped signatures, usaged + usage-cli embedded) and
@@ -1272,21 +1272,42 @@ the README rather than silently deviating.
   tag annotation. Info.plist versions are STAMPED from AppIdentity.swift by
   bundle.sh/dist.sh — never hand-edit them (they drifted two releases behind
   when hand-maintained, and the updater verifies downloads by that key).
+- DISTRIBUTION CHANNELS (v0.88.0, user-directed "think of it as
+  distribution streams"): every install auto-resolves to a channel
+  (`Distribution.channel`, UsageCore/Update/DistributionChannel.swift) that
+  owns its whole update story — feed URL, whether one-click install may
+  run, and the manual hint when it may not. Today's one channel is
+  `GitHubChannel` with two flavors off `InstallKind`'s ancestor walk:
+  `.releaseInstall` (standalone bundle, full pipeline) and
+  `.sourceCheckout(root:)` (`mise run app` build — polls the SAME feed but
+  only informs: pull-and-rebuild hint, never the swap). All the ugly
+  install forensics stay inside the channel + `SourceCheckoutProbe`
+  (LOCAL-ONLY `git rev-parse` — branch, short sha, is-the-tag-pulled;
+  NEVER networked git, which would spend user credentials outside §10's
+  destinations). A future store channel returns nil `updateFeedURL` and
+  every update surface goes dark. Presentation follows
+  `store.updateCanSelfInstall`; `AppUpdater.install` carries the same
+  guard as a belt (`Distribution.allowsSelfInstall`), and the drill's
+  `updateFeedURL` override forces install-mode through both — the drill's
+  staged bundle sits inside the checkout by construction.
 - The engine's `UpdateChecker` (UsageCore/Update/) polls
   `api.github.com/repos/avihut/coding-agent-usage-tracker/releases/latest`
   every 6h (conditional GET, honest UA — GitHub refuses UA-less requests)
-  and publishes `LiveState.appUpdate`. It runs ONLY when
-  `InstallKind.detect` says `.standaloneApp` — a bundle inside a git
-  checkout updates via git and checks nothing, which is why the dev worktree
-  never shows the chip. A failed check keeps the last card; only a
-  definitive 404 withdraws it. `AppVersion` compares dotted ints;
-  unparseable is NEVER newer.
+  and publishes `LiveState.appUpdate`. It runs whenever the install's
+  channel declares a feed — both GitHub flavors, so the dev worktree now
+  shows the card too (as manual guidance). A failed check keeps the last
+  card; only a definitive 404 withdraws it. `AppVersion` compares dotted
+  ints; unparseable is NEVER newer.
 - UI is deliberately a whisper: an accent `arrow.down.circle.fill` beside
-  the footer's version label, an "Update to X…" item in the ⋯ menu, and a
+  the footer's version label, an "Update to X…" ⋯-menu item, and a
   Settings → General card (install / Check Now / auto-check toggle / skip
-  version via `updateSkippedVersion`). No menu-bar change, no notifications.
-  A face whose own version already equals the card's stays quiet — the
-  daemon lags one relaunch behind right after an update.
+  version via `updateSkippedVersion`; a Distribution identity row names
+  the channel + checkout coordinates). On a non-installing flavor the
+  arrow and menu item open Settings instead, where the card carries the
+  pull-and-rebuild hint (sharpened to "just rebuild" when the release tag
+  is already local). No menu-bar change, no notifications. A face whose
+  own version already equals the card's stays quiet — the daemon lags one
+  relaunch behind right after an update.
 - One click runs `AppUpdater` (App/AppUpdater.swift): download (host
   allowlist github.com/*.githubusercontent.com), `ditto -xk`, `codesign
   --verify --deep --strict`, plist version must MATCH the clicked release,
@@ -1295,9 +1316,12 @@ the README rather than silently deviating.
   the app carry no quarantine (no LSFileQuarantineEnabled), so Gatekeeper
   doesn't re-interrogate updates.
 - Verify UI with `--fake-update <version|current>` (no asset URL — a click
-  on the fake opens the releases page, never swaps). Drill the real
+  on the fake opens the releases page, never swaps) plus
+  `--fake-channel <release|source>` to force the OTHER flavor's
+  presentation on whichever flavor the machine actually is. Drill the real
   pipeline against a localhost feed via the `updateFeedURL` defaults
-  override, which also forces the checker on in a source build.
+  override, which forces both the checker and install-mode on in a source
+  build.
 
 ## Testing
 

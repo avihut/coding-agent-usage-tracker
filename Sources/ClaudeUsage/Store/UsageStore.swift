@@ -156,9 +156,10 @@ final class UsageStore {
     /// can't be verified by waiting for a real outage, and synthetic AX
     /// clicks can't reach a popover. Nil in every ordinary run.
     private var fakeServiceStatus: ServiceStatusCard?
-    /// The app's newest published release, or nil when no updater runs
-    /// (a source-managed build) or the daemon predates it. Nil renders as
-    /// NOTHING — absent is never "up to date".
+    /// The app's newest published release, or nil when the install belongs
+    /// to no feed-polling channel (bare executables, a store install) or
+    /// the daemon predates the card. Nil renders as NOTHING — absent is
+    /// never "up to date".
     var appUpdate: AppUpdateCard? {
         if let fakeAppUpdate { return fakeAppUpdate }
         switch mode {
@@ -170,6 +171,25 @@ final class UsageStore {
     /// and Settings card can't be verified against a release that doesn't
     /// exist yet. Nil in every ordinary run.
     private var fakeAppUpdate: AppUpdateCard?
+    /// The distribution channel this install belongs to — decides whether
+    /// the update surfaces offer the one-click swap or manual guidance. An
+    /// install's channel can't change mid-run, so it's frozen at init.
+    var distribution: (any DistributionChannel)? {
+        fakeDistribution ?? realDistribution
+    }
+    private let realDistribution = Distribution.channel(for: Bundle.main.bundleURL)
+    /// Set only by the `--fake-channel` launch hatch — one machine is only
+    /// ever one flavor, so the other flavor's presentation needs forcing to
+    /// be click-verified. Nil in every ordinary run.
+    private var fakeDistribution: (any DistributionChannel)?
+    /// Whether update UI may offer the one-click install here. The updater
+    /// drill's feed override forces this true (its staged bundle sits
+    /// inside the checkout by construction); the fake channel wins over
+    /// everything, being the point of the hatch.
+    var updateCanSelfInstall: Bool {
+        if let fakeDistribution { return fakeDistribution.canSelfInstall }
+        return Distribution.allowsSelfInstall(bundleURL: Bundle.main.bundleURL)
+    }
 
     var provider: any UsageProvider { providerValue }
     var localActivity: (any LocalActivitySource)? {
@@ -527,6 +547,12 @@ final class UsageStore {
     /// Installs a synthetic release card for the `--fake-update` hatch.
     func installFakeAppUpdate(_ card: AppUpdateCard?) {
         fakeAppUpdate = card
+    }
+
+    /// Installs a synthetic distribution channel for the `--fake-channel`
+    /// hatch, forcing the other flavor's update presentation.
+    func installFakeDistribution(_ channel: (any DistributionChannel)?) {
+        fakeDistribution = channel
     }
 
     /// A user-asked release check — Settings' "Check Now". Hosting engines

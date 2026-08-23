@@ -161,6 +161,9 @@ struct GeneralSettingsPane: View {
     /// A release the user chose not to hear about again — shared with the
     /// panel's chip through the one defaults key.
     @AppStorage("updateSkippedVersion") private var skippedUpdateVersion = ""
+    /// What the source checkout said about itself, once probed; nil on the
+    /// release flavor and before the probe lands.
+    @State private var checkoutState: SourceCheckoutState?
 
     private var meteringSelection: Binding<String> {
         Binding(
@@ -314,8 +317,10 @@ struct GeneralSettingsPane: View {
                 }
                 note("Runs the engine as a launch agent (com.avihu.usaged), so the meters, the terminal dashboard, and the tmux status line keep updating with the app closed. It installs itself when missing; off is sticky — the agent is removed and stays away until this is turned back on.")
             }
-            // Present only where an updater runs at all: a source-managed
-            // build updates through git and publishes no card.
+            // Present only where the distribution channel polls a release
+            // feed at all — an install with no channel (or a future store
+            // channel, whose store owns updates) publishes no card and
+            // gets no section.
             if let update = store.appUpdate {
                 SettingsCard("Updates") {
                     updatesCardBody(update)
@@ -337,8 +342,9 @@ struct GeneralSettingsPane: View {
                     infoRow("Status feed", statusFeed.host)
                 }
                 // Same reasoning as the status feed: the update check is
-                // APP-scoped, not a provider destination, and runs only for
-                // standalone installs (spec §10, amendment 2026-08-23).
+                // APP-scoped, not a provider destination, and runs for any
+                // install whose distribution channel declares a feed —
+                // both GitHub flavors (spec §10, amendment 2026-08-23).
                 if store.appUpdate != nil {
                     Divider()
                     infoRow("Update check", "api.github.com")
@@ -371,14 +377,16 @@ struct GeneralSettingsPane: View {
         }
     }
 
-    /// The Updates card: the offer (or the all-clear), the install button,
-    /// and the check controls. Age strings tick with the popover idiom —
-    /// a settings window left open must not read "checked 1 min ago" all
-    /// afternoon.
+    /// The Updates card: the offer (or the all-clear), then the channel's
+    /// own way forward — the install button where the channel self-installs,
+    /// the pull-and-rebuild hint where it only informs — plus the check
+    /// controls. Age strings tick with the popover idiom — a settings
+    /// window left open must not read "checked 1 min ago" all afternoon.
     @ViewBuilder private func updatesCardBody(_ update: AppUpdateCard) -> some View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
             let offering = update.updateAvailable
                 && update.latestVersion != AppIdentity.version
+            let canInstall = store.updateCanSelfInstall
             VStack(alignment: .leading, spacing: 8) {
                 if offering {
                     HStack(alignment: .firstTextBaseline) {
@@ -392,12 +400,20 @@ struct GeneralSettingsPane: View {
                             }
                         }
                         Spacer()
-                        installControls(update)
+                        if canInstall {
+                            installControls(update)
+                        }
                     }
-                    if case .failed(let message) = AppUpdater.shared.phase {
+                    if canInstall, case .failed(let message) = AppUpdater.shared.phase {
                         Text(message)
                             .font(.caption)
                             .foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if !canInstall, let hint = manualUpdateHint(update) {
+                        Text(hint)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     HStack(spacing: 12) {
@@ -420,6 +436,10 @@ struct GeneralSettingsPane: View {
                 } else {
                     infoRow("Latest release", "v\(update.latestVersion) — you're up to date")
                 }
+                if let channelLine {
+                    Divider()
+                    infoRow("Distribution", channelLine)
+                }
                 Divider()
                 HStack {
                     Toggle("Check automatically", isOn: Self.updateAutoCheck)
@@ -430,9 +450,47 @@ struct GeneralSettingsPane: View {
                         .controlSize(.small)
                 }
                 note(
-                    "Checked \(UsageFormatting.duration(context.date.timeIntervalSince(update.checkedAt))) ago. Releases come from this app's GitHub repository over a plain anonymous request; installing swaps the app bundle in place and relaunches.")
+                    "Checked \(UsageFormatting.duration(context.date.timeIntervalSince(update.checkedAt))) ago. Releases come from this app's GitHub repository over a plain anonymous request"
+                        + (canInstall
+                            ? "; installing swaps the app bundle in place and relaunches."
+                            : "; this build updates through its own checkout — the app downloads and swaps nothing."))
             }
         }
+        .task(id: update.latestVersion) { await probeCheckout(update) }
+    }
+
+    /// The card's identity row: which distribution stream this install is,
+    /// with the checkout's own coordinates when the probe found any.
+    private var channelLine: String? {
+        guard let channel = store.distribution else { return nil }
+        var line = channel.displayName
+        if let state = checkoutState {
+            let bits = [state.branch, state.shortCommit.map { "@ \($0)" }]
+                .compactMap { $0 }
+            if !bits.isEmpty { line += ", " + bits.joined(separator: " ") }
+        }
+        return line
+    }
+
+    /// The manual channel's way forward, sharpened by the probe: a checkout
+    /// that already holds the release tag only needs the rebuild.
+    private func manualUpdateHint(_ update: AppUpdateCard) -> String? {
+        if checkoutState?.hasReleaseTag == true {
+            return "Tag v\(update.latestVersion) is already fetched in this checkout — a rebuild is all it takes."
+        }
+        return store.distribution?.manualUpdateHint
+    }
+
+    /// Local-only git reads against the checkout the bundle lives in —
+    /// never a fetch (`SourceCheckoutProbe`).
+    private func probeCheckout(_ update: AppUpdateCard) async {
+        guard let channel = store.distribution as? GitHubChannel,
+              case .sourceCheckout(let root) = channel.flavor
+        else { return }
+        let offering = update.updateAvailable
+            && update.latestVersion != AppIdentity.version
+        checkoutState = await SourceCheckoutProbe.probe(
+            root: root, releaseTag: offering ? "v\(update.latestVersion)" : nil)
     }
 
     @ViewBuilder private func installControls(_ update: AppUpdateCard) -> some View {

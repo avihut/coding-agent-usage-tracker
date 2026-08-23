@@ -396,11 +396,19 @@ struct UsagePanelView: View {
                 Toggle("Launch at login", isOn: SettingsBindings.launchAtLogin())
                 Divider()
                 if let update = visibleUpdate {
-                    Button("Update to \(update.latestVersion)…") {
-                        AppUpdater.shared.resetFailure()
-                        AppUpdater.shared.install(update)
+                    if store.updateCanSelfInstall {
+                        Button("Update to \(update.latestVersion)…") {
+                            AppUpdater.shared.resetFailure()
+                            AppUpdater.shared.install(update)
+                        }
+                        .disabled(AppUpdater.shared.isBusy)
+                    } else {
+                        // A checkout build can't swap itself; the Settings
+                        // card carries the how.
+                        Button("Version \(update.latestVersion) available…") {
+                            onOpenSettings()
+                        }
                     }
-                    .disabled(AppUpdater.shared.isBusy)
                 }
                 if store.providesSessions {
                     Button("Sessions…") { onOpenSessions() }
@@ -444,13 +452,32 @@ struct UsagePanelView: View {
     }
 
     /// As quiet as an update can get: a small accent arrow riding beside
-    /// the version label it would change. One click runs the whole install;
-    /// while it runs the arrow is a spinner, and a failure turns it amber
-    /// with the reason on hover — clicking again retries.
+    /// the version label it would change. On a self-installing channel one
+    /// click runs the whole install — spinner while it runs, amber with the
+    /// reason on hover after a failure, clicking again retries. On a
+    /// channel that only informs (a source checkout) the same arrow opens
+    /// Settings, where the card says how updating works here.
     @ViewBuilder private var updateControl: some View {
         if let update = visibleUpdate {
-            let updater = AppUpdater.shared
-            switch updater.phase {
+            if store.updateCanSelfInstall {
+                installUpdateControl(update)
+            } else {
+                Button {
+                    onOpenSettings()
+                } label: {
+                    Image(systemName: "arrow.down.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(ProviderStyle.accentColor)
+                }
+                .buttonStyle(.borderless)
+                .help("Version \(update.latestVersion) is available — this build updates from its checkout; click for how")
+            }
+        }
+    }
+
+    @ViewBuilder private func installUpdateControl(_ update: AppUpdateCard) -> some View {
+        let updater = AppUpdater.shared
+        switch updater.phase {
             case .downloading, .installing, .relaunching:
                 ProgressView()
                     .controlSize(.mini)
@@ -476,7 +503,6 @@ struct UsagePanelView: View {
                 }
                 .buttonStyle(.borderless)
                 .help("Version \(update.latestVersion) is available — one click installs and relaunches")
-            }
         }
     }
 

@@ -61,6 +61,15 @@ final class AppUpdater {
     /// pipeline; any thrown step lands in `.failed` with the app untouched.
     func install(_ card: AppUpdateCard) {
         guard !isBusy else { return }
+        // Belt under the UI's suspenders: an install whose channel forbids
+        // the swap (a source checkout) must never run the pipeline, no
+        // matter what card reached a click — the release page is the honest
+        // response. `Distribution` lifts this for the drill's feed override
+        // exactly as the override lifts the engine's checker gate.
+        guard Distribution.allowsSelfInstall(bundleURL: Bundle.main.bundleURL) else {
+            if let page = URL(string: card.url) { NSWorkspace.shared.open(page) }
+            return
+        }
         guard let assetURL = card.assetURL.flatMap(URL.init(string:)),
               Self.isAllowedHost(assetURL)
         else {

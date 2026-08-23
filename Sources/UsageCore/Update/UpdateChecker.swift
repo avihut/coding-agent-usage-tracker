@@ -26,8 +26,10 @@ public final class UpdateChecker {
     public static let autoCheckKey = "updateAutoCheck"
     /// Debug hatch: points the checker at an arbitrary feed URL (the
     /// end-to-end drill serves a synthetic release from localhost). Its
-    /// presence also forces the checker on in a source-managed build.
-    public static let feedOverrideKey = "updateFeedURL"
+    /// presence also forces the checker — and the install pipeline — on in
+    /// a source checkout. Nonisolated: a key constant is not actor state,
+    /// and `Distribution` reads it from nonisolated code.
+    public nonisolated static let feedOverrideKey = "updateFeedURL"
 
     private let feed: UpdateFeed
     private let currentVersion: String

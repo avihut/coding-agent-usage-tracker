@@ -46,6 +46,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let fake = Self.launchFakeUpdate() {
             registry.activeStore.installFakeAppUpdate(fake)
         }
+        // `--fake-channel <release|source>` forces the distribution
+        // flavor's presentation, so both update bodies (one-click install
+        // vs pull-and-rebuild) can be click-verified on one machine —
+        // whichever flavor that machine actually is.
+        if let fake = Self.launchFakeChannel() {
+            registry.activeStore.installFakeDistribution(fake)
+        }
         // Verification hatches: `ClaudeUsage --settings [--pane-cost]` /
         // `--panel` open UI straight away (the ⋯ menu can't be scripted,
         // and AX row selection can't drive the sidebar); `--provider <id>`
@@ -91,6 +98,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             publishedAt: now.addingTimeInterval(-3_600), assetName: nil,
             assetURL: nil, assetBytes: nil, checkedAt: now.addingTimeInterval(-120),
             updateAvailable: true)
+    }
+
+    /// Builds the `--fake-channel` channel. `source` roots its checkout at
+    /// the bundle's parent — on a machine that isn't actually a checkout
+    /// the probe just degrades to a bare channel line, which is fine for a
+    /// presentation hatch.
+    private static func launchFakeChannel() -> (any DistributionChannel)? {
+        let arguments = CommandLine.arguments
+        guard let flag = arguments.firstIndex(of: "--fake-channel"),
+              arguments.indices.contains(flag + 1)
+        else { return nil }
+        switch arguments[flag + 1] {
+        case "release":
+            return GitHubChannel(flavor: .releaseInstall)
+        case "source":
+            return GitHubChannel(flavor: .sourceCheckout(
+                root: Bundle.main.bundleURL.deletingLastPathComponent()))
+        default:
+            return nil
+        }
     }
 
     /// Builds the `--fake-status` card. The copy is the real 2026-08-18

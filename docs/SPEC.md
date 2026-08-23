@@ -341,12 +341,28 @@ Non-negotiable; flag rather than work around:
   `objects.githubusercontent.com` (the CDN its download redirects to) — is
   never automatic: it happens only on an explicit user click, in the app,
   followed by codesign verification, a version match against the clicked
-  release, and an in-place bundle swap with rollback. The checker runs ONLY
-  for standalone installs: a bundle inside a git checkout is the developer's
-  own build (`InstallKind`), updates via git, and checks nothing. This is an
-  APP-scoped destination, not a provider one — it is not in any provider's
-  `networkDestinations`, does not affect `isLocalProvider`, and appears on
-  the privacy card on its own line whenever the checker is active.
+  release, and an in-place bundle swap with rollback.
+
+  Distribution channels (amendment 2026-08-23, v0.88.0, user-directed —
+  "think of it as distribution streams"): how an install learns about and
+  applies updates is owned by its auto-detected distribution channel
+  (`Distribution`). Today's one channel is GitHub, in two flavors. A
+  standalone release install (typically /Applications) gets the full
+  one-click pipeline above. A bundle built inside a git checkout
+  (`mise run app`) polls the SAME anonymous feed — knowing it's behind is
+  half the point — but only INFORMS: pull-and-rebuild guidance, never the
+  bundle swap, because a working tree's build product is not the app's to
+  overwrite. The source flavor may run git, but strictly LOCAL and
+  READ-ONLY (`rev-parse` against the checkout the bundle lives in — branch,
+  commit, is-the-tag-pulled); never fetch/pull/ls-remote, since networked
+  git would spend the user's own credentials against hosts outside this
+  section's destinations. Future channels are each their own amendment: a
+  direct-download build would name its own feed host; a store build
+  declares no feed and the entire update surface goes dark, because the
+  store owns updates there. This is an APP-scoped destination, not a
+  provider one — it is not in any provider's `networkDestinations`, does
+  not affect `isLocalProvider`, and appears on the privacy card on its own
+  line whenever a channel polls the feed.
 - The token is never logged, persisted, or included in an error surface.
 - No sandbox entitlement, and no request for entitlements we don't need.
 - Don't install or register anything (login items, launch agents) without asking me

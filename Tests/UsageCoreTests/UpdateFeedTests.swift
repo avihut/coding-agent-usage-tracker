@@ -106,13 +106,18 @@ struct InstallKindTests {
         let root = try makeTree()
         defer { try? FileManager.default.removeItem(at: root) }
 
-        // Contained-layout worktree: .git is a FILE at the repo root.
+        // Contained-layout worktree: .git is a FILE at the repo root. The
+        // reported root is the NEAREST .git-bearing ancestor.
         let repo = root.appending(path: "repo")
         let app = repo.appending(path: "main/ClaudeUsage.app")
         try FileManager.default.createDirectory(at: app, withIntermediateDirectories: true)
         try Data("gitdir: ../.git/worktrees/main".utf8)
             .write(to: repo.appending(path: ".git"))
-        #expect(InstallKind.detect(bundleURL: app) == .sourceManaged)
+        guard case .sourceManaged(let worktreeRoot) = InstallKind.detect(bundleURL: app) else {
+            Issue.record("expected sourceManaged for a worktree bundle")
+            return
+        }
+        #expect(worktreeRoot.path == repo.path)
 
         // Plain clone: .git is a directory.
         let clone = root.appending(path: "clone")
@@ -120,7 +125,11 @@ struct InstallKindTests {
         try FileManager.default.createDirectory(
             at: clone.appending(path: ".git"), withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: cloneApp, withIntermediateDirectories: true)
-        #expect(InstallKind.detect(bundleURL: cloneApp) == .sourceManaged)
+        guard case .sourceManaged(let cloneRoot) = InstallKind.detect(bundleURL: cloneApp) else {
+            Issue.record("expected sourceManaged for a clone bundle")
+            return
+        }
+        #expect(cloneRoot.path == clone.path)
     }
 
     @Test("a bundle outside any checkout is a standalone install")
@@ -138,5 +147,82 @@ struct InstallKindTests {
             bundleURL: URL(fileURLWithPath: "/tmp/x/UsageCoreTests.xctest")) == .notAnApp)
         #expect(InstallKind.detect(
             bundleURL: URL(fileURLWithPath: "/tmp/x/debug")) == .notAnApp)
+    }
+}
+
+/// Install → distribution channel: the seam every update surface renders
+/// through.
+@Suite("DistributionChannel")
+struct DistributionChannelTests {
+    private func makeTree() throws -> URL {
+        let root = FileManager.default.temporaryDirectory
+            .appending(path: "distchannel-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        return root
+    }
+
+    @Test("a standalone install is the GitHub channel's release flavor — self-installing")
+    func releaseFlavor() throws {
+        let root = try makeTree()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let app = root.appending(path: "Applications/ClaudeUsage.app")
+        try FileManager.default.createDirectory(at: app, withIntermediateDirectories: true)
+
+        let channel = try #require(Distribution.channel(for: app) as? GitHubChannel)
+        #expect(channel.flavor == .releaseInstall)
+        #expect(channel.canSelfInstall)
+        #expect(channel.manualUpdateHint == nil)
+        #expect(channel.updateFeedURL
+            == UpdateFeed.latestURL(repository: AppIdentity.repository))
+    }
+
+    @Test("a checkout build is the GitHub channel's source flavor — informing, never installing")
+    func sourceFlavor() throws {
+        let root = try makeTree()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repo = root.appending(path: "repo")
+        let app = repo.appending(path: "ClaudeUsage.app")
+        try FileManager.default.createDirectory(
+            at: repo.appending(path: ".git"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: app, withIntermediateDirectories: true)
+        try Data("[tasks.app]".utf8).write(to: repo.appending(path: "mise.toml"))
+
+        let channel = try #require(Distribution.channel(for: app) as? GitHubChannel)
+        guard case .sourceCheckout(let found) = channel.flavor else {
+            Issue.record("expected the source flavor inside a checkout")
+            return
+        }
+        #expect(found.path == repo.path)
+        #expect(!channel.canSelfInstall)
+        // The checkout carries mise.toml, so the hint names the real task.
+        #expect(channel.manualUpdateHint?.contains("mise run app") == true)
+        // Same feed in both flavors — knowing you're behind is half the point.
+        #expect(channel.updateFeedURL
+            == UpdateFeed.latestURL(repository: AppIdentity.repository))
+    }
+
+    @Test("bare executables belong to no channel at all")
+    func noChannel() {
+        #expect(Distribution.channel(for: URL(fileURLWithPath: "/tmp/x/debug")) == nil)
+    }
+
+    @Test("the drill's feed override forces self-install even inside a checkout")
+    func overrideForcesInstall() throws {
+        let root = try makeTree()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repo = root.appending(path: "repo")
+        let app = repo.appending(path: "ClaudeUsage.app")
+        try FileManager.default.createDirectory(
+            at: repo.appending(path: ".git"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: app, withIntermediateDirectories: true)
+
+        let suite = "distchannel-defaults-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        #expect(!Distribution.allowsSelfInstall(bundleURL: app, defaults: defaults))
+        defaults.set(
+            "http://localhost:9999/feed.json", forKey: UpdateChecker.feedOverrideKey)
+        #expect(Distribution.allowsSelfInstall(bundleURL: app, defaults: defaults))
     }
 }
