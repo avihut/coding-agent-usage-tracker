@@ -26,6 +26,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let registry = ProviderRegistry(
             bundleID: bundleID, launchOverride: Self.launchProviderOverride())
         controller = StatusItemController(registry: registry)
+        // Touch the updater so its init sweeps a previous update's aside
+        // bundle — lazily it would only wake when the NEXT release's chip
+        // renders, leaving a hidden stale app copy beside this one.
+        _ = AppUpdater.shared
         // A real outage can't be scheduled, so the status surfaces get their
         // own hatch: `--fake-status <minor|major|critical|maintenance|
         // unknown|resolved|none>` installs a synthetic card carrying real

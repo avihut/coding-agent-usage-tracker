@@ -132,15 +132,23 @@ final class AppUpdater {
         let session = URLSession(configuration: configuration)
         defer { session.finishTasksAndInvalidate() }
 
+        let work = FileManager.default.temporaryDirectory
+            .appending(path: "ClaudeUsage-update-\(ProcessInfo.processInfo.processIdentifier)")
+        try? FileManager.default.removeItem(at: work)
+        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: work) }
+
         var request = URLRequest(url: assetURL)
         request.setValue(AppIdentity.userAgent, forHTTPHeaderField: "User-Agent")
-        let downloaded: URL
+        // The async download's temp file has no guaranteed lifetime past the
+        // await — claim it into the work directory before anything else.
+        let archive = work.appending(path: "asset.zip")
         do {
             let (file, response) = try await session.download(for: request)
             guard let http = response as? HTTPURLResponse,
                   (200..<300).contains(http.statusCode)
             else { throw UpdateError.download }
-            downloaded = file
+            try FileManager.default.moveItem(at: file, to: archive)
         } catch let error as UpdateError {
             throw error
         } catch {
@@ -148,15 +156,9 @@ final class AppUpdater {
         }
         await onInstalling()
 
-        let work = FileManager.default.temporaryDirectory
-            .appending(path: "ClaudeUsage-update-\(ProcessInfo.processInfo.processIdentifier)")
-        try? FileManager.default.removeItem(at: work)
-        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: work) }
-
         // ditto, not an unzip library: it round-trips bundle metadata and
         // the signature intact — the same reason dist.sh packs with it.
-        guard await run("/usr/bin/ditto", ["-x", "-k", downloaded.path, work.path]) == 0
+        guard await run("/usr/bin/ditto", ["-x", "-k", archive.path, work.path]) == 0
         else { throw UpdateError.unpack }
         let unpacked = work.appending(path: "ClaudeUsage.app")
         guard FileManager.default.fileExists(atPath: unpacked.path) else {
