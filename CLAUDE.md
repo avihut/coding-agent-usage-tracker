@@ -429,8 +429,14 @@ the README rather than silently deviating.
   .background sibling never sees wheel events, while a hit-testing
   overlay steals clicks/hovers; the monitor claims only gesture-phased,
   horizontal-dominant events inside its view's bounds and passes all
-  else through (deeper scroll views like the All grid keep their events
-  before it anyway). scrollingDeltaX honors natural scrolling: fingers
+  else through. A LOCAL MONITOR PRECEDES VIEW DISPATCH (v0.87.2 lesson):
+  "deeper" scroll views never keep their events from it — an enabled
+  catcher over the All grid ate every horizontal gesture while pageStep
+  no-opped, killing the grid's scrolling for a week — so the catcher
+  carries an `enabled` flag (inert = pass-through, the PanCatcher
+  pattern) and the pager attachment disables it on All; any future
+  surface that owns a horizontal scroller must do the same.
+  scrollingDeltaX honors natural scrolling: fingers
   left = +1 = later. Consumers: 7D/30D pager (`pageStep`) and the day
   drill (`stepDay`) — both extracted so arrows and swipes share one
   action; sign convention: direction < 0 = earlier.
