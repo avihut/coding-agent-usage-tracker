@@ -13,13 +13,17 @@ the README rather than silently deviating.
   token only, re-read on every refresh cycle, never cached in memory or disk.
 - The token is never logged, persisted, placed in a URL, or included in any
   error surface. Cache response bodies only.
-- Three network destinations, and no others: `api.anthropic.com` (usage, with
+- Four network destinations, and no others: `api.anthropic.com` (usage, with
   the OAuth token), `raw.githubusercontent.com` (LiteLLM pricing feed — plain
   GET, never any credential or account data attached; user-directed spec §10
-  amendment, 2026-08-13, see README), and the active provider's declared
+  amendment, 2026-08-13, see README), the active provider's declared
   status feed (`status.claude.com` for Claude; §10 amendment 2026-08-19,
-  v0.86.0 — anonymous conditional GET, ephemeral cookie-less session). No
-  analytics, no telemetry.
+  v0.86.0 — anonymous conditional GET, ephemeral cookie-less session), and
+  this app's own release feed (`api.github.com` releases/latest, §10
+  amendment 2026-08-23, v0.87.0 — anonymous conditional GET every 6h,
+  STANDALONE INSTALLS ONLY; the release asset from `github.com`/
+  `objects.githubusercontent.com` downloads exclusively on a user click).
+  No analytics, no telemetry.
 - A status feed is declared by `UsageProvider.statusFeed`, NOT added to
   `networkDestinations`: that list being empty is what makes a provider
   "local" (`isLocalProvider` — no budget gauge, refresh = rescan), so folding
@@ -1253,6 +1257,41 @@ the README rather than silently deviating.
 - Verify the UI with `--fake-status <none|minor|major|critical|maintenance|
   unknown|resolved>`: a real outage can't be scheduled, and the hatch carries
   the real 2026-08-18 incident's copy.
+
+## Self-update (v0.87.0)
+
+- Distribution is GitHub Releases; `mise run publish` builds the dist zip
+  (universal, timestamped signatures, usaged + usage-cli embedded) and
+  attaches it to the version's tag via `gh release create`, notes from the
+  tag annotation. Info.plist versions are STAMPED from AppIdentity.swift by
+  bundle.sh/dist.sh — never hand-edit them (they drifted two releases behind
+  when hand-maintained, and the updater verifies downloads by that key).
+- The engine's `UpdateChecker` (UsageCore/Update/) polls
+  `api.github.com/repos/avihut/coding-agent-usage-tracker/releases/latest`
+  every 6h (conditional GET, honest UA — GitHub refuses UA-less requests)
+  and publishes `LiveState.appUpdate`. It runs ONLY when
+  `InstallKind.detect` says `.standaloneApp` — a bundle inside a git
+  checkout updates via git and checks nothing, which is why the dev worktree
+  never shows the chip. A failed check keeps the last card; only a
+  definitive 404 withdraws it. `AppVersion` compares dotted ints;
+  unparseable is NEVER newer.
+- UI is deliberately a whisper: an accent `arrow.down.circle.fill` beside
+  the footer's version label, an "Update to X…" item in the ⋯ menu, and a
+  Settings → General card (install / Check Now / auto-check toggle / skip
+  version via `updateSkippedVersion`). No menu-bar change, no notifications.
+  A face whose own version already equals the card's stays quiet — the
+  daemon lags one relaunch behind right after an update.
+- One click runs `AppUpdater` (App/AppUpdater.swift): download (host
+  allowlist github.com/*.githubusercontent.com), `ditto -xk`, `codesign
+  --verify --deep --strict`, plist version must MATCH the clicked release,
+  stage beside the bundle (same volume), two-rename swap with rollback,
+  `launchctl kickstart` the daemon, detached-shell relaunch. Downloads by
+  the app carry no quarantine (no LSFileQuarantineEnabled), so Gatekeeper
+  doesn't re-interrogate updates.
+- Verify UI with `--fake-update <version|current>` (no asset URL — a click
+  on the fake opens the releases page, never swaps). Drill the real
+  pipeline against a localhost feed via the `updateFeedURL` defaults
+  override, which also forces the checker on in a source build.
 
 ## Testing
 

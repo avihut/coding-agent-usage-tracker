@@ -122,6 +122,22 @@ is written to disk. This amends spec §10 (2026-08-19); a status host is
 declared per provider and shown on the settings privacy card, and providers
 that declare none stay entirely offline.
 
+### Fourth network destination: this app's own releases
+
+Standalone installs (the app living in /Applications rather than inside a
+git checkout) check this repository's newest GitHub release every six hours —
+one anonymous conditional GET of
+`api.github.com/repos/avihut/coding-agent-usage-tracker/releases/latest` on a
+cookie-less session, nothing identifying beyond the public repo path. When a
+newer version exists, a small accent arrow appears beside the version label
+in the panel footer; one click downloads the release zip (from
+`github.com`, redirecting to GitHub's asset CDN — the only automatic-nothing
+download, it happens exclusively on that click), verifies its code signature
+and version, swaps the app bundle in place, restarts the background engine,
+and relaunches. Settings → General governs it: check now, automatic checks
+off, or skip a version. A build sitting inside a git worktree never checks —
+its update path is `git pull`. This amends spec §10 (2026-08-23).
+
 ## Known risk: undocumented endpoint
 
 `/api/oauth/usage` is not in the public API docs and may change shape or go away
@@ -230,6 +246,13 @@ found" — renew it in Xcode → Settings → Accounts → Manage Certificates. 
 name stays the same, so the identity survives.
 
 ## Install on another Mac
+
+The easy path: grab `ClaudeUsage-<version>.zip` from the [releases
+page](https://github.com/avihut/coding-agent-usage-tracker/releases) —
+`mise run publish` puts one there per tagged version. From then on the app
+updates itself: it notices the next release and installs it in one click.
+
+To build the artifact locally instead:
 
 ```sh
 mise run dist   # universal (arm64 + x86_64), signed with a timestamp, zipped

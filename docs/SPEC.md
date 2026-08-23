@@ -328,6 +328,25 @@ Non-negotiable; flag rather than work around:
   page must never flip that classification. Codex and Gemini declare no feed
   and remain zero-network; each future one is its own amendment naming its
   host.
+- Self-update feed (amendment 2026-08-23, v0.87.0, user-directed — "primary
+  distribution is through GitHub"): the engine may GET this APP's own newest
+  release record from `api.github.com` — exactly one endpoint,
+  `/repos/avihut/coding-agent-usage-tracker/releases/latest`, every six
+  hours. Plain anonymous conditional GET on an ephemeral, cookie-less
+  session, honest User-Agent (GitHub requires one), nothing identifying
+  beyond the public repo path. The normalized card rides in the digest;
+  nothing from the feed is written to disk.
+
+  The release ASSET download — `github.com` /
+  `objects.githubusercontent.com` (the CDN its download redirects to) — is
+  never automatic: it happens only on an explicit user click, in the app,
+  followed by codesign verification, a version match against the clicked
+  release, and an in-place bundle swap with rollback. The checker runs ONLY
+  for standalone installs: a bundle inside a git checkout is the developer's
+  own build (`InstallKind`), updates via git, and checks nothing. This is an
+  APP-scoped destination, not a provider one — it is not in any provider's
+  `networkDestinations`, does not affect `isLocalProvider`, and appears on
+  the privacy card on its own line whenever the checker is active.
 - The token is never logged, persisted, or included in an error surface.
 - No sandbox entitlement, and no request for entitlements we don't need.
 - Don't install or register anything (login items, launch agents) without asking me
