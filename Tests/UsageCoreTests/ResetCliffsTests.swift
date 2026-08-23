@@ -31,6 +31,16 @@ struct ResetCliffsTests {
         #expect(cliffs.isEmpty)
     }
 
+    @Test("a dip with sub-second stamp jitter is a correction, not a reset")
+    func jitteredStamps() {
+        // The API restates the same boundary with ±0.5s noise on every
+        // poll — a 1-point downward correction must not carve a zero-cliff.
+        let cliffs = ResetCliffs.cliffs(
+            between: [sample(0, 80, reset: 9000.3), sample(600, 79, reset: 8999.8)],
+            window: 18000, currentReset: date(9000))
+        #expect(cliffs.isEmpty)
+    }
+
     @Test("an unstamped drop lands on the reset-schedule grid")
     func gridFallback() {
         // Weekly window ending at 1200; current reset one window later.

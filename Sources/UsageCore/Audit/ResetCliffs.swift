@@ -51,12 +51,14 @@ public enum ResetCliffs {
         }
     }
 
-    /// With both stamps present the window rolled iff the stamp moved —
-    /// an in-window percent correction never cliffs. Legacy samples fall
-    /// back to the drop-size heuristic.
+    /// With both stamps present the window rolled iff the stamp moved
+    /// beyond `ResetStamp` jitter — an in-window percent correction never
+    /// cliffs. Legacy samples fall back to the drop-size heuristic.
     static func isReset(from a: Sample, to b: Sample) -> Bool {
         guard b.percent < a.percent else { return false }
-        if let before = a.resetsAt, let after = b.resetsAt { return before != after }
+        if let before = a.resetsAt, let after = b.resetsAt {
+            return ResetStamp.moved(before, after)
+        }
         return a.percent - b.percent >= legacyDropThreshold
     }
 

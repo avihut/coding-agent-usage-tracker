@@ -52,6 +52,19 @@ struct WindowLedgerTests {
         #expect(closed.isEmpty)
     }
 
+    @Test("a stamp jittering forward near the boundary closes nothing")
+    func jitterGuard() {
+        // The API restates the same boundary with ±0.5s noise on every
+        // poll; near the window's end the future-guard passes, so only
+        // stamp tolerance keeps the noise from double-recording the close.
+        let reset = date("2026-08-16T03:00:00.000Z")
+        let closed = WindowLedger.closedWindows(
+            previous: [meter(percent: 50, resetsAt: reset)],
+            current: [meter(percent: 51, resetsAt: reset.addingTimeInterval(0.437))],
+            samples: [], now: date("2026-08-16T02:59:00.000Z"))
+        #expect(closed.isEmpty)
+    }
+
     @Test("a stamp still deep in the future is weirdness, not a close")
     func futureStampGuard() {
         let closed = WindowLedger.closedWindows(

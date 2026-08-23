@@ -200,6 +200,16 @@ struct UsageMovementTests {
         #expect(UsageMovement.advanced(from: old, to: new))
     }
 
+    @Test("sub-second reset jitter alone is not movement")
+    func jitteredStamp() {
+        // The API restates the same boundary with ±0.5s noise on every
+        // poll; reading that as movement kept the cadence pinned at the
+        // active interval — quiet-time decay never engaged.
+        let old = snapshot([limit("weekly_all", 40, resetsAt: day)])
+        let new = snapshot([limit("weekly_all", 40, resetsAt: day.addingTimeInterval(0.437))])
+        #expect(!UsageMovement.advanced(from: old, to: new))
+    }
+
     @Test("a brand-new scoped meter with usage is movement")
     func newScopedMeter() {
         let old = snapshot([limit("session", 10)])

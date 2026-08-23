@@ -174,7 +174,7 @@ public enum UsageMovement {
             guard let percent = meter.percent else { return false }
             guard let before = previous[meter.label] else { return percent > 0 }
             if let beforePercent = before.percent, percent > beforePercent { return true }
-            return meter.resetsAt != before.resetsAt && percent > 0
+            return ResetStamp.moved(before.resetsAt, meter.resetsAt) && percent > 0
         }
     }
 }

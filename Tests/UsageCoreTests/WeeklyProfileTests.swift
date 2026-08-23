@@ -92,6 +92,22 @@ struct WeeklyProfileTests {
         #expect(mixed?.observedHours.reduce(0, +) == 1)
     }
 
+    @Test("sub-second reset jitter never drops a pair — the field failure mode")
+    func jitteredResets() {
+        // The API restates the same boundary with ±0.5s noise on every
+        // poll; comparing stamps exactly dropped 92% of a fortnight's
+        // pairs, leaving the prior's flat line as the whole profile.
+        let boundary = Self.at(6, 22)
+        let samples = [
+            Self.sample(Self.at(0, 10), 10, reset: boundary.addingTimeInterval(-0.492)),
+            Self.sample(Self.at(0, 11), 20, reset: boundary.addingTimeInterval(0.437)),
+            Self.sample(Self.at(0, 12), 24, reset: boundary.addingTimeInterval(-0.113)),
+        ]
+        let profile = WeeklyProfile.build(samples: samples, label: "W", calendar: Self.gmt)
+        #expect(profile?.pairCount == 2)
+        #expect(profile?.observedHours.reduce(0, +) == 2)
+    }
+
     @Test("expected percent integrates the rate across block boundaries")
     func expectedPercent() {
         let profile = Self.uniformProfile()

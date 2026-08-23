@@ -49,9 +49,10 @@ public struct WeeklyProfile: Sendable, Equatable {
     /// Consumption is measured between consecutive samples and attributed
     /// uniformly across the blocks the pair spans — a delta of zero across a
     /// quiet night correctly teaches those blocks a low rate. Pairs are
-    /// dropped when the percent fell or the reported reset moved (the window
-    /// rolled over between reads, so the delta doesn't describe consumption)
-    /// and when the gap exceeds `maximumGap`.
+    /// dropped when the percent fell or the reported reset moved beyond
+    /// `ResetStamp` jitter (the window rolled over between reads, so the
+    /// delta doesn't describe consumption) and when the gap exceeds
+    /// `maximumGap`.
     public static func build(
         samples: [UsageSample], label: String, calendar: Calendar = .current
     ) -> WeeklyProfile? {
@@ -73,7 +74,8 @@ public struct WeeklyProfile: Sendable, Equatable {
             let dt = b.t.timeIntervalSince(a.t)
             guard dt > 0, dt <= maximumGap else { continue }
             guard b.percent >= a.percent else { continue }
-            if let resetA = a.reset, let resetB = b.reset, resetA != resetB { continue }
+            if let resetA = a.reset, let resetB = b.reset,
+               ResetStamp.moved(resetA, resetB) { continue }
             let gained = Double(b.percent - a.percent)
             pairs += 1
             var cursor = a.t

@@ -860,6 +860,18 @@ the README rather than silently deviating.
   success; automatic triggers sit backoff out, manual refresh may punch
   through. The scheduler timer is one-shot — every completed refresh (and
   every denied trigger) must leave a live timer behind.
+- RESET STAMPS JITTER (v0.86.1): the API restates `resets_at` with
+  sub-second noise on every poll — a fortnight of weekly stamps held no two
+  byte-equal values (±0.5s around the true boundary). Every "did the window
+  roll?" comparison goes through `ResetStamp`
+  (Refresh/ResetStamp.swift, 60s tolerance; real rolls move stamps by
+  hours), NEVER Date equality: exact equality starved `WeeklyProfile` of
+  92% of its pairs (flat typical-week overlay, flat forecast baseline,
+  wrong pace factor) and made `UsageMovement` read every poll as activity
+  (quiet-time cadence decay never engaged). Consumers: WeeklyProfile.build,
+  UsageMovement.advanced, ResetCliffs.isReset, WindowLedger.closedWindows.
+  The raw jittered stamps stay in history.json untouched — they're what the
+  API said — so the fix heals retroactively on the first rebuild.
 - `UsageClient` makes exactly one attempt and maps to typed errors. The
   retry (once, transport errors only, ~2s delay) lives in the store.
 - Decode defensively: every field optional, unknown limit kinds render

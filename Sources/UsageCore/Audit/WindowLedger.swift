@@ -78,7 +78,7 @@ public struct WindowLedger: Sendable {
                   oldReset <= now.addingTimeInterval(300),
                   let new = currentByID[old.id],
                   let newReset = new.resetsAt,
-                  newReset > oldReset
+                  ResetStamp.rolledForward(from: oldReset, to: newReset)
             else { continue }
             let start = old.limitWindow.map { oldReset.addingTimeInterval(-$0) }
             let peak = samples
