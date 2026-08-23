@@ -113,6 +113,16 @@
     "todayPrompts" : 2,
     "todayTokens" : 535
   },
+  "appUpdate" : {
+    "assetBytes" : 6234881,
+    "assetName" : "ClaudeUsage-0.99.0.zip",
+    "assetURL" : "https:\/\/github.com\/avihut\/coding-agent-usage-tracker\/releases\/download\/v0.99.0\/ClaudeUsage-0.99.0.zip",
+    "checkedAt" : "2026-08-16T11:57:00Z",
+    "latestVersion" : "0.99.0",
+    "publishedAt" : "2026-08-16T08:00:00Z",
+    "updateAvailable" : true,
+    "url" : "https:\/\/github.com\/avihut\/coding-agent-usage-tracker\/releases\/tag\/v0.99.0"
+  },
   "engine" : {
     "accent" : {
       "blue" : 0.341,

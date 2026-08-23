@@ -239,6 +239,9 @@ final class DaemonHost {
         case .refreshStatus:
             engine.refreshServiceStatus()
             return ControlReply(ok: true)
+        case .checkUpdates:
+            engine.checkForUpdates()
+            return ControlReply(ok: true)
         case .shutdown:
             log("shutdown by socket command")
             engine.shutdown()

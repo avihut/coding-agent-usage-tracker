@@ -35,6 +35,37 @@ pub struct LiveState {
     /// NOT HEALTHY, so a renderer must show nothing rather than a green dot.
     #[serde(default)]
     pub service_status: Option<ServiceStatusCard>,
+    /// The app's own newest published release. `None` means the updater has
+    /// nothing to say (source-managed build, no releases, or a digest older
+    /// than 0.87.0) — absent is never "up to date".
+    #[serde(default)]
+    pub app_update: Option<AppUpdateCard>,
+}
+
+/// Mirror of `AppUpdateCard` — the newest GitHub release the engine host
+/// knows about. The TUI renders none of it today; the mirror exists because
+/// mirror completeness IS the schema freeze.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppUpdateCard {
+    /// The release tag with its leading "v" stripped — "0.87.0".
+    pub latest_version: String,
+    /// The release page for humans.
+    pub url: String,
+    #[serde(with = "time::serde::rfc3339::option", default)]
+    pub published_at: Option<OffsetDateTime>,
+    #[serde(default)]
+    pub asset_name: Option<String>,
+    /// Swift spells the property `assetURL` — the same acronym trap
+    /// `pageURL` below sidesteps.
+    #[serde(rename = "assetURL", default)]
+    pub asset_url: Option<String>,
+    #[serde(default)]
+    pub asset_bytes: Option<i64>,
+    #[serde(with = "time::serde::rfc3339")]
+    pub checked_at: OffsetDateTime,
+    /// Precomputed by the WRITER against its own version.
+    pub update_available: bool,
 }
 
 /// Mirror of `ServiceStatusCard` — what the provider's own status page says,
@@ -649,6 +680,35 @@ mod wave4_tests {
         let bytes = serde_json::to_vec(&value).unwrap();
         let state = LiveState::parse(&bytes).expect("older digests still decode");
         assert!(state.service_status.is_none());
+    }
+
+    /// The update card crosses the language boundary whole — including the
+    /// `assetURL` spelling, which camelCase alone would miss.
+    #[test]
+    fn app_update_decodes_with_the_asset() {
+        let state = golden();
+        let card = state.app_update.as_ref().expect("golden carries appUpdate");
+
+        assert_eq!(card.latest_version, "0.99.0");
+        assert!(card.update_available);
+        assert_eq!(card.asset_name.as_deref(), Some("ClaudeUsage-0.99.0.zip"));
+        assert!(card.asset_url.as_deref().unwrap().ends_with(".zip"));
+        assert_eq!(card.asset_bytes, Some(6_234_881));
+        assert!(card.published_at.is_some());
+    }
+
+    /// A pre-0.87.0 digest has no update card — None, never "up to date".
+    #[test]
+    fn an_absent_update_card_is_none_not_current() {
+        let mut value: serde_json::Value = serde_json::from_slice(&golden_bytes()).unwrap();
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("appUpdate")
+            .expect("golden had one to remove");
+        let bytes = serde_json::to_vec(&value).unwrap();
+        let state = LiveState::parse(&bytes).expect("older digests still decode");
+        assert!(state.app_update.is_none());
     }
 
     /// Absent is None, never 0 — an unpriced session reports no cost.

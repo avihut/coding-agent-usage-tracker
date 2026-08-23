@@ -47,11 +47,16 @@ public struct LiveState: Codable, Sendable, Equatable {
     /// feed, or the digest predates 0.86.0. ABSENT IS NOT HEALTHY: a reader
     /// showing green for a nil card would invent a fact nobody reported.
     public let serviceStatus: ServiceStatusCard?
+    /// This app's own newest published release (spec §10 amendment
+    /// 2026-08-23). Nil means the updater has nothing to say — a
+    /// source-managed build, no releases, or a digest predating 0.87.0.
+    /// Absent is never "up to date".
+    public let appUpdate: AppUpdateCard?
 
     public init(
         engine: EngineStatus, meters: [LiveMeter], menuBar: [SegmentStatus],
         models: [ModelRow], activity: ActivityRollup, sessions: [SessionCard] = [],
-        serviceStatus: ServiceStatusCard? = nil
+        serviceStatus: ServiceStatusCard? = nil, appUpdate: AppUpdateCard? = nil
     ) {
         self.schemaVersion = Self.schemaVersion
         self.sessionsCap = LiveStateBuilder.sessionsCap
@@ -62,6 +67,7 @@ public struct LiveState: Codable, Sendable, Equatable {
         self.activity = activity
         self.sessions = sessions
         self.serviceStatus = serviceStatus
+        self.appUpdate = appUpdate
     }
 
     /// `<App Support>/<bundleID>/live-state.json` — the bundle root, above
@@ -622,6 +628,8 @@ public enum LiveStateBuilder {
         systemAccent: RGBColor? = nil,
         /// The status poller's latest card, or nil when nothing tracks status.
         serviceStatus: ServiceStatusCard? = nil,
+        /// The update checker's latest card, or nil when no updater runs.
+        appUpdate: AppUpdateCard? = nil,
         now: Date,
         calendar: Calendar = .current,
         locale: Locale = .current
@@ -760,7 +768,7 @@ public enum LiveStateBuilder {
             sessions: sessionCards(
                 sessions, pricing: pricing, catalog: catalog,
                 colorLedger: colorLedger, accent: accent),
-            serviceStatus: serviceStatus)
+            serviceStatus: serviceStatus, appUpdate: appUpdate)
     }
 
     // MARK: - Meters

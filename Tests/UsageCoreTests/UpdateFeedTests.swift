@@ -1,0 +1,142 @@
+import Foundation
+import Testing
+
+@testable import UsageCore
+
+/// The release feed against the GitHub `releases/latest` shape, plus the
+/// release→card mapping and the install-kind gate that decides whether any
+/// of this runs.
+@Suite("UpdateFeed")
+struct UpdateFeedTests {
+    static func fixtureData() throws -> Data {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .appending(path: "Fixtures/update/releases-latest.json")
+        return try Data(contentsOf: url)
+    }
+
+    @Test("a release decodes to tag, page, date, and assets — extras ignored")
+    func decode() throws {
+        let release = try GitHubRelease.decode(from: Self.fixtureData())
+
+        #expect(release.tag == "v0.87.0")
+        #expect(release.version == "0.87.0")
+        #expect(release.pageURL.hasSuffix("/releases/tag/v0.87.0"))
+        #expect(release.publishedAt != nil)
+        #expect(release.assets.count == 2)
+    }
+
+    @Test("the update asset is the versioned zip, never the checksums file")
+    func assetSelection() throws {
+        let release = try GitHubRelease.decode(from: Self.fixtureData())
+        let asset = try #require(release.updateAsset)
+
+        #expect(asset.name == "ClaudeUsage-0.87.0.zip")
+        #expect(asset.bytes == 6_234_881)
+        #expect(asset.downloadURL.hasSuffix("/ClaudeUsage-0.87.0.zip"))
+    }
+
+    @Test("a release without the versioned name falls back to any zip")
+    func assetFallback() throws {
+        let json = """
+            {"tag_name": "v1.0.0", "html_url": "https://example.com/r",
+             "assets": [
+               {"name": "notes.txt", "browser_download_url": "https://example.com/n", "size": 1},
+               {"name": "app.zip", "browser_download_url": "https://example.com/z", "size": 2}]}
+            """
+        let release = try GitHubRelease.decode(from: Data(json.utf8))
+        #expect(release.updateAsset?.name == "app.zip")
+
+        let bare = try GitHubRelease.decode(
+            from: Data(#"{"tag_name": "v1.0.0", "html_url": "https://example.com/r"}"#.utf8))
+        #expect(bare.updateAsset == nil)
+    }
+
+    @Test("malformed payloads throw instead of producing a release")
+    func malformed() {
+        #expect(throws: (any Error).self) {
+            try GitHubRelease.decode(from: Data("not json".utf8))
+        }
+        // A shape without the essentials is malformed even as valid JSON.
+        #expect(throws: (any Error).self) {
+            try GitHubRelease.decode(from: Data(#"{"draft": false}"#.utf8))
+        }
+    }
+
+    @Test("the card flags an update only for a strictly newer release")
+    func cardMapping() throws {
+        let release = try GitHubRelease.decode(from: Self.fixtureData())
+        let now = Date(timeIntervalSince1970: 1_787_000_000)
+
+        let behind = UpdateChecker.card(from: release, currentVersion: "0.86.1", checkedAt: now)
+        #expect(behind.updateAvailable)
+        #expect(behind.latestVersion == "0.87.0")
+        #expect(behind.assetName == "ClaudeUsage-0.87.0.zip")
+        #expect(behind.assetURL?.hasSuffix(".zip") == true)
+        #expect(behind.checkedAt == now)
+
+        // Equal and ahead both stay quiet — a dev build past the release
+        // must not be offered a downgrade.
+        #expect(!UpdateChecker.card(from: release, currentVersion: "0.87.0", checkedAt: now)
+            .updateAvailable)
+        #expect(!UpdateChecker.card(from: release, currentVersion: "0.88.0", checkedAt: now)
+            .updateAvailable)
+    }
+
+    @Test("the feed URL targets exactly one endpoint")
+    func endpoint() {
+        #expect(UpdateFeed.latestURL(repository: "avihut/coding-agent-usage-tracker")
+            .absoluteString
+            == "https://api.github.com/repos/avihut/coding-agent-usage-tracker/releases/latest")
+    }
+}
+
+/// Whether this copy of the app is the updater's business at all.
+@Suite("InstallKind")
+struct InstallKindTests {
+    private func makeTree() throws -> URL {
+        let root = FileManager.default.temporaryDirectory
+            .appending(path: "installkind-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        return root
+    }
+
+    @Test("a bundle inside a git checkout is source-managed — worktree .git FILES included")
+    func sourceManaged() throws {
+        let root = try makeTree()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        // Contained-layout worktree: .git is a FILE at the repo root.
+        let repo = root.appending(path: "repo")
+        let app = repo.appending(path: "main/ClaudeUsage.app")
+        try FileManager.default.createDirectory(at: app, withIntermediateDirectories: true)
+        try Data("gitdir: ../.git/worktrees/main".utf8)
+            .write(to: repo.appending(path: ".git"))
+        #expect(InstallKind.detect(bundleURL: app) == .sourceManaged)
+
+        // Plain clone: .git is a directory.
+        let clone = root.appending(path: "clone")
+        let cloneApp = clone.appending(path: "ClaudeUsage.app")
+        try FileManager.default.createDirectory(
+            at: clone.appending(path: ".git"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: cloneApp, withIntermediateDirectories: true)
+        #expect(InstallKind.detect(bundleURL: cloneApp) == .sourceManaged)
+    }
+
+    @Test("a bundle outside any checkout is a standalone install")
+    func standalone() throws {
+        let root = try makeTree()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let app = root.appending(path: "Applications/ClaudeUsage.app")
+        try FileManager.default.createDirectory(at: app, withIntermediateDirectories: true)
+        #expect(InstallKind.detect(bundleURL: app) == .standaloneApp)
+    }
+
+    @Test("bare executables and test bundles get no updater")
+    func notAnApp() {
+        #expect(InstallKind.detect(
+            bundleURL: URL(fileURLWithPath: "/tmp/x/UsageCoreTests.xctest")) == .notAnApp)
+        #expect(InstallKind.detect(
+            bundleURL: URL(fileURLWithPath: "/tmp/x/debug")) == .notAnApp)
+    }
+}

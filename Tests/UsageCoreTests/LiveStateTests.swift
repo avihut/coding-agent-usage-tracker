@@ -157,9 +157,27 @@ struct LiveStateTests {
             apiBudget: (used: 7, ceiling: 20, fraction: 0.35),
             systemAccent: SystemAccentPalette.color(appleAccentColor: 4),
             serviceStatus: fixtureServiceStatus,
+            appUpdate: fixtureAppUpdate,
             now: now,
             calendar: utc,
             locale: posix)
+    }
+
+    /// A card in its LOUD state — a release ahead of the writer, with the
+    /// one-click asset present. The absent-field arms ride the same golden
+    /// through `publishedAt`-style optionals staying set here and the
+    /// no-card path covered by `absentCardIsNotHealthy`'s sibling below.
+    private var fixtureAppUpdate: AppUpdateCard {
+        AppUpdateCard(
+            latestVersion: "0.99.0",
+            url: "https://github.com/avihut/coding-agent-usage-tracker/releases/tag/v0.99.0",
+            publishedAt: date("2026-08-16T08:00:00Z"),
+            assetName: "ClaudeUsage-0.99.0.zip",
+            assetURL: "https://github.com/avihut/coding-agent-usage-tracker/releases/download/v0.99.0/ClaudeUsage-0.99.0.zip",
+            assetBytes: 6_234_881,
+            // Before the digest's own `now`, same rule as the status card.
+            checkedAt: date("2026-08-16T11:57:00Z"),
+            updateAvailable: true)
     }
 
     /// A card in its LOUD state — an unresolved incident with a message and
@@ -393,6 +411,25 @@ struct LiveStateTests {
         let data = try JSONSerialization.data(withJSONObject: object)
         let revived = try LiveState.decoder().decode(LiveState.self, from: data)
         #expect(revived.serviceStatus == nil)
+    }
+
+    @Test("the update card rides the digest whole, and absent is not current")
+    func appUpdate() throws {
+        let card = try #require(buildFixture().appUpdate)
+        #expect(card.latestVersion == "0.99.0")
+        #expect(card.updateAvailable)
+        #expect(card.assetName == "ClaudeUsage-0.99.0.zip")
+        #expect(card.assetURL?.hasSuffix(".zip") == true)
+        #expect(card.assetBytes == 6_234_881)
+        #expect(card.publishedAt == date("2026-08-16T08:00:00Z"))
+
+        // A pre-0.87.0 digest has no card — nil, never "up to date".
+        var object = try #require(
+            try JSONSerialization.jsonObject(
+                with: try LiveState.encoder().encode(buildFixture())) as? [String: Any])
+        object.removeValue(forKey: "appUpdate")
+        let data = try JSONSerialization.data(withJSONObject: object)
+        #expect(try LiveState.decoder().decode(LiveState.self, from: data).appUpdate == nil)
     }
 
     @Test("series thinning caps points and keeps both endpoints")

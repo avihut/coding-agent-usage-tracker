@@ -1,0 +1,56 @@
+{
+  "url": "https://api.github.com/repos/avihut/coding-agent-usage-tracker/releases/241000001",
+  "assets_url": "https://api.github.com/repos/avihut/coding-agent-usage-tracker/releases/241000001/assets",
+  "upload_url": "https://uploads.github.com/repos/avihut/coding-agent-usage-tracker/releases/241000001/assets{?name,label}",
+  "html_url": "https://github.com/avihut/coding-agent-usage-tracker/releases/tag/v0.87.0",
+  "id": 241000001,
+  "author": {
+    "login": "avihut",
+    "id": 1588055,
+    "type": "User",
+    "site_admin": false
+  },
+  "node_id": "RE_kwDOPTp1x84OW1xB",
+  "tag_name": "v0.87.0",
+  "target_commitish": "main",
+  "name": "v0.87.0 — self-updater",
+  "draft": false,
+  "immutable": false,
+  "prerelease": false,
+  "created_at": "2026-08-23T08:10:00Z",
+  "published_at": "2026-08-23T08:14:30Z",
+  "assets": [
+    {
+      "url": "https://api.github.com/repos/avihut/coding-agent-usage-tracker/releases/assets/301000001",
+      "id": 301000001,
+      "node_id": "RA_kwDOPTp1x84R8bJx",
+      "name": "ClaudeUsage-0.87.0.zip",
+      "label": "",
+      "uploader": { "login": "avihut", "id": 1588055 },
+      "content_type": "application/zip",
+      "state": "uploaded",
+      "size": 6234881,
+      "download_count": 3,
+      "created_at": "2026-08-23T08:12:10Z",
+      "updated_at": "2026-08-23T08:12:14Z",
+      "browser_download_url": "https://github.com/avihut/coding-agent-usage-tracker/releases/download/v0.87.0/ClaudeUsage-0.87.0.zip"
+    },
+    {
+      "url": "https://api.github.com/repos/avihut/coding-agent-usage-tracker/releases/assets/301000002",
+      "id": 301000002,
+      "name": "SHA256SUMS.txt",
+      "content_type": "text/plain",
+      "state": "uploaded",
+      "size": 102,
+      "browser_download_url": "https://github.com/avihut/coding-agent-usage-tracker/releases/download/v0.87.0/SHA256SUMS.txt"
+    }
+  ],
+  "tarball_url": "https://api.github.com/repos/avihut/coding-agent-usage-tracker/tarball/v0.87.0",
+  "zipball_url": "https://api.github.com/repos/avihut/coding-agent-usage-tracker/zipball/v0.87.0",
+  "body": "Self-updater: the app now notices new releases and installs them in one click.",
+  "reactions": {
+    "url": "https://api.github.com/repos/avihut/coding-agent-usage-tracker/releases/241000001/reactions",
+    "total_count": 1,
+    "+1": 1
+  }
+}

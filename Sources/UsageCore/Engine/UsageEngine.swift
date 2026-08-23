@@ -55,6 +55,9 @@ public final class UsageEngine {
     /// The provider's service health, or nil when it declares no status feed
     /// (absent is not healthy — see `ServiceStatusCard`).
     public private(set) var serviceStatus: ServiceStatusCard?
+    /// This app's newest published release, or nil when no updater runs
+    /// (source-managed builds check nothing — see `AppUpdateCard`).
+    public private(set) var appUpdate: AppUpdateCard?
 
     /// The one metered service this instance tracks. Everything
     /// vendor-specific — endpoints, paths, names, links — flows from here.
@@ -88,6 +91,10 @@ public final class UsageEngine {
     /// feed. Its cadence is entirely its own — status has nothing to do with
     /// the usage poll's gate, backoff, or activity signal.
     private var statusPoller: StatusPoller?
+    /// Checks this app's own release feed; nil for source-managed builds
+    /// and bare executables (`InstallKind`). App-scoped, so it neither
+    /// rides the provider seam nor cares which harness is metered.
+    private var updateChecker: UpdateChecker?
     private var lastActivityScan: Date?
     /// Single-flight for transcript scans: a window-open force-scan must not
     /// overlap an FSEvents-triggered one — two concurrent scans race their
@@ -183,6 +190,23 @@ public final class UsageEngine {
             statusPoller = poller
             poller.start()
         }
+        let installKind = InstallKind.detect(bundleURL: Bundle.main.bundleURL)
+        let feedOverride = defaults.string(forKey: UpdateChecker.feedOverrideKey)
+            .flatMap(URL.init(string:))
+        if installKind == .standaloneApp || feedOverride != nil {
+            let checker = UpdateChecker(
+                feed: UpdateFeed(
+                    latestReleaseURL: feedOverride
+                        ?? UpdateFeed.latestURL(repository: AppIdentity.repository)),
+                currentVersion: AppIdentity.version, defaults: defaults)
+            checker.onCard = { [weak self] card in
+                guard let self, !self.isShutDown else { return }
+                self.appUpdate = card
+                self.publishState()
+            }
+            updateChecker = checker
+            checker.start()
+        }
         refresh(.launch)
         // A seeded gate can deny that launch poll (the previous host
         // fetched moments ago — a takeover inside the floor; isRefreshing
@@ -208,6 +232,8 @@ public final class UsageEngine {
         watcher = nil
         statusPoller?.stop()
         statusPoller = nil
+        updateChecker?.stop()
+        updateChecker = nil
         nextRefreshAt = nil
     }
 
@@ -219,6 +245,7 @@ public final class UsageEngine {
     public func noteWake() {
         refresh(.wake)
         statusPoller?.pollNow()
+        updateChecker?.pokeIfStale()
     }
 
     /// An out-of-band status read — the control socket's `refreshStatus`,
@@ -226,6 +253,13 @@ public final class UsageEngine {
     /// the feed's own CDN spacing, so poking is always safe.
     public func refreshServiceStatus() {
         statusPoller?.pollNow()
+    }
+
+    /// A user-asked release check — Settings' "Check Now", the control
+    /// socket's `checkUpdates`. Floor-gated in the checker, so clicking in
+    /// a loop can't turn into a hot loop against GitHub.
+    public func checkForUpdates() {
+        updateChecker?.checkNow()
     }
 
     public func refresh(_ reason: RefreshReason) {
@@ -309,6 +343,7 @@ public final class UsageEngine {
             apiBudget: isLocalProvider ? nil : apiBudget(now: now),
             systemAccent: systemAccent,
             serviceStatus: serviceStatus,
+            appUpdate: appUpdate,
             now: now)
         publisher.publish(digest)
     }

@@ -19,6 +19,7 @@ public enum ControlCommand: Codable, Sendable, Equatable {
     /// on an aging card. The feed's CDN spacing rations it, so an eager
     /// caller can't turn this into a hot loop.
     case refreshStatus
+    case checkUpdates
     case shutdown
 }
 
