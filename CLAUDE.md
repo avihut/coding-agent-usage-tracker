@@ -11,6 +11,14 @@ the README rather than silently deviating.
 
 - Never write to the Keychain. Never read or use the refresh token — access
   token only, re-read on every refresh cycle, never cached in memory or disk.
+- UNDER NO CIRCUMSTANCES may a feature require the user to enter system
+  credentials — Keychain consent, admin authorization, TCC prompts — for the
+  app's REGULAR operation (user-directed §10 amendment 2026-08-25). The
+  v0.82.1 promptless credential path (`/usr/bin/security`, see the Keychain
+  bullet in macOS practices) is the standing mechanism; never replace it
+  with a native read. A very specific dedicated feature MAY be an
+  exception, but only with its own well-reasoned, documented §10 amendment
+  spelling out why no promptless path exists.
 - The token is never logged, persisted, placed in a URL, or included in any
   error surface. Cache response bodies only.
 - Four network destinations, and no others: `api.anthropic.com` (usage, with
@@ -20,8 +28,9 @@ the README rather than silently deviating.
   status feed (`status.claude.com` for Claude; §10 amendment 2026-08-19,
   v0.86.0 — anonymous conditional GET, ephemeral cookie-less session), and
   this app's own release feed (`api.github.com` releases/latest, §10
-  amendment 2026-08-23, v0.87.0 — anonymous conditional GET every 6h,
-  STANDALONE INSTALLS ONLY; the release asset from `github.com`/
+  amendment 2026-08-23, v0.87.0 — anonymous conditional GET every 6h, for
+  any install whose distribution channel declares a feed: both GitHub
+  flavors since v0.88.0; the release asset from `github.com`/
   `objects.githubusercontent.com` downloads exclusively on a user click).
   No analytics, no telemetry.
 - A status feed is declared by `UsageProvider.statusFeed`, NOT added to
@@ -29,6 +38,11 @@ the README rather than silently deviating.
   "local" (`isLocalProvider` — no budget gauge, refresh = rescan), so folding
   a status host in would silently reclassify Codex/Gemini the day they get
   feeds. The privacy card renders it on its own line.
+- The account-identity source is declared by `UsageProvider.accountIdentity`
+  (§10 amendment 2026-08-25, v0.89.0): a LOCAL read-only file read — for
+  Claude, one key of `~/.claude.json` — never a credential store, never a
+  network request, never attached to anything transported. Zero network
+  destinations added; the privacy card renders the path on its own line.
 - No App Sandbox. No entitlements we don't need.
 - Never install or register anything (login items, launch agents) without
   asking the user in-session. Launch-at-login is a user-clicked toggle only.
@@ -1322,6 +1336,60 @@ the README rather than silently deviating.
   pipeline against a localhost feed via the `updateFeedURL` defaults
   override, which forces both the checker and install-mode on in a source
   build.
+
+## Account presence & attribution (v0.89.0)
+
+- Every engine landing point (start, wake, scan pass, fetch) observes "who
+  is signed in" through the provider's `accountIdentity` seam — for Claude,
+  ONE key (`oauthAccount`) of `~/.claude.json`, strictly read-only (spec
+  §10 amendment 2026-08-25). Identity compares by the
+  accountUuid+organizationUuid PAIR (quotas attach to the org); tier/email
+  edits are not boundaries. NEVER the Keychain: the credentials item
+  carries no identity, rewrites per token refresh, and any new read there
+  risks the v0.82.1 consent-prompt regression. Codex/Gemini declare no
+  source; their credential files stay never-read.
+- `AccountPresenceLedger` coalesces observations into epochs in the scoped
+  `account-presence.json` (atomic rewrite like history.json; a transition
+  persists immediately, heartbeats at most every 5 min plus shutdown
+  flush; 15s observation floor collapses start+wake+scan pileups). An
+  OBSERVED sign-out/switch sets `closedAt` and forbids rejoin; a host that
+  merely stopped observing rejoins the same identity, because the gap
+  attributes to it either way.
+- Attribution is a pure function of timestamp (`AccountTimeline
+  .attribute`): inside an epoch exact; an unobserved gap owned only when
+  both edges agree; differing edges ambiguous FOREVER; before the first
+  observation unattributed FOREVER — absent ≠ zero, history is never
+  backfilled by assumption. The join lives entirely in the digest builder
+  over the minute timeline the scan already produces: the scanner and its
+  cache never learn about accounts (no cacheVersion bump), and minute
+  slots bound attribution error the same way they bound window-edge error.
+- Digest (additive, Optional): `LiveState.accountPresence` — current ref,
+  since/observedAt/attributionSince, `distinctAccounts`, current-first
+  today+window rollups per account, reserved `ambiguous`/`unattributed`
+  buckets (nil = no such usage), epochs table (newest 50) — plus
+  `SessionCard.accounts` chronological labels (nil = writer doesn't
+  attribute, [] = attribution ran and named nobody; nil ≠ empty). Labels
+  resolve ONCE in the builder: email, org suffix only on collision
+  (`disambiguatedLabels`); clients never re-derive them.
+- Surfaces auto-show on `distinctAccounts >= 2` and single-account
+  machines look exactly as before: the panel status row splits into the D9
+  two-line block (top Updated / email at caption·secondary, bottom
+  next-in · API / plan at caption2·tertiary, two baseline-aligned
+  full-width HStacks — never side-by-side VStacks), session rows carry
+  "personal → work" labels (hosting: engine's live timeline; client: a
+  label-level timeline rebuilt from the digest's epoch table), and
+  Settings About gains the Account row plus the "Account identity —
+  ~/.claude.json (read-only)" privacy line and never-sent-anywhere note.
+- `usage-cli account`: human summary ("work@example.com · Work Inc · for
+  1 hr · today $4.21"), 15 scalars, `accounts`/`epochs` tables (reserved
+  buckets as their own rows), `--fields`/`--json`; absent card → empty +
+  exit 0, never "no account". Registered in `nouns`, `fieldCatalog`, and
+  the fields-walk's `nounPrefix`.
+- Verify multi-account UI with `--fake-accounts` (a synthetic
+  personal→work switch an hour ago) — the auto-show gate can't be
+  produced on demand on a one-account machine.
+- Deliberately deferred (ledger): TUI/statusline rendering of the labels,
+  heatmap-by-account, an explicit user-initiated "claim history" backfill.
 
 ## Testing
 

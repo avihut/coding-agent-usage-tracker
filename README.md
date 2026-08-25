@@ -135,8 +135,25 @@ in the panel footer; one click downloads the release zip (from
 download, it happens exclusively on that click), verifies its code signature
 and version, swaps the app bundle in place, restarts the background engine,
 and relaunches. Settings → General governs it: check now, automatic checks
-off, or skip a version. A build sitting inside a git worktree never checks —
-its update path is `git pull`. This amends spec §10 (2026-08-23).
+off, or skip a version. A build sitting inside a git checkout polls the same
+anonymous feed — knowing it's behind is half the point — but only informs:
+its update path stays `git pull` and a rebuild, and the app swaps nothing
+(distribution channels, 2026-08-23). This amends spec §10 (2026-08-23).
+
+### One local identity read: which account is signed in
+
+Claude Code's transcripts carry no account identity, so switching accounts
+would silently blend two budgets into one history. The app therefore reads
+one key (`oauthAccount`) of `~/.claude.json` — the file `/login` itself
+maintains — strictly read-only, and keeps a small local ledger of which
+account was signed in when. Usage is attributed against that timeline
+honestly: exactly inside observed stretches, only by agreement across
+unobserved gaps, and never at all for history from before the ledger
+existed — ambiguity is shown as ambiguity, not guessed away. The identity
+never leaves the machine: it is not attached to any request, and this read
+adds no network destination. It is also deliberately NOT the Keychain — no
+new credential reads, so no consent prompts, ever. This amends spec §10
+(2026-08-25).
 
 ## Known risk: undocumented endpoint
 
@@ -158,6 +175,10 @@ change.
 - Never write to the Keychain. Never cache the token in memory or on disk —
   re-read every refresh cycle so Claude Code's own token refresh is picked up.
 - The token is never logged, persisted, put in a URL, or included in any error.
+- No feature may require entering system credentials (Keychain consent, admin
+  authorization) for the app's regular operation — the promptless read above
+  is the standing mechanism. Any narrowly-scoped exception needs its own
+  documented spec §10 amendment reasoning out why no promptless path exists.
 
 ## Build / run
 

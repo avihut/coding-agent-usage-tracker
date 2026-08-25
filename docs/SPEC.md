@@ -272,6 +272,14 @@ Non-negotiable; flag rather than work around:
 
 - No writes to the Keychain, ever. No reads or use of the refresh token — for
   ANY provider's credential store.
+- No consent-prompt regressions (amendment 2026-08-25, user-directed): under
+  no circumstances may a feature require the user to enter system
+  credentials — Keychain consent, admin authorization, TCC dialogs — for the
+  app's REGULAR operation. The v0.82.1 promptless credential path
+  (`/usr/bin/security find-generic-password -w`, the item's own client) is
+  the standing mechanism and must never be replaced with a native read. A
+  very specific dedicated feature MAY warrant an exception, but only with
+  its own amendment here reasoning out why no promptless path exists.
 - Network destinations, exhaustively: `api.anthropic.com` (the Claude
   provider's usage endpoint) and `raw.githubusercontent.com` (the LiteLLM
   pricing feed — plain GET, no credentials attached; amendment 2026-08-13).
@@ -363,6 +371,28 @@ Non-negotiable; flag rather than work around:
   provider one — it is not in any provider's `networkDestinations`, does
   not affect `isLocalProvider`, and appears on the privacy card on its own
   line whenever a channel polls the feed.
+- Account presence (amendment 2026-08-25, v0.89.0, user-directed — "an
+  account presence timeline that can be used for account usage
+  attribution"): the engine may read the active provider's agent's OWN
+  identity record, strictly read-only — for Claude, exactly one key
+  (`oauthAccount`) of `~/.claude.json`, the file `/login` itself rewrites.
+  Observations coalesce into epochs in the app's own provider-scoped
+  `account-presence.json`; the digest carries the attribution: inside an
+  epoch exact, unobserved gaps owned only when both edges agree, ambiguous
+  otherwise and forever, and everything before the first observation
+  permanently unattributed — history is never backfilled by assumption.
+
+  The identity is LOCAL ONLY: never attached to any request, never hashed
+  into anything transported, never written outside the app's own scope.
+  This read adds zero network destinations. It is emphatically NOT the
+  Keychain: the credentials item carries no identity, and reading it any
+  new way risks re-opening the consent-prompt story v0.82.1 closed — an
+  identity source must never touch a credential store. Declared per
+  provider via `UsageProvider.accountIdentity` (Codex/Gemini declare
+  none; their agents' credential files remain never-read per their own
+  amendments above); rendered on the settings privacy card on its own
+  line. Each future provider's identity source is its own amendment
+  naming its file.
 - The token is never logged, persisted, or included in an error surface.
 - No sandbox entitlement, and no request for entitlements we don't need.
 - Don't install or register anything (login items, launch agents) without asking me
