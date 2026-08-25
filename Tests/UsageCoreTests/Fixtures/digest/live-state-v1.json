@@ -1,4 +1,76 @@
 {
+  "accountPresence" : {
+    "accounts" : [
+      {
+        "ref" : {
+          "accountUuid" : "acct-work",
+          "displayName" : "Work Person",
+          "email" : "work@example.com",
+          "label" : "work@example.com",
+          "organizationName" : "Work Inc",
+          "organizationUuid" : "org-work",
+          "tier" : "default_claude_max_5x"
+        },
+        "todayTokens" : 55,
+        "windowTokens" : 55
+      },
+      {
+        "ref" : {
+          "accountUuid" : "acct-primary",
+          "displayName" : "Primary Person",
+          "email" : "primary@example.com",
+          "label" : "primary@example.com",
+          "organizationName" : "Primary's Organization",
+          "organizationUuid" : "org-primary",
+          "tier" : "default_claude_max_20x"
+        },
+        "todayCost" : 0.004,
+        "todayTokens" : 480,
+        "windowCost" : 0.004,
+        "windowTokens" : 480
+      }
+    ],
+    "ambiguous" : {
+      "todayCost" : 0.0004,
+      "todayTokens" : 48,
+      "windowCost" : 0.0004,
+      "windowTokens" : 48
+    },
+    "attributionSince" : "2026-08-16T08:00:00Z",
+    "current" : {
+      "accountUuid" : "acct-work",
+      "displayName" : "Work Person",
+      "email" : "work@example.com",
+      "label" : "work@example.com",
+      "organizationName" : "Work Inc",
+      "organizationUuid" : "org-work",
+      "tier" : "default_claude_max_5x"
+    },
+    "distinctAccounts" : 2,
+    "epochs" : [
+      {
+        "closed" : false,
+        "firstObservedAt" : "2026-08-16T08:00:00Z",
+        "label" : "primary@example.com",
+        "lastObservedAt" : "2026-08-16T10:05:00Z",
+        "organizationName" : "Primary's Organization"
+      },
+      {
+        "closed" : false,
+        "firstObservedAt" : "2026-08-16T11:00:00Z",
+        "label" : "work@example.com",
+        "lastObservedAt" : "2026-08-16T11:58:00Z",
+        "organizationName" : "Work Inc"
+      }
+    ],
+    "observedAt" : "2026-08-16T11:58:00Z",
+    "since" : "2026-08-16T11:00:00Z",
+    "unattributed" : {
+      "todayCost" : 0.0001,
+      "todayTokens" : 12,
+      "windowTokens" : 0
+    }
+  },
   "activity" : {
     "days" : [
       {
@@ -24,9 +96,14 @@
         "dayKey" : "2026-08-16",
         "hours" : [
           {
-            "cost" : 0.004,
+            "cost" : 0.0001,
+            "hour" : 7,
+            "tokens" : 12
+          },
+          {
+            "cost" : 0.0044,
             "hour" : 10,
-            "tokens" : 480
+            "tokens" : 528
           },
           {
             "hour" : 11,
@@ -101,9 +178,14 @@
     "todayCost" : 0.004,
     "todayHours" : [
       {
-        "cost" : 0.004,
+        "cost" : 0.0001,
+        "hour" : 7,
+        "tokens" : 12
+      },
+      {
+        "cost" : 0.0044,
         "hour" : 10,
-        "tokens" : 480
+        "tokens" : 528
       },
       {
         "hour" : 11,
@@ -261,155 +343,155 @@
               "t" : "2026-08-16T09:56:40Z"
             },
             {
-              "percent" : 47.55140186915887,
+              "percent" : 43.63636363636364,
               "t" : "2026-08-16T10:03:20Z"
             },
             {
-              "percent" : 47.55140186915887,
+              "percent" : 43.63636363636364,
               "t" : "2026-08-16T10:10:00Z"
             },
             {
-              "percent" : 47.55140186915887,
+              "percent" : 43.63636363636364,
               "t" : "2026-08-16T10:16:40Z"
             },
             {
-              "percent" : 47.55140186915887,
+              "percent" : 43.63636363636364,
               "t" : "2026-08-16T10:23:20Z"
             },
             {
-              "percent" : 47.55140186915887,
+              "percent" : 43.63636363636364,
               "t" : "2026-08-16T10:30:00Z"
             },
             {
-              "percent" : 47.55140186915887,
+              "percent" : 48,
               "t" : "2026-08-16T10:35:00Z"
             },
             {
-              "percent" : 47.55140186915887,
+              "percent" : 48,
               "t" : "2026-08-16T10:41:40Z"
             },
             {
-              "percent" : 47.55140186915887,
+              "percent" : 48,
               "t" : "2026-08-16T10:48:20Z"
             },
             {
-              "percent" : 47.55140186915887,
+              "percent" : 48,
               "t" : "2026-08-16T10:55:00Z"
             },
             {
-              "percent" : 47.55140186915887,
+              "percent" : 48,
               "t" : "2026-08-16T11:01:40Z"
             },
             {
-              "percent" : 47.55140186915887,
+              "percent" : 48,
               "t" : "2026-08-16T11:08:20Z"
             },
             {
-              "percent" : 47.55140186915887,
+              "percent" : 48,
               "t" : "2026-08-16T11:13:20Z"
             },
             {
-              "percent" : 47.55140186915887,
+              "percent" : 48,
               "t" : "2026-08-16T11:20:00Z"
             },
             {
-              "percent" : 47.55140186915887,
+              "percent" : 48,
               "t" : "2026-08-16T11:26:40Z"
             },
             {
-              "percent" : 47.55140186915887,
+              "percent" : 48,
               "t" : "2026-08-16T11:33:20Z"
             },
             {
-              "percent" : 47.55140186915887,
+              "percent" : 48,
               "t" : "2026-08-16T11:40:00Z"
             },
             {
-              "percent" : 47.55140186915887,
+              "percent" : 48,
               "t" : "2026-08-16T11:46:40Z"
             },
             {
-              "percent" : 47.55140186915887,
+              "percent" : 48,
               "t" : "2026-08-16T11:51:40Z"
             },
             {
-              "percent" : 47.55140186915887,
+              "percent" : 48,
               "t" : "2026-08-16T11:58:20Z"
             },
             {
-              "percent" : 47.55140186915887,
+              "percent" : 48,
               "t" : "2026-08-16T12:05:00Z"
             },
             {
-              "percent" : 47.55140186915887,
+              "percent" : 48,
               "t" : "2026-08-16T12:11:40Z"
             },
             {
-              "percent" : 47.55140186915887,
+              "percent" : 48,
               "t" : "2026-08-16T12:18:20Z"
             },
             {
-              "percent" : 47.55140186915887,
+              "percent" : 48,
               "t" : "2026-08-16T12:25:00Z"
             },
             {
-              "percent" : 47.55140186915887,
+              "percent" : 48,
               "t" : "2026-08-16T12:30:00Z"
             },
             {
-              "percent" : 47.55140186915887,
+              "percent" : 48,
               "t" : "2026-08-16T12:36:40Z"
             },
             {
-              "percent" : 47.55140186915887,
+              "percent" : 48,
               "t" : "2026-08-16T12:43:20Z"
             },
             {
-              "percent" : 47.55140186915887,
+              "percent" : 48,
               "t" : "2026-08-16T12:50:00Z"
             },
             {
-              "percent" : 47.55140186915887,
+              "percent" : 48,
               "t" : "2026-08-16T12:56:40Z"
             },
             {
-              "percent" : 47.55140186915887,
+              "percent" : 48,
               "t" : "2026-08-16T13:03:20Z"
             },
             {
-              "percent" : 47.55140186915887,
+              "percent" : 48,
               "t" : "2026-08-16T13:08:20Z"
             },
             {
-              "percent" : 47.55140186915887,
+              "percent" : 48,
               "t" : "2026-08-16T13:15:00Z"
             },
             {
-              "percent" : 47.55140186915887,
+              "percent" : 48,
               "t" : "2026-08-16T13:21:40Z"
             },
             {
-              "percent" : 47.55140186915887,
+              "percent" : 48,
               "t" : "2026-08-16T13:28:20Z"
             },
             {
-              "percent" : 47.55140186915887,
+              "percent" : 48,
               "t" : "2026-08-16T13:35:00Z"
             },
             {
-              "percent" : 47.55140186915887,
+              "percent" : 48,
               "t" : "2026-08-16T13:41:40Z"
             },
             {
-              "percent" : 47.55140186915887,
+              "percent" : 48,
               "t" : "2026-08-16T13:46:40Z"
             },
             {
-              "percent" : 47.55140186915887,
+              "percent" : 48,
               "t" : "2026-08-16T13:53:20Z"
             },
             {
-              "percent" : 47.55140186915887,
+              "percent" : 48,
               "t" : "2026-08-16T14:00:00Z"
             }
           ]
@@ -520,99 +602,99 @@
               "t" : "2026-08-16T11:26:40Z"
             },
             {
-              "percent" : 5.4485981308411215,
+              "percent" : 5,
               "t" : "2026-08-16T11:33:20Z"
             },
             {
-              "percent" : 5.4485981308411215,
+              "percent" : 5,
               "t" : "2026-08-16T11:40:00Z"
             },
             {
-              "percent" : 5.4485981308411215,
+              "percent" : 5,
               "t" : "2026-08-16T11:46:40Z"
             },
             {
-              "percent" : 5.4485981308411215,
+              "percent" : 5,
               "t" : "2026-08-16T11:51:40Z"
             },
             {
-              "percent" : 5.4485981308411215,
+              "percent" : 5,
               "t" : "2026-08-16T11:58:20Z"
             },
             {
-              "percent" : 5.4485981308411215,
+              "percent" : 5,
               "t" : "2026-08-16T12:05:00Z"
             },
             {
-              "percent" : 5.4485981308411215,
+              "percent" : 5,
               "t" : "2026-08-16T12:11:40Z"
             },
             {
-              "percent" : 5.4485981308411215,
+              "percent" : 5,
               "t" : "2026-08-16T12:18:20Z"
             },
             {
-              "percent" : 5.4485981308411215,
+              "percent" : 5,
               "t" : "2026-08-16T12:25:00Z"
             },
             {
-              "percent" : 5.4485981308411215,
+              "percent" : 5,
               "t" : "2026-08-16T12:30:00Z"
             },
             {
-              "percent" : 5.4485981308411215,
+              "percent" : 5,
               "t" : "2026-08-16T12:36:40Z"
             },
             {
-              "percent" : 5.4485981308411215,
+              "percent" : 5,
               "t" : "2026-08-16T12:43:20Z"
             },
             {
-              "percent" : 5.4485981308411215,
+              "percent" : 5,
               "t" : "2026-08-16T12:50:00Z"
             },
             {
-              "percent" : 5.4485981308411215,
+              "percent" : 5,
               "t" : "2026-08-16T12:56:40Z"
             },
             {
-              "percent" : 5.4485981308411215,
+              "percent" : 5,
               "t" : "2026-08-16T13:03:20Z"
             },
             {
-              "percent" : 5.4485981308411215,
+              "percent" : 5,
               "t" : "2026-08-16T13:08:20Z"
             },
             {
-              "percent" : 5.4485981308411215,
+              "percent" : 5,
               "t" : "2026-08-16T13:15:00Z"
             },
             {
-              "percent" : 5.4485981308411215,
+              "percent" : 5,
               "t" : "2026-08-16T13:21:40Z"
             },
             {
-              "percent" : 5.4485981308411215,
+              "percent" : 5,
               "t" : "2026-08-16T13:28:20Z"
             },
             {
-              "percent" : 5.4485981308411215,
+              "percent" : 5,
               "t" : "2026-08-16T13:35:00Z"
             },
             {
-              "percent" : 5.4485981308411215,
+              "percent" : 5,
               "t" : "2026-08-16T13:41:40Z"
             },
             {
-              "percent" : 5.4485981308411215,
+              "percent" : 5,
               "t" : "2026-08-16T13:46:40Z"
             },
             {
-              "percent" : 5.4485981308411215,
+              "percent" : 5,
               "t" : "2026-08-16T13:53:20Z"
             },
             {
-              "percent" : 5.4485981308411215,
+              "percent" : 5,
               "t" : "2026-08-16T14:00:00Z"
             }
           ]
@@ -655,6 +737,11 @@
           "end" : "2026-08-16T10:02:00Z",
           "exhausted" : false,
           "start" : "2026-08-16T10:00:00Z"
+        },
+        {
+          "end" : "2026-08-16T10:31:00Z",
+          "exhausted" : false,
+          "start" : "2026-08-16T10:30:00Z"
         },
         {
           "end" : "2026-08-16T11:31:00Z",
@@ -832,27 +919,27 @@
               "t" : "2026-08-16T06:56:00Z"
             },
             {
-              "percent" : 0,
+              "percent" : 2.2222222222222223,
               "t" : "2026-08-16T07:28:00Z"
             },
             {
-              "percent" : 0,
+              "percent" : 2.2222222222222223,
               "t" : "2026-08-16T07:52:00Z"
             },
             {
-              "percent" : 0,
+              "percent" : 2.2222222222222223,
               "t" : "2026-08-16T08:24:00Z"
             },
             {
-              "percent" : 0,
+              "percent" : 2.2222222222222223,
               "t" : "2026-08-16T08:56:00Z"
             },
             {
-              "percent" : 0,
+              "percent" : 2.2222222222222223,
               "t" : "2026-08-16T09:28:00Z"
             },
             {
-              "percent" : 0,
+              "percent" : 2.2222222222222223,
               "t" : "2026-08-16T10:00:00Z"
             },
             {
@@ -1071,7 +1158,7 @@
               "t" : "2026-08-16T11:28:00Z"
             },
             {
-              "percent" : 11.458333333333334,
+              "percent" : 10.185185185185185,
               "t" : "2026-08-16T12:00:00Z"
             }
           ]
@@ -1084,9 +1171,19 @@
       ],
       "stretches" : [
         {
+          "end" : "2026-08-16T07:01:00Z",
+          "exhausted" : false,
+          "start" : "2026-08-16T07:00:00Z"
+        },
+        {
           "end" : "2026-08-16T10:02:00Z",
           "exhausted" : false,
           "start" : "2026-08-16T10:00:00Z"
+        },
+        {
+          "end" : "2026-08-16T10:31:00Z",
+          "exhausted" : false,
+          "start" : "2026-08-16T10:30:00Z"
         },
         {
           "end" : "2026-08-16T11:31:00Z",
@@ -1198,6 +1295,10 @@
   },
   "sessions" : [
     {
+      "accounts" : [
+        "primary@example.com",
+        "work@example.com"
+      ],
       "activeSeconds" : 5400,
       "apiCalls" : 40,
       "branch" : "main",
@@ -1223,6 +1324,9 @@
       "tokens" : 9535
     },
     {
+      "accounts" : [
+
+      ],
       "activeSeconds" : 1800,
       "apiCalls" : 3,
       "end" : "2026-08-15T20:30:00Z",

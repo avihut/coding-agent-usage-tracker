@@ -58,6 +58,11 @@ public final class UsageEngine {
     /// This app's newest published release, or nil when no updater runs
     /// (source-managed builds check nothing — see `AppUpdateCard`).
     public private(set) var appUpdate: AppUpdateCard?
+    /// The signed-in-account presence card, rebuilt on every publish; nil
+    /// when the provider declares no identity source, or before the first
+    /// observation. Absent never means "no account" (spec §10 amendment
+    /// 2026-08-25).
+    public private(set) var accountPresence: AccountPresenceCard?
 
     /// The one metered service this instance tracks. Everything
     /// vendor-specific — endpoints, paths, names, links — flows from here.
@@ -96,6 +101,13 @@ public final class UsageEngine {
     /// feed (`Distribution`). App-scoped, so it neither rides the provider
     /// seam nor cares which harness is metered.
     private var updateChecker: UpdateChecker?
+    /// Reads "who is signed in" from the agent's own local record; nil when
+    /// the provider declares none. A plain file read — never the Keychain,
+    /// never the network (spec §10 amendment 2026-08-25).
+    private let identitySource: (any AccountIdentitySource)?
+    /// The observed-epochs presence ledger; nil exactly when
+    /// `identitySource` is. Engine-confined single writer, like `history`.
+    private var presence: AccountPresenceLedger?
     private var lastActivityScan: Date?
     /// Single-flight for transcript scans: a window-open force-scan must not
     /// overlap an FSEvents-triggered one — two concurrent scans race their
@@ -148,6 +160,9 @@ public final class UsageEngine {
             ?? UsageService(provider: provider, cache: UsageCache(directory: caches))
         self.history = UsageHistory(directory: support)
         self.windowLedger = WindowLedger(directory: support)
+        self.identitySource = provider.accountIdentity
+        self.presence = provider.accountIdentity == nil
+            ? nil : AccountPresenceLedger(directory: support)
         self.pricingService = PricingService(
             cacheDirectory: support, fallback: provider.bundledRates,
             selector: provider.pricingSelector)
@@ -209,6 +224,10 @@ public final class UsageEngine {
             updateChecker = checker
             checker.start()
         }
+        // Who is signed in, before anything scans or publishes: the first
+        // scan's attribution must run against a timeline that already
+        // includes the present.
+        observeAccountIdentity()
         refresh(.launch)
         // A seeded gate can deny that launch poll (the previous host
         // fetched moments ago — a takeover inside the floor; isRefreshing
@@ -230,6 +249,8 @@ public final class UsageEngine {
     public func shutdown() {
         guard !isShutDown else { return }
         isShutDown = true
+        // The open epoch's edge must not lose its last heartbeat window.
+        presence?.flush()
         scheduler.stop()
         watcher = nil
         statusPoller?.stop()
@@ -245,9 +266,29 @@ public final class UsageEngine {
     /// status card from before the lid closed is stale in exactly the same
     /// way, so both refresh here.
     public func noteWake() {
+        // A lid-open is the classic moment a login changed elsewhere-in-time
+        // (the user was away); look before the wake poll publishes anything.
+        observeAccountIdentity()
         refresh(.wake)
         statusPoller?.pollNow()
         updateChecker?.pokeIfStale()
+    }
+
+    /// One presence observation — rides every landing point that could
+    /// follow a login change: engine start, wake, each scan pass, each
+    /// fetch. A transition is itself a landing point: the digest
+    /// republishes immediately, so surfaces learn about a switch without
+    /// waiting for usage to move. The 15s floor keeps a start+wake+scan
+    /// pileup at one file read.
+    private func observeAccountIdentity(now: Date = Date()) {
+        guard let identitySource, var ledger = presence else { return }
+        if let last = ledger.observedAt,
+           now.timeIntervalSince(last) < AccountPresenceLedger.observationFloor {
+            return
+        }
+        let changed = ledger.observe(identitySource.currentIdentity(), at: now)
+        presence = ledger
+        if changed { publishState(now: now) }
     }
 
     /// An out-of-band status read — the control socket's `refreshStatus`,
@@ -267,6 +308,7 @@ public final class UsageEngine {
     public func refresh(_ reason: RefreshReason) {
         guard !isShutDown else { return }
         let now = Date()
+        observeAccountIdentity(now: now)
         // Automatic triggers sit out an active 429 backoff. A human clicking
         // refresh may try early — another 429 just extends the backoff.
         if reason != .manual, cadence.isBackingOff(now: now) {
@@ -346,7 +388,11 @@ public final class UsageEngine {
             systemAccent: systemAccent,
             serviceStatus: serviceStatus,
             appUpdate: appUpdate,
+            presence: presence.map {
+                AccountPresenceInput(epochs: $0.epochs, observedAt: $0.observedAt)
+            },
             now: now)
+        accountPresence = digest.accountPresence
         publisher.publish(digest)
     }
 
@@ -452,6 +498,10 @@ public final class UsageEngine {
         guard !isShutDown, !isScanningActivity, let source = localActivity else { return }
         if !force, let last = lastActivityScan, Date().timeIntervalSince(last) < 60 { return }
         lastActivityScan = Date()
+        // Observation rides the scan pass by design: the lines this scan
+        // ingests are attributed against a timeline that includes right now,
+        // so attribution is settled the first time it's computed.
+        observeAccountIdentity()
         isScanningActivity = true
         Task.detached(priority: .utility) { [weak self] in
             let scan = source.scanTranscripts(now: Date())

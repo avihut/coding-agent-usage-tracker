@@ -23,6 +23,11 @@ public struct ClaudeProvider: UsageProvider {
     public let statusFeed: StatusFeed? = .statuspage(
         base: URL(string: "https://status.claude.com")!,
         pageURL: URL(string: "https://status.claude.com")!)
+    /// Claude Code's own identity record (spec §10 amendment 2026-08-25):
+    /// `oauthAccount` in ~/.claude.json, read-only. Never the Keychain.
+    public var accountIdentity: (any AccountIdentitySource)? {
+        ClaudeAccountIdentitySource()
+    }
     public let credentials: CredentialChain
     private let client: UsageClient
 

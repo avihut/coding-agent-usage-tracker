@@ -43,6 +43,13 @@ public protocol UsageProvider: Sendable {
     /// card renders this host on its own line instead. Adding one is a spec
     /// §10 amendment, same as any other destination.
     var statusFeed: StatusFeed? { get }
+    /// Where the agent records which account is signed in, when the
+    /// provider can read one — the account-presence seam (spec §10
+    /// amendment 2026-08-25). Nil means the provider tracks no accounts
+    /// and every presence surface simply doesn't exist for it. Sources are
+    /// local-only, read-only, and never credential stores; the privacy
+    /// card renders the source's path on its own line.
+    var accountIdentity: (any AccountIdentitySource)? { get }
 
     /// Read-only places the agent's access token can be found. Read fresh
     /// every refresh cycle, never cached, never written back (spec §5/§10).
@@ -86,6 +93,8 @@ extension UsageProvider {
     public var preferences: [ProviderPreference] { [] }
     /// Opt-in: a provider without a declared feed tracks no status.
     public var statusFeed: StatusFeed? { nil }
+    /// Opt-in: a provider without a declared source tracks no accounts.
+    public var accountIdentity: (any AccountIdentitySource)? { nil }
 }
 
 /// Where a provider's service health can be read. One case today — the

@@ -448,17 +448,21 @@ extension DigestQueryTests {
         let rows = out.stdout.components(separatedBy: "\n")
         #expect(rows[0] == "start\tend\texhausted")
         #expect(rows[1] == "2026-08-16T10:00:00Z\t2026-08-16T10:02:00Z\tfalse")
-        #expect(rows[2] == "2026-08-16T11:30:00Z\t2026-08-16T11:31:00Z\tfalse")
+        #expect(rows[2] == "2026-08-16T10:30:00Z\t2026-08-16T10:31:00Z\tfalse")
+        #expect(rows[3] == "2026-08-16T11:30:00Z\t2026-08-16T11:31:00Z\tfalse")
     }
 
     @Test func modelSeriesReportsEachModelsFinalWindowShare() {
-        // The fixture's exact 17-significant-digit curve points, verified
-        // independently through JSONEncoder before being pinned here — not
-        // re-derived from the implementation's own output.
+        // Hand-derived from the fixture, not from the implementation's own
+        // output: the session window holds 528 Fable + 55 mystery tokens
+        // (583 total) against the meter's 53% — 53×528/583 = 48 exactly,
+        // 53×55/583 = 5.
         let out = run(["limit", "session", "models"])
-        #expect(out.stdout == "Fable 5\t47.55140186915887\nmystery-model\t5.4485981308411215")
+        #expect(out.stdout == "Fable 5\t48\nmystery-model\t5")
+        // The weekly meter's trailing 24h adds the 07:00 and 10:30 slots to
+        // Fable (540 total): mystery = 100×55/540.
         let weekly = run(["limit", "weekly_all", "models"])
-        #expect(weekly.stdout == "Fable 5\t100\nmystery-model\t11.458333333333334")
+        #expect(weekly.stdout == "Fable 5\t100\nmystery-model\t10.185185185185185")
     }
 
     @Test func modelSeriesJSONCarriesFullCurves() throws {
@@ -640,8 +644,9 @@ extension DigestQueryTests {
         let today = run(["activity", "today", "hours", "--raw", "--header"])
         let rows = today.stdout.components(separatedBy: "\n")
         #expect(rows[0] == "hour\ttokens\tcost")
-        #expect(rows[1] == "10\t480\t0.004")
-        #expect(rows[2] == "11\t55\t")
+        #expect(rows[1] == "7\t12\t0.0001")
+        #expect(rows[2] == "10\t528\t0.0044")
+        #expect(rows[3] == "11\t55\t")
         // The fixture's hourDays only covers 2026-08-16 — yesterday has
         // none, which is a genuine "beyond retention" no-match, not zero.
         let yesterday = run(["activity", "yesterday", "hours"])
@@ -1008,8 +1013,10 @@ extension DigestQueryTests {
         #expect(viaLimit.stdout == viaGet.stdout)
         #expect(viaLimit.stdout == "0.4")
 
+        // Fable's plateau after the 10:01 slot: 53×480/583 of the meter's
+        // percent — hand-derived, not read back from the implementation.
         let viaLimitCurvePoint = run(["get", "meters[session].modelSeries.0.points.10.percent"])
-        #expect(viaLimitCurvePoint.stdout == "47.55140186915887")
+        #expect(viaLimitCurvePoint.stdout == "43.63636363636364")
 
         let viaCost = run(["cost", "30d", "--raw"])
         let viaGetCost = run(["get", "activity.days.1.cost"])

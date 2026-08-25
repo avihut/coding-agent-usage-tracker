@@ -52,11 +52,17 @@ public struct LiveState: Codable, Sendable, Equatable {
     /// source-managed build, no releases, or a digest predating 0.87.0.
     /// Absent is never "up to date".
     public let appUpdate: AppUpdateCard?
+    /// Which account is signed in, since when, and the usage split across
+    /// observed accounts (spec §10 amendment 2026-08-25). Nil means this
+    /// engine tracks no accounts — the provider declares no identity
+    /// source, or the digest predates 0.89.0. ABSENT IS NEVER "no account".
+    public let accountPresence: AccountPresenceCard?
 
     public init(
         engine: EngineStatus, meters: [LiveMeter], menuBar: [SegmentStatus],
         models: [ModelRow], activity: ActivityRollup, sessions: [SessionCard] = [],
-        serviceStatus: ServiceStatusCard? = nil, appUpdate: AppUpdateCard? = nil
+        serviceStatus: ServiceStatusCard? = nil, appUpdate: AppUpdateCard? = nil,
+        accountPresence: AccountPresenceCard? = nil
     ) {
         self.schemaVersion = Self.schemaVersion
         self.sessionsCap = LiveStateBuilder.sessionsCap
@@ -68,6 +74,7 @@ public struct LiveState: Codable, Sendable, Equatable {
         self.sessions = sessions
         self.serviceStatus = serviceStatus
         self.appUpdate = appUpdate
+        self.accountPresence = accountPresence
     }
 
     /// `<App Support>/<bundleID>/live-state.json` — the bundle root, above
@@ -322,11 +329,18 @@ public struct SessionCard: Codable, Sendable, Equatable, Identifiable {
     /// Ledger colors of the models this session used, heaviest first — the
     /// shortlist's model dots.
     public let modelColors: [RGBColor]
+    /// The session's account labels, chronological (D8): usually one,
+    /// both when the session crossed a `/login` switch. Empty = attribution
+    /// ran and named nobody (pre-tracking history, ambiguous spans). Nil =
+    /// the WRITER doesn't attribute — a digest predating 0.89.0, or an
+    /// engine tracking no accounts. Empty and nil mean different things.
+    public let accounts: [String]?
 
     public init(
         id: String, title: String, project: String?, branch: String?,
         startedAt: Date, end: Date?, activeSeconds: TimeInterval, cost: Double?,
-        tokens: Int, prompts: Int, apiCalls: Int, modelColors: [RGBColor]
+        tokens: Int, prompts: Int, apiCalls: Int, modelColors: [RGBColor],
+        accounts: [String]? = nil
     ) {
         self.id = id
         self.title = title
@@ -340,6 +354,7 @@ public struct SessionCard: Codable, Sendable, Equatable, Identifiable {
         self.prompts = prompts
         self.apiCalls = apiCalls
         self.modelColors = modelColors
+        self.accounts = accounts
     }
 }
 
@@ -630,6 +645,10 @@ public enum LiveStateBuilder {
         serviceStatus: ServiceStatusCard? = nil,
         /// The update checker's latest card, or nil when no updater runs.
         appUpdate: AppUpdateCard? = nil,
+        /// The presence ledger's raw state, or nil when nothing tracks
+        /// accounts. Every derivation (timeline, rollups, labels, session
+        /// account lists) happens here — the one place the join lives.
+        presence: AccountPresenceInput? = nil,
         now: Date,
         calendar: Calendar = .current,
         locale: Locale = .current
@@ -762,13 +781,20 @@ public enum LiveStateBuilder {
             modelDays: modelDays,
             hourDays: hourDays)
 
+        let presenceTimeline = presence.map { AccountTimeline(epochs: $0.epochs) }
         return LiveState(
             engine: engine, meters: meters, menuBar: menuBar, models: models,
             activity: activityRollup,
             sessions: sessionCards(
                 sessions, pricing: pricing, catalog: catalog,
-                colorLedger: colorLedger, accent: accent),
-            serviceStatus: serviceStatus, appUpdate: appUpdate)
+                colorLedger: colorLedger, accent: accent,
+                timeline: presenceTimeline),
+            serviceStatus: serviceStatus, appUpdate: appUpdate,
+            accountPresence: presence.flatMap {
+                accountPresenceCard(
+                    input: $0, slots: timeline, meters: snapshot?.meters ?? [],
+                    pricing: pricing, calendar: calendar, now: now)
+            })
     }
 
     // MARK: - Meters
@@ -852,7 +878,8 @@ public enum LiveStateBuilder {
     /// touched, and only to throw the path away.
     static func sessionCards(
         _ sessions: [SessionSummary], pricing: PricingTable, catalog: ModelCatalog,
-        colorLedger: ModelColorLedger, accent: RGBColor
+        colorLedger: ModelColorLedger, accent: RGBColor,
+        timeline: AccountTimeline? = nil
     ) -> [SessionCard] {
         sessions
             .sorted { $0.end > $1.end }
@@ -888,7 +915,8 @@ public enum LiveStateBuilder {
                             ?? (hue: 0, shade: 0)
                         return ModelColorMath.rgb(
                             hueSlot: slots.hue, shadeSlot: slots.shade, accent: accent)
-                    })
+                    },
+                    accounts: timeline.map { sessionAccountLabels(session, timeline: $0) })
             }
     }
 

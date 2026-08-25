@@ -85,12 +85,21 @@ struct LiveStateTests {
                 resets: ["Session (5h)": date("2026-08-16T14:00:00Z")]),
         ]
         let timeline = [
+            // 07:00 predates the first presence observation (unattributed);
+            // 10:30 sits in the gap between the two accounts' epochs
+            // (ambiguous) — the golden exercises every attribution arm.
+            TokenSlot(
+                t: date("2026-08-16T07:00:00Z"), model: "claude-fable-5",
+                tally: TokenTally(input: 10, output: 2)),
             TokenSlot(
                 t: date("2026-08-16T10:00:00Z"), model: "claude-fable-5",
                 tally: TokenTally(input: 100, output: 20)),
             TokenSlot(
                 t: date("2026-08-16T10:01:00Z"), model: "claude-fable-5",
                 tally: TokenTally(input: 300, output: 60)),
+            TokenSlot(
+                t: date("2026-08-16T10:30:00Z"), model: "claude-fable-5",
+                tally: TokenTally(input: 40, output: 8)),
             TokenSlot(
                 t: date("2026-08-16T11:30:00Z"), model: "mystery-model",
                 tally: TokenTally(input: 50, output: 5)),
@@ -158,9 +167,37 @@ struct LiveStateTests {
             systemAccent: SystemAccentPalette.color(appleAccentColor: 4),
             serviceStatus: fixtureServiceStatus,
             appUpdate: fixtureAppUpdate,
+            presence: fixturePresence,
             now: now,
             calendar: utc,
             locale: posix)
+    }
+
+    /// Two accounts around a mid-morning switch, the second one open — with
+    /// the slots above, every attribution arm lands in the golden: exact
+    /// epochs, a differing-edge gap, and pre-tracking history. session-a
+    /// spans the switch (two labels); session-b predates tracking (empty).
+    private var fixturePresence: AccountPresenceInput {
+        AccountPresenceInput(
+            epochs: [
+                AccountEpoch(
+                    account: AccountIdentity(
+                        accountUuid: "acct-primary", organizationUuid: "org-primary",
+                        email: "primary@example.com", displayName: "Primary Person",
+                        organizationName: "Primary's Organization",
+                        tier: "default_claude_max_20x"),
+                    firstObservedAt: date("2026-08-16T08:00:00Z"),
+                    lastObservedAt: date("2026-08-16T10:05:00Z")),
+                AccountEpoch(
+                    account: AccountIdentity(
+                        accountUuid: "acct-work", organizationUuid: "org-work",
+                        email: "work@example.com", displayName: "Work Person",
+                        organizationName: "Work Inc",
+                        tier: "default_claude_max_5x"),
+                    firstObservedAt: date("2026-08-16T11:00:00Z"),
+                    lastObservedAt: date("2026-08-16T11:58:00Z")),
+            ],
+            observedAt: date("2026-08-16T11:58:00Z"))
     }
 
     /// A card in its LOUD state — a release ahead of the writer, with the
@@ -329,9 +366,10 @@ struct LiveStateTests {
         #expect(session.series.first?.percent == 91)
         #expect(session.series.contains { $0.percent == 0 })
         #expect(session.series.last?.percent == 53)
-        // One minute-gapped pair coalesces; the 11:30 slot stitches in
-        // within the 900s grace? No — 89 minutes apart: two stretches.
-        #expect(session.stretches.count == 2)
+        // The minute-gapped pair coalesces; 10:30 and 11:30 each sit past
+        // the 900s grace from their neighbors: three stretches. (07:00
+        // predates the window and never enters this meter's audit.)
+        #expect(session.stretches.count == 3)
         #expect(session.stretches.allSatisfy { !$0.exhausted })
     }
 
@@ -357,10 +395,10 @@ struct LiveStateTests {
         #expect(state.activity.timeZone == "GMT")
         #expect(state.activity.todayTokens == 535)
         #expect(state.activity.todayPrompts == 2)
-        #expect(state.activity.todayHours.map(\.hour) == [10, 11])
-        #expect(state.activity.todayHours[0].tokens == 480)
+        #expect(state.activity.todayHours.map(\.hour) == [7, 10, 11])
+        #expect(state.activity.todayHours[1].tokens == 528)
         // The mystery-model hour carries tokens but no priceable cost.
-        #expect(state.activity.todayHours[1].cost == nil)
+        #expect(state.activity.todayHours[2].cost == nil)
         #expect(state.activity.modelDays.map(\.dayKey) == ["2026-08-15", "2026-08-16"])
         #expect(state.activity.days.count == 3)
     }
@@ -430,6 +468,68 @@ struct LiveStateTests {
         object.removeValue(forKey: "appUpdate")
         let data = try JSONSerialization.data(withJSONObject: object)
         #expect(try LiveState.decoder().decode(LiveState.self, from: data).appUpdate == nil)
+    }
+
+    /// The account-presence card and the session labels: the whole join —
+    /// identity, current-first rollups, the reserved buckets, and both
+    /// session-list arms (crossing the switch; predating tracking).
+    @Test("account presence splits today and the window, honestly bucketed")
+    func accountPresence() throws {
+        let state = buildFixture()
+        let card = try #require(state.accountPresence)
+
+        #expect(card.current?.label == "work@example.com")
+        #expect(card.current?.tier == "default_claude_max_5x")
+        #expect(card.since == date("2026-08-16T11:00:00Z"))
+        #expect(card.observedAt == date("2026-08-16T11:58:00Z"))
+        #expect(card.attributionSince == date("2026-08-16T08:00:00Z"))
+        #expect(card.distinctAccounts == 2)
+
+        // Current account leads even though the other one out-spent it.
+        #expect(card.accounts.map(\.ref?.label) == [
+            "work@example.com", "primary@example.com",
+        ])
+        let work = card.accounts[0], primary = card.accounts[1]
+        #expect(work.todayTokens == 55)
+        // Its only model is unpriced — absent, never 0.
+        #expect(work.todayCost == nil)
+        #expect(work.windowTokens == 55)
+        #expect(primary.todayTokens == 480)
+        #expect(primary.todayCost != nil)
+        #expect(primary.windowTokens == 480)
+
+        // The 10:30 slot sits between the epochs' differing edges.
+        let ambiguous = try #require(card.ambiguous)
+        #expect(ambiguous.ref == nil)
+        #expect(ambiguous.todayTokens == 48)
+        #expect(ambiguous.windowTokens == 48)
+        // The 07:00 slot predates tracking: today yes, window (09:00→) no —
+        // and that zero is a real zero, the window being known.
+        let unattributed = try #require(card.unattributed)
+        #expect(unattributed.todayTokens == 12)
+        #expect(unattributed.windowTokens == 0)
+
+        #expect(card.epochs.map(\.label) == [
+            "primary@example.com", "work@example.com",
+        ])
+        #expect(card.epochs.map(\.closed) == [false, false])
+
+        // session-a spans the switch; session-b predates tracking entirely
+        // (empty ≠ nil: attribution RAN and named nobody).
+        #expect(state.sessions.first?.accounts == [
+            "primary@example.com", "work@example.com",
+        ])
+        #expect(state.sessions.last?.accounts == [])
+
+        // A pre-0.89.0 digest has no card and no session labels — nil,
+        // never "no account".
+        var object = try #require(
+            try JSONSerialization.jsonObject(
+                with: try LiveState.encoder().encode(state)) as? [String: Any])
+        object.removeValue(forKey: "accountPresence")
+        let data = try JSONSerialization.data(withJSONObject: object)
+        let revived = try LiveState.decoder().decode(LiveState.self, from: data)
+        #expect(revived.accountPresence == nil)
     }
 
     @Test("series thinning caps points and keeps both endpoints")

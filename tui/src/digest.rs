@@ -40,6 +40,12 @@ pub struct LiveState {
     /// than 0.87.0) — absent is never "up to date".
     #[serde(default)]
     pub app_update: Option<AppUpdateCard>,
+    /// Which account is signed in and how usage splits across observed
+    /// accounts. `None` means this engine tracks no accounts (no identity
+    /// source declared, or a digest older than 0.89.0) — ABSENT IS NEVER
+    /// "no account".
+    #[serde(default)]
+    pub account_presence: Option<AccountPresenceCard>,
 }
 
 /// Mirror of `AppUpdateCard` — the newest GitHub release the engine host
@@ -66,6 +72,92 @@ pub struct AppUpdateCard {
     pub checked_at: OffsetDateTime,
     /// Precomputed by the WRITER against its own version.
     pub update_available: bool,
+}
+
+/// Mirror of `AccountPresenceCard` — who is signed in, since when, and the
+/// usage split across observed accounts (spec §10 amendment 2026-08-25).
+/// Inside the card absence keeps its meaning: a `None` cost is unpriceable,
+/// a `None` bucket held no usage, and `attribution_since` bounds what can
+/// ever be labeled.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountPresenceCard {
+    /// The signed-in account; `None` while signed out.
+    #[serde(default)]
+    pub current: Option<AccountRef>,
+    #[serde(with = "time::serde::rfc3339::option", default)]
+    pub since: Option<OffsetDateTime>,
+    #[serde(with = "time::serde::rfc3339")]
+    pub observed_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339::option", default)]
+    pub attribution_since: Option<OffsetDateTime>,
+    /// Surfaces auto-show account chrome only from 2 up.
+    pub distinct_accounts: i64,
+    /// Current account first, then heaviest today.
+    #[serde(default)]
+    pub accounts: Vec<AccountUsage>,
+    /// Usage inside unobserved gaps whose edges disagree — its own bucket,
+    /// never split by guesswork.
+    #[serde(default)]
+    pub ambiguous: Option<AccountUsage>,
+    /// Usage from before the first observation ever.
+    #[serde(default)]
+    pub unattributed: Option<AccountUsage>,
+    /// Oldest first, bounded to the newest 50.
+    #[serde(default)]
+    pub epochs: Vec<AccountEpochCard>,
+}
+
+/// Mirror of `AccountRef`. `label` arrives resolved (email, org suffix only
+/// on collision) — a renderer never re-derives it.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountRef {
+    pub label: String,
+    pub account_uuid: String,
+    #[serde(default)]
+    pub organization_uuid: Option<String>,
+    #[serde(default)]
+    pub email: Option<String>,
+    #[serde(default)]
+    pub display_name: Option<String>,
+    #[serde(default)]
+    pub organization_name: Option<String>,
+    #[serde(default)]
+    pub tier: Option<String>,
+}
+
+/// Mirror of `AccountUsage` — one row of the split. `ref` is `None` exactly
+/// for the reserved ambiguous/unattributed buckets.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountUsage {
+    #[serde(default)]
+    pub r#ref: Option<AccountRef>,
+    pub today_tokens: i64,
+    /// None = nothing priceable — absent, never 0.
+    #[serde(default)]
+    pub today_cost: Option<f64>,
+    /// None when no current limit window is known.
+    #[serde(default)]
+    pub window_tokens: Option<i64>,
+    #[serde(default)]
+    pub window_cost: Option<f64>,
+}
+
+/// Mirror of `AccountEpochCard`. `closed` distinguishes an OBSERVED ending
+/// (sign-out, switch) from observation simply stopping.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountEpochCard {
+    pub label: String,
+    #[serde(default)]
+    pub organization_name: Option<String>,
+    #[serde(with = "time::serde::rfc3339")]
+    pub first_observed_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339")]
+    pub last_observed_at: OffsetDateTime,
+    pub closed: bool,
 }
 
 /// Mirror of `ServiceStatusCard` — what the provider's own status page says,
@@ -197,6 +289,12 @@ pub struct SessionCard {
     pub prompts: i64,
     pub api_calls: i64,
     pub model_colors: Vec<Rgb>,
+    /// Chronological account labels (usually one; both when the session
+    /// crossed a `/login` switch). `None` = the writer doesn't attribute
+    /// (digest older than 0.89.0); `Some(vec![])` = attribution ran and
+    /// named nobody. None ≠ empty.
+    #[serde(default)]
+    pub accounts: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -527,10 +625,57 @@ mod tests {
         assert_eq!(session.reset_caption.as_deref(), Some("resets in 2h"));
         assert!(session.risk.is_some());
         assert!(!session.series.is_empty());
-        assert_eq!(session.stretches.len(), 2);
+        assert_eq!(session.stretches.len(), 3);
         let forecast = session.forecast.as_ref().unwrap();
         assert_eq!(forecast.verdict, "green");
         assert_eq!(forecast.projected_at_reset, Some(78));
+    }
+
+    /// The account-presence card, whole: identity, current-first rollups,
+    /// both reserved buckets, the epoch table, and both session-label arms.
+    #[test]
+    fn account_presence_arrives_bucketed() {
+        let state = LiveState::parse(&golden()).unwrap();
+        let card = state
+            .account_presence
+            .as_ref()
+            .expect("golden carries accountPresence");
+        assert_eq!(
+            card.current.as_ref().map(|c| c.label.as_str()),
+            Some("work@example.com")
+        );
+        assert_eq!(card.distinct_accounts, 2);
+        assert!(card.since.is_some());
+        assert!(card.attribution_since.is_some());
+        let labels: Vec<_> = card
+            .accounts
+            .iter()
+            .map(|a| a.r#ref.as_ref().map(|r| r.label.as_str()))
+            .collect();
+        assert_eq!(
+            labels,
+            vec![Some("work@example.com"), Some("primary@example.com")]
+        );
+        // The current account's only model is unpriced: tokens with no cost.
+        assert_eq!(card.accounts[0].today_tokens, 55);
+        assert!(card.accounts[0].today_cost.is_none());
+        assert!(card.accounts[1].today_cost.is_some());
+        // Reserved buckets carry no ref — and honest zeros where known.
+        let ambiguous = card.ambiguous.as_ref().expect("ambiguous bucket");
+        assert!(ambiguous.r#ref.is_none());
+        assert_eq!(ambiguous.today_tokens, 48);
+        let unattributed = card.unattributed.as_ref().expect("unattributed bucket");
+        assert_eq!(unattributed.today_tokens, 12);
+        assert_eq!(unattributed.window_tokens, Some(0));
+        assert_eq!(card.epochs.len(), 2);
+        assert!(card.epochs.iter().all(|e| !e.closed));
+        // session-a crossed the switch; session-b predates tracking —
+        // Some(empty), which is NOT the same as None.
+        assert_eq!(
+            state.sessions[0].accounts.as_deref(),
+            Some(["primary@example.com".to_string(), "work@example.com".to_string()].as_slice())
+        );
+        assert_eq!(state.sessions[1].accounts.as_deref(), Some([].as_slice()));
     }
 
     /// Additive evolution: a reader must survive fields it has never heard
