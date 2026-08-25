@@ -63,6 +63,10 @@ public final class UsageEngine {
     /// observation. Absent never means "no account" (spec §10 amendment
     /// 2026-08-25).
     public private(set) var accountPresence: AccountPresenceCard?
+    /// The attribution timeline over the observed epochs — the sessions
+    /// sidebar labels its rows against this. Nil when nothing tracks
+    /// accounts.
+    public var presenceTimeline: AccountTimeline? { presence?.timeline }
 
     /// The one metered service this instance tracks. Everything
     /// vendor-specific — endpoints, paths, names, links — flows from here.

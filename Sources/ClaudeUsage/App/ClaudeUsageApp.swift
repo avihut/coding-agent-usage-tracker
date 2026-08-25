@@ -53,6 +53,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let fake = Self.launchFakeChannel() {
             registry.activeStore.installFakeDistribution(fake)
         }
+        // `--fake-accounts` installs a two-account presence card: the D9
+        // two-line status row, the Settings account rows, and the session
+        // labels auto-show only once a SECOND identity has been observed,
+        // which a single-account machine can't produce on demand.
+        if let fake = Self.launchFakeAccounts() {
+            registry.activeStore.installFakeAccountPresence(fake)
+        }
         // Verification hatches: `ClaudeUsage --settings [--pane-cost]` /
         // `--panel` open UI straight away (the ⋯ menu can't be scripted,
         // and AX row selection can't drive the sidebar); `--provider <id>`
@@ -118,6 +125,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         default:
             return nil
         }
+    }
+
+    /// Builds the `--fake-accounts` card: a personal account switched to a
+    /// work account an hour ago, so recent sessions land in the second
+    /// epoch and one spanning the switch shows both labels.
+    private static func launchFakeAccounts() -> AccountPresenceCard? {
+        guard CommandLine.arguments.contains("--fake-accounts") else { return nil }
+        let now = Date()
+        let personal = AccountRef(
+            label: "personal@example.com", accountUuid: "fake-personal",
+            organizationUuid: nil, email: "personal@example.com",
+            displayName: "Personal Person", organizationName: nil,
+            tier: "default_claude_max_20x")
+        let work = AccountRef(
+            label: "work@example.com", accountUuid: "fake-work",
+            organizationUuid: nil, email: "work@example.com",
+            displayName: "Work Person", organizationName: "Work Inc",
+            tier: "default_claude_max_5x")
+        return AccountPresenceCard(
+            current: work,
+            since: now.addingTimeInterval(-3_600),
+            observedAt: now,
+            attributionSince: now.addingTimeInterval(-14 * 86_400),
+            distinctAccounts: 2,
+            accounts: [
+                AccountUsage(
+                    ref: work, todayTokens: 1_234_567, todayCost: 4.21,
+                    windowTokens: 456_789, windowCost: 1.68),
+                AccountUsage(
+                    ref: personal, todayTokens: 8_901_234, todayCost: 31.75,
+                    windowTokens: 0, windowCost: nil),
+            ],
+            ambiguous: nil,
+            unattributed: nil,
+            epochs: [
+                AccountEpochCard(
+                    label: "personal@example.com", organizationName: nil,
+                    firstObservedAt: now.addingTimeInterval(-14 * 86_400),
+                    lastObservedAt: now.addingTimeInterval(-3_600), closed: true),
+                AccountEpochCard(
+                    label: "work@example.com", organizationName: "Work Inc",
+                    firstObservedAt: now.addingTimeInterval(-3_600),
+                    lastObservedAt: now, closed: false),
+            ])
     }
 
     /// Builds the `--fake-status` card. The copy is the real 2026-08-18

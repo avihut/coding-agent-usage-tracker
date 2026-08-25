@@ -19,6 +19,11 @@ struct SessionRow: View {
     /// so comparing along the sort never requires reading the fine print;
     /// surfaces without an ordering (the shortlist) default to cost.
     var sortKey: SessionSortKey = .recency
+    /// Chronological account labels ("personal → work" when the session
+    /// crossed a switch). Surfaces pass them only once a SECOND identity
+    /// has ever been observed — one account everywhere would say nothing.
+    /// Nil or empty renders nothing.
+    var accounts: [String]? = nil
     var isEditingTitle = false
     var onBeginRename: (() -> Void)? = nil
     var onCommitRename: ((String) -> Void)? = nil
@@ -61,6 +66,14 @@ struct SessionRow: View {
                     : "\(TokenFormat.compact(session.totalTokens)) tokens")
                 Text("\(plural(session.prompts, "prompt")) · \(plural(session.apiCalls, "call"))")
                 Spacer(minLength: 0)
+                if let accounts, !accounts.isEmpty {
+                    Text(accounts.joined(separator: " → "))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .help(accounts.count > 1
+                            ? "This session crossed an account switch"
+                            : "Account this session billed to")
+                }
                 if session.kind == .background {
                     Text("background")
                         .font(.caption2)

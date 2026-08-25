@@ -328,6 +328,14 @@ struct GeneralSettingsPane: View {
             }
             SettingsCard("About") {
                 infoRow("Version", "v\(AppIdentity.version)")
+                // Identity before inventory: whose usage this Mac is
+                // metering, from the presence ledger (spec §10, amendment
+                // 2026-08-25). Absent means nothing tracks accounts — the
+                // row simply doesn't exist, never a guess.
+                if let presence = store.accountPresence {
+                    Divider()
+                    infoRow("Account", accountLine(presence))
+                }
                 Divider()
                 infoRow(
                     "Network destinations",
@@ -349,13 +357,23 @@ struct GeneralSettingsPane: View {
                     Divider()
                     infoRow("Update check", "api.github.com")
                 }
+                // The identity read is local and passive, but it's a read
+                // all the same — named here so the privacy card stays the
+                // complete inventory (spec §10, amendment 2026-08-25).
+                if let identity = store.provider.accountIdentity {
+                    Divider()
+                    infoRow("Account identity", "\(identity.displayPath) (read-only)")
+                }
                 note(
                     (store.isLocalProvider
                         ? "Everything comes from this Mac's local \(store.provider.agentName) session files, read-only — including the limit percentages \(store.provider.agentName) itself records. Nothing is fetched from \(store.provider.serviceName). No analytics, no telemetry."
                         : "Usage comes from \(store.provider.serviceName)'s own usage endpoint; activity and tokens from this Mac's local \(store.provider.agentName) transcripts, read-only. No analytics, no telemetry.")
                         + (store.provider.statusFeed == nil
                             ? ""
-                            : " The status feed is \(store.provider.serviceName)'s public status page, read with a plain request carrying no sign-in, no cookies, and nothing about you."))
+                            : " The status feed is \(store.provider.serviceName)'s public status page, read with a plain request carrying no sign-in, no cookies, and nothing about you.")
+                        + (store.provider.accountIdentity == nil
+                            ? ""
+                            : " The signed-in account is read from \(store.provider.agentName)'s own local config, read-only — it labels usage on this Mac and is never sent anywhere."))
             }
         }
         .onAppear {
@@ -457,6 +475,23 @@ struct GeneralSettingsPane: View {
             }
         }
         .task(id: update.latestVersion) { await probeCheckout(update) }
+    }
+
+    /// The About card's identity row: who is signed in, which org when it
+    /// says something (a personal "<email>'s Organization" repeats the
+    /// label and stays out), and since when. Identity only — the plan has
+    /// its own label in the panel.
+    private func accountLine(_ presence: AccountPresenceCard) -> String {
+        guard let account = presence.current else { return "signed out" }
+        var parts = [account.label]
+        if let org = account.organizationName, !org.isEmpty,
+           !org.hasPrefix(account.label) {
+            parts.append(org)
+        }
+        if let since = presence.since {
+            parts.append("since \(UsageFormatting.updatedStamp(since, now: Date()))")
+        }
+        return parts.joined(separator: " · ")
     }
 
     /// The card's identity row: which distribution stream this install is,

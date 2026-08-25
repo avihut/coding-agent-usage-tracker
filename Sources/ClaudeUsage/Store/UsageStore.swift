@@ -171,6 +171,22 @@ final class UsageStore {
     /// and Settings card can't be verified against a release that doesn't
     /// exist yet. Nil in every ordinary run.
     private var fakeAppUpdate: AppUpdateCard?
+    /// Which account is signed in and how usage splits across observed
+    /// accounts, or nil when nothing tracks accounts (no identity source
+    /// declared, or a daemon too old to publish the card). Nil renders as
+    /// NOTHING — absent is never "no account".
+    var accountPresence: AccountPresenceCard? {
+        if let fakeAccountPresence { return fakeAccountPresence }
+        switch mode {
+        case .hosting(let engine): return engine.accountPresence
+        case .client(let client): return client.accountPresence
+        }
+    }
+    /// Set only by the `--fake-accounts` launch hatch: the two-line status
+    /// row and the sessions column auto-show only once a SECOND identity
+    /// has been observed — which a single-account machine can't produce on
+    /// demand. Nil in every ordinary run.
+    private var fakeAccountPresence: AccountPresenceCard?
     /// The distribution channel this install belongs to — decides whether
     /// the update surfaces offer the one-click swap or manual guidance. An
     /// install's channel can't change mid-run, so it's frozen at init.
@@ -553,6 +569,46 @@ final class UsageStore {
     /// hatch, forcing the other flavor's update presentation.
     func installFakeDistribution(_ channel: (any DistributionChannel)?) {
         fakeDistribution = channel
+    }
+
+    /// Installs a synthetic presence card for the `--fake-accounts` hatch,
+    /// so the multi-account surfaces can be clicked through on a machine
+    /// that has only ever seen one account.
+    func installFakeAccountPresence(_ card: AccountPresenceCard?) {
+        fakeAccountPresence = card
+    }
+
+    /// A session row's chronological account labels, computed against the
+    /// live attribution timeline (hosting) or the digest's reconstructed
+    /// one (client). Nil = nothing tracks accounts; rows then show nothing.
+    /// Callers gate on `accountPresence?.distinctAccounts` — one account
+    /// ever means the labels would all read the same and say nothing.
+    func sessionAccountLabels(_ session: SessionSummary) -> [String]? {
+        let timeline: AccountTimeline?
+        if let fakeAccountPresence {
+            // The hatch has no epochs behind it; fabricate the label rule's
+            // input from the card it installed, like the client path does.
+            timeline = fakeTimeline(fakeAccountPresence)
+        } else {
+            switch mode {
+            case .hosting(let engine): timeline = engine.presenceTimeline
+            case .client(let client): timeline = client.presenceTimeline
+            }
+        }
+        guard let timeline else { return nil }
+        return LiveStateBuilder.sessionAccountLabels(session, timeline: timeline)
+    }
+
+    private func fakeTimeline(_ card: AccountPresenceCard) -> AccountTimeline {
+        AccountTimeline(epochs: card.epochs.map { epoch in
+            AccountEpoch(
+                account: AccountIdentity(
+                    accountUuid: epoch.label, organizationUuid: "",
+                    email: epoch.label),
+                firstObservedAt: epoch.firstObservedAt,
+                lastObservedAt: epoch.lastObservedAt,
+                closedAt: epoch.closed ? epoch.lastObservedAt : nil)
+        })
     }
 
     /// A user-asked release check — Settings' "Check Now". Hosting engines

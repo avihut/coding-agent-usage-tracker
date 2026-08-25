@@ -154,7 +154,7 @@ extension LiveStateBuilder {
     /// Labels for a run of identities: email (or uuid prefix), org name
     /// appended only where two identities would otherwise read the same —
     /// the D1 label rule, applied once here for every surface.
-    static func disambiguatedLabels(_ identities: [AccountIdentity]) -> [String] {
+    public static func disambiguatedLabels(_ identities: [AccountIdentity]) -> [String] {
         var counts: [String: Int] = [:]
         for identity in identities { counts[identity.label, default: 0] += 1 }
         return identities.map { identity in
@@ -169,7 +169,9 @@ extension LiveStateBuilder {
     /// A session's chronological account labels, from its activity
     /// stretches joined against the presence timeline. Empty = attribution
     /// ran and named nobody (pre-tracking history, ambiguous spans).
-    static func sessionAccountLabels(
+    /// Public because the app's sessions sidebar computes the same labels
+    /// live off the engine's (or a reconstructed) timeline.
+    public static func sessionAccountLabels(
         _ session: SessionSummary, timeline: AccountTimeline
     ) -> [String] {
         let intervals = session.stretches.isEmpty

@@ -35,6 +35,7 @@ struct DigestQueryFieldsTests {
     static let nounPrefix: [String: [String]] = [
         "status": ["status"],
         "health": ["health"],
+        "account": ["account"],
         "limit": ["limit", "session"],
         "budget": ["budget"],
         "spend": ["spend"],

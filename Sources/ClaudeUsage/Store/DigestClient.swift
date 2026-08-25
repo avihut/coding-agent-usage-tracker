@@ -27,6 +27,28 @@ final class DigestClient {
     /// The host engine's release card, mirrored from the digest. Nil when
     /// the host runs no updater — absent is never "up to date".
     private(set) var appUpdate: AppUpdateCard?
+    /// The host engine's presence card, mirrored from the digest. Nil when
+    /// the host tracks no accounts — absent is never "no account".
+    private(set) var accountPresence: AccountPresenceCard?
+
+    /// Label-level attribution timeline rebuilt from the digest's epoch
+    /// table: labels arrive already disambiguated, so a label IS an
+    /// identity here, and the timeline rule runs unchanged. Enough for the
+    /// sidebar's row labels; a client never re-derives the labels
+    /// themselves.
+    var presenceTimeline: AccountTimeline? {
+        guard let card = accountPresence else { return nil }
+        let epochs = card.epochs.map { epoch in
+            AccountEpoch(
+                account: AccountIdentity(
+                    accountUuid: epoch.label, organizationUuid: "",
+                    email: epoch.label),
+                firstObservedAt: epoch.firstObservedAt,
+                lastObservedAt: epoch.lastObservedAt,
+                closedAt: epoch.closed ? epoch.lastObservedAt : nil)
+        }
+        return AccountTimeline(epochs: epochs)
+    }
     /// Optimistic: set when this process asks for a refresh, cleared when
     /// the next digest heartbeat lands.
     private(set) var isRefreshing = false
@@ -200,6 +222,7 @@ final class DigestClient {
         digestGeneratedAt = digest.engine.generatedAt
         serviceStatus = digest.serviceStatus
         appUpdate = digest.appUpdate
+        accountPresence = digest.accountPresence
         nextRefreshAt = digest.engine.nextPollAt
         activeInterval = digest.engine.activeIntervalSeconds
         paceMultiplierMirror = digest.engine.paceMultiplier

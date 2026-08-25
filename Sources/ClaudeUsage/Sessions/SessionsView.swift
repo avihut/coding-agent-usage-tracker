@@ -190,6 +190,10 @@ struct SessionsView: View {
             cost: Self.cost(of: session, pricing: store.pricing),
             colors: colors,
             sortKey: sortKey,
+            // Auto-show (D4): labels appear only once a second identity has
+            // ever been observed — single-account machines stay unchanged.
+            accounts: (store.accountPresence?.distinctAccounts ?? 0) >= 2
+                ? store.sessionAccountLabels(session) : nil,
             isEditingTitle: editingID == session.id,
             onBeginRename: { editingID = session.id },
             onCommitRename: { name in

@@ -44,6 +44,11 @@ extension DigestQuery {
             "incident", "impact", "phase", "started", "duration", "message", "message-at",
             "incident-url",
         ]).merging(tables(["components", "incidents", "resolved", "maintenances"])) { lhs, _ in lhs },
+        "account": scalars([
+            "label", "email", "name", "uuid", "org", "tier", "since", "observed", "age",
+            "attribution-since", "distinct", "today-tokens", "today-cost", "window-tokens",
+            "window-cost",
+        ]).merging(tables(["accounts", "epochs"])) { lhs, _ in lhs },
         "budget": scalars(["used", "ceiling", "left", "fraction"]),
         "spend": scalars(["used", "limit", "left", "currency"]),
         "activity": scalars(["tokens", "prompts", "cost"])
