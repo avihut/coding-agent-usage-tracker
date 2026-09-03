@@ -4,7 +4,7 @@ import Foundation
 /// never impersonates Claude Code or the Claude app.
 public enum AppIdentity {
     public static let name = "claude-usage-menubar"
-    public static let version = "0.89.0"
+    public static let version = "0.90.0"
     public static let userAgent = "\(name)/\(version)"
     /// Where releases are published — the self-updater's one feed.
     public static let repository = "avihut/coding-agent-usage-tracker"

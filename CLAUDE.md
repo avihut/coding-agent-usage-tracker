@@ -1458,3 +1458,15 @@ the README rather than silently deviating.
   explicitly when it is).
 - Every commit that bumps `AppIdentity.version` gets a matching annotated
   tag (`vX.Y.Z`) on that commit, pushed alongside it.
+- RELEASE RITUAL — a shipped feature or fix is NOT done until it is
+  released, in the same session (a fresh session on 2026-09-03 committed
+  two changes and stopped, because nothing had written this down; every
+  install stayed behind). Minor bump for features, patch for fixes:
+  (1) bump `AppIdentity.version` — the ONE version source, Info.plist is
+  stamped from it; (2) commit `release: vX.Y.Z` whose body summarizes
+  what shipped since the last release (docs that ride along may join it);
+  (3) `git tag -a vX.Y.Z` on that commit — the annotation IS the GitHub
+  release notes (publish.sh reads it; tags and commits GPG-sign by
+  config); (4) `git push origin main vX.Y.Z`; (5) `mise run publish` —
+  universal dist zip, timestamped signature from a real identity, attached
+  to the tag's release; installed apps see it on their next 6h check.
