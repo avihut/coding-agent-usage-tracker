@@ -1096,7 +1096,10 @@ struct MeterHistoryView: View {
         _ pts: [(t: Date, normalized: Double)], at date: Date
     ) -> Double? {
         guard let first = pts.first, let last = pts.last else { return nil }
-        if date <= first.t { return first.normalized }
+        // A curve begins where its model's usage begins — before that
+        // there is no line to grab, so nothing focuses.
+        if date < first.t { return nil }
+        if date == first.t { return first.normalized }
         if date >= last.t { return last.normalized }
         for (p0, p1) in zip(pts, pts.dropFirst()) where date <= p1.t {
             let span = p1.t.timeIntervalSince(p0.t)

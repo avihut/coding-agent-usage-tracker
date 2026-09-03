@@ -32,13 +32,27 @@ struct CumulativeSeriesTests {
         }
     }
 
-    @Test("a leading idle stretch stays at zero until activity begins")
-    func leadingIdleFlat() {
+    @Test("a leading idle stretch draws nothing — the curve begins at the zero it rises from")
+    func leadingIdleTrimmed() {
         let moments = [(t: date(82800), amount: 40)]
         let curve = CumulativeSeries.build(moments: moments, start: start, end: end)
-        let lastZero = curve.last { $0.total == 0 }
-        #expect((lastZero?.t.timeIntervalSinceReferenceDate ?? -1) >= 82800 - 480)
+        // Exactly one zero survives, at the boundary of the first bucket
+        // that held tokens, so the line visibly climbs out of the floor
+        // there — and no point sits anywhere before it.
+        #expect(curve.filter { $0.total == 0 }.count == 1)
+        let first = curve.first
+        #expect(first?.total == 0)
+        #expect((first?.t.timeIntervalSinceReferenceDate ?? -1) >= 82800 - 480)
+        #expect((first?.t.timeIntervalSinceReferenceDate ?? .infinity) <= 82800)
+        #expect(curve.dropFirst().first?.total == 40)
+    }
+
+    @Test("activity in the first bucket keeps the start point")
+    func activityAtStartKeepsStart() {
+        let moments = [(t: date(60), amount: 40)]
+        let curve = CumulativeSeries.build(moments: moments, start: start, end: end)
         #expect(curve.first == CumulativePoint(t: start, total: 0))
+        #expect(curve.dropFirst().first?.total == 40)
     }
 
     @Test("a trailing idle stretch keeps the final total flat to the end")
@@ -61,12 +75,9 @@ struct CumulativeSeriesTests {
         #expect(totals == totals.sorted())
     }
 
-    @Test("no moments draw a flat zero line")
+    @Test("no moments draw nothing at all")
     func empty() {
-        let curve = CumulativeSeries.build(moments: [], start: start, end: end)
-        #expect(curve == [
-            CumulativePoint(t: start, total: 0), CumulativePoint(t: end, total: 0),
-        ])
+        #expect(CumulativeSeries.build(moments: [], start: start, end: end).isEmpty)
     }
 
     @Test("moments outside the domain are ignored")

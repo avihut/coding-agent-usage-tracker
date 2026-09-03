@@ -691,6 +691,22 @@ the README rather than silently deviating.
   ~1-min remembered sliver at the window's left edge (prev window closed
   pegged; detected cliff lags resets_at by a sample cadence) hijack the
   forecast nub's hover into a corner-pinned red "1 min".
+- CURVES BEGIN WHERE USAGE BEGINS (2026-09-03, user-directed, ALL model
+  charts): a model adopted mid-span draws nothing before its first tokens —
+  its curve starts at the ONE zero it rises from (the boundary of the first
+  bucket that held tokens / the row before the first call), never a flat
+  zero leader back to the span's start, which read as "this model sat at 0
+  the whole time". Time-based curves get this from `CumulativeSeries.build`
+  (so the popover, the audit chart, AND the digest's `modelSeries` for the
+  TUI agree — the golden fixture was regenerated); a model idle across the
+  whole span keeps its `ModelCurves.Curve` entry with NO points (legends
+  still name it, nothing draws). Row-based series
+  (`SessionChartModel.ModelSeries`) stay row-aligned for O(1) hover but
+  carry `firstRow`/`drawStart`; `RunningBreakdownChart` pins `drawStart`
+  into its thinned index set so the rise is never strided away. Hover
+  focus honours it everywhere: `interpolate` returns nil before a curve's
+  first point, the audit and session focus loops skip a curve before it
+  begins — nothing undrawn can be grabbed.
 - CHART MARK COLORS: inside a `Chart`, ALWAYS spell it `Color.primary` /
   `Color.secondary` / `Color.quaternary`. The bare hierarchical `.primary`
   does NOT mean the label color there — it resolves against the plot's own

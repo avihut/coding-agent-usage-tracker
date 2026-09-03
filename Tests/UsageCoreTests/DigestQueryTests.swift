@@ -1015,7 +1015,10 @@ extension DigestQueryTests {
 
         // Fable's plateau after the 10:01 slot: 53×480/583 of the meter's
         // percent — hand-derived, not read back from the implementation.
-        let viaLimitCurvePoint = run(["get", "meters[session].modelSeries.0.points.10.percent"])
+        // Point 0 is the zero the curve rises from (curves begin at their
+        // model's first tokens, not at the window's start); point 1 is the
+        // plateau.
+        let viaLimitCurvePoint = run(["get", "meters[session].modelSeries.0.points.1.percent"])
         #expect(viaLimitCurvePoint.stdout == "43.63636363636364")
 
         let viaCost = run(["cost", "30d", "--raw"])

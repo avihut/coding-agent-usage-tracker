@@ -109,6 +109,9 @@ struct AuditWindowChart: View {
         let grab = Double(8) / Double(plotHeight) * ceiling
         var best: (model: String, distance: Double)?
         for curve in curves {
+            // Nothing is drawn before a curve's first point (the model
+            // wasn't in use yet), so nothing there can be grabbed.
+            guard let first = curve.points.first, date >= first.t else { continue }
             guard let nearest = curve.points.min(by: {
                 abs($0.t.timeIntervalSince(date)) < abs($1.t.timeIntervalSince(date))
             }) else { continue }

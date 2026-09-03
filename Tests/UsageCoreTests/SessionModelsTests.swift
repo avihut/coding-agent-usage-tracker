@@ -165,6 +165,21 @@ struct SessionChartModelTests {
         #expect(mystery.values(.tokens)?.count == 8)
     }
 
+    @Test("model series know their first call row, and draw from the row before it")
+    func modelSeriesStart() {
+        let model = Self.build()
+        let fable = model.models[0]
+        let mystery = model.models[1]
+        #expect(fable.firstRow == 1)
+        #expect(fable.drawStart == 0)
+        // Adopted at row 4: the arrays stay row-aligned and zero before it,
+        // but the curve is drawn from row 3 — never from the first row.
+        #expect(mystery.firstRow == 4)
+        #expect(mystery.drawStart == 3)
+        #expect(mystery.tokens[3] == 0)
+        #expect(mystery.tokens[4] == 550)
+    }
+
     @Test("sections span prompt to prompt; pre-prompt rows belong to none")
     func sections() throws {
         let model = Self.build()

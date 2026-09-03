@@ -20,14 +20,24 @@ public struct SessionChartModel: Sendable, Equatable {
         /// cost curve at all, never a flat $0 line (the ledger rule).
         public let cost: [Double]?
         public let tokens: [Double]
+        /// The row of this model's first call. The arrays stay row-aligned
+        /// (O(1) hover lookups) and hold zeros before it, but a chart draws
+        /// the curve only from the row before — a model adopted mid-session
+        /// must not appear as a flat zero line from the first row.
+        public let firstRow: Int
 
         public var id: String { model }
 
-        public init(model: String, cost: [Double]?, tokens: [Double]) {
+        public init(model: String, cost: [Double]?, tokens: [Double], firstRow: Int = 0) {
             self.model = model
             self.cost = cost
             self.tokens = tokens
+            self.firstRow = firstRow
         }
+
+        /// Where the drawn curve starts: the row before the first call, so
+        /// the line visibly rises from zero rather than materializing mid-air.
+        public var drawStart: Int { max(0, firstRow - 1) }
 
         public func values(_ measure: SessionChartMeasure) -> [Double]? {
             measure == .cost ? cost : tokens
@@ -126,10 +136,12 @@ public struct SessionChartModel: Sendable, Equatable {
         // A model is priced iff its call rows carry ledger increments; rates
         // are per-model constants, so one row answers for all of them.
         var priced: [String: Bool] = [:]
+        var firstRow: [String: Int] = [:]
         for (index, row) in rows.enumerated() {
             if case .apiCall(let model, let tally, _) = row.kind {
                 tokens += tally.total
                 priced[model] = priced[model] ?? (ledger[index].incremental != nil)
+                if firstRow[model] == nil { firstRow[model] = index }
                 if let window = windows[model], window > 0 {
                     contextNow = Double(tally.inputSide) / Double(window)
                     contextKnown = true
@@ -166,7 +178,8 @@ public struct SessionChartModel: Sendable, Equatable {
                 ModelSeries(
                     model: model,
                     cost: priced[model] == true ? modelCost[model] : nil,
-                    tokens: modelTokens[model] ?? [])
+                    tokens: modelTokens[model] ?? [],
+                    firstRow: firstRow[model] ?? 0)
             }
             .sorted { ($0.tokens.last ?? 0) > ($1.tokens.last ?? 0) }
         var sections: [Section] = []

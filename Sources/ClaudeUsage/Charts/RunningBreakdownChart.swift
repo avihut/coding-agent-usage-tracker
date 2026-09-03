@@ -256,8 +256,14 @@ struct RunningBreakdownChart: View {
             ForEach(drawOrder(visibleModels)) { series in
                 if let values = series.values(measure) {
                     let color = colors[series.model] ?? .gray
+                    // A curve exists only from the row before its model's
+                    // first call: the zero it rises from, and nothing
+                    // earlier. The start row is pinned into the thinned
+                    // index set so the rise is never strided away.
+                    let indices = [series.drawStart]
+                        + modelIndices.filter { $0 > series.drawStart }
                     if hoveredModel == series.model {
-                        ForEach(modelIndices, id: \.self) { index in
+                        ForEach(indices, id: \.self) { index in
                             AreaMark(
                                 x: .value("Message", Double(index)),
                                 yStart: .value("Value", 0),
@@ -266,7 +272,7 @@ struct RunningBreakdownChart: View {
                             .interpolationMethod(.monotone)
                         }
                     }
-                    ForEach(modelIndices, id: \.self) { index in
+                    ForEach(indices, id: \.self) { index in
                         LineMark(
                             x: .value("Message", Double(index)),
                             y: .value("Value", values[index]),
@@ -540,7 +546,10 @@ struct RunningBreakdownChart: View {
     private func updateModelFocus(at row: Int, locationY: CGFloat, proxy: ChartProxy) {
         var best: (model: String, distance: CGFloat)?
         for series in visibleModels {
-            guard let values = series.values(measure), values.indices.contains(row),
+            // No line is drawn before the model's first call, so nothing
+            // there can be grabbed.
+            guard row >= series.drawStart,
+                  let values = series.values(measure), values.indices.contains(row),
                   let y = proxy.position(forY: values[row])
             else { continue }
             let distance = abs(y - locationY)

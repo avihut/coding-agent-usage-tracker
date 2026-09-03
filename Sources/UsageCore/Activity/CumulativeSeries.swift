@@ -17,6 +17,12 @@ public struct CumulativePoint: Equatable, Sendable {
 /// construction — the line can only rise inside a bucket that actually
 /// held tokens. (Sparse points, however placed, let neighboring bursts
 /// interpolate into ramps across the quiet minutes between them.)
+///
+/// A curve BEGINS where its usage begins: the first point is the zero at
+/// the boundary of the first bucket that held tokens, never a flat zero
+/// run back to `start`. A model adopted mid-span draws nothing before its
+/// first call (user-directed 2026-09-03 — the flat leader read as "this
+/// model sat at 0 the whole time"). No tokens in the span → no points.
 public enum CumulativeSeries {
     public static func build(
         moments: [(t: Date, amount: Int)], start: Date, end: Date, buckets: Int = 180
@@ -32,9 +38,7 @@ public enum CumulativeSeries {
             sums[index] += moment.amount
             any = true
         }
-        guard any else {
-            return [CumulativePoint(t: start, total: 0), CumulativePoint(t: end, total: 0)]
-        }
+        guard any else { return [] }
         var curve: [CumulativePoint] = [CumulativePoint(t: start, total: 0)]
         var total = 0
         for (index, amount) in sums.enumerated() {
@@ -48,6 +52,10 @@ public enum CumulativeSeries {
             } else {
                 curve[curve.count - 1] = CumulativePoint(t: t, total: total)
             }
+        }
+        // Drop the idle leader, keeping the one zero the climb rises from.
+        if let firstRise = curve.firstIndex(where: { $0.total > 0 }), firstRise > 1 {
+            curve.removeFirst(firstRise - 1)
         }
         return curve
     }

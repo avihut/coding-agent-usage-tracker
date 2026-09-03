@@ -57,7 +57,10 @@ public enum ModelCurves {
         return Double(gains) / Double(tokens)
     }
 
-    /// One cumulative curve per model over `start...end`.
+    /// One cumulative curve per model over `start...end`. Each curve starts
+    /// at the zero just before its model's first tokens (`CumulativeSeries`);
+    /// a model idle across the whole span keeps its entry with NO points, so
+    /// legends still name it while the plot draws nothing for it.
     ///
     /// `percentPerToken` nil falls back to scaling the tallest curve to 100:
     /// the axis stops speaking percent, but the SHAPE — who climbed when,

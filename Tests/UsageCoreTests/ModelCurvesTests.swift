@@ -78,10 +78,10 @@ struct ModelCurvesTests {
         #expect(abs((curves.first { $0.model == "haiku" }?.peak ?? 0) - 25) < 0.001)
     }
 
-    /// A model that spent nothing in the span still yields a curve, flat at
-    /// zero — an absent line would read as "no such model" rather than
-    /// "this model was idle".
-    @Test func anIdleModelDrawsFlatRatherThanVanishing() {
+    /// A model that spent nothing in the span keeps its ENTRY (legends and
+    /// colour lookups still find it) but carries no points — the plot draws
+    /// nothing rather than a flat zero line pretending to be usage.
+    @Test func anIdleModelKeepsItsEntryButDrawsNothing() {
         let curves = ModelCurves.build(
             models: ["opus", "haiku"],
             moments: [ModelCurves.Moment(model: "opus", t: at(1), amount: 100)],
@@ -89,7 +89,31 @@ struct ModelCurvesTests {
 
         let idle = curves.first { $0.model == "haiku" }
         #expect(idle != nil)
+        #expect(idle?.points.isEmpty == true)
         #expect(idle?.peak == 0)
+    }
+
+    /// A model adopted mid-span appears only from its first tokens: one
+    /// zero at the boundary it climbs from, nothing back to the span's
+    /// start — the flat leader read as "at 0 the whole time".
+    @Test func aModelAdoptedMidSpanAppearsWhenItStarts() {
+        let moments = [
+            ModelCurves.Moment(model: "opus", t: at(0), amount: 100_000),
+            ModelCurves.Moment(model: "haiku", t: at(3), amount: 100_000),
+        ]
+        let curves = ModelCurves.build(
+            models: ["opus", "haiku"], moments: moments, start: at(0), end: at(4),
+            percentPerToken: 0.0001, cap: false)
+
+        let late = try! #require(curves.first { $0.model == "haiku" })
+        #expect(late.points.first?.value == 0)
+        #expect(late.points.filter { $0.value == 0 }.count == 1)
+        // Its first point sits within one bucket (4h/180) of the first call.
+        #expect((late.points.first?.t ?? at(0)) > at(2.9))
+        #expect((late.points.first?.t ?? at(9)) <= at(3))
+        // A model busy from the first bucket still starts at the span's start.
+        let early = try! #require(curves.first { $0.model == "opus" })
+        #expect(early.points.first?.t == at(0))
     }
 
     /// An empty ceiling still gives the plot a full limit to draw against.
