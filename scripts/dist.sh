@@ -4,6 +4,8 @@
 # round trip. Deliberately writes to dist/ rather than re-signing the
 # ClaudeUsage.app the dev loop launches. This zip is what `publish.sh` hands
 # to GitHub Releases — the artifact the in-app updater downloads.
+# A real signing identity is REQUIRED here (CODESIGN_REQUIRE_IDENTITY): an
+# ad-hoc build is fine on the machine that built it, never as a release.
 set -euo pipefail
 
 ROOT="${0:A:h:h}"
@@ -15,6 +17,9 @@ APP="$DIST/ClaudeUsage.app"
 VERSION=$(sed -n 's/.*static let version = "\(.*\)".*/\1/p' \
     "$ROOT/Sources/UsageCore/AppIdentity.swift")
 ZIP="$DIST/ClaudeUsage-$VERSION.zip"
+
+# Fail on a missing identity now, not after three universal builds.
+CODESIGN_REQUIRE_IDENTITY=1 "$ROOT/scripts/sign.sh" --which
 
 swift build -c release --product ClaudeUsage --arch arm64 --arch x86_64 --package-path "$ROOT"
 swift build -c release --product usaged --arch arm64 --arch x86_64 --package-path "$ROOT"
@@ -32,12 +37,12 @@ cp "$ROOT/.build/apple/Products/Release/ClaudeUsage" "$APP/Contents/MacOS/Claude
 # bundle.sh, same one-installed-copy reasoning — and each inner binary is
 # signed before the outer bundle seals over it.
 cp "$ROOT/.build/apple/Products/Release/usaged" "$APP/Contents/MacOS/usaged"
-CODESIGN_TIMESTAMP=1 "$ROOT/scripts/sign.sh" "$APP/Contents/MacOS/usaged"
+CODESIGN_TIMESTAMP=1 CODESIGN_REQUIRE_IDENTITY=1 "$ROOT/scripts/sign.sh" "$APP/Contents/MacOS/usaged"
 cp "$ROOT/.build/apple/Products/Release/usage-cli" "$APP/Contents/MacOS/usage-cli"
-CODESIGN_TIMESTAMP=1 "$ROOT/scripts/sign.sh" "$APP/Contents/MacOS/usage-cli"
+CODESIGN_TIMESTAMP=1 CODESIGN_REQUIRE_IDENTITY=1 "$ROOT/scripts/sign.sh" "$APP/Contents/MacOS/usage-cli"
 "$ROOT/scripts/icon.sh"
 cp "$ROOT/.build/icon/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
-CODESIGN_TIMESTAMP=1 "$ROOT/scripts/sign.sh" "$APP"
+CODESIGN_TIMESTAMP=1 CODESIGN_REQUIRE_IDENTITY=1 "$ROOT/scripts/sign.sh" "$APP"
 
 # ditto, not zip: it round-trips bundle metadata and the signature intact.
 ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"

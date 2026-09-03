@@ -55,8 +55,12 @@ run = [
 description = "Assemble + sign ClaudeUsage.app without launching (arg: release|debug)"
 run = "scripts/bundle.sh"
 
+[tasks.identity]
+description = "Show which code-signing identity builds will use, and where it came from"
+run = "scripts/sign.sh --which"
+
 [tasks.sign]
-description = "Sign a binary with the stable identity (arg: path to binary)"
+description = "Sign a binary with the resolved identity (arg: path to binary)"
 run = "scripts/sign.sh"
 
 [tasks.daemon]

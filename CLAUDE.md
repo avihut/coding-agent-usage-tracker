@@ -1202,10 +1202,17 @@ the README rather than silently deviating.
   Reading as the item's own client is permanently silent. Never reintroduce
   a native SecItem read of Claude Code's item; the secret stays pipe→memory,
   never argv/logs (spec §10 unchanged: read-only, access token only).
-- Binaries are still signed with the stable identity via `scripts/sign.sh`
-  BEFORE first run (default `Apple Development: Avihu Turzion`, override
-  with `CODESIGN_IDENTITY`) — launchd job identity and any future ACLs stay
-  stable across builds; never ship an ad-hoc build.
+- Binaries are signed via `scripts/sign.sh` BEFORE first run with a
+  MACHINE-LOCAL identity — NO developer account is named anywhere in the
+  repo (2026-09-03; a second contributor's clone failed on the old
+  hardcoded certificate). Resolution: `CODESIGN_IDENTITY` (per-checkout via
+  git-ignored `mise.local.toml`, example file committed) > keychain
+  auto-discovery (Developer ID Application > Apple Development > Mac
+  Developer) > ad-hoc with a warning. `mise run identity` shows the
+  resolution. Ad-hoc is acceptable for a dev build (the Keychain read
+  needs no stable signature since v0.82.1) but `dist.sh` sets
+  `CODESIGN_REQUIRE_IDENTITY=1` and refuses it — never ship an ad-hoc
+  build. Never reintroduce a hardcoded identity, name, or team ID.
 - Menu bar rendering: height from `NSStatusBar.system.thickness` (never
   hardcoded), `monospacedDigitSystemFont` so width doesn't jitter,
   `isTemplate = false`. Since v0.21.0 the title is a DRAWN NSImage

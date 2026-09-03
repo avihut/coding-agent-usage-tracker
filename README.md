@@ -193,6 +193,39 @@ Every lifecycle script in `scripts/` has a matching mise task — `mise tasks`
 lists the full catalog, including the AX verification pair
 (`axdump` / `axpress`).
 
+### Code signing
+
+Nothing in the repo names a developer account. Every build signs with an
+identity resolved on the machine doing the building (`scripts/sign.sh`), in
+this order:
+
+1. `CODESIGN_IDENTITY`, if set — pin one per checkout by copying
+   `mise.local.toml.example` to `mise.local.toml` (git-ignored) and running
+   `mise trust`.
+2. The login keychain's first code-signing identity, preferring
+   `Developer ID Application` > `Apple Development` > `Mac Developer`.
+3. Ad-hoc (`-`), with a warning.
+
+```sh
+mise run identity   # which identity builds will use, and where it came from
+```
+
+A fresh clone with no certificate at all builds and runs ad-hoc: the app,
+daemon, and CLI all work, since the Keychain read goes through Apple's
+`security` tool rather than our own signature. What ad-hoc costs is
+*stability* — every rebuild is a new identity to macOS, so Gatekeeper and
+launchd re-evaluate the bundle each time. A real certificate fixes that and
+needs no paid membership: sign into Xcode with any Apple ID (Settings →
+Accounts), then Manage Certificates → **+** → Apple Development. Those
+certificates last a year; when one expires, `mise run identity` falls back to
+ad-hoc and signing warns — renew it in the same place, and the identity
+survives because its name does.
+
+`mise run dist` refuses ad-hoc outright (`CODESIGN_REQUIRE_IDENTITY`): a
+release zip must carry a timestamped signature from a real identity, or the
+in-app updater's `codesign --verify` and Gatekeeper reject it on the
+receiving Mac.
+
 ## The terminal dashboard (usage-tui)
 
 A full-screen TUI face for tmux panes (`tui/`, Rust + ratatui): reads the
@@ -260,12 +293,6 @@ Opting out is deliberate and sticky: `uninstall` (or the Settings toggle
 then simply hosts the engine embedded whenever it runs, exactly as before
 v0.66.0.
 
-Signing uses the local `Apple Development` identity so the binaries keep one
-stable identity across rebuilds (override with `CODESIGN_IDENTITY=...`). Those
-certificates last a year; when one expires, signing fails with "no identity
-found" — renew it in Xcode → Settings → Accounts → Manage Certificates. The
-name stays the same, so the identity survives.
-
 ## Install on another Mac
 
 The easy path: grab `ClaudeUsage-<version>.zip` from the [releases
@@ -306,6 +333,6 @@ Keep the bundle in `/Applications`: `SMAppService` registers the launch-at-login
 item by path, so moving the app afterwards breaks that toggle.
 
 The signature is timestamped, so it stays valid after the signing certificate
-expires. Rebuilding on a Mac that has Xcode and the signing identity
-(`daft clone` + `mise run app`) is the other route, and sidesteps Gatekeeper
-entirely.
+expires. Rebuilding on the target Mac (`daft clone` + `mise run app`, signing
+with that machine's own identity — see [Code signing](#code-signing)) is the
+other route, and sidesteps Gatekeeper entirely.

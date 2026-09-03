@@ -1,0 +1,8 @@
+# Per-checkout settings mise loads automatically and git ignores.
+#   cp mise.local.toml.example mise.local.toml && mise trust
+#
+# Builds sign with whatever code-signing identity your login keychain holds
+# (`mise run identity` shows which). Pin one only when you have several, or
+# when auto-discovery picks the wrong one:
+[env]
+CODESIGN_IDENTITY = "Apple Development: Your Name (TEAMID)"
