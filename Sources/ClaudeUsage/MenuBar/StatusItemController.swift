@@ -163,6 +163,7 @@ final class StatusItemController: NSResponder {
                 meter: meter, samples: self.store.samples,
                 timeline: self.store.tokenTimeline, pricing: self.store.pricing,
                 prediction: self.store.predictions[meter.label],
+                outcomes: self.store.windowOutcomes,
                 agentName: self.store.provider.agentName,
                 providerID: self.store.provider.id)
             let incidentCard = self.store.serviceStatus.flatMap {

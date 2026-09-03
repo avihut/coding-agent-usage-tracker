@@ -691,6 +691,30 @@ the README rather than silently deviating.
   ~1-min remembered sliver at the window's left edge (prev window closed
   pegged; detected cliff lags resets_at by a sample cadence) hijack the
   forecast nub's hover into a corner-pinned red "1 min".
+- LIMIT-WINDOW PAGING (2026-09-04 v0.91.0, user-directed): the popover's
+  Current span pages back through the meter's PAST windows — ‹ › arrows
+  flanking the bounds row, a skip-to-live button after ›, and a two-finger
+  horizontal swipe (`HorizontalSwipeCatcher` on the chart; enabled only on
+  Current). Pages are `LimitWindows.observed` (UsageCore/Audit, tested):
+  strictly the windows this Mac SAW — reset stamps carried by the percent
+  samples (`UsageSample.resets`) plus the window ledger's closes, jitter-
+  collapsed through `ResetStamp`, live stamp and future stamps excluded,
+  newest first; a stretch the app slept through is a gap, never a
+  cadence-guessed page. `windowOffset` state (clamped to the pages that
+  exist via `pageIndex`; reset on meter switch and on a span flip); `isLive`
+  gates everything only the live window has — now rule, forecast
+  trajectory, crossing hatch, axis projection, predicted readouts, the
+  strip's hold-open. A past page's table and totals are bounded by the
+  PAGE's end (`windowRows` to: min(domain.end, now) — summing to now made
+  a week page and a 5h page read identical). Labels: the stats line
+  becomes the page TITLE in primary semibold ("Sun Aug 23 · 13:30–18:30 ·
+  10 sessions ago"; weeks "Aug 23 – Aug 30 · previous week"), the header
+  stays identical to the live page's, every row keeps its height (arrows
+  reserved at zero opacity on the live page and on History); bounds and
+  readouts on a past page always carry month + day (`timeLabel`). Page
+  turns slide the chart (`.id(pageIndex)` + asymmetric move transition,
+  earlier pages arrive from the left; animation scoped to the chart
+  subtree so the grid below resizes discretely). TUI parity deferred.
 - CURVES BEGIN WHERE USAGE BEGINS (2026-09-03, user-directed, ALL model
   charts): a model adopted mid-span draws nothing before its first tokens —
   its curve starts at the ONE zero it rises from (the boundary of the first
@@ -920,7 +944,15 @@ the README rather than silently deviating.
   (`five_hour`, `seven_day`) are deliberately not modeled.
 - Dates go through `FlexibleISO8601`: the live API sends six fractional
   digits + numeric offset (`.137024+00:00`), which both stock
-  `ISO8601DateFormatter` variants reject.
+  `ISO8601DateFormatter` variants reject. IT IS A HOT PATH (v0.91.0): the
+  scanner calls it once per transcript line, and the old body built three
+  formatters per call — a corpus re-parse in the daemon spent 100% of its
+  samples inside ICU's TimeZoneFormat allocation and ran for 10+ minutes
+  before being killed. Now a hand-rolled integer fast path (days-from-
+  civil) parses the canonical shapes; the formatters are built once and
+  only see strings outside that grammar. Equivalence and a 20k-parse
+  speed floor are pinned in FlexibleISO8601Tests. The full-corpus
+  re-parse measured 165s after the fix (2,508 files, this Mac).
 - Color thresholds live in `Thresholds` (defaults ≥70 warning, ≥90
   critical — user-adjustable in Settings → Thresholds, persisted in
   UserDefaults, min 5 points apart); an API `severity != "normal"` forces
@@ -946,8 +978,18 @@ the README rather than silently deviating.
   tokens per model (`TokenTally`: in/out/cache-write incl. the 1h-TTL
   split/cache-read): per day forever (`DailyActivity.models`, feeding the
   per-period summary via `HeatmapLayout.modelTotals`) and per minute for a
-  trailing 8 days (`TokenSlot` timeline, cache-bounded — feeds the
-  per-meter window breakdowns via `WindowTokens`). Day tooltips stay a
+  trailing 56 DAYS (`TokenSlot` timeline, `TranscriptScanner
+  .timelineRetention`, matched to UsageHistory's sample retention since
+  v0.91.0 so every window the popover can page back to has its model
+  curves; 8 days before that). The cache trims slots to the bound every
+  pass and stamps each entry with the cutoff it trimmed to (`FileEntry
+  .slotsFrom`); a hit whose stamp sits after today's cutoff with calls in
+  between re-parses ONCE despite matching mtime/size (`slotsTrimmed`) — a
+  finished transcript never changes, so nothing else could ever backfill
+  a longer retention. Growing the retention again is a one-constant change
+  plus a one-time corpus re-parse in the daemon, NOT a cacheVersion bump
+  (and its stampede). Feeds the per-meter window breakdowns via
+  `WindowTokens`. Day tooltips stay a
   one-liner by request; the per-model detail lives in the meter popovers
   and the period summary. That summary is a tabular grid (aligned
   input/cached/output/cost columns — `uncachedInput` vs `cacheRead`,

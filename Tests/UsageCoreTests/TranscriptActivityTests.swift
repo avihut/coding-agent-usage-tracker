@@ -167,20 +167,20 @@ struct TranscriptScannerTests {
     func retention() throws {
         let (scanner, root) = try makeScanner()
         let content = """
-            {"timestamp":"2026-07-20T09:00:00.000Z","requestId":"old","message":{"id":"o1","model":"claude-fable-5","usage":{"input_tokens":50,"output_tokens":50}}}
+            {"timestamp":"2026-06-01T09:00:00.000Z","requestId":"old","message":{"id":"o1","model":"claude-fable-5","usage":{"input_tokens":50,"output_tokens":50}}}
             {"timestamp":"2026-08-02T09:00:00.000Z","requestId":"new","message":{"id":"o2","model":"claude-fable-5","usage":{"input_tokens":5,"output_tokens":5}}}
             """
         try content.write(to: root.appending(path: "a.jsonl"), atomically: true, encoding: .utf8)
 
         let scan = scanner.scan(now: Self.scanNow)
 
-        #expect(scan.daily.count == 2) // July 20 still feeds the heatmap
-        #expect(scan.timeline.count == 1)
+        #expect(scan.daily.count == 2) // June 1 still feeds the heatmap
+        #expect(scan.timeline.count == 1) // 63 days back is past the 56-day retention
         #expect(scan.timeline[0].t == Self.minute("2026-08-02T09:00:00.000Z"))
 
         // The same trim applies to cached entries on later scans.
         let later = scanner.scan(now: Self.utcCalendar().date(
-            from: DateComponents(year: 2026, month: 8, day: 11))!)
+            from: DateComponents(year: 2026, month: 9, day: 29))!)
         #expect(later.timeline.isEmpty)
         #expect(later.daily.count == 2)
     }

@@ -103,6 +103,7 @@ struct UsagePanelView: View {
                 meter: meter, samples: store.samples,
                 timeline: store.tokenTimeline, pricing: store.pricing,
                 prediction: store.predictions[meter.label],
+                outcomes: store.windowOutcomes,
                 agentName: store.provider.agentName,
                 providerID: store.provider.id)
                 .onHover { inside in

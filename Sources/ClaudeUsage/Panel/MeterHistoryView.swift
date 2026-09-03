@@ -16,6 +16,9 @@ struct MeterHistoryView: View {
     let timeline: [TokenSlot]
     let pricing: PricingTable
     let prediction: UsagePrediction?
+    /// Closed-window records — with the samples' reset stamps, the pages
+    /// the Current span can turn back to.
+    let outcomes: [WindowOutcome]
     /// Names whose local sessions feed the breakdown, in the footer note.
     let agentName: String
 
@@ -93,10 +96,18 @@ struct MeterHistoryView: View {
     @State private var hoveredSegment: ActivitySegment?
     /// The reset line under the cursor — its whole ended window lights up.
     @State private var hoveredReset: Date?
+    /// Which limit window the Current span shows: 0 = the live one, k = the
+    /// k-th observed window before it (`pastWindows[k - 1]`). Paged by the
+    /// ‹ › arrows under the chart and by a two-finger horizontal swipe.
+    @State private var windowOffset = 0
+    /// Which way the last page turn went (-1 earlier, +1 later): an earlier
+    /// window slides in from the left, the way a timeline reads.
+    @State private var pageSlide = -1
 
     init(
         meter: Meter, samples: [UsageSample], timeline: [TokenSlot],
         pricing: PricingTable, prediction: UsagePrediction?,
+        outcomes: [WindowOutcome] = [],
         agentName: String, providerID: String
     ) {
         self.meter = meter
@@ -104,6 +115,7 @@ struct MeterHistoryView: View {
         self.timeline = timeline
         self.pricing = pricing
         self.prediction = prediction
+        self.outcomes = outcomes
         self.agentName = agentName
         // Meter.id is positional within one provider's snapshot — the
         // provider prefix keeps two harnesses' "0-session" prefs apart.
@@ -158,6 +170,32 @@ struct MeterHistoryView: View {
         formatter.dateFormat = "MMM d HH:mm"
         return formatter
     }()
+    /// "Tue Aug 26" — which day a past page belongs to, in the stats line.
+    private static let weekdayDate: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEE MMM d"
+        return formatter
+    }()
+    private static let monthDay: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d"
+        return formatter
+    }()
+
+    /// A past page's calendar identity, the stats line's lead: "Sun Aug 23 ·
+    /// 13:30–18:30" for a window inside one day, "Aug 23 13:30 – Aug 24
+    /// 01:30" across midnight, "Aug 23 – Aug 30" for a week.
+    private var pageRange: String {
+        let (start, end) = domain
+        if window > 24 * 3600 {
+            return "\(Self.monthDay.string(from: start)) – \(Self.monthDay.string(from: end))"
+        }
+        if Calendar.current.isDate(start, inSameDayAs: end) {
+            return "\(Self.weekdayDate.string(from: start)) · "
+                + "\(UsageFormatting.clockTime(start))–\(UsageFormatting.clockTime(end))"
+        }
+        return "\(Self.monthDayTime.string(from: start)) – \(Self.monthDayTime.string(from: end))"
+    }
 
     /// The limit window is provider data on the meter; the 7-day fallback
     /// only covers a meter whose provider didn't say (Claude always does).
@@ -172,21 +210,121 @@ struct MeterHistoryView: View {
 
     private var effectiveSpan: Span { liveReset == nil ? .history : span }
 
+    /// The windows this meter was seen running through before the live one,
+    /// newest first — the Current span's pages. Observational only
+    /// (`LimitWindows`): a stretch the app slept through is a gap, never a
+    /// guessed page.
+    private var pastWindows: [DateInterval] {
+        LimitWindows.observed(
+            label: meter.label, window: window, liveReset: liveReset,
+            samples: samples, outcomes: outcomes)
+    }
+
+    /// The offset clamped to the pages that exist — a window closing while
+    /// the popover is open, or a meter switch, must never strand it.
+    private var pageIndex: Int { min(windowOffset, pastWindows.count) }
+
+    /// True while the Current span shows the LIVE window — the only page
+    /// with a now, a forecast, a crossing, and an open-ended session. Every
+    /// past page is closed history and draws none of those.
+    private var isLive: Bool { effectiveSpan == .current && pageIndex == 0 }
+
     private var domain: (start: Date, end: Date) {
         if effectiveSpan == .current, let reset = liveReset {
+            if pageIndex > 0 {
+                let page = pastWindows[pageIndex - 1]
+                return (page.start, page.end)
+            }
             return (reset.addingTimeInterval(-window), reset)
         }
         let now = Date()
         return (now.addingTimeInterval(-historyFrame.length(now: now)), now)
     }
 
+    /// What one window of this meter is called: a session, a week, or a
+    /// generic window — "this session" live, "previous session" one page
+    /// back, "3 sessions ago" beyond.
+    private var windowNoun: String {
+        meter.rank == 0 ? "session" : window >= 6 * 86400 ? "week" : "window"
+    }
+
     private var spanLabel: String {
         switch effectiveSpan {
         case .current:
-            meter.rank == 0 ? "this session"
-                : window >= 6 * 86400 ? "this week" : "this window"
+            switch pageIndex {
+            case 0: "this \(windowNoun)"
+            case 1: "previous \(windowNoun)"
+            default: "\(pageIndex) \(windowNoun)s ago"
+            }
         case .history: historyFrame.label
         }
+    }
+
+    /// One page step, shared by the arrows and the swipe: direction < 0 =
+    /// an earlier window, > 0 = later (the heatmap pager's convention).
+    /// No-ops at either edge. Hover state is cleared — a nub or reset from
+    /// the previous page has no meaning on the new one.
+    private func pageStep(_ direction: Int) {
+        guard effectiveSpan == .current else { return }
+        // Magnitude = how many pages; the arrows and swipes pass ±1, the
+        // back-to-live button the whole distance (clamped below).
+        let next = min(max(pageIndex - direction, 0), pastWindows.count)
+        guard next != pageIndex else { return }
+        hoverDate = nil
+        focusedModel = nil
+        hoveredSegment = nil
+        hoveredReset = nil
+        // Two transactions, deliberately. A removed view exits with the
+        // transition it was RENDERED with, not the one the removing render
+        // computes — so the direction must land in the view graph first
+        // (this render), and the page flip follow in the next one; in one
+        // transaction the outgoing chart slid by the PREVIOUS turn's
+        // direction while the incoming one obeyed the new, which read as
+        // the two halves moving apart.
+        pageSlide = direction < 0 ? -1 : 1
+        Task { @MainActor in windowOffset = next }
+    }
+
+    /// Jumps a paged-back Current span straight to the live window — the
+    /// arrows walk one window at a time, and eleven sessions back is a long
+    /// walk. Reserved at zero opacity on the live page so the row is stable.
+    private var backToLiveButton: some View {
+        let available = effectiveSpan == .current && pageIndex > 0
+        return Button {
+            pageStep(pastWindows.count)
+        } label: {
+            Image(systemName: "forward.end.circle.fill")
+                .font(.system(size: 11, weight: .semibold))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(.secondary)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .opacity(available ? 1 : 0)
+        .disabled(!available)
+        .help("Back to the current \(windowNoun)")
+    }
+
+    /// The ‹ / › page arrow flanking the domain labels. Unavailable
+    /// directions — and the History span, which pages nothing — keep their
+    /// slot at zero opacity so the row never reflows.
+    private func pageArrow(direction: Int) -> some View {
+        let available = effectiveSpan == .current
+            && (direction < 0 ? pageIndex < pastWindows.count : pageIndex > 0)
+        return Button {
+            pageStep(direction)
+        } label: {
+            Image(systemName: direction < 0
+                ? "chevron.left.circle.fill" : "chevron.right.circle.fill")
+                .font(.system(size: 11, weight: .semibold))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(.secondary)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .opacity(available ? 1 : 0)
+        .disabled(!available)
+        .help(direction < 0 ? "Previous \(windowNoun)" : "Next \(windowNoun)")
     }
 
     /// The frame dropdown: current choice + chevron, menu of the long
@@ -281,7 +419,10 @@ struct MeterHistoryView: View {
     /// This window's per-model usage, scoped for scoped meters — the rows of
     /// the shared table and the curves the chart overlays.
     private var windowRows: [ModelTokenUsage] {
-        let all = WindowTokens.breakdown(timeline: timeline, from: domain.start, to: Date())
+        // Bounded by the page's own end: a past window's table must not
+        // keep summing to now (a week page and a 5h page read identical).
+        let all = WindowTokens.breakdown(
+            timeline: timeline, from: domain.start, to: min(domain.end, Date()))
         return scopeName.map { WindowTokens.scoped(all, name: $0) } ?? all
     }
 
@@ -343,6 +484,10 @@ struct MeterHistoryView: View {
             }
             // Fixed-height stats line: window totals normally, the focused
             // model's share while a curve/row pair is lit. Never reflows.
+            // On a past page this line is the window's TITLE — "Sun Aug 23 ·
+            // 13:30–18:30 · 10 sessions ago" — in primary weight, so which
+            // window is on screen is the first thing read; the header above
+            // stays identical to the live page's, and the height is fixed.
             HStack(spacing: 5) {
                 if let focusedModel {
                     Circle()
@@ -350,23 +495,49 @@ struct MeterHistoryView: View {
                         .frame(width: 6, height: 6)
                 }
                 Text(statsText(rows: rows))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .font(.caption2.weight(isPageTitle ? .semibold : .regular))
+                    .foregroundStyle(isPageTitle ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
                     .lineLimit(1)
                 Spacer(minLength: 0)
             }
             .frame(height: 14)
             if points.count < 2 && curves.isEmpty {
-                Text("Collecting samples — this fills in as refreshes accumulate.")
+                Text(isLive || effectiveSpan == .history
+                    ? "Collecting samples — this fills in as refreshes accumulate."
+                    : "No samples retained for this \(windowNoun).")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                     .frame(width: Self.chartWidth, height: Self.chartHeight)
             } else {
                 // The 30s tick keeps the now-notch sliding and the sliding
                 // domain honest while the popover stays open.
-                TimelineView(.periodic(from: .now, by: 30)) { context in
-                    chart(curves: curves, now: context.date, percentPerToken: scale)
+                // A page turn slides the chart the way the timeline reads —
+                // an earlier window arrives from the left — clipped to the
+                // chart's own fixed frame. Scoped to THIS subtree via the
+                // value-keyed animation: the labels and the breakdown grid
+                // below step discretely, so the popover resizes once,
+                // natively, instead of chasing an animated height.
+                ZStack {
+                    TimelineView(.periodic(from: .now, by: 30)) { context in
+                        chart(curves: curves, now: context.date, percentPerToken: scale)
+                    }
+                    .id(pageIndex)
+                    // Push: the incoming chart arrives from `edge` while the
+                    // outgoing one leaves through the opposite edge, in
+                    // lockstep — one transition for both halves, so they
+                    // can't drift apart. Earlier windows arrive from the
+                    // left, the way the timeline reads; a swipe to the
+                    // right (fingers right = earlier) moves the chart right.
+                    .transition(.push(from: pageSlide < 0 ? .leading : .trailing))
                 }
+                .frame(width: Self.chartWidth, height: Self.chartHeight)
+                .clipped()
+                .animation(.easeInOut(duration: 0.28), value: pageIndex)
+                // Two-finger horizontal swipes page windows like the arrows
+                // below. Inert on History, whose frame is a trailing one.
+                .background(HorizontalSwipeCatcher(enabled: effectiveSpan == .current) {
+                    direction in pageStep(direction)
+                })
             }
             domainLabels
             Text(resetReadout ?? segmentReadout ?? readout.map(readoutText) ?? hoverHint)
@@ -397,7 +568,10 @@ struct MeterHistoryView: View {
             focusedModel = nil
             hoveredSegment = nil
             hoveredReset = nil
+            windowOffset = 0
         }
+        // Flipping to History and back lands on the live window again.
+        .onChange(of: span) { windowOffset = 0 }
     }
 
     /// Grabbing distance is measured against this chart's pinned width —
@@ -514,7 +688,7 @@ struct MeterHistoryView: View {
                 .foregroundStyle(orange.opacity(focusedModel == nil ? 1 : 0.3))
                 .interpolationMethod(.monotone)
             }
-            if effectiveSpan == .current {
+            if isLive {
                 // The prediction engine's trajectory: dashed, measured side
                 // of the notch left alone. It speaks the risk ramp — accent
                 // while the forecast is clean, yellow-to-red as the
@@ -803,7 +977,7 @@ struct MeterHistoryView: View {
     /// The projected limit-crossing inside the Current span, if the current
     /// pace spends the meter before the window resets.
     private var exhaustDate: Date? {
-        guard effectiveSpan == .current,
+        guard isLive,
               let exhaust = prediction?.exhaustsAt,
               exhaust > domain.start, exhaust < domain.end
         else { return nil }
@@ -814,7 +988,7 @@ struct MeterHistoryView: View {
     /// while the forecast stays within the limit (an exhausting one is the
     /// red rule's story) and the axis still speaks percent.
     private var axisProjection: Double? {
-        guard effectiveSpan == .current, focusedModel == nil,
+        guard isLive, focusedModel == nil,
               let prediction, prediction.exhaustsAt == nil,
               let projected = prediction.projectedAtReset, projected < 100
         else { return nil }
@@ -1040,8 +1214,12 @@ struct MeterHistoryView: View {
         let stitched = ActivityGrace.stitch(
             segments.map { DateInterval(start: $0.start, end: $0.end) },
             grace: graceSeconds)
-        segments = ActivityGrace.holdOpen(
-            stitched, until: min(end, exhaustDate ?? end), grace: graceSeconds
+        // A closed page's last session ended when it ended — only the live
+        // window has a session that may still be going.
+        segments = (isLive
+            ? ActivityGrace.holdOpen(
+                stitched, until: min(end, exhaustDate ?? end), grace: graceSeconds)
+            : stitched
         ).map { ActivitySegment(start: $0.start, end: $0.end) }
         // Windows that already CLOSED spent-out: the stretch between the
         // crossing and the reset reads red, so a frame holding several
@@ -1212,10 +1390,23 @@ struct MeterHistoryView: View {
 
     /// "89.2M tokens this session", or the focused model's slice of it.
     private func statsText(rows: [ModelTokenUsage]) -> String {
+        if effectiveSpan == .current, pageIndex > 0 {
+            if let focusedModel, let row = rows.first(where: { $0.model == focusedModel }) {
+                return "\(row.displayName) · \(TokenFormat.compact(row.tally.total)) tokens · \(pageRange)"
+            }
+            return "\(pageRange) · \(spanLabel)"
+        }
         if let focusedModel, let row = rows.first(where: { $0.model == focusedModel }) {
             return "\(row.displayName) · \(TokenFormat.compact(row.tally.total)) tokens \(spanLabel)"
         }
         return "\(TokenFormat.compact(WindowTokens.total(rows).total)) tokens \(spanLabel)"
+    }
+
+    /// The stats line reads as the page's title — primary, semibold — on a
+    /// past page while no model is focused (a focus turns it back into the
+    /// model's share, in the usual secondary voice).
+    private var isPageTitle: Bool {
+        effectiveSpan == .current && pageIndex > 0 && focusedModel == nil
     }
 
     private var hoverHint: String {
@@ -1227,10 +1418,18 @@ struct MeterHistoryView: View {
     /// the end is the reset itself.
     private var domainLabels: some View {
         let (start, end) = domain
-        return HStack {
+        // A past page's bounds carry their day (timeLabel does that for
+        // every non-live page); the end repeats it only across midnight.
+        let sameDay = Calendar.current.isDate(start, inSameDayAs: end)
+        return HStack(spacing: 4) {
+            pageArrow(direction: -1)
             Text(timeLabel(start))
             Spacer()
-            Text(effectiveSpan == .current ? "resets \(timeLabel(end))" : "now")
+            Text(effectiveSpan == .history ? "now"
+                : isLive ? "resets \(timeLabel(end))"
+                : "reset \(sameDay ? UsageFormatting.clockTime(end) : timeLabel(end))")
+            pageArrow(direction: 1)
+            backToLiveButton
         }
         .font(.caption2)
         .foregroundStyle(.tertiary)
@@ -1242,6 +1441,9 @@ struct MeterHistoryView: View {
     private func timeLabel(_ date: Date) -> String {
         let (start, end) = domain
         let length = end.timeIntervalSince(start)
+        // A past page is some other day, or some other week — a bare clock
+        // time or a weekday name can't say which. Month + day always.
+        if effectiveSpan == .current, !isLive { return Self.monthDayTime.string(from: date) }
         if length > 8 * 86400 { return Self.monthDayTime.string(from: date) }
         if length > 24 * 3600 { return Self.weekdayTime.string(from: date) }
         return UsageFormatting.clockTime(date)
@@ -1269,7 +1471,7 @@ struct MeterHistoryView: View {
         let now = Date()
         let (domainStart, domainEnd) = domain
         let t = min(max(hoverDate, domainStart), domainEnd)
-        if effectiveSpan == .current, t > now {
+        if isLive, t > now {
             guard let prediction,
                   let projected = PredictionEngine.percent(onCurve: prediction.curve, at: t)
             else { return nil }

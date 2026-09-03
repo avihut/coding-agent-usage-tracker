@@ -66,10 +66,15 @@ public struct TranscriptScanner: Sendable {
         self.calendar = calendar
     }
 
-    /// The panel's windows need at most 7 days back; a day of slack absorbs
-    /// clock skew. Trimming to this bound is what keeps minute-granularity
-    /// slots from growing the cache without limit.
-    public static let timelineRetention: TimeInterval = 8 * 86400
+    /// Per-minute slots — the popover's model curves and per-window
+    /// breakdowns — are kept as far back as the percent samples
+    /// (`UsageHistory`'s 56 days), so every window the Current span can page
+    /// back to draws BOTH its lines, not the percent trace alone. Trimming
+    /// to this bound is what keeps minute-granularity slots from growing the
+    /// cache without limit. (8 days through v0.90.0 — the panel's own frames
+    /// never looked further back than a week; cached entries trimmed under
+    /// that bound backfill once via `slotsTrimmed`.)
+    public static let timelineRetention: TimeInterval = 56 * 86400
 
     /// v6 (0.85.0): a streamed call now counts its LARGEST record rather than
     /// its first, and advisor sub-calls count at all — every token and cost
@@ -128,6 +133,13 @@ public struct TranscriptScanner: Sendable {
         /// a freshly computed fingerprint to decide whether ownership moved
         /// since this entry was written.
         let excluded: UInt64
+        /// The cutoff (epoch seconds) `slots` were last trimmed to — where
+        /// this entry's minute timeline is complete from. Nil in entries
+        /// written before v0.91.0, which were trimmed to the 8-day bound of
+        /// their day. Read by `slotsTrimmed` so a LONGER retention can
+        /// backfill a finished transcript, which mtime/size alone would
+        /// never re-open.
+        var slotsFrom: Double? = nil
     }
 
     /// One kept call's identity for the cross-file pass.
@@ -448,7 +460,8 @@ public struct TranscriptScanner: Sendable {
                   let size = values.fileSize
             else { continue }
             let entry: FileEntry
-            if let cached = cache.files[path], cached.mtime == mtime, cached.size == size {
+            if let cached = cache.files[path], cached.mtime == mtime, cached.size == size,
+               !slotsTrimmed(cached, cutoff: cutoff) {
                 entry = cached
             } else {
                 let parsed = parseFile(item, collectRows: false) ?? FileParse()
@@ -456,11 +469,13 @@ public struct TranscriptScanner: Sendable {
                     mtime: mtime, size: size, days: parsed.days, slots: parsed.slots,
                     session: parsed.session, calls: Self.encodeCalls(parsed.calls), excluded: 0)
             }
-            // Every pass re-trims, so slots age out of unchanged files too.
+            // Every pass re-trims, so slots age out of unchanged files too —
+            // and stamps the bound it trimmed to.
             files[path] = FileEntry(
                 mtime: entry.mtime, size: entry.size, days: entry.days,
                 slots: entry.slots.filter { $0.t >= cutoff },
-                session: entry.session, calls: entry.calls, excluded: entry.excluded)
+                session: entry.session, calls: entry.calls, excluded: entry.excluded,
+                slotsFrom: cutoff.timeIntervalSince1970)
         }
 
         // Second pass: one call can appear in several transcripts — echoed
@@ -494,7 +509,8 @@ public struct TranscriptScanner: Sendable {
             corrections[path] = FileEntry(
                 mtime: entry.mtime, size: entry.size, days: parsed.days,
                 slots: parsed.slots.filter { $0.t >= cutoff }, session: parsed.session,
-                calls: Self.encodeCalls(parsed.calls), excluded: mark)
+                calls: Self.encodeCalls(parsed.calls), excluded: mark,
+                slotsFrom: cutoff.timeIntervalSince1970)
         }
         for (path, entry) in corrections { files[path] = entry }
 
@@ -1142,6 +1158,26 @@ public struct TranscriptScanner: Sendable {
         formatter.timeZone = calendar.timeZone
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter
+    }
+
+    /// A cache hit whose minute slots were trimmed under a SHORTER retention
+    /// than today's: the bound it was last trimmed to (`slotsFrom`) lies
+    /// after the current cutoff, and it recorded calls in the stretch
+    /// between. Such an entry re-parses once despite matching mtime/size — a
+    /// finished transcript never changes on its own, so nothing else would
+    /// ever restore the slots a longer retention now wants. An entry without
+    /// the marker was trimmed to the pre-v0.91.0 8-day bound of its day. A
+    /// quiet stretch is not worth a parse: the entry is re-stamped as-is.
+    private func slotsTrimmed(_ entry: FileEntry, cutoff: Date) -> Bool {
+        let trimmedTo = entry.slotsFrom.map { Date(timeIntervalSince1970: $0) }
+            ?? cutoff.addingTimeInterval(Self.timelineRetention - 8 * 86400)
+        guard trimmedTo > cutoff.addingTimeInterval(1) else { return false }
+        let formatter = dayFormatter
+        return entry.days.contains { day, count in
+            guard count.messages > 0, let start = formatter.date(from: day) else { return false }
+            let end = calendar.date(byAdding: .day, value: 1, to: start) ?? start
+            return end > cutoff && start < trimmedTo
+        }
     }
 
     private func loadCache() -> CacheFile {
