@@ -24,6 +24,11 @@ enum ProviderStyle {
     nonisolated(unsafe) private(set) static var glyph = "✳︎"
 
     static var accentColor: Color { Color(nsColor: accent) }
+    /// The accent lifted ~45% toward white — the highlight register the
+    /// TUI's focus band uses, for a mark that must read as "this one".
+    static var accentHighlightColor: Color {
+        Color(nsColor: accent.blended(withFraction: 0.45, of: .white) ?? accent)
+    }
 
     static func install(_ provider: any UsageProvider) {
         providerID = provider.id
