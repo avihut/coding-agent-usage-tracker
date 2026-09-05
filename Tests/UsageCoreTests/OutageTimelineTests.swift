@@ -45,6 +45,20 @@ struct OutageTimelineTests {
         #expect(spans[0].title == "Elevated errors")
     }
 
+    /// Statuspage posts informational incidents with impact "none" (an
+    /// add-in's availability, trouble reaching the status page itself).
+    /// Nothing was down, and their color would be the healthy green.
+    @Test func impactNoneIsNotAnOutage() {
+        let spans = OutageTimeline.spans(
+            from: [
+                outage("info", start: 1, end: 3, impact: "none"),
+                outage("real", start: 5, end: 6, impact: "minor"),
+                outage("unrated", start: 7, end: 8, impact: nil),
+            ],
+            now: at(10))
+        #expect(spans.map(\.id) == ["real", "unrated"])
+    }
+
     @Test func anOngoingOutageHasNoEndAndReachesNow() {
         let spans = OutageTimeline.spans(from: [outage("live", start: 10, end: nil)], now: at(12))
         #expect(spans.count == 1)

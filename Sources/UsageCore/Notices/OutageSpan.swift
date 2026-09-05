@@ -65,14 +65,19 @@ public enum OutageTimeline {
     public static let retention: TimeInterval = 56 * 86400
 
     /// Chronological by start. Maintenance never reaches here — the status
-    /// card keeps it apart and the detector records incidents only.
+    /// card keeps it apart and the detector records incidents only — and an
+    /// incident whose impact is "none" (an informational post: "Issues
+    /// reaching status.claude.com", an add-in's availability) is not an
+    /// outage either: nothing was down, so the floor shows nothing. Its
+    /// severity color would have been the healthy green, the one thing an
+    /// outage nub must never wear.
     public static func spans(
         from notices: [Notice], now: Date, retention: TimeInterval = retention
     ) -> [OutageSpan] {
         let cutoff = now.addingTimeInterval(-retention)
         return notices
             .filter { notice in
-                guard notice.kindValue == .outage else { return false }
+                guard notice.kindValue == .outage, notice.impact != "none" else { return false }
                 return notice.ongoing || (notice.endedAt ?? notice.occurredAt) >= cutoff
             }
             .sorted { $0.occurredAt < $1.occurredAt }
