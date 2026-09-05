@@ -91,7 +91,7 @@ public enum ResetCliffs {
         resetKind(from: a, to: b) != nil
     }
 
-    private static func midpoint(_ a: Sample, _ b: Sample) -> Date {
+    static func midpoint(_ a: Sample, _ b: Sample) -> Date {
         a.t.addingTimeInterval(b.t.timeIntervalSince(a.t) / 2)
     }
 

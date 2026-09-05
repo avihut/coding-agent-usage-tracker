@@ -971,6 +971,15 @@ the README rather than silently deviating.
   curtain (no window closed), readout "Limit reset · ~Thu
   21:10 · from 30%". The dashed
   boundary rule + curtain stay exclusively `.windowEnd`.
+  A GRANT IS ONE ACCOUNT-WIDE EVENT (v0.92.3, user-reported: the session
+  meter had closed at its own 19:xx boundary and sat at zero when the reset
+  landed, so its day drill and 24h History showed nothing while the weekly
+  charts did): `VendorGrants.observed(samples:for:through:)` (Audit/) reads
+  mid-window cliffs off EVERY OTHER meter's samples, re-voices `from` as
+  the chart's own standing percent (readouts omit "from 0%"), dedupes
+  within 120s, and `VendorGrants.union(own:foreign:)` — own reading wins
+  an instant — feeds both `AuditWindow.build` and the popover's
+  `percentSeries`. Whatever any meter saw, every meter marks.
   `ExhaustedStretches.build(grants:)` ends a lockout at the grant and never
   reaches back across one. The window ledger records nothing for a grant
   (the window didn't close; its later close keeps the pre-grant peak from

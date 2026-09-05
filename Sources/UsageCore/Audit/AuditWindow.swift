@@ -120,7 +120,13 @@ public enum AuditWindow {
 
         let inSpan = cliffs.filter { $0.at >= domain.start }
         let resets = inSpan.filter { $0.kind == .windowEnd }.map(\.at)
-        let grants = inSpan.filter { $0.kind == .midWindow }
+        // A vendor's grant is one event for the whole account: what this
+        // meter's own samples saw, plus what its siblings saw while this
+        // one already sat at zero (`VendorGrants`).
+        let grants = VendorGrants.union(
+            own: inSpan.filter { $0.kind == .midWindow },
+            foreign: VendorGrants.observed(samples: samples, for: meterLabel, through: measuredEnd)
+                .filter { $0.at >= domain.start })
         return AuditWindowModel(
             percent: drawn,
             resets: resets,

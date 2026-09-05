@@ -426,7 +426,12 @@ struct MeterHistoryView: View {
         return PercentSeries(
             drawn: drawn.sorted { $0.t < $1.t },
             resets: inFrame.filter { $0.kind == .windowEnd }.map(\.at),
-            midWindow: inFrame.filter { $0.kind == .midWindow })
+            // The vendor's grants as every meter saw them — a session meter
+            // already at zero when the account emptied still marks it.
+            midWindow: VendorGrants.union(
+                own: inFrame.filter { $0.kind == .midWindow },
+                foreign: VendorGrants.observed(samples: samples, for: meter.label, through: measuredEnd)
+                    .filter { $0.at >= start }))
     }
 
     /// This window's per-model usage, scoped for scoped meters — the rows of
@@ -1146,7 +1151,7 @@ struct MeterHistoryView: View {
     /// polls it fell between.
     private var grantReadout: String? {
         hoveredGrant.map { grant in
-            "Limit reset · ~\(timeLabel(grant.at)) · from \(grant.from)%"
+            "Limit reset · ~\(timeLabel(grant.at))" + (grant.from > 0 ? " · from \(grant.from)%" : "")
         }
     }
 

@@ -436,7 +436,7 @@ struct AuditWindowChart: View {
             } else if let hoveredGrant {
                 Text(
                     "Limit reset · ~\(UsageFormatting.clockTime(hoveredGrant.at))"
-                    + " · from \(hoveredGrant.from)%")
+                    + (hoveredGrant.from > 0 ? " · from \(hoveredGrant.from)%" : ""))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             } else if let hoveredReset {
