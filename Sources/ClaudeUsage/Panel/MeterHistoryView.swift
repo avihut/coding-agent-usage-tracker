@@ -105,6 +105,10 @@ struct MeterHistoryView: View {
     /// the readout until the pointer takes over the chart. Held apart from
     /// `hoveredGrant` because nothing hovered put it there.
     @State private var pinnedReset: Date?
+    /// When the pin landed — the glow's clock. The glow pulses three times
+    /// over `glowDuration` and fades; afterwards the rule stays lit and
+    /// the readout keeps its words, but nothing glows.
+    @State private var glowStartedAt: Date?
     /// Span/frame chosen FOR the pinned reset when the remembered ones
     /// don't contain it — transient, never written to the per-meter prefs.
     @State private var spanOverride: Span?
@@ -268,7 +272,17 @@ struct MeterHistoryView: View {
         spanOverride = nil
         frameOverride = nil
         pinnedReset = nil
+        glowStartedAt = nil
         guard let at = highlightReset else { return }
+        let started = Date()
+        glowStartedAt = started
+        // Hand the chart's clock back to the now rule once the glow is
+        // spent — a body that only READS the time would keep ticking at
+        // animation rate until something else changed.
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(Self.glowDuration + 0.2))
+            if glowStartedAt == started { glowStartedAt = nil }
+        }
         windowOffset = 0
         let (start, end) = domain
         if start <= at, at <= end {
@@ -281,6 +295,27 @@ struct MeterHistoryView: View {
             now.addingTimeInterval(-$0.length(now: now)) <= at
         } ?? .d30
         pinnedReset = at
+    }
+
+    private static let glowDuration: TimeInterval = 2.4
+    private static let glowPulses = 3.0
+
+    /// The glow's brightness at `now`: three sine pulses under a linear
+    /// fade, zero once the run is over. Pure in time, so the chart's own
+    /// tick redraws it — no animation state to leak into a later render.
+    private func glow(now: Date) -> Double {
+        guard pinnedReset != nil, let start = glowStartedAt else { return 0 }
+        let elapsed = now.timeIntervalSince(start)
+        guard elapsed >= 0, elapsed < Self.glowDuration else { return 0 }
+        let pulse = pow(sin(.pi * elapsed * Self.glowPulses / Self.glowDuration), 2)
+        return pulse * (1 - elapsed / Self.glowDuration)
+    }
+
+    /// True while the glow still has frames to draw — the chart's tick
+    /// then runs at animation rate instead of the now rule's 30s.
+    private var isGlowing: Bool {
+        guard pinnedReset != nil, let start = glowStartedAt else { return false }
+        return Date().timeIntervalSince(start) < Self.glowDuration + 0.1
     }
 
     /// The measured cliff the pinned moment names, if the samples saw one
@@ -592,7 +627,9 @@ struct MeterHistoryView: View {
                 // below step discretely, so the popover resizes once,
                 // natively, instead of chasing an animated height.
                 ZStack {
-                    TimelineView(.periodic(from: .now, by: 30)) { context in
+                    // 30s for the now rule; animation rate only while the
+                    // opener's glow is still running.
+                    TimelineView(.animation(minimumInterval: isGlowing ? 1.0 / 30 : 30)) { context in
                         chart(curves: curves, now: context.date, percentPerToken: scale)
                     }
                     .id(pageIndex)
@@ -720,7 +757,7 @@ struct MeterHistoryView: View {
             WindowPlot.resets(series.resets, hovered: hoveredReset, ceiling: ceiling)
             WindowPlot.midWindowResets(
                 series.midWindow.map(\.at), hovered: hoveredGrant?.at,
-                highlighted: pinnedMoment, ceiling: ceiling)
+                highlighted: pinnedMoment, glow: glow(now: now), ceiling: ceiling)
             // Reset hover: curtain-dim everything outside the limit window
             // that ended at this line — the undimmed stretch IS the window
             // — with a solid twin marking where that window began. The

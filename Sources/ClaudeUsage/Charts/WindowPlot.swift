@@ -166,21 +166,24 @@ enum WindowPlot {
     /// here the accent IS the data. No curtain pairs with it: there is no
     /// "ended window" to light.
     ///
-    /// `highlighted` (v0.93.0) is the reset a notification click pointed at:
-    /// it wears a soft accent halo behind its rule so the eye lands on it
-    /// the moment the card opens. A highlighted moment the samples never
+    /// `highlighted` (v0.93.0) is the reset a notification click pointed at,
+    /// and `glow` (0…1) how brightly it is glowing RIGHT NOW: the opener
+    /// pulses it a few times and lets it fade (v0.93.1, user-directed — an
+    /// animated glow, never a standing aura), after which only the lit rule
+    /// and the readout remain. A highlighted moment the samples never
     /// measured (no cliff at that instant) still gets its rule — the notice
     /// said it happened, and the card owes the person the mark.
     @ChartContentBuilder
     static func midWindowResets(
-        _ dates: [Date], hovered: Date?, highlighted: Date? = nil, ceiling: Double
+        _ dates: [Date], hovered: Date?, highlighted: Date? = nil, glow: Double = 0,
+        ceiling: Double
     ) -> some ChartContent {
-        if let highlighted {
+        if let highlighted, glow > 0.01 {
             RuleMark(
                 x: .value("Limit reset", highlighted),
                 yStart: .value("Usage", 0), yEnd: .value("Usage", min(100, ceiling)))
-                .foregroundStyle(ProviderStyle.accentColor.opacity(0.22))
-                .lineStyle(StrokeStyle(lineWidth: 7, lineCap: .round))
+                .foregroundStyle(ProviderStyle.accentColor.opacity(0.45 * glow))
+                .lineStyle(StrokeStyle(lineWidth: 5 + 7 * glow, lineCap: .round))
         }
         ForEach(
             highlighted.map { dates.contains($0) ? dates : dates + [$0] } ?? dates,
@@ -197,7 +200,8 @@ enum WindowPlot {
                     overflowResolution: .init(x: .fit(to: .plot), y: .fit(to: .plot))
                 ) {
                     Text(ProviderStyle.glyph)
-                        .font(.system(size: highlighted == reset ? 11 : 9, weight: .semibold))
+                        .font(.system(
+                            size: highlighted == reset ? 9 + 2 * glow : 9, weight: .semibold))
                         .foregroundStyle(ProviderStyle.accentColor.opacity(
                             hovered == reset || highlighted == reset ? 1 : 0.85))
                 }
