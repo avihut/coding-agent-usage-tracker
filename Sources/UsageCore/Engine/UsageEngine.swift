@@ -71,6 +71,10 @@ public final class UsageEngine {
     /// publish — the hosting app's panel and menu bar read this; a client
     /// reads the same card off the digest.
     public private(set) var notices: NoticesCard?
+    /// Every incident within retention — the charts' outage floor. Derived
+    /// from the notice ledger's whole record (dismissed rows included) at
+    /// each publish; empty when the provider declares no status feed.
+    public private(set) var outages: [OutageSpan] = []
 
     /// The one metered service this instance tracks. Everything
     /// vendor-specific — endpoints, paths, names, links — flows from here.
@@ -229,8 +233,12 @@ public final class UsageEngine {
             poller.onHistory = { [weak self] history in
                 guard let self, !self.isShutDown else { return }
                 let now = Date()
+                // Two days of incidents are news; the rest of the retention
+                // window lands as already-dismissed facts for the charts'
+                // outage floor, so a fresh ledger never floods the panel.
                 if NoticeDetector.backfill(
                     history: history, since: now.addingTimeInterval(-Self.noticeCatchUp),
+                    factsSince: now.addingTimeInterval(-OutageTimeline.retention),
                     now: now, into: &self.noticeLedger) {
                     self.publishState(now: now)
                 }
@@ -473,9 +481,12 @@ public final class UsageEngine {
                 AccountPresenceInput(epochs: $0.epochs, observedAt: $0.observedAt)
             },
             notices: noticeLedger.pending,
+            outages: provider.statusFeed == nil
+                ? nil : OutageTimeline.spans(from: noticeLedger.notices, now: now),
             now: now)
         accountPresence = digest.accountPresence
         notices = digest.notices
+        outages = digest.outages ?? []
         publisher.publish(digest)
     }
 

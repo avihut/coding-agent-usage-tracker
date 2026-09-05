@@ -75,6 +75,8 @@ struct UsagePanelView: View {
                         timeline: store.tokenTimeline,
                         sessions: store.sessions,
                         windowOutcomes: store.windowOutcomes,
+                        outages: store.outages,
+                        onOpenOutage: openOutage,
                         sessionAuditMeter: auditMeter(rank: 0),
                         weeklyAuditMeter: auditMeter(rank: 1))
                     sessionsSection
@@ -111,7 +113,9 @@ struct UsagePanelView: View {
                 outcomes: store.windowOutcomes,
                 agentName: store.provider.agentName,
                 providerID: store.provider.id,
-                highlightReset: litReset?.meter == meter.id ? litReset?.at : nil)
+                highlightReset: litReset?.meter == meter.id ? litReset?.at : nil,
+                outages: store.outages,
+                onOpenOutage: openOutage)
                 .onHover { inside in
                     hoveringPopover = inside
                     if !inside { scheduleHideIfLeft() }
@@ -242,6 +246,13 @@ struct UsagePanelView: View {
             litReset = (meter.id, at)
             openMeter = meter.id
         }
+    }
+
+    /// A click on an outage nub in any chart: the incident's report, where
+    /// the provider says one exists — the same rule the notice row follows.
+    private func openOutage(_ span: OutageSpan) {
+        guard let url = store.provider.outageDestination(url: span.url) else { return }
+        NSWorkspace.shared.open(url)
     }
 
     /// Whether a pending notice already carries the running incident — then

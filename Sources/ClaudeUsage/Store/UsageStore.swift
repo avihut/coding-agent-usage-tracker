@@ -87,6 +87,18 @@ final class UsageStore {
         case .client(let client): client.windowOutcomes
         }
     }
+    /// Provider incidents within retention — the charts' outage floor.
+    /// Empty when the provider declares no status feed or the daemon
+    /// predates the field; the fake (`--fake-notices`) wins so the floor can
+    /// be verified against the same synthetic incidents as the section.
+    var outages: [OutageSpan] {
+        if let fakeOutages { return fakeOutages }
+        switch mode {
+        case .hosting(let engine): return engine.outages
+        case .client(let client): return client.outages
+        }
+    }
+    private var fakeOutages: [OutageSpan]?
     var predictions: [String: UsagePrediction] {
         switch mode {
         case .hosting(let engine): engine.predictions
@@ -586,9 +598,11 @@ final class UsageStore {
         fakeServiceStatus = card
     }
 
-    /// Installs a synthetic notices card for the `--fake-notices` hatch.
-    func installFakeNotices(_ card: NoticesCard?) {
+    /// Installs a synthetic notices card for the `--fake-notices` hatch,
+    /// and the same incidents as outage spans for the charts' floor.
+    func installFakeNotices(_ card: NoticesCard?, outages: [OutageSpan]? = nil) {
         fakeNotices = card
+        fakeOutages = outages
     }
 
     // MARK: - Notices

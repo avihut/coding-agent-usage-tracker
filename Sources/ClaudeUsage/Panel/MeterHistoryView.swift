@@ -119,15 +119,27 @@ struct MeterHistoryView: View {
 
     /// A reset moment to light on open — the notices section's click-through.
     let highlightReset: Date?
+    /// Provider incidents for the outage floor under the session strip
+    /// (v0.94.0). The floor exists only while the frame holds one.
+    let outages: [OutageSpan]
+    /// A click on an outage nub — the owner resolves the destination through
+    /// the provider (`outageDestination`). Nil = nubs are hover-only.
+    let onOpenOutage: ((OutageSpan) -> Void)?
+    /// The outage nub under the cursor, on the second floor.
+    @State private var hoveredOutage: WindowPlot.OutageNub?
 
     init(
         meter: Meter, samples: [UsageSample], timeline: [TokenSlot],
         pricing: PricingTable, prediction: UsagePrediction?,
         outcomes: [WindowOutcome] = [],
         agentName: String, providerID: String,
-        highlightReset: Date? = nil
+        highlightReset: Date? = nil,
+        outages: [OutageSpan] = [],
+        onOpenOutage: ((OutageSpan) -> Void)? = nil
     ) {
         self.highlightReset = highlightReset
+        self.outages = outages
+        self.onOpenOutage = onOpenOutage
         self.meter = meter
         self.samples = samples
         self.timeline = timeline
@@ -154,7 +166,20 @@ struct MeterHistoryView: View {
     }
 
     private static let chartWidth: CGFloat = 300
-    private static let chartHeight: CGFloat = 124
+    private static let baseChartHeight: CGFloat = 124
+    /// One floor's worth of height (≈1pt per domain unit at this size), so
+    /// adding the outage floor never squeezes the plot.
+    private static let outageFloorHeight: CGFloat = 7
+    /// The chart grows by a floor while the frame holds an outage, and
+    /// only then — a rare event shouldn't tax every chart. The popover
+    /// resizes once, discretely, like the grid below it on a page turn.
+    private var chartHeight: CGFloat {
+        Self.baseChartHeight + (hasOutageFloor ? Self.outageFloorHeight : 0)
+    }
+    private var hasOutageFloor: Bool {
+        let (start, end) = domain
+        return !WindowPlot.outageNubs(outages, start: start, end: end, now: Date()).isEmpty
+    }
     /// One width for Y-axis labels in both modes — sized for the widest
     /// token string TokenFormat.compact emits ("838.9M", six characters),
     /// so nothing wraps or truncates and the axis flipping between percent
@@ -599,7 +624,7 @@ struct MeterHistoryView: View {
                     : "No samples retained for this \(windowNoun).")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
-                    .frame(width: Self.chartWidth, height: Self.chartHeight)
+                    .frame(width: Self.chartWidth, height: chartHeight)
             } else {
                 // The 30s tick keeps the now-notch sliding and the sliding
                 // domain honest while the popover stays open.
@@ -622,7 +647,7 @@ struct MeterHistoryView: View {
                     // right (fingers right = earlier) moves the chart right.
                     .transition(.push(from: pageSlide < 0 ? .leading : .trailing))
                 }
-                .frame(width: Self.chartWidth, height: Self.chartHeight)
+                .frame(width: Self.chartWidth, height: chartHeight)
                 .clipped()
                 .animation(.easeInOut(duration: 0.28), value: pageIndex)
                 // Two-finger horizontal swipes page windows like the arrows
@@ -633,10 +658,10 @@ struct MeterHistoryView: View {
             }
             domainLabels
             Text(resetReadout ?? grantReadout ?? pinnedReadout ?? segmentReadout
-                ?? readout.map(readoutText) ?? hoverHint)
+                ?? outageReadout ?? readout.map(readoutText) ?? hoverHint)
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(readout == nil && segmentReadout == nil && resetReadout == nil
-                    && grantReadout == nil && pinnedReadout == nil
+                    && grantReadout == nil && pinnedReadout == nil && outageReadout == nil
                     ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.secondary))
                 .lineLimit(1)
                 .frame(height: 14, alignment: .leading)
@@ -707,8 +732,17 @@ struct MeterHistoryView: View {
         // The stored hover re-anchored onto this render's freshly built
         // segments — see liveNub for why no direct comparison can do it.
         let hovered = hoveredSegment.flatMap { liveNub(for: $0, in: segments) }
+        // The second floor: provider incidents overlapping the frame, an
+        // ongoing one held open to now. Absent entirely when there are none.
+        let outageNubs = WindowPlot.outageNubs(outages, start: start, end: end, now: now)
+        let floorBottom = outageNubs.isEmpty ? Self.stripBottom : Self.outageBottom
+        // Re-anchored by identity, not by dates: an ongoing nub's end moves
+        // with now on every render.
+        let hoveredOutageNub = hoveredOutage.flatMap { stored in
+            outageNubs.first { $0.id == stored.id }
+        }
         let focusedCurve = focusedModel.flatMap { model in curves.first { $0.model == model } }
-        let nowLabelShown = hovered == nil
+        let nowLabelShown = hovered == nil && hoveredOutageNub == nil
             && !nowEclipsed(by: focusedCurve, now: now, start: start, end: end)
         return Chart {
             // Activity strip, iStat-style: a band under the plot floor —
@@ -725,6 +759,25 @@ struct MeterHistoryView: View {
                     yStart: .value("Usage", Self.stripBottom),
                     yEnd: .value("Usage", Self.stripTop))
                 .foregroundStyle(nubColor(segment).opacity(nubOpacity(segment, hovered: hovered)))
+            }
+            // The outage floor under the sessions, severity-colored: a
+            // vertical read answers "was I working while it was down". Its
+            // own faint track so an empty stretch reads as "up".
+            if !outageNubs.isEmpty {
+                RectangleMark(
+                    xStart: .value("Time", start), xEnd: .value("Time", measuredEnd),
+                    yStart: .value("Usage", Self.outageBottom),
+                    yEnd: .value("Usage", Self.outageTop))
+                .foregroundStyle(Color.primary.opacity(0.08))
+                ForEach(outageNubs) { nub in
+                    RectangleMark(
+                        xStart: .value("Time", nub.start), xEnd: .value("Time", nub.end),
+                        yStart: .value("Usage", Self.outageBottom),
+                        yEnd: .value("Usage", Self.outageTop))
+                    .foregroundStyle(
+                        WindowPlot.outageColor(nub.span)
+                            .opacity(WindowPlot.outageOpacity(nub, hovered: hoveredOutageNub)))
+                }
             }
             // Scaffolding under the data: a muted dashed vertical at each
             // reset that happened inside the frame, and — when the frame
@@ -818,7 +871,7 @@ struct MeterHistoryView: View {
                 // session-duration label.
                 RuleMark(
                     x: .value("Now", now),
-                    yStart: .value("Usage", Self.stripBottom),
+                    yStart: .value("Usage", floorBottom),
                     yEnd: .value("Usage", 100))
                     .foregroundStyle(.primary)
                     .lineStyle(StrokeStyle(lineWidth: 1))
@@ -842,7 +895,7 @@ struct MeterHistoryView: View {
                 if let exhaust = exhaustDate {
                     RuleMark(
                         x: .value("Exhausted", exhaust),
-                        yStart: .value("Usage", Self.stripBottom),
+                        yStart: .value("Usage", floorBottom),
                         yEnd: .value("Usage", 100))
                         .foregroundStyle(.red.opacity(0.75))
                         .lineStyle(StrokeStyle(lineWidth: 1))
@@ -874,6 +927,28 @@ struct MeterHistoryView: View {
                                 ? AnyShapeStyle(.red) : AnyShapeStyle(.primary))
                 }
             }
+            // Outage hover: the same curtains around the incident's slice,
+            // its length in the headroom band in its severity color; the
+            // readout line below names it. The breakdown grid does not
+            // re-tally — the outage is not this person's spend.
+            if let hoveredOutageNub {
+                WindowPlot.outageCurtain(hoveredOutageNub, start: start, end: end, ceiling: ceiling)
+                PointMark(
+                    x: .value("Time", hoveredOutageNub.start.addingTimeInterval(
+                        hoveredOutageNub.end.timeIntervalSince(hoveredOutageNub.start) / 2)),
+                    y: .value("Usage", ceiling))
+                .symbolSize(0)
+                .annotation(
+                    position: .top, alignment: .center, spacing: 2,
+                    overflowResolution: .init(x: .fit(to: .plot), y: .disabled)
+                ) {
+                    Text(UsageFormatting.duration(
+                        (hoveredOutageNub.span.end ?? now)
+                            .timeIntervalSince(hoveredOutageNub.span.start)))
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(WindowPlot.outageColor(hoveredOutageNub.span))
+                }
+            }
             // The focused model's name rides above its curve's tip — the
             // chart-side echo of the legend row. Labels are layered: this
             // outranks the now label (which yields on overlap) and the
@@ -895,7 +970,7 @@ struct MeterHistoryView: View {
             if let readout {
                 RuleMark(
                     x: .value("Time", readout.t),
-                    yStart: .value("Usage", Self.stripBottom),
+                    yStart: .value("Usage", floorBottom),
                     yEnd: .value("Usage", ceiling))
                     .foregroundStyle(.quaternary)
                 PointMark(
@@ -905,7 +980,7 @@ struct MeterHistoryView: View {
                 .symbolSize(30)
             }
         }
-        .chartYScale(domain: Self.stripBottom - 1...plotTop)
+        .chartYScale(domain: floorBottom - 1...plotTop)
         // While a model is focused the axis speaks its language: the
         // gridlines re-labeled as tokens through the shared conversion,
         // climbing in steps of half a limit as far as the curves reach.
@@ -1043,17 +1118,26 @@ struct MeterHistoryView: View {
                             hoverDate = date
                             // Below the plot floor the cursor is on the
                             // activity strip: nubs take the hover there,
-                            // curves let go.
+                            // curves let go. Below THAT strip, on the
+                            // outage floor, the incidents take it.
                             if let yValue, yValue < 0 {
-                                let hit = date.flatMap { d in
-                                    segments.first { $0.start <= d && d <= $0.end }
+                                if !outageNubs.isEmpty, yValue < Self.stripBottom - 1 {
+                                    let hit = date.flatMap { d in outageNubs.first { $0.contains(d) } }
+                                    if hoveredOutage != hit { hoveredOutage = hit }
+                                    if hoveredSegment != nil { hoveredSegment = nil }
+                                } else {
+                                    let hit = date.flatMap { d in
+                                        segments.first { $0.start <= d && d <= $0.end }
+                                    }
+                                    if hoveredSegment != hit { hoveredSegment = hit }
+                                    if hoveredOutage != nil { hoveredOutage = nil }
                                 }
-                                if hoveredSegment != hit { hoveredSegment = hit }
                                 if focusedModel != nil { focusedModel = nil }
                                 if hoveredReset != nil { hoveredReset = nil }
                                 if hoveredGrant != nil { hoveredGrant = nil }
                             } else {
                                 if hoveredSegment != nil { hoveredSegment = nil }
+                                if hoveredOutage != nil { hoveredOutage = nil }
                                 // A reset line within reach takes the hover
                                 // before curve focus — its ended window
                                 // lights up instead.
@@ -1076,18 +1160,29 @@ struct MeterHistoryView: View {
                             hoverDate = nil
                             focusedModel = nil
                             hoveredSegment = nil
+                            hoveredOutage = nil
                             hoveredReset = nil
                             hoveredGrant = nil
                         }
                     }
+                    // An outage nub is a link to its incident report — the
+                    // provider's rule, the notice row's destination.
+                    .pointerStyle(hoveredOutage != nil && onOpenOutage != nil ? .link : .default)
+                    .onTapGesture {
+                        if let hoveredOutage, let onOpenOutage { onOpenOutage(hoveredOutage.span) }
+                    }
             }
         }
-        .frame(width: Self.chartWidth, height: Self.chartHeight)
+        .frame(width: Self.chartWidth, height: chartHeight)
     }
 
     /// The activity strip's band, in chart-Y units below the plot floor.
     private static let stripBottom: Double = -7
     private static let stripTop: Double = -2
+    /// The outage floor's band, below the strip with the same gap — present
+    /// only while the frame holds an incident (the Y domain then reaches it).
+    private static let outageBottom: Double = -14
+    private static let outageTop: Double = -9
 
     /// The projected limit-crossing inside the Current span, if the current
     /// pace spends the meter before the window resets.
@@ -1260,6 +1355,12 @@ struct MeterHistoryView: View {
                 + UsageFormatting.duration(
                     segment.end.timeIntervalSince(segment.sessionStart))
         }
+    }
+
+    /// "Outage · major · Wed 01:10 – Wed 03:20 · 2 hr 10 min · Claude Code"
+    /// while an outage nub is hovered — the incident's true bounds.
+    private var outageReadout: String? {
+        hoveredOutage.map { WindowPlot.outageReadout($0, now: Date(), timeLabel: timeLabel) }
     }
 
     /// The scoped activity moments before `boundary`, walked backwards with

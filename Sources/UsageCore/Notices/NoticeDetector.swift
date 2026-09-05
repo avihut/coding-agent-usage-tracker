@@ -129,19 +129,29 @@ public enum NoticeDetector {
 
     /// A wake-time (or start-time) read of the page's incident history:
     /// incidents that opened AND resolved while nobody was polling become
-    /// closed notices. Only ones resolved at or after `since`; unresolved
-    /// ones are the summary poll's business. Returns whether it changed.
+    /// closed notices. Only ones resolved at or after `since` are NEWS
+    /// (pending epilogues); ones resolved between `factsSince` and `since`
+    /// are recorded already dismissed — the outage floor draws them, the
+    /// Notifications section never lists them, so a first run over a month
+    /// of incident history stays quiet. Unresolved ones are the summary
+    /// poll's business. Returns whether it changed.
     @discardableResult
     public static func backfill(
-        history: [StatusIncident], since: Date, now: Date, into ledger: inout NoticeLedger
+        history: [StatusIncident], since: Date, factsSince: Date? = nil, now: Date,
+        into ledger: inout NoticeLedger
     ) -> Bool {
         var changed = false
         for incident in history {
-            guard let resolvedAt = incident.resolvedAt, resolvedAt >= since,
+            guard let resolvedAt = incident.resolvedAt,
+                  resolvedAt >= (factsSince.map { min($0, since) } ?? since),
                   ledger.notice(id: Notice.outageID(incidentID: incident.id)) == nil
             else { continue }
-            changed = ledger.record(outage(from: incident, ongoing: false, now: now), now: now)
-                || changed
+            var notice = outage(from: incident, ongoing: false, now: now)
+            if resolvedAt < since {
+                notice.dismissedAt = now
+                notice.seenAt = now
+            }
+            changed = ledger.record(notice, now: now) || changed
         }
         return changed
     }

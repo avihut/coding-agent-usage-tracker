@@ -62,12 +62,18 @@ public struct LiveState: Codable, Sendable, Equatable {
     /// older build; a reader must show no indicator and no section for it.
     /// Empty `items` means nothing is pending.
     public let notices: NoticesCard?
+    /// Every incident within the sample retention, ongoing ones with a nil
+    /// end (0.94.0) — the charts' outage floor. Nil means the writer records
+    /// no outages (no status feed, or an older build); empty means none in
+    /// the last 56 days. Nil ≠ empty.
+    public let outages: [OutageSpan]?
 
     public init(
         engine: EngineStatus, meters: [LiveMeter], menuBar: [SegmentStatus],
         models: [ModelRow], activity: ActivityRollup, sessions: [SessionCard] = [],
         serviceStatus: ServiceStatusCard? = nil, appUpdate: AppUpdateCard? = nil,
-        accountPresence: AccountPresenceCard? = nil, notices: NoticesCard? = nil
+        accountPresence: AccountPresenceCard? = nil, notices: NoticesCard? = nil,
+        outages: [OutageSpan]? = nil
     ) {
         self.schemaVersion = Self.schemaVersion
         self.sessionsCap = LiveStateBuilder.sessionsCap
@@ -81,6 +87,7 @@ public struct LiveState: Codable, Sendable, Equatable {
         self.appUpdate = appUpdate
         self.accountPresence = accountPresence
         self.notices = notices
+        self.outages = outages
     }
 
     /// `<App Support>/<bundleID>/live-state.json` — the bundle root, above
@@ -658,6 +665,9 @@ public enum LiveStateBuilder {
         /// The notice ledger's pending entries, or nil when the host keeps no
         /// ledger. Phrased here — the one place the copy lives.
         notices: [Notice]? = nil,
+        /// Incidents within retention for the charts' outage floor, or nil
+        /// when the host records none.
+        outages: [OutageSpan]? = nil,
         now: Date,
         calendar: Calendar = .current,
         locale: Locale = .current
@@ -808,7 +818,8 @@ public enum LiveStateBuilder {
                 NoticePhrasing.card(
                     pending: $0, serviceName: provider.serviceName, now: now,
                     calendar: calendar, locale: locale)
-            })
+            },
+            outages: outages)
     }
 
     // MARK: - Meters

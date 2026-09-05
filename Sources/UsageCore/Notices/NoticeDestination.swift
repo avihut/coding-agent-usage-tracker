@@ -15,6 +15,15 @@ public enum NoticeDestination: Sendable, Equatable {
 }
 
 extension UsageProvider {
+    /// Where an outage leads, whatever face shows it — the notice row, the
+    /// chart's outage nub: the incident's own report when the page gave one,
+    /// else the status page, else nowhere. ONE rule so the two clicks can't
+    /// disagree.
+    public func outageDestination(url raw: String?) -> URL? {
+        if let raw, let url = URL(string: raw) { return url }
+        return statusFeed?.pageURL
+    }
+
     /// The default policy: an outage leads to its incident page (else the
     /// status page), a reset to the meter card — no vendor is known to
     /// publish a feed of limit resets. A provider with such a feed
@@ -22,8 +31,7 @@ extension UsageProvider {
     public func noticeDestination(for notice: NoticeCard) -> NoticeDestination? {
         switch Notice.Kind(rawValue: notice.kind) {
         case .outage:
-            if let raw = notice.url, let url = URL(string: raw) { return .web(url) }
-            return statusFeed.map { .web($0.pageURL) }
+            return outageDestination(url: notice.url).map { .web($0) }
         case .reset:
             return .meterHistory(meterLabel: notice.meterLabel, at: notice.occurredAt)
         case nil:

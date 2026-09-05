@@ -1612,10 +1612,48 @@ the README rather than silently deviating.
   query verb that writes, through the engine's socket (20 when refused, 13
   with no engine). Registered in `nouns`, `fieldCatalog`, the fields-walk's
   `nounPrefix`.
+- OUTAGE FLOOR (v0.94.0, user-directed): every provider incident within
+  the sample retention draws as a nub on a SECOND floor under the session
+  strip in BOTH limit-window charts (`WindowPlot.outageNubs`/`outageColor`/
+  `outageCurtain`/`outageReadout` — the one vocabulary; MeterHistoryView
+  band −14…−9 and the chart grows 7pt while the frame holds one, so the
+  plot is never squeezed; AuditWindowChart rule at −14 with floor −18 —
+  its height is the caller's, tied to the ring/bars, so there the plot
+  compresses). Two floors because the severity colors (yellow/orange/red)
+  would be read as session/exhausted nubs on the session floor, and because
+  "was I working while it was down" is a vertical read. The floor is ABSENT
+  when nothing overlaps the frame; an ongoing incident is held open to now;
+  maintenance never appears. Severity color ongoing or ended (the chart's
+  job is history — greying is the notice row's idiom, not the chart's).
+  Hover: curtains + duration in the headroom band + "Outage · major · 01:10
+  – 03:20 · 2 hr 10 min · Claude Code" readout (TRUE bounds, not the
+  clipped nub's); the grid does not re-tally (not the person's spend);
+  click → `UsageProvider.outageDestination(url:)`, the SAME rule the notice
+  row's `.outage` arm uses (pointer .link). DATA: `LiveState.outages:
+  [OutageSpan]?` (additive; nil = writer records none, [] = none in 56d),
+  derived by the engine from the notice ledger's WHOLE record
+  (`OutageTimeline.spans`, dismissed rows included) — so `NoticeLedger`
+  keeps outage rows for `keepOutagesFor` (56d, = sample/timeline retention)
+  instead of the dismissed-row month, and the wake-time backfill takes
+  `factsSince` (56d): incidents resolved inside the 48h news window become
+  pending epilogues, older ones land ALREADY DISMISSED so a fresh ledger
+  never floods the panel while the floor still gets its history.
+  `AuditWindowModel.outages` carries the overlapping spans unclipped.
+  Client mode mirrors the digest field; `store.outages` is the one app
+  seam; `--fake-notices` installs the same incidents as spans (plus a
+  minor one three days back for a past page). TUI mirrors the field
+  (`digest.rs OutageSpan`, golden-decoded) but does not draw the floor yet.
+  Deferred, user-agreed: per-incident relevance dimming (components vs the
+  models this Mac ran) as a ClaudeProvider-level rule.
 - VERIFY: `--fake-notices <morning|live>` installs a synthetic card
   (dismissals edit it in place); `--snapshot <dir>` renders the
-  Notifications section and the weekly meter card (lit at the first reset
-  notice) headlessly to PNG and quits — the harness's eyes when the live
+  Notifications section, the weekly meter card (lit at the first reset
+  notice) and a trailing 5-day audit chart of the weekly meter headlessly
+  to PNG and quits. KNOWN: `meter.png` comes out as a yellow ⊘ placeholder
+  over the picker and the plot — ImageRenderer's stand-in for the
+  AppKit-backed pieces the card hosts (confirmed pre-existing 2026-09-06 by
+  rendering with the outage floor stripped); `audit.png` is the chart
+  surface that actually verifies (it carries the outage floor too) — the harness's eyes when the live
   popover can't be caught (the outside-click monitor closes the panel on
   ANY real click, and a user at the machine is always clicking; ImageRenderer
   leaves a ScrollView's content blank, so the panel can't be snapshotted

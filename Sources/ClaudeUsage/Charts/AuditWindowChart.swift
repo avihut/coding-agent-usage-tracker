@@ -24,9 +24,14 @@ struct AuditWindowChart: View {
     var modelColors: [String: Color] = [:]
     /// Plot height; the caption row adds its fixed 14 below.
     var plotHeight: CGFloat = 114
+    /// A click on an outage nub — the owner resolves the incident's page
+    /// through the provider. Nil = the floor is hover-only.
+    var onOpenOutage: ((OutageSpan) -> Void)? = nil
 
     /// Continuous-hover crosshair position, nil while the cursor is away.
     @State private var hoverDate: Date?
+    /// The outage nub under the cursor, on the second floor.
+    @State private var hoveredOutage: WindowPlot.OutageNub?
     /// The reset line under the cursor — its whole ended window lights up,
     /// the meter popover's idiom.
     @State private var hoveredReset: Date?
@@ -52,6 +57,17 @@ struct AuditWindowChart: View {
     /// Strip space below the percent floor, the meter chart's idiom.
     private static let plotFloor = -10.0
     private static let stripY = -6.0
+    /// The outage floor below the strip, reached by the Y domain only while
+    /// the span holds an incident. The plot height is the caller's (it sits
+    /// where the ring or the bars sit, so the toggle never moves the
+    /// arrows), so the extra floor compresses the plot slightly rather than
+    /// growing it.
+    private static let outageY = -14.0
+    private static let outageFloor = -18.0
+
+    private func outageNubs(now: Date) -> [WindowPlot.OutageNub] {
+        WindowPlot.outageNubs(model.outages, start: domain.start, end: domain.end, now: now)
+    }
 
     /// Per-model cumulative curves on this span's percent axis, anchored to
     /// the percent the span actually gained (drops excluded, so a sawtooth
@@ -133,7 +149,7 @@ struct AuditWindowChart: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            if model.percent.count >= 2 || !model.nubs.isEmpty {
+            if model.percent.count >= 2 || !model.nubs.isEmpty || !model.outages.isEmpty {
                 // A span still running ticks its now rule every 30s, the
                 // popover's cadence; a finished span renders once.
                 if domain.end > Date() {
@@ -168,7 +184,13 @@ struct AuditWindowChart: View {
         // The now label yields the headroom band to the focused curve's
         // name (its tip sits AT now on a live span, so they always collide)
         // and to the hovered session's duration, the popover's layering.
-        let nowLabelShown = focusedModel == nil && hoveredNub == nil
+        let outageNubs = self.outageNubs(now: now)
+        let floor = outageNubs.isEmpty ? Self.plotFloor : Self.outageFloor
+        // Re-anchored by identity: an ongoing nub's end moves with now.
+        let hoveredOutageNub = hoveredOutage.flatMap { stored in
+            outageNubs.first { $0.id == stored.id }
+        }
+        let nowLabelShown = focusedModel == nil && hoveredNub == nil && hoveredOutageNub == nil
         // Uncapped curves over a multi-window span run well past 100; a
         // fixed 0…100 domain would clip them silently and read as a
         // rendering fault. The headroom band above the tallest is the
@@ -234,6 +256,25 @@ struct AuditWindowChart: View {
                             .opacity(WindowPlot.nubOpacity(nub, hovered: hoveredNub)))
                     .lineStyle(StrokeStyle(lineWidth: 4, lineCap: .round))
             }
+            // The outage floor: provider incidents in their severity color
+            // under the sessions, so working-through-an-outage is a
+            // vertical read. Present only while the span holds one.
+            if !outageNubs.isEmpty {
+                RuleMark(
+                    xStart: .value("Start", domain.start), xEnd: .value("End", measuredEnd),
+                    y: .value("Outage track", Self.outageY))
+                    .foregroundStyle(Color.secondary.opacity(0.18))
+                    .lineStyle(StrokeStyle(lineWidth: 4, lineCap: .round))
+                ForEach(outageNubs) { nub in
+                    RuleMark(
+                        xStart: .value("Start", nub.start), xEnd: .value("End", nub.end),
+                        y: .value("Outage", Self.outageY))
+                        .foregroundStyle(
+                            WindowPlot.outageColor(nub.span)
+                                .opacity(WindowPlot.outageOpacity(nub, hovered: hoveredOutageNub)))
+                        .lineStyle(StrokeStyle(lineWidth: 4, lineCap: .round))
+                }
+            }
             if isLive(now) {
                 // The now separator: measured to the left, nothing yet to
                 // the right. Full primary like the popover's — anything
@@ -241,7 +282,7 @@ struct AuditWindowChart: View {
                 // so its clock label sits in the headroom band.
                 RuleMark(
                     x: .value("Now", now),
-                    yStart: .value("Floor", Self.plotFloor), yEnd: .value("Usage", 100))
+                    yStart: .value("Floor", floor), yEnd: .value("Usage", 100))
                     .foregroundStyle(Color.primary)
                     .lineStyle(StrokeStyle(lineWidth: 1))
                     .annotation(
@@ -258,6 +299,9 @@ struct AuditWindowChart: View {
             if let hoveredNub {
                 WindowPlot.nubCurtain(
                     hoveredNub, start: domain.start, end: domain.end, ceiling: 100)
+            } else if let hoveredOutageNub {
+                WindowPlot.outageCurtain(
+                    hoveredOutageNub, start: domain.start, end: domain.end, ceiling: 100)
             } else if let hoveredReset {
                 WindowPlot.resetCurtain(
                     hoveredReset, window: window,
@@ -271,7 +315,7 @@ struct AuditWindowChart: View {
             }
         }
         .chartXScale(domain: domain.start...domain.end)
-        .chartYScale(domain: Self.plotFloor...(ceiling * 1.15))
+        .chartYScale(domain: floor...(ceiling * 1.15))
         .chartYAxis {
             AxisMarks(values: [0, 50, 100]) { value in
                 AxisGridLine()
@@ -320,14 +364,25 @@ struct AuditWindowChart: View {
                             // the reset lines let go — the popover's
                             // precedence, so both charts read the same.
                             if let depth, depth < 0 {
-                                hoveredNub = date.flatMap { moment in
-                                    nubs.first { $0.contains(moment) }
+                                // Below the session strip's own floor the
+                                // cursor is on the outage floor.
+                                if !outageNubs.isEmpty, depth < Self.plotFloor {
+                                    hoveredOutage = date.flatMap { moment in
+                                        outageNubs.first { $0.contains(moment) }
+                                    }
+                                    hoveredNub = nil
+                                } else {
+                                    hoveredNub = date.flatMap { moment in
+                                        nubs.first { $0.contains(moment) }
+                                    }
+                                    hoveredOutage = nil
                                 }
                                 hoveredReset = nil
                                 hoveredGrant = nil
                                 focusedModel = nil
                             } else {
                                 hoveredNub = nil
+                                hoveredOutage = nil
                                 // A reset line within reach outranks curve
                                 // focus — its ended window lights instead.
                                 let hit = date.flatMap {
@@ -353,8 +408,15 @@ struct AuditWindowChart: View {
                             hoveredReset = nil
                             hoveredGrant = nil
                             hoveredNub = nil
+                            hoveredOutage = nil
                             focusedModel = nil
                         }
+                    }
+                    // An outage nub links to its incident report — the
+                    // provider's rule, shared with the notice row.
+                    .pointerStyle(hoveredOutage != nil && onOpenOutage != nil ? .link : .default)
+                    .onTapGesture {
+                        if let hoveredOutage, let onOpenOutage { onOpenOutage(hoveredOutage.span) }
                     }
             }
         }
@@ -433,6 +495,13 @@ struct AuditWindowChart: View {
                         hoveredNub.end.timeIntervalSince(hoveredNub.sessionStart)))
                     .font(.caption2)
                     .foregroundStyle(hoveredNub.kind == .exhausted ? .red : .secondary)
+            } else if let hoveredOutage {
+                // The incident's true bounds and length, the popover's
+                // phrasing; in its severity color like the nub.
+                Text(WindowPlot.outageReadout(
+                    hoveredOutage, now: Date(), timeLabel: { UsageFormatting.clockTime($0) }))
+                    .font(.caption2)
+                    .foregroundStyle(WindowPlot.outageColor(hoveredOutage.span))
             } else if let hoveredGrant {
                 Text(
                     "Limit reset · ~\(UsageFormatting.clockTime(hoveredGrant.at))"

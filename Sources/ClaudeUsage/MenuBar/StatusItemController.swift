@@ -167,7 +167,14 @@ final class StatusItemController: NSResponder {
                 prediction: self.store.predictions[meter.label],
                 outcomes: self.store.windowOutcomes,
                 agentName: self.store.provider.agentName,
-                providerID: self.store.provider.id)
+                providerID: self.store.provider.id,
+                outages: self.store.outages,
+                onOpenOutage: { [weak self] span in
+                    guard let self,
+                          let url = self.store.provider.outageDestination(url: span.url)
+                    else { return }
+                    NSWorkspace.shared.open(url)
+                })
             let incidentCard = self.store.serviceStatus.flatMap {
                 $0.hasIncident ? $0 : nil
             }

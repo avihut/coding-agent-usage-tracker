@@ -67,7 +67,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // in plus the reset (pair it with `--fake-status major` to see the
         // capsule and the dot together). Dismissing edits the fake in place.
         if let fake = Self.launchFakeNotices() {
-            registry.activeStore.installFakeNotices(fake)
+            registry.activeStore.installFakeNotices(fake.card, outages: fake.outages)
         }
         // Verification hatches: `ClaudeUsage --settings [--pane-cost]` /
         // `--panel` open UI straight away (the ⋯ menu can't be scripted,
@@ -131,8 +131,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 meter: meter, samples: store.samples, timeline: store.tokenTimeline,
                 pricing: store.pricing, prediction: store.predictions[meter.label],
                 outcomes: store.windowOutcomes, agentName: store.provider.agentName,
-                providerID: store.provider.id, highlightReset: reset)
+                providerID: store.provider.id, highlightReset: reset,
+                outages: store.outages)
             write(ImageRenderer(content: card), "meter.png")
+        }
+        // The weekly meter's week-span audit chart — the other face of the
+        // outage floor. This span rather than today's drill because a
+        // resolved outage sits in the past week where it's visible, while
+        // anything dated "today" may still be in the future at render time.
+        if let meters = store.state.snapshot?.meters,
+           let meter = meters.first(where: { $0.rank == 1 }) ?? meters.first,
+           let window = meter.limitWindow {
+            let now = Date()
+            // A trailing window rather than a calendar week: it always holds
+            // the fake's resolved outage (three days back) whatever weekday
+            // the render lands on, and reaches a few hours past now so the
+            // live now rule shows too.
+            let span = DateInterval(
+                start: now.addingTimeInterval(-5 * 86400), end: now.addingTimeInterval(6 * 3600))
+            let chart = AuditWindowChart(
+                model: AuditWindow.build(
+                    domain: span, meterLabel: meter.label, window: window,
+                    samples: store.samples, sessions: store.sessions,
+                    outcomes: store.windowOutcomes, outages: store.outages, now: now),
+                domain: span, window: window, accent: ProviderStyle.accentColor,
+                timeline: store.tokenTimeline, plotHeight: 114)
+            write(ImageRenderer(content: chart.padding(14).frame(width: 360)), "audit.png")
         }
     }
 
@@ -235,8 +259,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Builds the `--fake-notices` card through the digest's own phrasing,
     /// so what gets click-verified is exactly what the engine would publish
-    /// for these facts.
-    private static func launchFakeNotices() -> NoticesCard? {
+    /// for these facts — and the same incidents as outage spans, so the
+    /// charts' outage floor shows the very outage the section lists (plus a
+    /// resolved one from earlier in the week, for a past page).
+    private static func launchFakeNotices() -> (card: NoticesCard, outages: [OutageSpan])? {
+        guard let facts = launchFakeNoticeFacts() else { return nil }
+        let now = Date()
+        let calendar = Calendar.current
+        let earlier = calendar.date(byAdding: .day, value: -3, to: now) ?? now
+        let earlierStart = calendar.date(bySettingHour: 14, minute: 30, second: 0, of: earlier) ?? now
+        let earlierOutage = Notice(
+            id: Notice.outageID(incidentID: "fake-earlier"), kind: "outage",
+            occurredAt: earlierStart, endedAt: earlierStart.addingTimeInterval(2_700),
+            ongoing: false, seenAt: now, dismissedAt: now, recordedAt: now,
+            subject: "Degraded performance for Claude Opus", impact: "minor",
+            phase: "resolved", components: ["Claude API (api.anthropic.com)"],
+            url: "https://stspg.io/tcsfmtc03xgm")
+        return (
+            NoticePhrasing.card(pending: facts, serviceName: "Claude", now: now),
+            OutageTimeline.spans(from: facts + [earlierOutage], now: now))
+    }
+
+    private static func launchFakeNoticeFacts() -> [Notice]? {
         let arguments = CommandLine.arguments
         guard let flag = arguments.firstIndex(of: "--fake-notices"),
               arguments.indices.contains(flag + 1)
@@ -260,7 +304,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 ongoing: false, seenWhileOngoing: false, recordedAt: now,
                 subject: "Elevated errors on Claude Code and the API", impact: "major",
                 phase: "resolved", components: components, url: "https://stspg.io/tcsfmtc03xgm")
-            return NoticePhrasing.card(pending: [outage, reset], serviceName: "Claude", now: now)
+            return [outage, reset]
         case "live":
             let outage = Notice(
                 id: Notice.outageID(incidentID: "fake-major"), kind: "outage",
@@ -270,7 +314,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 phase: "identified",
                 message: "We have identified the cause and are rolling out a fix.",
                 components: components, url: "https://stspg.io/tcsfmtc03xgm")
-            return NoticePhrasing.card(pending: [outage, reset], serviceName: "Claude", now: now)
+            return [outage, reset]
         default:
             return nil
         }

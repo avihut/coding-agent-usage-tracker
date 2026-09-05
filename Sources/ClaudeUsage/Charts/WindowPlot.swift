@@ -65,6 +65,82 @@ enum WindowPlot {
         return nub == hovered ? 1 : 0.25
     }
 
+    // MARK: - Outage floor
+
+    /// One provider incident on the SECOND floor under the plot (v0.94.0,
+    /// user-directed): sessions keep the upper strip against the curves,
+    /// outages sit below them, so "was I working while it was down" is a
+    /// vertical read — and their severity colors (yellow/orange/red) never
+    /// share a floor with the accent session nubs and the red exhausted
+    /// stretch they would be mistaken for. Drawn clipped to the frame; the
+    /// span carries the incident's true bounds for the readout.
+    struct OutageNub: Equatable, Identifiable {
+        let span: OutageSpan
+        let start: Date
+        let end: Date
+
+        var id: String { span.id }
+        func contains(_ moment: Date) -> Bool { start <= moment && moment <= end }
+    }
+
+    /// The incidents overlapping `start…end`, clipped, an ongoing one held
+    /// open to `now` — it isn't over, so its nub isn't either. Sub-minute
+    /// overlaps still draw: a nub is at least a hairline, never nothing.
+    static func outageNubs(
+        _ spans: [OutageSpan], start: Date, end: Date, now: Date
+    ) -> [OutageNub] {
+        let domain = DateInterval(start: start, end: max(start, min(end, now)))
+        return spans.compactMap { span in
+            span.clipped(to: domain, now: now).map {
+                OutageNub(span: span, start: $0.start, end: $0.end)
+            }
+        }
+    }
+
+    /// Severity color for the whole nub, ongoing or ended — the chart's job
+    /// is history, and greying an ended incident (the notice row's idiom)
+    /// would drop the one fact the floor is there to show.
+    static func outageColor(_ span: OutageSpan) -> Color {
+        ServiceStatusStyle.color(
+            for: ServiceStatusCard.Indicator.parse(span.severity ?? "unknown"))
+    }
+
+    static func outageOpacity(_ nub: OutageNub, hovered: OutageNub?) -> Double {
+        guard let hovered else { return 0.8 }
+        return nub == hovered ? 1 : 0.3
+    }
+
+    /// Outage hover: the same curtains a session nub draws, around the
+    /// incident's slice.
+    @ChartContentBuilder
+    static func outageCurtain(
+        _ nub: OutageNub, start: Date, end: Date, ceiling: Double
+    ) -> some ChartContent {
+        curtains(around: nub.start, to: nub.end, start: start, end: end, ceiling: ceiling)
+    }
+
+    /// "Outage · major · Wed 01:10 – Wed 03:20 · 2 hr 10 min · Claude Code,
+    /// Claude API" — the incident's TRUE bounds, not the clipped nub's, an
+    /// ongoing one ending "now". `timeLabel` is the caller's (frame-aware in
+    /// the popover, clock-only on the audit chart).
+    static func outageReadout(
+        _ nub: OutageNub, now: Date, timeLabel: (Date) -> String
+    ) -> String {
+        let span = nub.span
+        let end = span.end ?? now
+        var parts = ["Outage"]
+        if let severity = span.severity { parts.append(severity) }
+        parts.append(
+            "\(timeLabel(span.start)) – \(span.ongoing ? "now" : timeLabel(end))")
+        parts.append(
+            (span.ongoing ? "ongoing " : "")
+                + UsageFormatting.duration(max(0, end.timeIntervalSince(span.start))))
+        if !span.components.isEmpty {
+            parts.append(span.components.prefix(2).joined(separator: ", "))
+        }
+        return parts.joined(separator: " · ")
+    }
+
     /// Red diagonal hatching over the spans a limit was — or will be —
     /// unusable. ONE painter for both: the forecast's dead zone past the
     /// projected crossing and the windows that actually ran out and waited

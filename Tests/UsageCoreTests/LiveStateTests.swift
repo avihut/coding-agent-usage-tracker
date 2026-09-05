@@ -169,9 +169,27 @@ struct LiveStateTests {
             appUpdate: fixtureAppUpdate,
             presence: fixturePresence,
             notices: fixtureNotices,
+            outages: OutageTimeline.spans(from: fixtureNotices + fixtureOutageFacts, now: now),
             now: now,
             calendar: utc,
             locale: posix)
+    }
+
+    /// A resolved, already-dismissed incident from two days before — a fact
+    /// the outage floor draws that the Notifications section never lists —
+    /// alongside the ongoing one from `fixtureNotices`.
+    private var fixtureOutageFacts: [Notice] {
+        [
+            Notice(
+                id: Notice.outageID(incidentID: "k2m9dj3lqp0a"), kind: "outage",
+                occurredAt: date("2026-08-14T01:10:00Z"), endedAt: date("2026-08-14T03:20:00Z"),
+                ongoing: false, seenAt: date("2026-08-14T08:00:00Z"),
+                dismissedAt: date("2026-08-14T08:00:00Z"),
+                recordedAt: date("2026-08-14T08:00:00Z"),
+                subject: "Elevated errors on Claude Code", impact: "major", phase: "resolved",
+                message: "This incident has been resolved.",
+                components: ["Claude Code"], url: "https://stspg.io/k2m9dj3lqp0a"),
+        ]
     }
 
     /// Both lifecycles, so the Rust mirror decodes every arm: the ongoing
@@ -217,6 +235,21 @@ struct LiveStateTests {
         let bare = LiveState(
             engine: state.engine, meters: [], menuBar: [], models: [], activity: state.activity)
         #expect(bare.notices == nil)
+    }
+
+    /// Item 0.94.0: the digest carries every incident within retention as a
+    /// span, oldest first, the ongoing one with no end — and an older
+    /// writer publishes none (nil ≠ empty).
+    @Test func outagesRideTheDigestAsSpans() throws {
+        let state = buildFixture()
+        let outages = try #require(state.outages)
+        #expect(outages.map(\.id) == ["k2m9dj3lqp0a", "q7txxvbsftgq"])
+        #expect(outages[0].end == date("2026-08-14T03:20:00Z") && !outages[0].ongoing)
+        #expect(outages[0].severity == "major")
+        #expect(outages[1].end == nil && outages[1].ongoing)
+        let bare = LiveState(
+            engine: state.engine, meters: [], menuBar: [], models: [], activity: state.activity)
+        #expect(bare.outages == nil)
     }
 
     /// Two accounts around a mid-morning switch, the second one open — with

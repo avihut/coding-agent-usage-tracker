@@ -44,11 +44,17 @@ public struct AuditWindowModel: Sendable, Equatable {
     /// emptied from.
     public let midWindowResets: [ResetCliffs.Cliff]
 
+    /// Provider incidents overlapping the span (0.94.0) — the outage floor
+    /// under the session nubs. Whole spans, unclipped: the chart clips at
+    /// draw time so a hover can still report the incident's true bounds.
+    public let outages: [OutageSpan]
+
     public init(
         percent: [PercentPoint], resets: [Date], nubs: [DateInterval],
         outcomes: [WindowOutcome], peakPercent: Int?,
         exhausted: [DateInterval] = [],
-        midWindowResets: [ResetCliffs.Cliff] = []
+        midWindowResets: [ResetCliffs.Cliff] = [],
+        outages: [OutageSpan] = []
     ) {
         self.percent = percent
         self.resets = resets
@@ -57,6 +63,7 @@ public struct AuditWindowModel: Sendable, Equatable {
         self.peakPercent = peakPercent
         self.exhausted = exhausted
         self.midWindowResets = midWindowResets
+        self.outages = outages
     }
 
     public var isEmpty: Bool {
@@ -77,6 +84,7 @@ public enum AuditWindow {
         samples: [UsageSample],
         sessions: [SessionSummary],
         outcomes: [WindowOutcome],
+        outages: [OutageSpan] = [],
         now: Date = Date()
     ) -> AuditWindowModel {
         let measuredEnd = min(domain.end, now)
@@ -136,7 +144,10 @@ public enum AuditWindow {
             exhausted: ExhaustedStretches.build(
                 resets: resets, grants: grants.map(\.at), window: window,
                 meterLabel: meterLabel, samples: samples, domain: domain),
-            midWindowResets: grants)
+            midWindowResets: grants,
+            // Only what the span can show: an ongoing incident reaches
+            // `now`, so a live span always overlaps it.
+            outages: outages.filter { $0.clipped(to: domain, now: now) != nil })
     }
 
     /// Sweep-union of possibly-overlapping intervals (concurrent sessions

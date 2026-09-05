@@ -7,13 +7,18 @@ import Foundation
 ///
 /// Dismissed notices stay for a month so a re-observation (the same grant
 /// read off another meter's samples, the same incident in a wake-time
-/// history read) finds the record and stays silent, then age out.
+/// history read) finds the record and stays silent, then age out — except
+/// outages, which the charts draw as an outage floor for as long as the
+/// samples they sit under are retained (`keepOutagesFor`).
 public struct NoticeLedger: Sendable {
     /// Chronological by `occurredAt`.
     public private(set) var notices: [Notice]
     public let fileURL: URL
 
     public static let keepDismissedFor: TimeInterval = 30 * 86400
+    /// Outage rows outlive their dismissal: the chart's outage floor draws
+    /// them under every window the popover can page back to.
+    public static let keepOutagesFor: TimeInterval = OutageTimeline.retention
     public static let cap = 200
     /// Two grants inside this span are one event — `VendorGrants`' rule.
     public static let grantTolerance: TimeInterval = 120
@@ -140,6 +145,12 @@ public struct NoticeLedger: Sendable {
     private mutating func prune(now: Date) {
         notices.removeAll { notice in
             guard let dismissedAt = notice.dismissedAt else { return false }
+            // An outage is a chart fact past its life as news (`OutageTimeline`):
+            // it stays as long as the samples it will be drawn under.
+            if notice.kindValue == .outage {
+                let ended = notice.endedAt ?? notice.occurredAt
+                return now.timeIntervalSince(ended) > Self.keepOutagesFor
+            }
             return now.timeIntervalSince(dismissedAt) > Self.keepDismissedFor
         }
         if notices.count > Self.cap {

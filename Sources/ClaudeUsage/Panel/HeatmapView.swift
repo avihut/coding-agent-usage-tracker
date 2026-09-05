@@ -35,6 +35,10 @@ struct HeatmapView: View {
     let timeline: [TokenSlot]
     let sessions: [SessionSummary]
     let windowOutcomes: [WindowOutcome]
+    /// Provider incidents for the audit charts' outage floor, and where a
+    /// click on one leads (the owner asks the provider).
+    var outages: [OutageSpan] = []
+    var onOpenOutage: ((OutageSpan) -> Void)? = nil
     let sessionAuditMeter: AuditMeterInfo?
     let weeklyAuditMeter: AuditMeterInfo?
 
@@ -715,13 +719,15 @@ struct HeatmapView: View {
         return AuditWindowChart(
             model: AuditWindow.build(
                 domain: span, meterLabel: meter.label, window: meter.window,
-                samples: samples, sessions: sessions, outcomes: windowOutcomes),
+                samples: samples, sessions: sessions, outcomes: windowOutcomes,
+                outages: outages),
             domain: span,
             window: meter.window,
             accent: Self.accent,
             timeline: timeline,
             modelColors: modelColors,
-            plotHeight: 114)
+            plotHeight: 114,
+            onOpenOutage: onOpenOutage)
     }
 
     /// Donut of the day's tokens per model in the legend's colors; the center
@@ -1035,13 +1041,15 @@ struct HeatmapView: View {
         return AuditWindowChart(
             model: AuditWindow.build(
                 domain: span, meterLabel: meter.label, window: meter.window,
-                samples: samples, sessions: sessions, outcomes: windowOutcomes),
+                samples: samples, sessions: sessions, outcomes: windowOutcomes,
+                outages: outages),
             domain: span,
             window: meter.window,
             accent: Self.accent,
             timeline: timeline,
             modelColors: modelColors,
-            plotHeight: 88)
+            plotHeight: 88,
+            onOpenOutage: onOpenOutage)
     }
 
     private var barChart: some View {

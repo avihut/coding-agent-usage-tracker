@@ -46,8 +46,7 @@ public struct ClaudeProvider: UsageProvider {
     public func noticeDestination(for notice: NoticeCard) -> NoticeDestination? {
         switch Notice.Kind(rawValue: notice.kind) {
         case .outage:
-            if let raw = notice.url, let url = URL(string: raw) { return .web(url) }
-            return statusFeed.map { .web($0.pageURL) }
+            return outageDestination(url: notice.url).map { .web($0) }
         case .reset:
             return .meterHistory(meterLabel: notice.meterLabel, at: notice.occurredAt)
         case nil:

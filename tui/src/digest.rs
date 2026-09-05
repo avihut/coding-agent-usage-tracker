@@ -52,6 +52,32 @@ pub struct LiveState {
     /// pending. None ≠ empty.
     #[serde(default)]
     pub notices: Option<NoticesCard>,
+    /// Every provider incident within the sample retention (0.94.0) — the
+    /// charts' outage floor. `None` means the writer records no outages (no
+    /// status feed, or an older build); empty means none in 56 days.
+    /// None ≠ empty. Mirrored for schema completeness; the TUI's meter chart
+    /// does not draw the floor yet.
+    #[serde(default)]
+    pub outages: Option<Vec<OutageSpan>>,
+}
+
+/// Mirror of `OutageSpan`: one incident as a span. `end` is `None` while
+/// `ongoing` — a renderer holds the nub open to now.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OutageSpan {
+    pub id: String,
+    pub title: String,
+    pub severity: Option<String>,
+    #[serde(with = "time::serde::rfc3339")]
+    pub start: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339::option", default)]
+    pub end: Option<OffsetDateTime>,
+    pub ongoing: bool,
+    #[serde(default)]
+    pub components: Vec<String>,
+    #[serde(default)]
+    pub url: Option<String>,
 }
 
 /// Mirror of `NoticesCard`. Consumers render, never compute: the header
@@ -938,5 +964,22 @@ mod wave4_tests {
         assert_eq!(reset.title, "Limit reset · Claude");
         assert_eq!(reset.meter_label.as_deref(), Some("Weekly (all)"));
         assert!(reset.when.starts_with('~'));
+    }
+
+    /// The outage floor's spans: the golden carries a resolved incident and
+    /// the ongoing one (no end), oldest first.
+    #[test]
+    fn outages_arrive_as_spans_oldest_first() {
+        let state = golden();
+        let outages = state.outages.as_ref().expect("outages in golden");
+        assert_eq!(outages.len(), 2);
+        let ended = &outages[0];
+        assert!(!ended.ongoing && ended.end.is_some());
+        assert_eq!(ended.severity.as_deref(), Some("major"));
+        assert_eq!(ended.components, vec!["Claude Code".to_string()]);
+        let live = &outages[1];
+        assert!(live.ongoing && live.end.is_none());
+        assert_eq!(live.id, "q7txxvbsftgq");
+        assert!(live.url.is_some());
     }
 }

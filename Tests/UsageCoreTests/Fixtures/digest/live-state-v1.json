@@ -1061,6 +1061,31 @@
     ],
     "pendingCount" : 2
   },
+  "outages" : [
+    {
+      "components" : [
+        "Claude Code"
+      ],
+      "end" : "2026-08-14T03:20:00Z",
+      "id" : "k2m9dj3lqp0a",
+      "ongoing" : false,
+      "severity" : "major",
+      "start" : "2026-08-14T01:10:00Z",
+      "title" : "Elevated errors on Claude Code",
+      "url" : "https:\/\/stspg.io\/k2m9dj3lqp0a"
+    },
+    {
+      "components" : [
+        "claude.ai"
+      ],
+      "id" : "q7txxvbsftgq",
+      "ongoing" : true,
+      "severity" : "minor",
+      "start" : "2026-08-16T10:49:00Z",
+      "title" : "Degraded performance for multiple models",
+      "url" : "https:\/\/stspg.io\/tcsfmtc03xgm"
+    }
+  ],
   "schemaVersion" : 1,
   "serviceStatus" : {
     "checkedAt" : "2026-08-16T11:58:30Z",

@@ -33,6 +33,10 @@ final class DigestClient {
     /// The host engine's pending notices, mirrored from the digest. Nil when
     /// the host publishes none (a daemon before 0.93.0).
     private(set) var notices: NoticesCard?
+    /// The host engine's incidents within retention, mirrored from the
+    /// digest — the charts' outage floor. Empty when the host publishes
+    /// none (no status feed, or a daemon before 0.94.0).
+    private(set) var outages: [OutageSpan] = []
 
     /// Label-level attribution timeline rebuilt from the digest's epoch
     /// table: labels arrive already disambiguated, so a label IS an
@@ -242,6 +246,7 @@ final class DigestClient {
         appUpdate = digest.appUpdate
         accountPresence = digest.accountPresence
         notices = digest.notices
+        outages = digest.outages ?? []
         nextRefreshAt = digest.engine.nextPollAt
         activeInterval = digest.engine.activeIntervalSeconds
         paceMultiplierMirror = digest.engine.paceMultiplier
