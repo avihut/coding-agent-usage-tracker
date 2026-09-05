@@ -167,9 +167,10 @@ enum WindowPlot {
     /// "ended window" to light.
     ///
     /// `highlighted` (v0.93.0) is the reset a notification click pointed at:
-    /// its rule and mark draw in the accent's highlight tint (lifted toward
-    /// white) for as long as the pin holds — a color highlight, nothing
-    /// more (v0.93.2, user-directed: no glow, no aura). A highlighted moment
+    /// its rule (the line alone, never the mark) draws in the accent's
+    /// highlight tint (lifted toward white) for the moment the pin holds —
+    /// a color highlight, nothing more (v0.93.2–3, user-directed: no glow,
+    /// no aura, and it passes). A highlighted moment
     /// the samples never measured (no cliff at that instant) still gets its
     /// rule — the notice said it happened, and the card owes the person the
     /// mark.
@@ -196,10 +197,9 @@ enum WindowPlot {
                 ) {
                     Text(ProviderStyle.glyph)
                         .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(
-                            highlighted == reset
-                                ? ProviderStyle.accentHighlightColor
-                                : ProviderStyle.accentColor.opacity(hovered == reset ? 1 : 0.85))
+                        // The mark keeps its everyday tint — only the line
+                        // takes the highlight (user-directed).
+                        .foregroundStyle(ProviderStyle.accentColor.opacity(hovered == reset ? 1 : 0.85))
                 }
         }
     }

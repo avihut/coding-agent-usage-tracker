@@ -273,6 +273,7 @@ struct MeterHistoryView: View {
         let (start, end) = domain
         if start <= at, at <= end {
             pinnedReset = at
+            releasePinLater(at)
             return
         }
         let now = Date()
@@ -281,6 +282,23 @@ struct MeterHistoryView: View {
             now.addingTimeInterval(-$0.length(now: now)) <= at
         } ?? .d30
         pinnedReset = at
+        releasePinLater(at)
+    }
+
+    /// How long the highlight holds before the mark eases back to its
+    /// everyday tint (v0.93.3, user-directed: a moment, not a state).
+    private static let highlightHold: TimeInterval = 1.8
+
+    /// The moment passes: the pin lifts and the color eases back. The
+    /// transient span/frame stay where the click put them — the person is
+    /// looking at that window, and yanking it back would be worse than
+    /// the highlight lingering.
+    private func releasePinLater(_ at: Date) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(Self.highlightHold))
+            guard pinnedReset == at else { return }
+            withAnimation(.easeOut(duration: 0.6)) { pinnedReset = nil }
+        }
     }
 
     /// The measured cliff the pinned moment names, if the samples saw one
