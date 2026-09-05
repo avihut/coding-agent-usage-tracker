@@ -143,7 +143,11 @@ struct NoticeRow: View {
             RoundedRectangle(cornerRadius: 7)
                 .strokeBorder(tint.opacity(0.3), lineWidth: 0.5))
         .contentShape(Rectangle())
-        .onHover { hovering = $0 }
+        // Not `.onHover`: a click here presents the meter popover, after
+        // which SwiftUI's hover never re-enters this row until the panel
+        // reopens — the × stayed gone (v0.93.4). The probe tracks through
+        // AppKit and re-reads the pointer on its own.
+        .background(HoverProbe { hovering = $0 })
         .onTapGesture { onTap?() }
         .pointerStyle(onTap == nil ? .default : .link)
         .help(onTap == nil ? "" : "Open")

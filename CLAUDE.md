@@ -1560,7 +1560,13 @@ the README rather than silently deviating.
   grey); × on hover for dismissable rows, "Dismiss all" only once ≥2 can
   go; dismissal ANIMATES (row transition + `.animation(value: ids)` keyed
   on the row set so a client-mode dismissal landing with the next digest
-  animates too). The ongoing outage's row IS the incident banner with a
+  animates too). THE × IS HOVER-GATED THROUGH `HoverProbe`
+  (Components/, an NSTrackingArea `.activeAlways` + `.mouseMoved` probe
+  with hitTest nil), NOT `.onHover` (v0.93.4, user-reported): a click on
+  the row presents the meter popover, after which SwiftUI's hover never
+  re-enters that row until the panel reopens. Any hover-gated control on a
+  row whose click presents a popover needs the same probe. The ongoing
+  outage's row IS the incident banner with a
   lifecycle — the banner yields to it (`incidentShownAsNotice`) so the
   panel never says the same thing twice. Opening the panel marks every
   pending notice seen; the hover popover marks only what it shows (the
