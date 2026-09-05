@@ -33,6 +33,23 @@ struct ExhaustedStretchesTests {
         #expect(stretches.first?.end == reset)
     }
 
+    /// A grant inside the window ends the lockout there, and the window's
+    /// own close no longer reaches back across the grant to the crossing —
+    /// the stretch is spent → grant, never spent → reset.
+    @Test func aMidWindowGrantEndsTheLockout() {
+        let grant = at(98)
+        let reset = at(100)
+        let samples = [
+            sample(at(90), 40), sample(at(96), 100), sample(at(97), 100),
+            sample(at(99), 0), sample(at(99.5), 3),
+        ]
+        let stretches = ExhaustedStretches.build(
+            resets: [reset], grants: [grant], window: window, meterLabel: label,
+            samples: samples, domain: DateInterval(start: at(80), end: at(110)))
+
+        #expect(stretches == [DateInterval(start: at(96), end: grant)])
+    }
+
     /// A window that never reached its limit contributes nothing — absent,
     /// not a zero-width interval.
     @Test func aWindowThatNeverFilledHasNoStretch() {

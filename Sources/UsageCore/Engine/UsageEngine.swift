@@ -332,12 +332,19 @@ public final class UsageEngine {
         }
         Task {
             let previous = state.snapshot
-            let newState = await service.refresh(thresholds: currentThresholds())
+            // A meter reporting no window end inherits the one last seen
+            // while it still lies ahead (`ResetCarry`): a mid-window grant
+            // that zeroes the meter also blanks the stamp until the next
+            // spend, and the window is nonetheless still running. History
+            // records the API's own word below; the carry is what gets
+            // rendered and forecast.
+            let reported = await service.refresh(thresholds: currentThresholds())
+            let newState = Self.carryingResets(reported, samples: samples, now: Date())
             state = newState
             isRefreshing = false
             noteOutcome(newState, previous: previous)
             scheduleNext()
-            if case .live(let snapshot) = newState {
+            if case .live(let snapshot) = newState, case .live(let asReported) = reported {
                 // Close-out first, against the samples as they stood while
                 // the old window ran; the roll is detected by comparing the
                 // last snapshot (live or cached — both are observations)
@@ -351,7 +358,11 @@ public final class UsageEngine {
                             closed, existing: windowOutcomes)
                     }
                 }
-                samples = history.append(snapshot, existing: samples)
+                // History keeps the API's own word — an absent stamp stays
+                // absent on disk, so the carry can heal (or be revised)
+                // retroactively at read time; the forecast runs on the
+                // carried window it will be drawn against.
+                samples = history.append(asReported, existing: samples)
                 recomputePredictions(for: snapshot)
             }
             // The heartbeat: every completed cycle rewrites the digest, so
@@ -414,6 +425,22 @@ public final class UsageEngine {
         return Thresholds(
             warningPercent: warning > 0 ? warning : Thresholds.standard.warningPercent,
             criticalPercent: critical > 0 ? critical : Thresholds.standard.criticalPercent)
+    }
+
+    /// The fetched state with `ResetCarry` applied to whichever snapshot it
+    /// carries — live or cache-served alike, since a replayed body lacks the
+    /// stamp for the same reason the fresh one did.
+    static func carryingResets(
+        _ state: DisplayState, samples: [UsageSample], now: Date
+    ) -> DisplayState {
+        switch state {
+        case .live(let snapshot):
+            .live(ResetCarry.fill(snapshot, samples: samples, now: now))
+        case .cached(let snapshot, let error):
+            .cached(ResetCarry.fill(snapshot, samples: samples, now: now), error: error)
+        case .loading, .unavailable:
+            state
+        }
     }
 
     private func currentThresholds() -> Thresholds {

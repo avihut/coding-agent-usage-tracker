@@ -31,6 +31,29 @@ struct ResetCliffsTests {
         #expect(cliffs.isEmpty)
     }
 
+    @Test("a fall to zero under an unmoved stamp is a mid-window reset at the gap's midpoint")
+    func midWindowGrant() {
+        // 2026-09-04: 30% at 19:14, 0% at 23:09, the same window end on both
+        // sides once the carry fills the stampless poll between them.
+        let cliffs = ResetCliffs.cliffs(
+            between: [sample(0, 30, reset: 9000), sample(4000, 0, reset: 9000.4)],
+            window: 18000, currentReset: date(9000))
+        #expect(cliffs == [ResetCliffs.Cliff(at: date(2000), from: 30, kind: .midWindow)])
+        // The schedule grid never applies — no window ended here.
+        let gridded = ResetCliffs.cliffs(
+            between: [sample(0, 30, reset: 27000), sample(4000, 0, reset: 27000)],
+            window: 18000, currentReset: date(27000))
+        #expect(gridded.map(\.at) == [date(2000)])
+    }
+
+    @Test("a moved stamp is a window end, whatever it fell to")
+    func movedStampIsAWindowEnd() {
+        let cliffs = ResetCliffs.cliffs(
+            between: [sample(0, 80, reset: 600), sample(3600, 0, reset: 18600)],
+            window: 18000, currentReset: date(18600))
+        #expect(cliffs.map(\.kind) == [.windowEnd])
+    }
+
     @Test("a dip with sub-second stamp jitter is a correction, not a reset")
     func jitteredStamps() {
         // The API restates the same boundary with ±0.5s noise on every

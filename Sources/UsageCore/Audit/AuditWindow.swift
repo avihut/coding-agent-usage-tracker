@@ -38,10 +38,17 @@ public struct AuditWindowModel: Sendable, Equatable {
     /// `ExhaustedStretches`.
     public let exhausted: [DateInterval]
 
+    /// Resets granted INSIDE a window (the meter fell to zero, the window
+    /// end stood still) — drawn apart from the boundary markers in
+    /// `resets`, since no window closed there. Each carries the percent it
+    /// emptied from.
+    public let midWindowResets: [ResetCliffs.Cliff]
+
     public init(
         percent: [PercentPoint], resets: [Date], nubs: [DateInterval],
         outcomes: [WindowOutcome], peakPercent: Int?,
-        exhausted: [DateInterval] = []
+        exhausted: [DateInterval] = [],
+        midWindowResets: [ResetCliffs.Cliff] = []
     ) {
         self.percent = percent
         self.resets = resets
@@ -49,6 +56,7 @@ public struct AuditWindowModel: Sendable, Equatable {
         self.outcomes = outcomes
         self.peakPercent = peakPercent
         self.exhausted = exhausted
+        self.midWindowResets = midWindowResets
     }
 
     public var isEmpty: Bool {
@@ -74,7 +82,10 @@ public enum AuditWindow {
         let measuredEnd = min(domain.end, now)
         var series: [ResetCliffs.Sample] = []
         var lastBefore: ResetCliffs.Sample?
-        for sample in samples where sample.t <= measuredEnd {
+        // Stamps carried across the polls that omitted them, so a grant
+        // that blanked the stamp still classifies against the window it
+        // happened inside rather than falling to the legacy drop rule.
+        for sample in ResetCarry.fill(samples) where sample.t <= measuredEnd {
             guard let percent = sample.percents[meterLabel] else { continue }
             let point = ResetCliffs.Sample(
                 t: sample.t, percent: percent, resetsAt: sample.resets?[meterLabel])
@@ -107,7 +118,9 @@ public enum AuditWindow {
             .filter { $0.label == meterLabel && $0.end > domain.start && $0.end <= domain.end }
             .sorted { $0.end < $1.end }
 
-        let resets = cliffs.map(\.at).filter { $0 >= domain.start }
+        let inSpan = cliffs.filter { $0.at >= domain.start }
+        let resets = inSpan.filter { $0.kind == .windowEnd }.map(\.at)
+        let grants = inSpan.filter { $0.kind == .midWindow }
         return AuditWindowModel(
             percent: drawn,
             resets: resets,
@@ -115,8 +128,9 @@ public enum AuditWindow {
             outcomes: closed,
             peakPercent: drawn.filter { $0.t >= domain.start }.map(\.percent).max(),
             exhausted: ExhaustedStretches.build(
-                resets: resets, window: window, meterLabel: meterLabel,
-                samples: samples, domain: domain))
+                resets: resets, grants: grants.map(\.at), window: window,
+                meterLabel: meterLabel, samples: samples, domain: domain),
+            midWindowResets: grants)
     }
 
     /// Sweep-union of possibly-overlapping intervals (concurrent sessions

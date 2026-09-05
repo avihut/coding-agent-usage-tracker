@@ -96,6 +96,10 @@ struct MeterHistoryView: View {
     @State private var hoveredSegment: ActivitySegment?
     /// The reset line under the cursor — its whole ended window lights up.
     @State private var hoveredReset: Date?
+    /// A mid-window reset line under the cursor — a grant that emptied
+    /// the meter without closing its window. Held apart from
+    /// `hoveredReset` because nothing about it lights a window.
+    @State private var hoveredGrant: ResetCliffs.Cliff?
     /// Which limit window the Current span shows: 0 = the live one, k = the
     /// k-th observed window before it (`pastWindows[k - 1]`). Paged by the
     /// ‹ › arrows under the chart and by a two-finger horizontal swipe.
@@ -274,6 +278,7 @@ struct MeterHistoryView: View {
         focusedModel = nil
         hoveredSegment = nil
         hoveredReset = nil
+        hoveredGrant = nil
         // Two transactions, deliberately. A removed view exits with the
         // transition it was RENDERED with, not the one the removing render
         // computes — so the direction must land in the view graph first
@@ -377,6 +382,9 @@ struct MeterHistoryView: View {
         /// The reset moments inside the frame — where the drawn line
         /// cliffs, and where the vertical reset markers stand.
         let resets: [Date]
+        /// Resets granted INSIDE a window in the frame: the line cliffs
+        /// there too, but no window closed — drawn as their own mark.
+        let midWindow: [ResetCliffs.Cliff]
     }
 
     /// The drawn percent series: the in-domain samples, the last sample
@@ -392,7 +400,10 @@ struct MeterHistoryView: View {
         let measuredEnd = min(end, Date())
         var series: [ResetCliffs.Sample] = []
         var lastBefore: ResetCliffs.Sample?
-        for sample in samples where sample.t <= measuredEnd {
+        // Stamps carried across the polls that omitted them (`ResetCarry`),
+        // so a grant that blanked the stamp classifies against the window
+        // it happened inside instead of reading as a boundary.
+        for sample in ResetCarry.fill(samples) where sample.t <= measuredEnd {
             guard let percent = sample.percents[meter.label] else { continue }
             let point = ResetCliffs.Sample(
                 t: sample.t, percent: percent, resetsAt: sample.resets?[meter.label])
@@ -411,9 +422,11 @@ struct MeterHistoryView: View {
                 id: cliff.at.timeIntervalSince1970 + 0.75,
                 t: cliff.at.addingTimeInterval(1), percent: 0))
         }
+        let inFrame = cliffs.filter { $0.at >= start }
         return PercentSeries(
             drawn: drawn.sorted { $0.t < $1.t },
-            resets: cliffs.map(\.at).filter { $0 >= start })
+            resets: inFrame.filter { $0.kind == .windowEnd }.map(\.at),
+            midWindow: inFrame.filter { $0.kind == .midWindow })
     }
 
     /// This window's per-model usage, scoped for scoped meters — the rows of
@@ -540,9 +553,10 @@ struct MeterHistoryView: View {
                 })
             }
             domainLabels
-            Text(resetReadout ?? segmentReadout ?? readout.map(readoutText) ?? hoverHint)
+            Text(resetReadout ?? grantReadout ?? segmentReadout ?? readout.map(readoutText) ?? hoverHint)
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(readout == nil && segmentReadout == nil && resetReadout == nil
+                    && grantReadout == nil
                     ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.secondary))
                 .lineLimit(1)
                 .frame(height: 14, alignment: .leading)
@@ -568,6 +582,7 @@ struct MeterHistoryView: View {
             focusedModel = nil
             hoveredSegment = nil
             hoveredReset = nil
+            hoveredGrant = nil
             windowOffset = 0
         }
         // Flipping to History and back lands on the live window again.
@@ -633,6 +648,8 @@ struct MeterHistoryView: View {
             // hovered line goes full primary and its whole ended window
             // lights via the curtains below.
             WindowPlot.resets(series.resets, hovered: hoveredReset, ceiling: ceiling)
+            WindowPlot.midWindowResets(
+                series.midWindow.map(\.at), hovered: hoveredGrant?.at, ceiling: ceiling)
             // Reset hover: curtain-dim everything outside the limit window
             // that ended at this line — the undimmed stretch IS the window
             // — with a solid twin marking where that window began. The
@@ -942,17 +959,22 @@ struct MeterHistoryView: View {
                                 if hoveredSegment != hit { hoveredSegment = hit }
                                 if focusedModel != nil { focusedModel = nil }
                                 if hoveredReset != nil { hoveredReset = nil }
+                                if hoveredGrant != nil { hoveredGrant = nil }
                             } else {
                                 if hoveredSegment != nil { hoveredSegment = nil }
                                 // A reset line within reach takes the hover
                                 // before curve focus — its ended window
                                 // lights up instead.
-                                let reset = date.flatMap { d in
+                                let hit = date.flatMap { d in
                                     nearestReset(
-                                        to: d, in: series.resets, start: start, end: end)
+                                        to: d, in: series.resets + series.midWindow.map(\.at),
+                                        start: start, end: end)
                                 }
+                                let grant = hit.flatMap { h in series.midWindow.first { $0.at == h } }
+                                let reset = grant == nil ? hit : nil
                                 if hoveredReset != reset { hoveredReset = reset }
-                                if reset != nil {
+                                if hoveredGrant != grant { hoveredGrant = grant }
+                                if hit != nil {
                                     if focusedModel != nil { focusedModel = nil }
                                 } else {
                                     updateFocus(at: date, yValue: yValue, curves: curves)
@@ -963,6 +985,7 @@ struct MeterHistoryView: View {
                             focusedModel = nil
                             hoveredSegment = nil
                             hoveredReset = nil
+                            hoveredGrant = nil
                         }
                     }
             }
@@ -1117,6 +1140,16 @@ struct MeterHistoryView: View {
         }
     }
 
+    /// "Limit reset · ~Thu 21:10 · from 30%" while a mid-window reset line
+    /// is hovered: the meter was emptied without its window closing. The
+    /// tilde is honest — the API gives no moment for a grant, only the two
+    /// polls it fell between.
+    private var grantReadout: String? {
+        hoveredGrant.map { grant in
+            "Limit reset · ~\(timeLabel(grant.at)) · from \(grant.from)%"
+        }
+    }
+
     /// "Wed 09:15 – Wed 11:30 · active 2 hr 15 min" while a nub is hovered;
     /// the exhausted nub reads "unreachable" instead. A frame-clipped
     /// session reads from its true start, before the domain.
@@ -1158,8 +1191,9 @@ struct MeterHistoryView: View {
     private func spentStretches(_ series: PercentSeries) -> [DateInterval] {
         let (start, end) = domain
         return ExhaustedStretches.build(
-            resets: series.resets, window: window, meterLabel: meter.label,
-            samples: samples, domain: DateInterval(start: start, end: end))
+            resets: series.resets, grants: series.midWindow.map(\.at), window: window,
+            meterLabel: meter.label, samples: samples,
+            domain: DateInterval(start: start, end: end))
     }
 
     /// Every span in this frame nothing could land in: the windows that

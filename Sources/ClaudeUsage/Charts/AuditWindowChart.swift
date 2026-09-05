@@ -26,6 +26,8 @@ struct AuditWindowChart: View {
     /// The reset line under the cursor — its whole ended window lights up,
     /// the meter popover's idiom.
     @State private var hoveredReset: Date?
+    /// A mid-window reset (grant) line under the cursor — see the popover.
+    @State private var hoveredGrant: ResetCliffs.Cliff?
     /// The activity nub under the cursor; the graph above it stays lit while
     /// everything else curtains.
     @State private var hoveredNub: WindowPlot.Nub?
@@ -159,6 +161,8 @@ struct AuditWindowChart: View {
                     .lineStyle(StrokeStyle(lineWidth: 1.5))
             }
             WindowPlot.resets(model.resets, hovered: hoveredReset, ceiling: ceiling)
+            WindowPlot.midWindowResets(
+                model.midWindowResets.map(\.at), hovered: hoveredGrant?.at, ceiling: ceiling)
             // Per-model overlay curves in the shared palette, focused one
             // last so it draws on top. No legend to sync here — the day
             // drill's grid has one, the week's audit has none — so the tip
@@ -273,18 +277,23 @@ struct AuditWindowChart: View {
                                     nubs.first { $0.contains(moment) }
                                 }
                                 hoveredReset = nil
+                                hoveredGrant = nil
                                 focusedModel = nil
                             } else {
                                 hoveredNub = nil
                                 // A reset line within reach outranks curve
                                 // focus — its ended window lights instead.
-                                let reset = date.flatMap {
+                                let hit = date.flatMap {
                                     WindowPlot.nearestReset(
-                                        to: $0, in: model.resets,
+                                        to: $0, in: model.resets + model.midWindowResets.map(\.at),
                                         span: domain.duration, trackWidth: plot.width)
                                 }
-                                hoveredReset = reset
-                                if reset == nil, let date, let depth {
+                                let grant = hit.flatMap { h in
+                                    model.midWindowResets.first { $0.at == h }
+                                }
+                                hoveredGrant = grant
+                                hoveredReset = grant == nil ? hit : nil
+                                if hit == nil, let date, let depth {
                                     focusedModel = focusedCurve(
                                         at: date, value: depth, plotHeight: plot.height)
                                 } else {
@@ -294,6 +303,7 @@ struct AuditWindowChart: View {
                         case .ended:
                             hoverDate = nil
                             hoveredReset = nil
+                            hoveredGrant = nil
                             hoveredNub = nil
                             focusedModel = nil
                         }
@@ -361,6 +371,12 @@ struct AuditWindowChart: View {
                         hoveredNub.end.timeIntervalSince(hoveredNub.sessionStart)))
                     .font(.caption2)
                     .foregroundStyle(hoveredNub.kind == .exhausted ? .red : .secondary)
+            } else if let hoveredGrant {
+                Text(
+                    "Limit reset · ~\(UsageFormatting.clockTime(hoveredGrant.at))"
+                    + " · from \(hoveredGrant.from)%")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             } else if let hoveredReset {
                 // The window the hovered line closed, named the same way the
                 // meter popover names it.

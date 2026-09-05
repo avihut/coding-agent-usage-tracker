@@ -69,13 +69,18 @@ public enum ExhaustedStretches {
     /// One stretch per closed window that reached its limit, clipped to
     /// `domain` and dropped when the clip leaves nothing. `resets` are the
     /// cliff instants — each one ends the window that reached back `window`
-    /// before it.
+    /// before it. `grants` are mid-window resets (`ResetCliffs.Cliff.Kind
+    /// .midWindow`): a lockout ends at the grant that emptied the meter,
+    /// so a window's search for its spent moment starts after the latest
+    /// grant inside it rather than reaching back across one — and a grant
+    /// itself ends any lockout that preceded it.
     public static func build(
-        resets: [Date], window: TimeInterval, meterLabel: String,
+        resets: [Date], grants: [Date] = [], window: TimeInterval, meterLabel: String,
         samples: [UsageSample], domain: DateInterval
     ) -> [DateInterval] {
-        resets.compactMap { reset in
-            let windowStart = reset.addingTimeInterval(-window)
+        (resets + grants).sorted().compactMap { reset in
+            let latestGrant = grants.filter { $0 < reset && $0 > reset.addingTimeInterval(-window) }.max()
+            let windowStart = latestGrant ?? reset.addingTimeInterval(-window)
             // Bounded at BOTH ends: an open-ended search would hand back the
             // newest window's crossing for every reset in the span.
             guard let spent = PredictionEngine.spentAt(

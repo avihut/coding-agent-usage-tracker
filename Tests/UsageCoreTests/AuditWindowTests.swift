@@ -64,6 +64,34 @@ struct AuditWindowTests {
         #expect(model.peakPercent == 70)
     }
 
+    @Test("a fall to zero under one window end is a mid-window reset, not a boundary")
+    func midWindowReset() {
+        let label = "week"
+        let end = date("2026-08-14T00:00:00.000Z")
+        let samples = [
+            UsageSample(
+                t: date("2026-08-10T06:00:00.000Z"), percents: [label: 30],
+                resets: [label: end]),
+            // The stampless zeroed poll history.json actually holds.
+            UsageSample(t: date("2026-08-10T10:00:00.000Z"), percents: [label: 0], resets: nil),
+            UsageSample(
+                t: date("2026-08-10T12:00:00.000Z"), percents: [label: 2],
+                resets: [label: end]),
+        ]
+        let model = AuditWindow.build(
+            domain: day, meterLabel: label, window: 7 * 86400,
+            samples: samples, sessions: [], outcomes: [],
+            now: date("2026-08-12T00:00:00.000Z"))
+
+        #expect(model.resets.isEmpty)
+        #expect(model.midWindowResets.count == 1)
+        #expect(model.midWindowResets.first?.kind == .midWindow)
+        #expect(model.midWindowResets.first?.from == 30)
+        #expect(model.midWindowResets.first?.at == date("2026-08-10T08:00:00.000Z"))
+        // The drawn line still falls off a cliff there.
+        #expect(model.percent.contains { $0.t == date("2026-08-10T08:00:00.000Z") && $0.percent == 30 })
+    }
+
     @Test("nubs clip to the span and merge concurrent sessions")
     func nubClipping() {
         let sessions = [

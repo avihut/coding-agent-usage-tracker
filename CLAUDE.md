@@ -936,6 +936,43 @@ the README rather than silently deviating.
   UsageMovement.advanced, ResetCliffs.isReset, WindowLedger.closedWindows.
   The raw jittered stamps stay in history.json untouched — they're what the
   API said — so the fix heals retroactively on the first rebuild.
+- MID-WINDOW RESETS + STAMP CARRY (2026-09-05 v0.92.0, user-reported):
+  Anthropic's 2026-09-04 limit reset zeroed the weekly meters two days
+  before their boundary, and until the next spend the API OMITTED
+  `resets_at` outright; when usage resumed the SAME stamp came back — the
+  window never ended. Two rules now, both core-tested:
+  (1) `ResetCarry` (Refresh/): a meter reporting no stamp inherits the last
+  observed stamp for its label WHILE THAT STAMP IS STILL AHEAD OF NOW. Safe
+  by construction — a future stamp names a window that hasn't ended, and a
+  later different stamp is caught by `ResetStamp.moved` as before; a 5h
+  session that ended idle carries nothing (stamp in the past). Applied at
+  READ time only: the engine fills the fetched state (`carryingResets`, live
+  and cache-served alike) so the popover's Current span, the forecast, the
+  digest's reset and every face keep the window; history.json still records
+  the API's own word (`history.append(asReported)`), and the two chart
+  series builders fill the sample series (`ResetCarry.fill(samples)`) so the
+  gap already on disk heals. Before this the popover was FORCED onto History
+  for the 16 hours the stamp was missing.
+  (2) `ResetCliffs.Cliff.kind`: `.windowEnd` (stamp moved) vs `.midWindow`
+  (fell to ZERO under an unmoved stamp — any other in-window decrease stays
+  a correction, never a cliff). Mid-window cliffs sit at the gap's midpoint
+  (no boundary to snap to; the readout says "~"). They flow as their own
+  lists — `PercentSeries.midWindow`, `AuditWindowModel.midWindowResets` —
+  and draw through `WindowPlot.midWindowResets`: a fine dotted primary
+  rule stopping at 100 with a ↺ glyph in the headroom, NO curtain (no window
+  closed), readout "Limit reset · ~Thu 21:10 · from 30%". The dashed
+  boundary rule + curtain stay exclusively `.windowEnd`.
+  `ExhaustedStretches.build(grants:)` ends a lockout at the grant and never
+  reaches back across one. The window ledger records nothing for a grant
+  (the window didn't close; its later close keeps the pre-grant peak from
+  samples). FOLLOW-UP, user-directed for the NEXT version: Anthropic's
+  once-a-week user-initiated 5h SESSION reset — mark it on the session
+  history AND on the weekly chart ("was it used this week, and when"); the
+  detection rule there is "emptied while the OLD stamp still lay ahead"
+  (the new window's stamp moves, so the unmoved-stamp rule above won't see
+  it), a session drop coinciding with a weekly mid-window drop is the
+  vendor's grant, not the user's reset, and the weekly popover needs the
+  session meter passed in.
 - `UsageClient` makes exactly one attempt and maps to typed errors. The
   retry (once, transport errors only, ~2s delay) lives in the store.
 - Decode defensively: every field optional, unknown limit kinds render

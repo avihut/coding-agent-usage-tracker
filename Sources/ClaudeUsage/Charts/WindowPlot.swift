@@ -156,6 +156,32 @@ enum WindowPlot {
         }
     }
 
+    /// A reset granted INSIDE a window (`ResetCliffs.Cliff.Kind.midWindow`):
+    /// the meter emptied but no window closed, so this is deliberately not
+    /// the boundary's dash — a finer dotted rule that stops at 100, with a
+    /// small ↺ in the headroom above it naming what happened without words.
+    /// No curtain pairs with it: there is no "ended window" to light.
+    @ChartContentBuilder
+    static func midWindowResets(
+        _ dates: [Date], hovered: Date?, ceiling: Double
+    ) -> some ChartContent {
+        ForEach(dates, id: \.timeIntervalSinceReferenceDate) { reset in
+            RuleMark(
+                x: .value("Limit reset", reset),
+                yStart: .value("Usage", 0), yEnd: .value("Usage", min(100, ceiling)))
+                .foregroundStyle(Color.primary.opacity(hovered == reset ? 1 : 0.7))
+                .lineStyle(StrokeStyle(lineWidth: 1.5, lineCap: .round, dash: [0.5, 3.5]))
+                .annotation(
+                    position: .top, spacing: 1,
+                    overflowResolution: .init(x: .fit(to: .plot), y: .fit(to: .plot))
+                ) {
+                    Image(systemName: "arrow.counterclockwise")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(hovered == reset ? Color.primary : Color.secondary)
+                }
+        }
+    }
+
     /// Reset hover: curtain-dim everything outside the limit window that
     /// ended at this line — the undimmed stretch IS the window — with a
     /// solid twin marking where that window began.
