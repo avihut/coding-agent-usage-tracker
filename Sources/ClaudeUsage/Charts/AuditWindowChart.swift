@@ -2,10 +2,14 @@ import Charts
 import SwiftUI
 import UsageCore
 
-/// A past span drawn in the meter popover's Window-view vocabulary: the
-/// percent line with reset cliffs, session nubs under the plot floor, and
-/// the window ledger's verdict in the caption. Read-only audit — no now
-/// rule, no projections, no dead-zone hatching; history doesn't move.
+/// A span drawn in the meter popover's Window-view vocabulary: the percent
+/// line with reset cliffs, session nubs under the plot floor, and the
+/// window ledger's verdict in the caption. Read-only audit — no
+/// projections; history doesn't move. A span that CONTAINS now (today's
+/// drill, the current week) is the live limit window's own shape: measured
+/// data stops at a labeled now rule and the future stays empty, exactly as
+/// in the popover — a curve carried flat to midnight read as usage that
+/// never happened (user-reported 2026-09-05).
 struct AuditWindowChart: View {
     let model: AuditWindowModel
     let domain: DateInterval
@@ -53,9 +57,9 @@ struct AuditWindowChart: View {
     /// the percent the span actually gained (drops excluded, so a sawtooth
     /// can't cancel itself). Capped only when the span IS one window — a day
     /// over a 5h meter holds about five, and that overshoot is the point.
-    private var curves: [(model: String, color: Color, points: [ModelCurves.Point])] {
+    private func curves(now: Date) -> [(model: String, color: Color, points: [ModelCurves.Point])] {
         guard !timeline.isEmpty else { return [] }
-        let scoped = timeline.filter { domain.contains($0.t) }
+        let scoped = timeline.filter { domain.contains($0.t) && $0.t <= now }
         let models = Array(Set(scoped.map(\.model))).sorted()
         guard !models.isEmpty else { return [] }
         let anchor = ModelCurves.gainsPercentPerToken(
@@ -66,7 +70,9 @@ struct AuditWindowChart: View {
             moments: scoped.map {
                 ModelCurves.Moment(model: $0.model, t: $0.t, amount: $0.tally.total)
             },
-            start: domain.start, end: domain.end,
+            // Curves end where measurement ends: a live span's buckets
+            // run to now, never on to the span's end.
+            start: domain.start, end: min(domain.end, now),
             percentPerToken: anchor,
             cap: domain.duration <= window * 1.01
         ).map { ($0.model, modelColors[$0.model] ?? .gray, $0.points) }
@@ -89,9 +95,9 @@ struct AuditWindowChart: View {
 
     /// Rebuilds the drawn curves and asks which one the cursor is on.
     private func focusedCurve(
-        at date: Date, value: Double, plotHeight: CGFloat
+        at date: Date, value: Double, plotHeight: CGFloat, now: Date
     ) -> String? {
-        let shown = curves
+        let shown = curves(now: now)
         let ceiling = ModelCurves.ceiling(
             shown.map { ModelCurves.Curve(model: $0.model, points: $0.points) })
         return focus(
@@ -128,8 +134,17 @@ struct AuditWindowChart: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             if model.percent.count >= 2 || !model.nubs.isEmpty {
-                chart
+                // A span still running ticks its now rule every 30s, the
+                // popover's cadence; a finished span renders once.
+                if domain.end > Date() {
+                    TimelineView(.periodic(from: .now, by: 30)) { context in
+                        chart(now: context.date)
+                    }
                     .frame(height: plotHeight)
+                } else {
+                    chart(now: domain.end)
+                        .frame(height: plotHeight)
+                }
             } else {
                 Text("Nothing recorded for this span")
                     .font(.caption2)
@@ -141,8 +156,19 @@ struct AuditWindowChart: View {
         }
     }
 
-    private var chart: some View {
-        let curves = self.curves
+    /// True while the span holds the present — the only time the chart
+    /// draws a now rule and leaves the future empty.
+    private func isLive(_ now: Date) -> Bool {
+        domain.start <= now && now < domain.end
+    }
+
+    private func chart(now: Date) -> some View {
+        let curves = self.curves(now: now)
+        let measuredEnd = min(domain.end, now)
+        // The now label yields the headroom band to the focused curve's
+        // name (its tip sits AT now on a live span, so they always collide)
+        // and to the hovered session's duration, the popover's layering.
+        let nowLabelShown = focusedModel == nil && hoveredNub == nil
         // Uncapped curves over a multi-window span run well past 100; a
         // fixed 0…100 domain would clip them silently and read as a
         // rendering fault. The headroom band above the tallest is the
@@ -195,7 +221,7 @@ struct AuditWindowChart: View {
             // round-capped rule rather than the popover's band — but the
             // colouring and the hover dimming come from WindowPlot.
             RuleMark(
-                xStart: .value("Start", domain.start), xEnd: .value("End", domain.end),
+                xStart: .value("Start", domain.start), xEnd: .value("End", measuredEnd),
                 y: .value("Track", Self.stripY))
                 .foregroundStyle(Color.secondary.opacity(0.18))
                 .lineStyle(StrokeStyle(lineWidth: 4, lineCap: .round))
@@ -207,6 +233,27 @@ struct AuditWindowChart: View {
                         WindowPlot.nubColor(nub.kind, accent: accent)
                             .opacity(WindowPlot.nubOpacity(nub, hovered: hoveredNub)))
                     .lineStyle(StrokeStyle(lineWidth: 4, lineCap: .round))
+            }
+            if isLive(now) {
+                // The now separator: measured to the left, nothing yet to
+                // the right. Full primary like the popover's — anything
+                // softer vanishes against the material — stopping at 100
+                // so its clock label sits in the headroom band.
+                RuleMark(
+                    x: .value("Now", now),
+                    yStart: .value("Floor", Self.plotFloor), yEnd: .value("Usage", 100))
+                    .foregroundStyle(Color.primary)
+                    .lineStyle(StrokeStyle(lineWidth: 1))
+                    .annotation(
+                        position: .top, alignment: .center, spacing: 2,
+                        overflowResolution: .init(x: .fit(to: .plot), y: .disabled)
+                    ) {
+                        if nowLabelShown {
+                            Text(nowLabel(now))
+                                .font(.system(size: 8, weight: .semibold))
+                                .foregroundStyle(Color.primary)
+                        }
+                    }
             }
             if let hoveredNub {
                 WindowPlot.nubCurtain(
@@ -295,7 +342,8 @@ struct AuditWindowChart: View {
                                 hoveredReset = grant == nil ? hit : nil
                                 if hit == nil, let date, let depth {
                                     focusedModel = focusedCurve(
-                                        at: date, value: depth, plotHeight: plot.height)
+                                        at: date, value: depth, plotHeight: plot.height,
+                                        now: now)
                                 } else {
                                     focusedModel = nil
                                 }
@@ -350,6 +398,20 @@ struct AuditWindowChart: View {
             : Self.weekdayFormatter.string(from: date)
     }
 
+    /// The now label, frame-aware like the axis: a clock within a day,
+    /// weekday + clock across a week.
+    private func nowLabel(_ date: Date) -> String {
+        domain.duration <= 2 * 86400
+            ? UsageFormatting.clockTime(date)
+            : Self.weekdayTimeFormatter.string(from: date)
+    }
+
+    private static let weekdayTimeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEE HH:mm"
+        return formatter
+    }()
+
     private static let weekdayFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "EEE"
@@ -387,7 +449,7 @@ struct AuditWindowChart: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             } else if let hoverDate {
-                Text(hoverReadout(at: hoverDate))
+                Text(hoverReadout(at: hoverDate, now: Date()))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             } else if let outcome = model.outcomes.last {
@@ -413,7 +475,10 @@ struct AuditWindowChart: View {
         .lineLimit(1)
     }
 
-    private func hoverReadout(at date: Date) -> String {
+    private func hoverReadout(at date: Date, now: Date) -> String {
+        // Right of now nothing has been measured: the clock alone, never
+        // the last percent carried into the future.
+        guard date <= now else { return UsageFormatting.clockTime(date) }
         // Carry-forward: the percent standing at the hovered instant is the
         // last drawn point at or before it.
         let standing = model.percent.last { $0.t <= date }?.percent

@@ -474,7 +474,12 @@ the README rather than silently deviating.
   with currentReset nil, session-stretch nubs clipped+merged, in-span
   outcomes) and `AuditWindowChart` (Charts/) renders it read-only
   (percent line, dashed cliffs, floor strip, hover crosshair,
-  fixed-height verdict caption). Two toggles, both `auditToggle` icon
+  fixed-height verdict caption). A span that CONTAINS now — today's
+  drill, the current week — is LIVE (v0.92.2, user-reported: curves ran
+  flat to midnight and no now rule): model curves and the strip track end
+  at now, a primary now rule with its clock label in the headroom band
+  ticks every 30s (label yields to a focused curve's tip and a hovered
+  nub), hover right of now reads the clock alone. Two toggles, both `auditToggle` icon
   buttons (no room for a third segmented control at 360pt):
   @AppStorage dayDetailStyle ring↔24h-timeline in the drill-down
   (session meter), weekChartStyle bars↔window on 7D (weekly meter,
