@@ -19,10 +19,15 @@ enum ProviderStyle {
     nonisolated(unsafe) private(set) static var accentRGB =
         RGBColor(red: 0.851, green: 0.467, blue: 0.341)
 
+    /// The vendor's mark as the menu bar draws it (Claude's ✳︎) — what a
+    /// chart uses to say "the vendor did this" without naming one.
+    nonisolated(unsafe) private(set) static var glyph = "✳︎"
+
     static var accentColor: Color { Color(nsColor: accent) }
 
     static func install(_ provider: any UsageProvider) {
         providerID = provider.id
+        glyph = provider.menuBarGlyph
         accent = NSColor(
             srgbRed: provider.accent.red, green: provider.accent.green,
             blue: provider.accent.blue, alpha: 1)

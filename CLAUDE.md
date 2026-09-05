@@ -959,8 +959,12 @@ the README rather than silently deviating.
   (no boundary to snap to; the readout says "~"). They flow as their own
   lists — `PercentSeries.midWindow`, `AuditWindowModel.midWindowResets` —
   and draw through `WindowPlot.midWindowResets`: a fine dotted primary
-  rule stopping at 100 with a ↺ glyph in the headroom, NO curtain (no window
-  closed), readout "Limit reset · ~Thu 21:10 · from 30%". The dashed
+  rule stopping at 100 IN THE PROVIDER ACCENT, capped by the VENDOR'S MARK
+  in the headroom (`ProviderStyle.glyph` = the provider's menuBarGlyph,
+  Claude's ✳︎, OpenAI's for Codex — v0.92.1, user-directed: "the vendor did
+  this", so the vendor's colour and logo, never a generic ↺ or primary), NO
+  curtain (no window closed), readout "Limit reset · ~Thu
+  21:10 · from 30%". The dashed
   boundary rule + curtain stay exclusively `.windowEnd`.
   `ExhaustedStretches.build(grants:)` ends a lockout at the grant and never
   reaches back across one. The window ledger records nothing for a grant

@@ -158,9 +158,13 @@ enum WindowPlot {
 
     /// A reset granted INSIDE a window (`ResetCliffs.Cliff.Kind.midWindow`):
     /// the meter emptied but no window closed, so this is deliberately not
-    /// the boundary's dash — a finer dotted rule that stops at 100, with a
-    /// small ↺ in the headroom above it naming what happened without words.
-    /// No curtain pairs with it: there is no "ended window" to light.
+    /// the boundary's dash — a finer dotted rule that stops at 100, drawn in
+    /// the VENDOR'S accent and capped by the vendor's own mark
+    /// (`ProviderStyle.glyph`, Claude's ✳︎; Codex/Gemini wear theirs): the
+    /// vendor emptied the meter, and its colour and mark say so without
+    /// words — the one reset mark that is allowed to wear the accent, because
+    /// here the accent IS the data. No curtain pairs with it: there is no
+    /// "ended window" to light.
     @ChartContentBuilder
     static func midWindowResets(
         _ dates: [Date], hovered: Date?, ceiling: Double
@@ -169,15 +173,15 @@ enum WindowPlot {
             RuleMark(
                 x: .value("Limit reset", reset),
                 yStart: .value("Usage", 0), yEnd: .value("Usage", min(100, ceiling)))
-                .foregroundStyle(Color.primary.opacity(hovered == reset ? 1 : 0.7))
+                .foregroundStyle(ProviderStyle.accentColor.opacity(hovered == reset ? 1 : 0.8))
                 .lineStyle(StrokeStyle(lineWidth: 1.5, lineCap: .round, dash: [0.5, 3.5]))
                 .annotation(
                     position: .top, spacing: 1,
                     overflowResolution: .init(x: .fit(to: .plot), y: .fit(to: .plot))
                 ) {
-                    Image(systemName: "arrow.counterclockwise")
-                        .font(.system(size: 8, weight: .bold))
-                        .foregroundStyle(hovered == reset ? Color.primary : Color.secondary)
+                    Text(ProviderStyle.glyph)
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(ProviderStyle.accentColor.opacity(hovered == reset ? 1 : 0.85))
                 }
         }
     }
