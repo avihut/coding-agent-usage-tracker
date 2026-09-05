@@ -46,6 +46,55 @@ pub struct LiveState {
     /// "no account".
     #[serde(default)]
     pub account_presence: Option<AccountPresenceCard>,
+    /// Pending notifications — vendor resets, outages past and present —
+    /// pre-phrased by the writer. `None` means the writer emits none (a
+    /// digest older than 0.93.0); an empty `items` means nothing is
+    /// pending. None ≠ empty.
+    #[serde(default)]
+    pub notices: Option<NoticesCard>,
+}
+
+/// Mirror of `NoticesCard`. Consumers render, never compute: the header
+/// dot follows `indicator`, the rows print `title`/`detail`/`when` verbatim.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoticesCard {
+    /// Light the pending-notice dot: some pending notice has no surface of
+    /// its own. A lone ongoing outage owns the status banner and lights
+    /// nothing.
+    pub indicator: bool,
+    pub pending_count: i64,
+    /// Ongoing first, then newest first.
+    pub items: Vec<NoticeCard>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoticeCard {
+    pub id: String,
+    /// "reset" | "outage"; unknown kinds render by title.
+    pub kind: String,
+    /// Incident impact for outages; None for kinds without one.
+    pub severity: Option<String>,
+    pub title: String,
+    pub detail: Option<String>,
+    /// The time line, pre-phrased ("~21:10 yesterday", "Ongoing · 30 min").
+    pub when: String,
+    #[serde(with = "time::serde::rfc3339")]
+    pub occurred_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339::option", default)]
+    pub ended_at: Option<OffsetDateTime>,
+    pub ongoing: bool,
+    pub dismissable: bool,
+    pub seen: bool,
+    /// Already shown elsewhere (the ongoing outage's banner/capsule): not
+    /// listed in the section, and not counted by the dot.
+    pub owns_menu_bar_surface: bool,
+    pub url: Option<String>,
+    pub components: Vec<String>,
+    /// The meter a reset was read from; absent from older writers.
+    #[serde(default)]
+    pub meter_label: Option<String>,
 }
 
 /// Mirror of `AppUpdateCard` — the newest GitHub release the engine host
@@ -868,5 +917,26 @@ mod wave4_tests {
 
         assert!(background.cost.is_none());
         assert!(background.project.is_none());
+    }
+
+    /// The notices card, both lifecycles: the ongoing outage that owns the
+    /// banner (no dot of its own) and the dismissable reset that lights it.
+    #[test]
+    fn notices_arrive_with_the_indicator_decided() {
+        let state = golden();
+        let card = state.notices.as_ref().expect("notices card in golden");
+        assert!(card.indicator);
+        assert_eq!(card.pending_count, 2);
+        assert_eq!(card.items.len(), 2);
+        let outage = &card.items[0];
+        assert_eq!(outage.kind, "outage");
+        assert!(outage.ongoing && !outage.dismissable && outage.owns_menu_bar_surface);
+        assert_eq!(outage.severity.as_deref(), Some("minor"));
+        let reset = &card.items[1];
+        assert_eq!(reset.kind, "reset");
+        assert!(reset.dismissable && !reset.owns_menu_bar_surface);
+        assert_eq!(reset.title, "Limit reset · Claude");
+        assert_eq!(reset.meter_label.as_deref(), Some("Weekly (all)"));
+        assert!(reset.when.starts_with('~'));
     }
 }

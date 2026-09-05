@@ -114,7 +114,7 @@ fn parse_args() -> Result<(PathBuf, PathBuf), String> {
                     "  --digest <path>   read this live-state.json (default: app support)\n",
                     "  --socket <path>   control socket for commands (default: app support)\n",
                     "\nkeys: q quit · r refresh · arrows move the cursor, enter opens · 1-3 meters · [ ] page\n",
-                    "      v span · c cost · p pace · s/z span+zoom on a meter · esc back · ? help"
+                    "      v span · c cost · p pace · s/z span+zoom on a meter · n/x/X notices · esc back · ? help"
                 )
                 .to_owned());
             }
@@ -160,6 +160,7 @@ fn run(mut terminal: ratatui::DefaultTerminal, mut app: App) -> std::io::Result<
     let (reply_tx, reply_rx) = mpsc::channel::<String>();
     let mut last_draw = Instant::now() - Duration::from_secs(1);
     let mut last_stat = Instant::now() - Duration::from_secs(1);
+    let mut seen_sent = std::collections::HashSet::<String>::new();
 
     if app.freshness(OffsetDateTime::now_utc()) == Freshness::EngineOffline {
         app.notice = Some("no engine running — asking usaged to set itself up…".into());
@@ -172,7 +173,14 @@ fn run(mut terminal: ratatui::DefaultTerminal, mut app: App) -> std::io::Result<
         // The digest's mtime is the update signal (design §7).
         if last_stat.elapsed() >= Duration::from_millis(500) {
             last_stat = Instant::now();
-            dirty |= app.poll_digest();
+            if app.poll_digest() {
+                dirty = true;
+                mark_seen(&app, &mut seen_sent);
+            }
+        }
+        if let Some(id) = app.pending_dismiss.take() {
+            dismiss_notice(&mut app, id, &reply_tx);
+            dirty = true;
         }
         while let Ok(reply) = reply_rx.try_recv() {
             app.notice = Some(reply);
@@ -302,6 +310,29 @@ fn handle_key(app: &mut App, code: KeyCode, reply_tx: &mpsc::Sender<String>) {
         }
         KeyCode::Char('[') => page_heatmap(app, 1),
         KeyCode::Char(']') => page_heatmap(app, -1),
+        // Notifications: `n` parks the cursor on the first row, `x`
+        // dismisses the focused one, `X` every dismissable one. The engine
+        // owns the ledger — the pane only asks, and the next digest shows.
+        KeyCode::Char('n') => {
+            if let Some(first) = app.hits.find(|hit| matches!(hit, Hit::Notice(_))) {
+                app.keyboard_mode = true;
+                app.focus_hit = Some(first);
+            } else {
+                app.notice = Some("no notifications pending".into());
+            }
+        }
+        KeyCode::Char('x') => match app.hover_hit.clone() {
+            Some(Hit::Notice(id)) | Some(Hit::NoticeDismiss(id)) => dismiss_notice(app, id, reply_tx),
+            _ => app.notice = Some("focus a notification first (n)".into()),
+        },
+        KeyCode::Char('X') => {
+            let socket_path = app.socket_path.clone();
+            let tx = reply_tx.clone();
+            app.notice = Some("dismissing all…".into());
+            std::thread::spawn(move || {
+                let _ = tx.send(reply_word(socket::dismiss_all_notices(&socket_path)));
+            });
+        }
         // The app's activity pills and Tokens/Cost picker, as keys. Pages
         // don't translate between window sizes, so a period switch lands
         // on the current window — the app resets its pager the same way.
@@ -421,6 +452,47 @@ fn step(app: &mut App, direction: i64) {
     }
 }
 
+/// The reply's one word for the pane's echo line.
+fn reply_word(reply: Option<socket::Reply>) -> String {
+    match reply {
+        Some(reply) => reply
+            .message
+            .unwrap_or_else(|| if reply.ok { "ok".into() } else { "refused".into() }),
+        None => "engine socket not listening".into(),
+    }
+}
+
+fn dismiss_notice(app: &mut App, id: String, reply_tx: &mpsc::Sender<String>) {
+    let socket_path = app.socket_path.clone();
+    let tx = reply_tx.clone();
+    app.notice = Some("dismissing…".into());
+    // The cursor's target is about to vanish; drop it rather than ghost it.
+    app.focus_hit = None;
+    std::thread::spawn(move || {
+        let _ = tx.send(reply_word(socket::dismiss_notice(&socket_path, &id)));
+    });
+}
+
+/// Every pending notice the pane has drawn gets marked seen ONCE per run —
+/// the app's panel does the same on open. Seen is not dismissed.
+fn mark_seen(app: &App, sent: &mut std::collections::HashSet<String>) {
+    let Some(card) = app.digest.as_ref().and_then(|d| d.notices.as_ref()) else { return };
+    let ids: Vec<String> = card
+        .items
+        .iter()
+        .filter(|item| !item.seen && !sent.contains(&item.id))
+        .map(|item| item.id.clone())
+        .collect();
+    if ids.is_empty() {
+        return;
+    }
+    sent.extend(ids.iter().cloned());
+    let socket_path = app.socket_path.clone();
+    std::thread::spawn(move || {
+        let _ = socket::mark_notices_seen(&socket_path, &ids);
+    });
+}
+
 fn page_heatmap(app: &mut App, direction: i64) {
     let moved = app.heat_page as i64 + direction;
     app.heat_page = moved.max(0) as usize;
@@ -449,5 +521,13 @@ fn activate(app: &mut App, hit: Hit) {
             app.scrub = None;
         }
         Hit::ModelRow(_) => {}
+        // The row itself is a focus target for `x`; the × cell acts.
+        Hit::Notice(_) => {}
+        Hit::NoticeDismiss(id) => {
+            // Enter/click on × — routed through the same path as `x`, but
+            // activate() has no reply channel, so the request rides a
+            // deferred flag the loop drains.
+            app.pending_dismiss = Some(id);
+        }
     }
 }

@@ -72,6 +72,17 @@ pub fn render(digest_path: &Path) -> String {
     if state.engine.stale {
         out.push_str(if color { " #[dim]stale#[default]" } else { " stale" });
     }
+    // Pending notices: one dot cell and the count, only while the digest's
+    // indicator is lit (a lone ongoing outage lights nothing here either).
+    if let Some(card) = state.notices.as_ref().filter(|card| card.indicator) {
+        let dot = if look().ascii { "*" } else { "●" };
+        let count = card
+            .items
+            .iter()
+            .filter(|item| !item.owns_menu_bar_surface)
+            .count();
+        out.push_str(&format!(" {dot}{count}"));
+    }
     out
 }
 

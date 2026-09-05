@@ -6,7 +6,7 @@
 //! what was actually painted.
 
 use crate::activity::{self, ModelTotal};
-use crate::digest::{DayRollup, HourBucket, LiveState, Rgb, ServiceStatusCard};
+use crate::digest::{DayRollup, HourBucket, LiveState, NoticeCard, NoticesCard, Rgb, ServiceStatusCard};
 use crate::layout::{self, Plan, Shape};
 use crate::state::{App, Dimension, Freshness, Hit, Period, Surface};
 use crate::surfaces;
@@ -191,6 +191,85 @@ fn countdown(to: OffsetDateTime, now: OffsetDateTime) -> String {
     } else {
         format!("{secs}s")
     }
+}
+
+/// The notices the section lists: everything pending that has no surface of
+/// its own. An ongoing outage rides the status banner (and the footer rung),
+/// so it never repeats here.
+pub fn listed_notices(card: Option<&NoticesCard>) -> Vec<&NoticeCard> {
+    card.map(|card| {
+        card.items
+            .iter()
+            .filter(|item| !item.owns_menu_bar_surface)
+            .collect()
+    })
+    .unwrap_or_default()
+}
+
+/// Rows the Notifications section wants: a title plus one per listed
+/// notice, capped so a pile-up can't push the meters off a small pane.
+pub fn notice_rows(card: Option<&NoticesCard>) -> u16 {
+    let count = listed_notices(card).len().min(4) as u16;
+    if count == 0 { 0 } else { count + 1 }
+}
+
+/// A notice row's rail color: the vendor's own act wears the accent, a
+/// running incident its severity, an ended one grey.
+fn notice_color(item: &NoticeCard, accent: Color) -> Color {
+    match item.kind.as_str() {
+        "reset" => accent,
+        "outage" if item.ongoing => status_color(item.severity.as_deref().unwrap_or("")),
+        _ => DIM,
+    }
+}
+
+/// The Notifications section: a rail, the title (with the impact for
+/// outages), the detail as room allows, the time line and — for a
+/// dismissable notice — a × at the row's end. Words verbatim from the
+/// digest; the `×` column is what `hits` registers for a click.
+fn notices_section<'a>(
+    items: &[&'a NoticeCard],
+    accent: Color,
+    rect: Rect,
+) -> Paragraph<'a> {
+    let mut lines = vec![section_title("Notifications")];
+    let rail = if crate::state::look().ascii { "| " } else { "▍ " };
+    let cross = if crate::state::look().ascii { "x" } else { "×" };
+    for item in items {
+        let color = notice_color(item, accent);
+        let mut tail = format!("  {}", item.when);
+        if item.dismissable {
+            tail.push_str(&format!("  {cross}"));
+        }
+        let mut spans = vec![Span::styled(rail.to_owned(), style(color))];
+        let mut head = item.title.clone();
+        if let Some(severity) = &item.severity {
+            head.push_str(&format!("{}{}", glyphs().sep, severity));
+        }
+        let fixed = rail.chars().count() + tail.chars().count();
+        let room = (rect.width as usize).saturating_sub(fixed);
+        let title_len = head.chars().count().min(room);
+        spans.push(Span::styled(
+            truncate(&head, title_len.max(4)),
+            Style::new().add_modifier(Modifier::BOLD),
+        ));
+        // The detail fills whatever the title left, never cramping it; the
+        // time line and × are then padded out to the row's right edge, so
+        // the × always sits in the last cell (where the hit map expects it).
+        let left = room.saturating_sub(title_len);
+        let mut used = title_len;
+        if let Some(detail) = &item.detail {
+            if left > 8 {
+                let shown = truncate(detail, left - 2);
+                used += 2 + shown.chars().count();
+                spans.push(Span::styled(format!("  {shown}"), style(DIM)));
+            }
+        }
+        spans.push(Span::raw(" ".repeat(room.saturating_sub(used))));
+        spans.push(Span::styled(tail, style(DIM)));
+        lines.push(Line::from(spans));
+    }
+    Paragraph::new(lines)
 }
 
 /// How loudly the service's health speaks, in rows of dashboard it earns.
@@ -407,6 +486,7 @@ pub fn render(frame: &mut Frame, app: &mut App, now: OffsetDateTime) {
             let plan = layout::plan_with_status(
                 area,
                 status_rungs(digest.service_status.as_ref()),
+                notice_rows(digest.notices.as_ref()),
                 data.meter_rows,
                 data.model_rows,
                 data.activity_rows,
@@ -428,6 +508,7 @@ pub fn render(frame: &mut Frame, app: &mut App, now: OffsetDateTime) {
                 let plan = layout::plan_with_status(
                     left,
                     status_rungs(digest.service_status.as_ref()),
+                    notice_rows(digest.notices.as_ref()),
                     data.meter_rows,
                     data.model_rows,
                     data.activity_rows,
@@ -615,6 +696,22 @@ fn render_dashboard(
     if let Some(rect) = plan.header {
         frame.render_widget(header(digest, freshness, app, now, accent, rect.width), rect);
     }
+    if let Some(rect) = plan.notices {
+        let items = listed_notices(digest.notices.as_ref());
+        frame.render_widget(notices_section(&items, accent, rect), rect);
+        for (index, item) in items.iter().take((rect.height.max(1) - 1) as usize).enumerate() {
+            let row = Rect::new(rect.x, rect.y + 1 + index as u16, rect.width, 1);
+            app.hits.add(row, Hit::Notice(item.id.clone()));
+            if item.dismissable && rect.width >= 2 {
+                // The × is the last cell; registered after the row so it
+                // wins the hit (later additions win).
+                app.hits.add(
+                    Rect::new(rect.x + rect.width - 1, row.y, 1, 1),
+                    Hit::NoticeDismiss(item.id.clone()),
+                );
+            }
+        }
+    }
     if let Some(rect) = plan.meters {
         frame.render_widget(meters(digest, freshness, rect), rect);
         // The credits line (when spend rides along) takes the last row and
@@ -678,16 +775,23 @@ fn header<'a>(
     width: u16,
 ) -> Paragraph<'a> {
     let engine = &digest.engine;
-    let mut identity = vec![
-        Span::styled(
-            format!("{} ", engine.glyph),
-            style(accent).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            engine.service_name.clone(),
-            Style::new().add_modifier(Modifier::BOLD),
-        ),
-    ];
+    let mut identity = vec![Span::styled(
+        format!("{} ", engine.glyph),
+        style(accent).add_modifier(Modifier::BOLD),
+    )];
+    // The menu bar's pending-notice dot, in the header's own grammar: one
+    // cell after the glyph, lit by the digest's `indicator` and nothing
+    // else — so the app and the pane can never disagree about it.
+    if digest.notices.as_ref().is_some_and(|card| card.indicator) {
+        identity.push(Span::styled(
+            format!("{} ", glyphs().live.trim_end()),
+            style(Color::Reset).add_modifier(Modifier::BOLD),
+        ));
+    }
+    identity.push(Span::styled(
+        engine.service_name.clone(),
+        Style::new().add_modifier(Modifier::BOLD),
+    ));
     if let Some(plan) = &engine.plan_label {
         identity.push(Span::styled(format!("  {plan}"), style(DIM)));
     }
@@ -765,6 +869,20 @@ fn header<'a>(
                 ));
                 return status;
             }
+        }
+        // Pending notices, counted where the dot can't say how many.
+        // Only the ones the section lists — the ongoing outage is the
+        // banner's to announce.
+        let pending = listed_notices(digest.notices.as_ref()).len();
+        if pending > 0 {
+            status.push(Span::styled(
+                format!(
+                    "{}{pending} notice{}",
+                    glyphs().sep,
+                    if pending == 1 { "" } else { "s" }
+                ),
+                style(DIM),
+            ));
         }
         // Cadence transparency, the panel status line's grammar: "idle ×N"
         // says why "next in" reads slower than the chosen pace.
@@ -1901,6 +2019,13 @@ fn render_strip(
         format!("{} ", digest.engine.glyph),
         style(if grey { DIM } else { accent }),
     )];
+    // The pending-notice dot spends one cell, same as the header's.
+    if digest.notices.as_ref().is_some_and(|card| card.indicator) {
+        spans.push(Span::styled(
+            format!("{} ", glyphs().live.trim_end()),
+            Style::new().add_modifier(Modifier::BOLD),
+        ));
+    }
     for (index, segment) in digest.menu_bar.iter().enumerate() {
         if index > 0 {
             spans.push(Span::styled(glyphs().sep.to_owned(), style(FAINT)));
@@ -1984,6 +2109,8 @@ fn render_help(frame: &mut Frame, area: Rect) {
         Line::raw("1-3 / click open a meter's window chart"),
         Line::raw("click a day drill into it; ←→ step days"),
         Line::raw("[ ]         page the activity view into the past"),
+        Line::raw("n           jump to the notifications"),
+        Line::raw("x / X       dismiss the focused notification / all"),
         Line::raw("←→          scrub the open meter chart"),
         Line::raw("esc         back (cursor → surface → quit)"),
         Line::raw("mouse       hover readouts · wheel pages/scrubs"),

@@ -67,6 +67,10 @@ public final class UsageEngine {
     /// sidebar labels its rows against this. Nil when nothing tracks
     /// accounts.
     public var presenceTimeline: AccountTimeline? { presence?.timeline }
+    /// Pending notifications as the digest phrases them, rebuilt on every
+    /// publish — the hosting app's panel and menu bar read this; a client
+    /// reads the same card off the digest.
+    public private(set) var notices: NoticesCard?
 
     /// The one metered service this instance tracks. Everything
     /// vendor-specific — endpoints, paths, names, links — flows from here.
@@ -112,6 +116,11 @@ public final class UsageEngine {
     /// The observed-epochs presence ledger; nil exactly when
     /// `identitySource` is. Engine-confined single writer, like `history`.
     private var presence: AccountPresenceLedger?
+    /// What the engine noticed and hasn't been told to forget — vendor
+    /// resets read off the samples, incidents read off the status card.
+    /// Engine-confined single writer like `history`; faces mark seen and
+    /// dismiss over the control socket.
+    private var noticeLedger: NoticeLedger
     private var lastActivityScan: Date?
     /// Single-flight for transcript scans: a window-open force-scan must not
     /// overlap an FSEvents-triggered one — two concurrent scans race their
@@ -182,6 +191,13 @@ public final class UsageEngine {
             ceiling: storedCeiling > 0 ? storedCeiling : RequestLedger.defaultCeiling)
         self.samples = history.load()
         self.windowOutcomes = windowLedger.load()
+        self.noticeLedger = NoticeLedger(directory: support)
+        // Catch-up: grants already in the sample history that no ledger
+        // recorded (the first run after the feature landed, a ledger lost).
+        // Two days, matching the wake-time incident backfill's reach.
+        NoticeDetector.noteGrants(
+            samples: samples, since: Date().addingTimeInterval(-Self.noticeCatchUp),
+            now: Date(), into: &noticeLedger)
 
         scheduler.onTrigger = { [weak self] reason in
             self?.refresh(reason)
@@ -203,9 +219,21 @@ public final class UsageEngine {
             poller.onCard = { [weak self] card in
                 guard let self, !self.isShutDown else { return }
                 self.serviceStatus = card
+                // An incident opening, changing, or resolving is a notice
+                // transition; the ledger reads every card.
+                NoticeDetector.apply(card: card, now: Date(), into: &self.noticeLedger)
                 // A card change is a landing point like any other — consumers
                 // learn about an incident from the digest, not from polling.
                 self.publishState()
+            }
+            poller.onHistory = { [weak self] history in
+                guard let self, !self.isShutDown else { return }
+                let now = Date()
+                if NoticeDetector.backfill(
+                    history: history, since: now.addingTimeInterval(-Self.noticeCatchUp),
+                    now: now, into: &self.noticeLedger) {
+                    self.publishState(now: now)
+                }
             }
             statusPoller = poller
             poller.start()
@@ -275,7 +303,39 @@ public final class UsageEngine {
         observeAccountIdentity()
         refresh(.wake)
         statusPoller?.pollNow()
+        // An incident that opened and closed during the sleep is gone from
+        // the summary an hour after resolving; the history read finds it.
+        statusPoller?.pollHistoryNow()
         updateChecker?.pokeIfStale()
+    }
+
+    /// How far back a start-up or wake catch-up reaches for grants in the
+    /// sample history and resolved incidents in the page's history.
+    static let noticeCatchUp: TimeInterval = 48 * 3600
+
+    // MARK: - Notices
+
+    /// A face rendered these pending notices (the panel opened, the hover
+    /// popover showed, the TUI drew). Seen is not dismissed: the indicator
+    /// stays until a click, but an ongoing outage's epilogue will read
+    /// "ended" rather than recount what was watched.
+    public func markNoticesSeen(_ ids: [String]) {
+        guard !isShutDown, !ids.isEmpty else { return }
+        if noticeLedger.markSeen(ids: ids) { publishState() }
+    }
+
+    /// The person's ×. False when the notice is ongoing (or unknown).
+    @discardableResult
+    public func dismissNotice(id: String) -> Bool {
+        guard !isShutDown else { return false }
+        let ok = noticeLedger.dismiss(id: id)
+        if ok { publishState() }
+        return ok
+    }
+
+    public func dismissAllNotices() {
+        guard !isShutDown else { return }
+        if noticeLedger.dismissAll() { publishState() }
     }
 
     /// One presence observation — rides every landing point that could
@@ -363,6 +423,12 @@ public final class UsageEngine {
                 // retroactively at read time; the forecast runs on the
                 // carried window it will be drawn against.
                 samples = history.append(asReported, existing: samples)
+                // The vendor emptying a meter inside its window is news;
+                // the recent tail is enough to see the drop, the ledger's
+                // tolerance keeps a re-read from filing it twice.
+                NoticeDetector.noteGrants(
+                    samples: samples, since: Date().addingTimeInterval(-3 * 3600),
+                    now: Date(), into: &noticeLedger)
                 recomputePredictions(for: snapshot)
             }
             // The heartbeat: every completed cycle rewrites the digest, so
@@ -406,8 +472,10 @@ public final class UsageEngine {
             presence: presence.map {
                 AccountPresenceInput(epochs: $0.epochs, observedAt: $0.observedAt)
             },
+            notices: noticeLedger.pending,
             now: now)
         accountPresence = digest.accountPresence
+        notices = digest.notices
         publisher.publish(digest)
     }
 

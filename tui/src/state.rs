@@ -114,6 +114,10 @@ pub enum Hit {
     PageLater,
     ModelRow(usize),
     Back,
+    /// A notification row, by notice id — focusable, so `x` has a target.
+    Notice(String),
+    /// The row's × cell; click or enter dismisses.
+    NoticeDismiss(String),
 }
 
 #[derive(Debug, Default)]
@@ -142,6 +146,12 @@ impl HitMap {
     }
 
     /// Where a hit was painted last frame (later additions win, like `at`).
+    /// The first registered hit matching `pred`, in paint order — `n`
+    /// uses it to land the cursor on the first notification row.
+    pub fn find(&self, pred: impl Fn(&Hit) -> bool) -> Option<Hit> {
+        self.regions.iter().map(|(_, hit)| hit).find(|hit| pred(hit)).cloned()
+    }
+
     pub fn rect_of(&self, hit: &Hit) -> Option<Rect> {
         self.regions
             .iter()
@@ -233,6 +243,8 @@ pub struct App {
     pub meter_span: HashMap<String, (crate::meter::Span, usize)>,
     /// Last mouse cell, for hover halos and readouts.
     pub pointer: Option<(u16, u16)>,
+    /// A × activated by click/enter, waiting for the loop's reply channel.
+    pub pending_dismiss: Option<String>,
     /// The EFFECTIVE hot element — mouse hover or keyboard focus,
     /// whichever device spoke last — resolved against the PREVIOUS
     /// frame's hit map (a frame's own map doesn't exist until its
@@ -257,6 +269,7 @@ impl App {
             digest: None,
             decode_error: None,
             notice: None,
+            pending_dismiss: None,
             local_offset,
             last_modified: None,
             quit: false,

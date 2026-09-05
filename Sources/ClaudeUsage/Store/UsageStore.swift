@@ -156,6 +156,23 @@ final class UsageStore {
     /// can't be verified by waiting for a real outage, and synthetic AX
     /// clicks can't reach a popover. Nil in every ordinary run.
     private var fakeServiceStatus: ServiceStatusCard?
+    /// Pending notifications, phrased by the writer, or nil when the host
+    /// publishes none (a daemon before 0.93.0). Nil renders as NOTHING —
+    /// and so does an empty card; the section exists only while something
+    /// is pending.
+    var notices: NoticesCard? {
+        if let fakeNotices { return fakeNotices }
+        switch mode {
+        case .hosting(let engine): return engine.notices
+        case .client(let client): return client.notices
+        }
+    }
+    /// Set only by the `--fake-notices` launch hatch: a vendor reset and
+    /// an overnight outage can't be scheduled, so the section, the menu
+    /// bar dot and the × get a synthetic card. Dismissals edit the fake in
+    /// place so the click path can be verified end to end. Nil in every
+    /// ordinary run.
+    private var fakeNotices: NoticesCard?
     /// The app's newest published release, or nil when the install belongs
     /// to no feed-polling channel (bare executables, a store install) or
     /// the daemon predates the card. Nil renders as NOTHING — absent is
@@ -401,6 +418,15 @@ final class UsageStore {
             case .checkUpdates:
                 engine.checkForUpdates()
                 return ControlReply(ok: true)
+            case .markNoticesSeen(let ids):
+                engine.markNoticesSeen(ids)
+                return ControlReply(ok: true)
+            case .dismissNotice(let id):
+                let ok = engine.dismissNotice(id: id)
+                return ControlReply(ok: ok, message: ok ? nil : "not dismissable")
+            case .dismissAllNotices:
+                engine.dismissAllNotices()
+                return ControlReply(ok: true)
             case .setProvider, .shutdown:
                 return ControlReply(
                     ok: false, message: "not while the app hosts — use the app's Metering menu")
@@ -558,6 +584,59 @@ final class UsageStore {
     /// outage. Never called in an ordinary launch.
     func installFakeServiceStatus(_ card: ServiceStatusCard?) {
         fakeServiceStatus = card
+    }
+
+    /// Installs a synthetic notices card for the `--fake-notices` hatch.
+    func installFakeNotices(_ card: NoticesCard?) {
+        fakeNotices = card
+    }
+
+    // MARK: - Notices
+
+    /// A face rendered these notices while pending — the panel opened on
+    /// them, the hover popover showed. Seen is not dismissed (the dot
+    /// stays); it decides how an ongoing notice's epilogue reads.
+    func markNoticesSeen(_ ids: [String]) {
+        guard !ids.isEmpty, fakeNotices == nil else { return }
+        switch mode {
+        case .hosting(let engine): engine.markNoticesSeen(ids)
+        case .client(let client): client.markNoticesSeen(ids)
+        }
+    }
+
+    /// The ×. The engine refuses an ongoing notice; the fake drops the row
+    /// so the hatch's click path reads like the real one.
+    func dismissNotice(id: String) {
+        if let fake = fakeNotices {
+            fakeNotices = Self.dropping(fake) { $0.id == id && $0.dismissable }
+            return
+        }
+        switch mode {
+        case .hosting(let engine): engine.dismissNotice(id: id)
+        case .client(let client): client.dismissNotice(id: id)
+        }
+    }
+
+    func dismissAllNotices() {
+        if let fake = fakeNotices {
+            fakeNotices = Self.dropping(fake) { $0.dismissable }
+            return
+        }
+        switch mode {
+        case .hosting(let engine): engine.dismissAllNotices()
+        case .client(let client): client.dismissAllNotices()
+        }
+    }
+
+    /// The fake card minus the matching rows, its indicator recomputed by
+    /// the digest's own rule.
+    private static func dropping(
+        _ card: NoticesCard, where gone: (NoticeCard) -> Bool
+    ) -> NoticesCard {
+        let items = card.items.filter { !gone($0) }
+        return NoticesCard(
+            indicator: items.contains { !$0.ownsMenuBarSurface },
+            pendingCount: items.count, items: items)
     }
 
     /// Installs a synthetic release card for the `--fake-update` hatch.

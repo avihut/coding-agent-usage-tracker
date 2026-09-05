@@ -114,6 +114,7 @@ final class StatusItemController: NSResponder {
             _ = observed.state
             _ = observed.predictions
             _ = observed.serviceStatus
+            _ = observed.notices
         } onChange: {
             Task { @MainActor [weak self] in
                 guard let self, self.store === observed else { return }
@@ -128,7 +129,8 @@ final class StatusItemController: NSResponder {
         let model = StatusItemRenderer.model(
             for: store.state, predictions: store.predictions,
             glyph: store.provider.menuBarGlyph,
-            serviceStatus: store.serviceStatus)
+            serviceStatus: store.serviceStatus,
+            notices: store.notices)
         // Drawn as literal pixels, not attributedTitle: the dot and badge
         // are filled geometry no attributed string can carry. Fixed colors
         // keep the image immune to the appearance-context lies a tinted
@@ -174,7 +176,22 @@ final class StatusItemController: NSResponder {
             host.sizingOptions = .preferredContentSize
             self.hoverPopover.contentViewController = host
             self.hoverPopover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            // The hover popover carries the incident banner, so showing it
+            // counts as seeing the ongoing outage — its epilogue will then
+            // read "ended" rather than recount the whole incident.
+            self.markNoticesSeen(onlyMenuBarSurfaces: true)
         }
+    }
+
+    /// Opening the panel marks every pending notice seen; the hover
+    /// popover marks only the ones it actually shows (the incident
+    /// banner). Seen is not dismissed — the dot stays until a click.
+    private func markNoticesSeen(onlyMenuBarSurfaces: Bool) {
+        guard let card = store.notices else { return }
+        let ids = card.items
+            .filter { !$0.seen && (!onlyMenuBarSurfaces || $0.ownsMenuBarSurface) }
+            .map(\.id)
+        store.markNoticesSeen(ids)
     }
 
     override func mouseExited(with event: NSEvent) {
@@ -199,6 +216,7 @@ final class StatusItemController: NSResponder {
             store.pokeServiceStatus()
             NSApp.activate()
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            markNoticesSeen(onlyMenuBarSurfaces: false)
             // Cooperative activation usually leaves this app inactive, and a
             // non-key window consumes the first click just to focus itself —
             // SwiftUI tap targets (day drill-down, meter rows) then need two

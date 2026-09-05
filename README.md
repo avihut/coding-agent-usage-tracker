@@ -122,6 +122,14 @@ is written to disk. This amends spec §10 (2026-08-19); a status host is
 declared per provider and shown on the settings privacy card, and providers
 that declare none stay entirely offline.
 
+Since v0.93.0 the same host answers one more question, at start-up and on
+wake only: `/api/v2/incidents.json`, the page's public incident history, read
+the same anonymous way (no ETag needed — at most once per ten minutes). It
+exists so an outage that opened AND closed while the Mac slept still shows up
+as a dismissable "Outage overnight" notification the next morning; the
+summary feed only remembers the last hour. Same host, same terms, no new
+destination.
+
 ### Fourth network destination: this app's own releases
 
 Standalone installs (the app living in /Applications rather than inside a

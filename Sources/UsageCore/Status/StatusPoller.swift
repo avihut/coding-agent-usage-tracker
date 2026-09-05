@@ -16,6 +16,9 @@ import Foundation
 public final class StatusPoller {
     /// Fires whenever the card changes — the engine republishes the digest.
     public var onCard: ((ServiceStatusCard) -> Void)?
+    /// Fires with the page's incident history after a start or wake read —
+    /// the notice ledger backfills incidents that came and went unpolled.
+    public var onHistory: (([StatusIncident]) -> Void)?
 
     public private(set) var card: ServiceStatusCard?
     public private(set) var cadence = StatusCadence()
@@ -48,10 +51,12 @@ public final class StatusPoller {
         self.pageURL = pageURL
     }
 
-    /// Begins polling, starting with an immediate read.
+    /// Begins polling, starting with an immediate read — and one history
+    /// read, for whatever resolved while no engine was running.
     public func start() {
         guard !isStopped else { return }
         poll()
+        pollHistoryNow()
     }
 
     /// Retires the poller; a pending timer never fires again.
@@ -60,6 +65,7 @@ public final class StatusPoller {
         timer?.invalidate()
         timer = nil
         onCard = nil
+        onHistory = nil
     }
 
     /// An out-of-band poke — wake, a panel opening on a stale card, a manual
@@ -69,6 +75,28 @@ public final class StatusPoller {
         guard !isStopped, cadence.mayPollNow(Date()) else { return }
         poll()
     }
+
+    /// The history read behind `onHistory`: start and wake only, and at most
+    /// once per `historyFloor` — the payload is ~100× the summary's, and
+    /// nothing in it changes faster than a sleep.
+    public func pollHistoryNow() {
+        let now = Date()
+        guard !isStopped, onHistory != nil, !isPollingHistory else { return }
+        if let last = lastHistoryAt, now.timeIntervalSince(last) < Self.historyFloor { return }
+        lastHistoryAt = now
+        isPollingHistory = true
+        Task { [weak self] in
+            guard let self else { return }
+            let history = try? await self.feed.fetchIncidents()
+            self.isPollingHistory = false
+            guard !self.isStopped, let history else { return }
+            self.onHistory?(history)
+        }
+    }
+
+    public static let historyFloor: TimeInterval = 600
+    private var lastHistoryAt: Date?
+    private var isPollingHistory = false
 
     /// True when the card is old enough that a consumer opening a window
     /// should ask for a fresh one (decision D6's 90-second rule lives with

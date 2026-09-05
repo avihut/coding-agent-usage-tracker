@@ -1021,6 +1021,46 @@
       }
     }
   ],
+  "notices" : {
+    "indicator" : true,
+    "items" : [
+      {
+        "components" : [
+          "claude.ai"
+        ],
+        "detail" : "Monitoring · “A fix has been implemented and we are monitoring the results.”",
+        "dismissable" : false,
+        "id" : "outage|q7txxvbsftgq",
+        "kind" : "outage",
+        "occurredAt" : "2026-08-16T10:49:00Z",
+        "ongoing" : true,
+        "ownsMenuBarSurface" : true,
+        "seen" : true,
+        "severity" : "minor",
+        "title" : "Degraded performance for multiple models",
+        "url" : "https:\/\/stspg.io\/tcsfmtc03xgm",
+        "when" : "Ongoing · 1 hr 11 min"
+      },
+      {
+        "components" : [
+
+        ],
+        "detail" : "Weekly (all) fell from 71% ahead of its reset.",
+        "dismissable" : true,
+        "endedAt" : "2026-08-15T18:10:30Z",
+        "id" : "reset|1786817400",
+        "kind" : "reset",
+        "meterLabel" : "Weekly (all)",
+        "occurredAt" : "2026-08-15T18:10:30Z",
+        "ongoing" : false,
+        "ownsMenuBarSurface" : false,
+        "seen" : false,
+        "title" : "Limit reset · Claude",
+        "when" : "~18:10 yesterday"
+      }
+    ],
+    "pendingCount" : 2
+  },
   "schemaVersion" : 1,
   "serviceStatus" : {
     "checkedAt" : "2026-08-16T11:58:30Z",

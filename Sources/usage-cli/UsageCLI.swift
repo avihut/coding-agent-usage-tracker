@@ -309,6 +309,14 @@ struct UsageCLI {
                 code: 19)
         }
 
+        // `notices dismiss <id>` / `notices dismiss --all` is the one query
+        // verb that WRITES — through the engine's socket, like the panel's ×
+        // and the TUI's `x`, never by touching the ledger file. It needs no
+        // digest: the engine answers for itself.
+        if noun == "notices", arguments.dropFirst().first == "dismiss" {
+            dismissNotices(Array(arguments.dropFirst(2)))
+        }
+
         let fileURL = digestPath.map { URL(fileURLWithPath: $0) }
             ?? LiveState.fileURL(bundleID: "com.avihu.ClaudeUsage")
         let digestData = FileManager.default.contents(atPath: fileURL.path)
@@ -353,6 +361,28 @@ struct UsageCLI {
             arguments: arguments, digest: digest, rawDigest: data,
             environment: ProcessInfo.processInfo.environment, now: Date())
         emit(output)
+    }
+
+    /// Sends the dismissal and reports the engine's word. Exit 20 when the
+    /// engine refuses (an ongoing notice, or an id it doesn't hold), 13 when
+    /// no engine is listening — the same "no engine" code a missing digest
+    /// gets, because that is what it means.
+    private static func dismissNotices(_ rest: [String]) -> Never {
+        let command: ControlCommand
+        switch rest {
+        case ["--all"]:
+            command = .dismissAllNotices
+        case let words where words.count == 1 && !words[0].hasPrefix("-"):
+            command = .dismissNotice(id: words[0])
+        default:
+            die("usage: usage-cli notices dismiss <id> | --all", code: 19)
+        }
+        let socket = EngineHostBroker.socketURL(bundleID: "com.avihu.ClaudeUsage")
+        guard let reply = ControlSocket.send(command, to: socket) else {
+            die("no engine listening on \(socket.path) — launch the app (or usaged)", code: 13)
+        }
+        guard reply.ok else { die(reply.message ?? "refused", code: 20) }
+        exit(0)
     }
 
     /// Shared by both query layers: several exits are pinned to EMPTY

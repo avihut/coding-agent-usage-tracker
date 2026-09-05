@@ -42,3 +42,20 @@ pub fn set_interval(socket_path: &Path, seconds: u32) -> Option<Reply> {
         &serde_json::json!({ "setInterval": { "seconds": seconds } }),
     )
 }
+
+/// The person's × on a notice. The engine refuses an ongoing one (`ok:
+/// false`, "not dismissable") — the reply, not the request, is the word.
+pub fn dismiss_notice(socket_path: &Path, id: &str) -> Option<Reply> {
+    send(socket_path, &serde_json::json!({ "dismissNotice": { "id": id } }))
+}
+
+pub fn dismiss_all_notices(socket_path: &Path) -> Option<Reply> {
+    send(socket_path, &serde_json::json!({ "dismissAllNotices": {} }))
+}
+
+/// The pane drew these while they were pending. Seen is not dismissed: the
+/// dot stays, but an outage watched here ends with "Outage ended" rather
+/// than a full recount.
+pub fn mark_notices_seen(socket_path: &Path, ids: &[String]) -> Option<Reply> {
+    send(socket_path, &serde_json::json!({ "markNoticesSeen": { "ids": ids } }))
+}

@@ -1511,6 +1511,111 @@ the README rather than silently deviating.
 - Deliberately deferred (ledger): TUI/statusline rendering of the labels,
   heatmap-by-account, an explicit user-initiated "claim history" backfill.
 
+## Notifications (v0.93.0)
+
+- ONE generic notice system; outages are a KIND of notice, not a special
+  case (user-directed 2026-09-05). Core lives in UsageCore/Notices/:
+  `Notice` (the ledger's value in FACTS — kind stored as a String for
+  forward-compat, `ongoing`/`seenAt`/`dismissedAt`/`seenWhileOngoing`),
+  `NoticeLedger` (`notices.json` beside history.json, single writer =
+  the engine, dismissed rows aged out after 30d, cap 200),
+  `NoticeDetector` (pure: `grants` reads vendor mid-window resets off
+  EVERY meter's samples via the VendorGrants rule and voices ONE notice per
+  instant by the meter that stood highest; `apply(card:)` runs the outage
+  lifecycle off the status card — open incidents become ongoing notices,
+  leaving the open list closes them, an `unknown` indicator closes NOTHING
+  because losing the feed is not the incident ending; `backfill(history:)`
+  records incidents resolved since a cutoff that the ledger never saw).
+  IDs: `reset|<minute epoch>` (two hosts name the same event),
+  `outage|<incident id>`.
+- Two lifecycles. ONGOING = bound to a live condition, persistent, NOT
+  dismissable (the engine refuses over the socket: ok=false "not
+  dismissable"). Closing an ongoing notice makes it its own EPILOGUE in
+  place: `ongoing=false`, `endedAt` set, `seenWhileOngoing` remembers
+  whether any face rendered it, `seenAt` reset so the epilogue is fresh
+  news. SEEN ≠ DISMISSED: seen = a face rendered it while pending (panel
+  open, hover popover shown, TUI drawn); dismissed = the person's ×. The
+  indicator keys off dismissal; epilogue COPY keys off seen ("Outage ended
+  · lasted 2 hr" vs "Outage overnight"/"Outage while away" with the whole
+  span — overnight = any part inside 22:00–08:00 local).
+- ALL COPY IS DECIDED ONCE in `NoticePhrasing` (Digests/NoticeCard.swift)
+  and rides the digest as `LiveState.notices: NoticesCard?` (additive;
+  nil = pre-0.93 writer, empty items = nothing pending, nil ≠ empty).
+  `NoticeCard` carries title/detail/when pre-phrased, `dismissable`,
+  `seen`, `ownsMenuBarSurface`, `meterLabel`. Faces print verbatim; the
+  ONE exception is the ongoing row's running clock ("Ongoing · N min"),
+  which ticks locally like the incident banner's. Pinned by
+  NoticePhrasingTests (Jerusalem-offset fixture) and the golden.
+- MENU BAR RULE (`NoticesCard.indicator`, decided by the WRITER so app and
+  TUI can't disagree): a pending notice with no surface of its own lights
+  a white 6pt dot at the glyph's top-right (`StatusItemRenderer` `.indicator`
+  run — zero width, knocked out of the glyph/capsule by a clear ring, no
+  count: the panel counts). An ACTIVE OUTAGE already owns the glyph capsule
+  (`ownsMenuBarSurface`), so alone it lights nothing; outage + anything else
+  pending shows both. The TUI header carries the same dot after the glyph,
+  the strip and `--status` line spend one cell on it (`●N`).
+- PANEL: `NoticesSection`/`NoticeRow` (Panel/NoticeViews.swift) above the
+  meters, absent when nothing is pending; rail color by kind (`NoticeStyle
+  .tint`: reset = provider accent, ongoing outage = its severity, ended =
+  grey); × on hover for dismissable rows, "Dismiss all" only once ≥2 can
+  go; dismissal ANIMATES (row transition + `.animation(value: ids)` keyed
+  on the row set so a client-mode dismissal landing with the next digest
+  animates too). The ongoing outage's row IS the incident banner with a
+  lifecycle — the banner yields to it (`incidentShownAsNotice`) so the
+  panel never says the same thing twice. Opening the panel marks every
+  pending notice seen; the hover popover marks only what it shows (the
+  banner's outage).
+- CLICK-THROUGH IS THE PROVIDER'S CALL (user-directed 2026-09-05):
+  `UsageProvider.noticeDestination(for:)` → `NoticeDestination.web(URL)`
+  (an official record — the incident's Statuspage shortlink, else the
+  status page) or `.meterHistory(meterLabel:at:)` (no official record
+  exists: the meter card, opened LIT at the moment). Default policy in
+  Notices/NoticeDestination.swift; `ClaudeProvider` implements it
+  explicitly and documents that Anthropic publishes NO feed of limit
+  resets (the 2026-09-04 reset never appeared on the status page) — should
+  one appear, point `.reset` at it THERE and nowhere else. The panel
+  resolves the meter by label, falling back to rank 1; `MeterHistoryView
+  (highlightReset:)` pins the moment: if the remembered span/frame already
+  contains it nothing moves, else a TRANSIENT `spanOverride`/`frameOverride`
+  turns to History at the tightest frame reaching it (the person's saved
+  choices untouched); `WindowPlot.midWindowResets(highlighted:)` draws a
+  soft accent halo behind the rule (and the rule itself if the samples
+  never measured a cliff there — the notice said it happened), the readout
+  spells "Limit reset · ~Fri 23:06 · from 30%"; the pointer taking the
+  chart ends the pin.
+- STORE/CLIENT: `UsageStore.notices` (+ `markNoticesSeen`/`dismissNotice`
+  /`dismissAllNotices`) forwards to the engine when hosting and over the
+  socket when a client (`ControlCommand.markNoticesSeen(ids:)`,
+  `.dismissNotice(id:)`, `.dismissAllNotices`; DigestClient mirrors the
+  card and never edits it optimistically — the next heartbeat carries the
+  result). Wake-time BACKFILL: `StatusPoller.pollHistoryNow()` reads the
+  status host's `incidents.json` at start and wake only (600s floor), same
+  host, spec §10 extended — not a new destination.
+- TUI: `NoticesCard` mirrored in tui/src/digest.rs (must decode the
+  golden); `layout::plan_with_status(area, status_rows, notice_rows, …)`
+  seats the section between banner and meters and yields it BEFORE the
+  banner when the meters would pay; rows list only notices that don't own
+  a surface (the ongoing outage stays the banner's); hits `Hit::Notice(id)`
+  (focus target) + `Hit::NoticeDismiss(id)` on the × cell; keys `n` (cursor
+  to the section), `x` (dismiss focused), `X` (dismiss all); drawn notices
+  are marked seen once per run over the socket.
+- CLI: `usage-cli notices` (table kind/when/title/state/id; `--raw` swaps
+  the phrase for the ISO instant; fields `count`/`indicator`/`items`;
+  `--json` the card; `--check` exits 23 while anything is pending; absent
+  card = silence + 0) and `usage-cli notices dismiss <id>|--all` — the one
+  query verb that writes, through the engine's socket (20 when refused, 13
+  with no engine). Registered in `nouns`, `fieldCatalog`, the fields-walk's
+  `nounPrefix`.
+- VERIFY: `--fake-notices <morning|live>` installs a synthetic card
+  (dismissals edit it in place); `--snapshot <dir>` renders the
+  Notifications section and the weekly meter card (lit at the first reset
+  notice) headlessly to PNG and quits — the harness's eyes when the live
+  popover can't be caught (the outside-click monitor closes the panel on
+  ANY real click, and a user at the machine is always clicking; ImageRenderer
+  leaves a ScrollView's content blank, so the panel can't be snapshotted
+  whole). The daemon's real ledger detected the 2026-09-04 reset and
+  backfilled the Sep 3 outage on first run.
+
 ## Testing
 
 - Fixtures live in `Tests/UsageCoreTests/Fixtures/`, loaded via

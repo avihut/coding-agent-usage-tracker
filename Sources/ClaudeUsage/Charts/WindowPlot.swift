@@ -165,23 +165,41 @@ enum WindowPlot {
     /// words — the one reset mark that is allowed to wear the accent, because
     /// here the accent IS the data. No curtain pairs with it: there is no
     /// "ended window" to light.
+    ///
+    /// `highlighted` (v0.93.0) is the reset a notification click pointed at:
+    /// it wears a soft accent halo behind its rule so the eye lands on it
+    /// the moment the card opens. A highlighted moment the samples never
+    /// measured (no cliff at that instant) still gets its rule — the notice
+    /// said it happened, and the card owes the person the mark.
     @ChartContentBuilder
     static func midWindowResets(
-        _ dates: [Date], hovered: Date?, ceiling: Double
+        _ dates: [Date], hovered: Date?, highlighted: Date? = nil, ceiling: Double
     ) -> some ChartContent {
-        ForEach(dates, id: \.timeIntervalSinceReferenceDate) { reset in
+        if let highlighted {
+            RuleMark(
+                x: .value("Limit reset", highlighted),
+                yStart: .value("Usage", 0), yEnd: .value("Usage", min(100, ceiling)))
+                .foregroundStyle(ProviderStyle.accentColor.opacity(0.22))
+                .lineStyle(StrokeStyle(lineWidth: 7, lineCap: .round))
+        }
+        ForEach(
+            highlighted.map { dates.contains($0) ? dates : dates + [$0] } ?? dates,
+            id: \.timeIntervalSinceReferenceDate
+        ) { reset in
             RuleMark(
                 x: .value("Limit reset", reset),
                 yStart: .value("Usage", 0), yEnd: .value("Usage", min(100, ceiling)))
-                .foregroundStyle(ProviderStyle.accentColor.opacity(hovered == reset ? 1 : 0.8))
+                .foregroundStyle(ProviderStyle.accentColor.opacity(
+                    hovered == reset || highlighted == reset ? 1 : 0.8))
                 .lineStyle(StrokeStyle(lineWidth: 1.5, lineCap: .round, dash: [0.5, 3.5]))
                 .annotation(
                     position: .top, spacing: 1,
                     overflowResolution: .init(x: .fit(to: .plot), y: .fit(to: .plot))
                 ) {
                     Text(ProviderStyle.glyph)
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(ProviderStyle.accentColor.opacity(hovered == reset ? 1 : 0.85))
+                        .font(.system(size: highlighted == reset ? 11 : 9, weight: .semibold))
+                        .foregroundStyle(ProviderStyle.accentColor.opacity(
+                            hovered == reset || highlighted == reset ? 1 : 0.85))
                 }
         }
     }

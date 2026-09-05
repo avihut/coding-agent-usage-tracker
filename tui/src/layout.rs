@@ -42,6 +42,11 @@ pub struct Plan {
     /// header — but never at the meters' expense: a pane that can't seat
     /// both re-plans without it, and the footer rung still speaks.
     pub status: Option<Rect>,
+    /// The Notifications section (0.93.0): pending notices with no surface
+    /// of their own, between the banner and the meters. Yields exactly as
+    /// the banner does — never at the meters' expense; the header dot still
+    /// says something is pending.
+    pub notices: Option<Rect>,
     pub meters: Option<Rect>,
     pub today: Option<Rect>,
     pub models: Option<Rect>,
@@ -62,6 +67,7 @@ const SESSIONS_MIN_ROWS: u16 = 3;
 /// never guesses and never reserves a row nothing fills.
 struct Wants {
     status: u16,
+    notices: u16,
     meters: u16,
     today: u16,
     models: u16,
@@ -72,7 +78,7 @@ struct Wants {
 /// changed nothing about a healthy dashboard.
 #[cfg(test)]
 pub fn plan(area: Rect, meter_rows: u16, model_rows: u16, activity_rows: u16) -> Plan {
-    plan_with_status(area, 0, meter_rows, model_rows, activity_rows)
+    plan_with_status(area, 0, 0, meter_rows, model_rows, activity_rows)
 }
 
 /// The planner proper. `status_rows` is what the incident banner would paint
@@ -84,13 +90,25 @@ pub fn plan(area: Rect, meter_rows: u16, model_rows: u16, activity_rows: u16) ->
 pub fn plan_with_status(
     area: Rect,
     status_rows: u16,
+    notice_rows: u16,
     meter_rows: u16,
     model_rows: u16,
     activity_rows: u16,
 ) -> Plan {
-    let planned = plan_inner(area, status_rows, meter_rows, model_rows, activity_rows);
-    if status_rows > 0 && planned.meters.is_none() {
-        return plan_inner(area, 0, meter_rows, model_rows, activity_rows);
+    let planned = plan_inner(area, status_rows, notice_rows, meter_rows, model_rows, activity_rows);
+    if planned.meters.is_some() {
+        return planned;
+    }
+    // Notices go first (the header dot still speaks), then the banner (the
+    // footer rung still speaks) — the meters are what the pane is for.
+    if notice_rows > 0 {
+        let without_notices = plan_inner(area, status_rows, 0, meter_rows, model_rows, activity_rows);
+        if without_notices.meters.is_some() || status_rows == 0 {
+            return without_notices;
+        }
+    }
+    if status_rows > 0 {
+        return plan_inner(area, 0, 0, meter_rows, model_rows, activity_rows);
     }
     planned
 }
@@ -98,12 +116,14 @@ pub fn plan_with_status(
 fn plan_inner(
     area: Rect,
     status_rows: u16,
+    notice_rows: u16,
     meter_rows: u16,
     model_rows: u16,
     activity_rows: u16,
 ) -> Plan {
     let want = Wants {
         status: status_rows,
+        notices: notice_rows,
         meters: meter_rows.max(2),
         today: 3, // title + spark + hour axis
         models: model_rows.max(2),
@@ -160,6 +180,9 @@ fn portrait(area: Rect, want: &Wants, gap: u16, activity: u16) -> Plan {
     if want.status > 0 {
         plan.status = take(want.status, &mut y);
     }
+    if want.notices > 0 {
+        plan.notices = take(want.notices, &mut y);
+    }
     plan.meters = take(want.meters, &mut y);
     plan.today = take(want.today, &mut y);
     plan.models = take(want.models, &mut y);
@@ -200,6 +223,9 @@ fn wide_portrait(area: Rect, want: &Wants, gap: u16, activity: u16) -> Plan {
     plan.header = take(2, &mut y);
     if want.status > 0 {
         plan.status = take(want.status, &mut y);
+    }
+    if want.notices > 0 {
+        plan.notices = take(want.notices, &mut y);
     }
     plan.meters = take(want.meters, &mut y);
     plan.today = take(want.today, &mut y);
@@ -245,6 +271,9 @@ fn landscape(area: Rect, want: &Wants, gap: u16, activity: u16) -> Plan {
     plan.header = take(2, &mut y);
     if want.status > 0 {
         plan.status = take(want.status, &mut y);
+    }
+    if want.notices > 0 {
+        plan.notices = take(want.notices, &mut y);
     }
     plan.meters = take(want.meters, &mut y);
     plan.today = take(want.today, &mut y);
@@ -409,7 +438,7 @@ mod status_slot_tests {
     #[test]
     fn no_status_rows_leaves_the_plan_untouched() {
         let quiet = plan(area(46, 30), 4, 5, 56);
-        let same = plan_with_status(area(46, 30), 0, 4, 5, 56);
+        let same = plan_with_status(area(46, 30), 0, 0, 4, 5, 56);
         assert!(quiet.status.is_none());
         assert!(same.status.is_none());
         assert_eq!(quiet.meters.unwrap(), same.meters.unwrap());
@@ -420,7 +449,7 @@ mod status_slot_tests {
     #[test]
     fn the_banner_sits_between_the_header_and_the_meters() {
         for pane in [area(46, 30), area(95, 110), area(100, 27)] {
-            let plan = plan_with_status(pane, 2, 4, 5, 56);
+            let plan = plan_with_status(pane, 2, 0, 4, 5, 56);
             let header = plan.header.expect("header");
             let status = plan.status.expect("status banner");
             let meters = plan.meters.expect("meters");
@@ -438,7 +467,7 @@ mod status_slot_tests {
         // asking for a 2-row banner would push the models off, and a big
         // enough ask pushes the meters themselves — which is refused.
         for rows in 1..=6u16 {
-            let plan = plan_with_status(area(40, 20), rows, 4, 5, 56);
+            let plan = plan_with_status(area(40, 20), rows, 0, 4, 5, 56);
             assert!(
                 plan.meters.is_some(),
                 "a {rows}-row banner must never cost the meters their slot"
@@ -455,7 +484,7 @@ mod status_slot_tests {
         let quiet = plan(area(46, 22), 4, 5, 56);
         assert!(quiet.heatmap.is_some(), "the quiet plan seats a chart");
 
-        let loud = plan_with_status(area(46, 22), 2, 4, 5, 56);
+        let loud = plan_with_status(area(46, 22), 2, 0, 4, 5, 56);
         assert!(loud.status.is_some(), "the banner landed");
         assert!(loud.heatmap.is_none(), "the chart paid for it");
         assert!(loud.meters.is_some(), "the meters did not");
@@ -467,7 +496,7 @@ mod status_slot_tests {
     /// rung is the whole story down there.
     #[test]
     fn the_strip_has_no_banner() {
-        assert!(plan_with_status(area(38, 8), 2, 3, 4, 8).status.is_none());
+        assert!(plan_with_status(area(38, 8), 2, 0, 3, 4, 8).status.is_none());
     }
 }
 
@@ -509,5 +538,28 @@ mod sessions_slot_tests {
     fn the_strip_has_no_sessions() {
         assert!(plan(area(38, 8), 3, 4, 8).sessions.is_none());
     }
-}
 
+    /// The Notifications section sits between the banner and the meters,
+    /// and yields before the banner does when the pane can't seat everyone
+    /// — the meters are never the price of either.
+    #[test]
+    fn notices_sit_under_the_banner_and_yield_first() {
+        let roomy = plan_with_status(area(46, 30), 1, 3, 4, 5, 56);
+        let (status, notices, meters) =
+            (roomy.status.unwrap(), roomy.notices.unwrap(), roomy.meters.unwrap());
+        assert!(status.y < notices.y && notices.y < meters.y);
+        assert_eq!(notices.height, 3);
+
+        // 40×12 is landscape (40 ≥ 2.1×12): the left column's 11 rows seat
+        // header 2 + banner 1 + notices 3 + meters 4 only ungapped — the
+        // planner picks the tight plan rather than dropping anyone.
+        let tight = plan_with_status(area(40, 12), 1, 3, 4, 5, 56);
+        assert!(tight.meters.is_some() && tight.notices.is_some());
+        // 40×10: 9 usable rows can't seat all four; the notices go first,
+        // the banner stays, the meters never move.
+        let tighter = plan_with_status(area(40, 10), 1, 3, 4, 5, 56);
+        assert!(tighter.meters.is_some());
+        assert!(tighter.status.is_some(), "the banner outranks the notices");
+        assert!(tighter.notices.is_none(), "notices yield before the meters");
+    }
+}

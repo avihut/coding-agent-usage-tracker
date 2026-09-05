@@ -57,12 +57,17 @@ public struct LiveState: Codable, Sendable, Equatable {
     /// engine tracks no accounts — the provider declares no identity
     /// source, or the digest predates 0.89.0. ABSENT IS NEVER "no account".
     public let accountPresence: AccountPresenceCard?
+    /// Pending notifications and the menu bar's pending-notice indicator
+    /// (0.93.0). Nil means the writer emits no notices — a digest from an
+    /// older build; a reader must show no indicator and no section for it.
+    /// Empty `items` means nothing is pending.
+    public let notices: NoticesCard?
 
     public init(
         engine: EngineStatus, meters: [LiveMeter], menuBar: [SegmentStatus],
         models: [ModelRow], activity: ActivityRollup, sessions: [SessionCard] = [],
         serviceStatus: ServiceStatusCard? = nil, appUpdate: AppUpdateCard? = nil,
-        accountPresence: AccountPresenceCard? = nil
+        accountPresence: AccountPresenceCard? = nil, notices: NoticesCard? = nil
     ) {
         self.schemaVersion = Self.schemaVersion
         self.sessionsCap = LiveStateBuilder.sessionsCap
@@ -75,6 +80,7 @@ public struct LiveState: Codable, Sendable, Equatable {
         self.serviceStatus = serviceStatus
         self.appUpdate = appUpdate
         self.accountPresence = accountPresence
+        self.notices = notices
     }
 
     /// `<App Support>/<bundleID>/live-state.json` — the bundle root, above
@@ -649,6 +655,9 @@ public enum LiveStateBuilder {
         /// accounts. Every derivation (timeline, rollups, labels, session
         /// account lists) happens here — the one place the join lives.
         presence: AccountPresenceInput? = nil,
+        /// The notice ledger's pending entries, or nil when the host keeps no
+        /// ledger. Phrased here — the one place the copy lives.
+        notices: [Notice]? = nil,
         now: Date,
         calendar: Calendar = .current,
         locale: Locale = .current
@@ -794,6 +803,11 @@ public enum LiveStateBuilder {
                 accountPresenceCard(
                     input: $0, slots: timeline, meters: snapshot?.meters ?? [],
                     pricing: pricing, calendar: calendar, now: now)
+            },
+            notices: notices.map {
+                NoticePhrasing.card(
+                    pending: $0, serviceName: provider.serviceName, now: now,
+                    calendar: calendar, locale: locale)
             })
     }
 

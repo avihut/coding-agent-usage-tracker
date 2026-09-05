@@ -27,24 +27,35 @@ enum StatusItemRenderer {
         /// Nil whenever the service is fine, unknown, or under maintenance —
         /// the menu bar alarms for incidents only (decision D2).
         var incident: ServiceStatusCard.Indicator?
+        /// A pending notice with no menu bar surface of its own: a white
+        /// dot at the glyph's corner, no count (the panel counts). An
+        /// active outage alone lights nothing — the capsule already says
+        /// it — and the digest decides that (`NoticesCard.indicator`), so
+        /// the TUI's header dot and this one can't disagree.
+        var indicator = false
     }
 
     static func model(
         for state: DisplayState, predictions: [String: UsagePrediction] = [:],
-        glyph: String = "✳︎", serviceStatus: ServiceStatusCard? = nil
+        glyph: String = "✳︎", serviceStatus: ServiceStatusCard? = nil,
+        notices: NoticesCard? = nil
     ) -> Model {
         // Which impacts are loud enough to badge is decision D2, and it lives
         // on the card so the TUI's rungs and this badge can't drift apart.
         let alarming = serviceStatus?.alarmingImpact
+        let indicator = notices?.indicator ?? false
         guard let snapshot = state.snapshot else {
-            return Model(segments: nil, stale: true, glyph: glyph, incident: alarming)
+            return Model(
+                segments: nil, stale: true, glyph: glyph, incident: alarming,
+                indicator: indicator)
         }
         return Model(
             segments: UsageFormatting.menuBarSegments(
                 from: snapshot.meters, predictions: predictions),
             stale: state.isStale,
             glyph: glyph,
-            incident: alarming
+            incident: alarming,
+            indicator: indicator
         )
     }
 
@@ -102,6 +113,11 @@ enum StatusItemRenderer {
         /// same geometry as `badge`, its own fill, and the glyph's font so
         /// the mark keeps its shape (surface S3).
         case glyphBadge(String, NSColor)
+        /// The pending-notice dot over the run drawn just before it: white,
+        /// at the glyph's top-right, knocked out of whatever sits under it
+        /// by a clear ring so it separates from the ✳︎ strokes and from a
+        /// capsule fill alike. Zero width — it rides the previous run.
+        case indicator
     }
 
     /// Incident fills, a step deeper than the ramp's colors for the same
@@ -123,6 +139,8 @@ enum StatusItemRenderer {
     private static let dotGap: CGFloat = 2
     private static let badgePaddingX: CGFloat = 3.5
     private static let badgeHeight: CGFloat = 15
+    private static let indicatorDiameter: CGFloat = 6
+    private static let indicatorRing: CGFloat = 1.5
 
     static func image(for model: Model, height: CGFloat) -> NSImage {
         let runs = compose(model)
@@ -136,8 +154,31 @@ enum StatusItemRenderer {
             shadow.shadowOffset = .zero
 
             var x: CGFloat = 0
+            // The run the indicator hugs: its right edge and top.
+            var previousRun: (x: CGFloat, width: CGFloat, top: CGFloat)?
             for run in runs {
                 switch run {
+                case .indicator:
+                    guard let previousRun else { break }
+                    // Hug the glyph's top-right: the dot's center sits on
+                    // the run's corner, pulled a hair inward so the ring
+                    // never clips at the image's own top edge.
+                    let center = NSPoint(
+                        x: previousRun.x + previousRun.width - indicatorDiameter / 2 + 0.5,
+                        y: min(previousRun.top, height - indicatorDiameter / 2 - indicatorRing)
+                            - indicatorDiameter / 4)
+                    let ring = NSRect(
+                        x: center.x - indicatorDiameter / 2 - indicatorRing,
+                        y: center.y - indicatorDiameter / 2 - indicatorRing,
+                        width: indicatorDiameter + 2 * indicatorRing,
+                        height: indicatorDiameter + 2 * indicatorRing)
+                    NSGraphicsContext.current?.saveGraphicsState()
+                    NSGraphicsContext.current?.compositingOperation = .destinationOut
+                    NSColor.black.setFill()
+                    NSBezierPath(ovalIn: ring).fill()
+                    NSGraphicsContext.current?.restoreGraphicsState()
+                    NSColor.white.setFill()
+                    NSBezierPath(ovalIn: ring.insetBy(dx: indicatorRing, dy: indicatorRing)).fill()
                 case .text(let string, let color, let font):
                     let attributes: [NSAttributedString.Key: Any] = [
                         .font: font, .foregroundColor: color, .shadow: shadow,
@@ -189,6 +230,8 @@ enum StatusItemRenderer {
                         at: NSPoint(x: x + badgePaddingX, y: (height - size.height) / 2),
                         withAttributes: attributes)
                 }
+                if case .indicator = run { continue }
+                previousRun = (x, inkWidth(run), inkTop(run, height: height))
                 x += runWidth(run)
             }
             return true
@@ -203,8 +246,12 @@ enum StatusItemRenderer {
         // without stealing the digits' meaning. Staleness never suppresses
         // it: a stale usage number says nothing about the service's health.
         var runs: [Run] = model.incident.map {
-            [.glyphBadge(model.glyph, incidentFill($0)), .text(" ", dim, font)]
-        } ?? [.text("\(model.glyph) ", model.stale ? staleColor : accent, font)]
+            [.glyphBadge(model.glyph, incidentFill($0))]
+        } ?? [.text(model.glyph, model.stale ? staleColor : accent, font)]
+        // The dot rides the glyph (or its capsule) — declared right after
+        // the run it hugs, before the spacer, so it never adds width.
+        if model.indicator { runs.append(.indicator) }
+        runs.append(.text(" ", dim, font))
         guard let segments = model.segments, !segments.isEmpty else {
             runs.append(.text("—", dim, font))
             return runs
@@ -235,6 +282,28 @@ enum StatusItemRenderer {
         return runs
     }
 
+    /// The run's visible ink (a text run's trailing space excluded) — what
+    /// the indicator dot hugs.
+    private static func inkWidth(_ run: Run) -> CGFloat {
+        if case .text(let string, _, let font) = run {
+            return (string.trimmingCharacters(in: .whitespaces) as NSString)
+                .size(withAttributes: [.font: font]).width
+        }
+        return runWidth(run)
+    }
+
+    /// The run's top edge in image coordinates.
+    private static func inkTop(_ run: Run, height: CGFloat) -> CGFloat {
+        switch run {
+        case .text(let string, _, let font):
+            return (height + (string as NSString).size(withAttributes: [.font: font]).height) / 2
+        case .badge, .glyphBadge:
+            return (height + badgeHeight) / 2
+        case .dot, .indicator:
+            return height
+        }
+    }
+
     private static func runWidth(_ run: Run) -> CGFloat {
         switch run {
         case .text(let string, _, let font):
@@ -247,6 +316,8 @@ enum StatusItemRenderer {
         case .glyphBadge(let string, _):
             let text = (string as NSString).size(withAttributes: [.font: font]).width
             return text + 2 * badgePaddingX
+        case .indicator:
+            return 0
         }
     }
 }

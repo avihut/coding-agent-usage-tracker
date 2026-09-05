@@ -36,6 +36,25 @@ public struct ClaudeProvider: UsageProvider {
         self.client = client
     }
 
+    /// Where a Claude notification leads. An outage opens its incident
+    /// report on status.claude.com (the Statuspage shortlink the feed
+    /// carries). A limit reset opens the meter card with the reset lit:
+    /// Anthropic publishes NO feed of these — the 2026-09-04 account-wide
+    /// reset never appeared on the status page, only in the meters — so
+    /// this app's own observation is the only record. Should Anthropic ever
+    /// publish one, point `.reset` at it here and nowhere else.
+    public func noticeDestination(for notice: NoticeCard) -> NoticeDestination? {
+        switch Notice.Kind(rawValue: notice.kind) {
+        case .outage:
+            if let raw = notice.url, let url = URL(string: raw) { return .web(url) }
+            return statusFeed.map { .web($0.pageURL) }
+        case .reset:
+            return .meterHistory(meterLabel: notice.meterLabel, at: notice.occurredAt)
+        case nil:
+            return nil
+        }
+    }
+
     public func fetchRawUsage(accessToken: String) async throws -> Data {
         try await client.fetchRawUsage(accessToken: accessToken)
     }

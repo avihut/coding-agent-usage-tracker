@@ -60,6 +60,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let fake = Self.launchFakeAccounts() {
             registry.activeStore.installFakeAccountPresence(fake)
         }
+        // `--fake-notices <morning|live>` installs a synthetic notices card:
+        // `morning` is the wake-up shape (yesterday's vendor reset plus an
+        // overnight outage that ended before anyone looked — menu bar dot,
+        // both rows dismissable); `live` is a running outage seen an hour
+        // in plus the reset (pair it with `--fake-status major` to see the
+        // capsule and the dot together). Dismissing edits the fake in place.
+        if let fake = Self.launchFakeNotices() {
+            registry.activeStore.installFakeNotices(fake)
+        }
         // Verification hatches: `ClaudeUsage --settings [--pane-cost]` /
         // `--panel` open UI straight away (the ⋯ menu can't be scripted,
         // and AX row selection can't drive the sidebar); `--provider <id>`
@@ -71,6 +80,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             controller?.showPanel()
         } else if CommandLine.arguments.contains("--sessions") {
             controller?.showSessions()
+        }
+        // `--snapshot <dir>` renders the Notifications section and the
+        // weekly meter card headlessly to PNGs and quits — the harness's eyes when the live
+        // popover can't be caught (any real click dismisses it, and a user
+        // at the machine is always clicking). NSViewRepresentable pieces
+        // (swipe catchers) render blank; everything SwiftUI renders as is.
+        if let directory = Self.launchSnapshotDirectory() {
+            Task { @MainActor in
+                // Let the digest, the scan and the first layout land.
+                try? await Task.sleep(for: .seconds(3))
+                Self.writeSnapshots(store: registry.activeStore, to: directory)
+                NSApp.terminate(nil)
+            }
+        }
+    }
+
+    private static func launchSnapshotDirectory() -> URL? {
+        let arguments = CommandLine.arguments
+        guard let flag = arguments.firstIndex(of: "--snapshot"),
+              arguments.indices.contains(flag + 1)
+        else { return nil }
+        return URL(fileURLWithPath: arguments[flag + 1], isDirectory: true)
+    }
+
+    private static func writeSnapshots(store: UsageStore, to directory: URL) {
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        func write(_ renderer: ImageRenderer<some View>, _ name: String) {
+            renderer.scale = 2
+            guard let image = renderer.nsImage,
+                  let tiff = image.tiffRepresentation,
+                  let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:])
+            else { return }
+            try? png.write(to: directory.appending(path: name))
+        }
+        // The Notifications section on its own: ImageRenderer leaves a
+        // ScrollView's content blank, so the panel can't be rendered whole.
+        if let notices = store.notices, !notices.items.isEmpty {
+            let section = NoticesSection(
+                card: notices, onDismiss: { _ in }, onDismissAll: {},
+                canOpen: { store.provider.noticeDestination(for: $0) != nil }, onOpen: { _ in })
+            write(ImageRenderer(content: section.padding(14).frame(width: 360)), "notices.png")
+        }
+        // The weekly meter's card, lit at the first pending reset notice
+        // exactly as a click on that notice would open it.
+        if let meters = store.state.snapshot?.meters,
+           let meter = meters.first(where: { $0.rank == 1 }) ?? meters.first {
+            let reset = store.notices?.items.first { $0.kind == "reset" }?.occurredAt
+            let card = MeterHistoryView(
+                meter: meter, samples: store.samples, timeline: store.tokenTimeline,
+                pricing: store.pricing, prediction: store.predictions[meter.label],
+                outcomes: store.windowOutcomes, agentName: store.provider.agentName,
+                providerID: store.provider.id, highlightReset: reset)
+            write(ImageRenderer(content: card), "meter.png")
         }
     }
 
@@ -169,6 +231,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     firstObservedAt: now.addingTimeInterval(-3_600),
                     lastObservedAt: now, closed: false),
             ])
+    }
+
+    /// Builds the `--fake-notices` card through the digest's own phrasing,
+    /// so what gets click-verified is exactly what the engine would publish
+    /// for these facts.
+    private static func launchFakeNotices() -> NoticesCard? {
+        let arguments = CommandLine.arguments
+        guard let flag = arguments.firstIndex(of: "--fake-notices"),
+              arguments.indices.contains(flag + 1)
+        else { return nil }
+        let now = Date()
+        let calendar = Calendar.current
+        // Yesterday 21:10 local — the 2026-09-04 reset's shape.
+        let yesterday = calendar.date(byAdding: .day, value: -1, to: now) ?? now
+        let resetAt = calendar.date(bySettingHour: 21, minute: 10, second: 0, of: yesterday) ?? now
+        let reset = Notice(
+            id: Notice.resetID(at: resetAt), kind: "reset", occurredAt: resetAt,
+            endedAt: resetAt, recordedAt: resetAt.addingTimeInterval(180),
+            meterLabel: "Weekly (all)", fromPercent: 71)
+        let components = ["Claude Code", "Claude API (api.anthropic.com)"]
+        switch arguments[flag + 1] {
+        case "morning":
+            let start = calendar.date(bySettingHour: 1, minute: 10, second: 0, of: now) ?? now
+            let outage = Notice(
+                id: Notice.outageID(incidentID: "fake-night"), kind: "outage",
+                occurredAt: start, endedAt: start.addingTimeInterval(7_800),
+                ongoing: false, seenWhileOngoing: false, recordedAt: now,
+                subject: "Elevated errors on Claude Code and the API", impact: "major",
+                phase: "resolved", components: components, url: "https://stspg.io/tcsfmtc03xgm")
+            return NoticePhrasing.card(pending: [outage, reset], serviceName: "Claude", now: now)
+        case "live":
+            let outage = Notice(
+                id: Notice.outageID(incidentID: "fake-major"), kind: "outage",
+                occurredAt: now.addingTimeInterval(-1_800), ongoing: true,
+                seenAt: now.addingTimeInterval(-600), recordedAt: now,
+                subject: "Elevated errors on Claude Code", impact: "major",
+                phase: "identified",
+                message: "We have identified the cause and are rolling out a fix.",
+                components: components, url: "https://stspg.io/tcsfmtc03xgm")
+            return NoticePhrasing.card(pending: [outage, reset], serviceName: "Claude", now: now)
+        default:
+            return nil
+        }
     }
 
     /// Builds the `--fake-status` card. The copy is the real 2026-08-18

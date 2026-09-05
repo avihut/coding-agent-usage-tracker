@@ -30,6 +30,9 @@ final class DigestClient {
     /// The host engine's presence card, mirrored from the digest. Nil when
     /// the host tracks no accounts — absent is never "no account".
     private(set) var accountPresence: AccountPresenceCard?
+    /// The host engine's pending notices, mirrored from the digest. Nil when
+    /// the host publishes none (a daemon before 0.93.0).
+    private(set) var notices: NoticesCard?
 
     /// Label-level attribution timeline rebuilt from the digest's epoch
     /// table: labels arrive already disambiguated, so a label IS an
@@ -151,6 +154,21 @@ final class DigestClient {
         send(.checkUpdates)
     }
 
+    // The notice verbs go to the ledger's one writer; the next digest
+    // heartbeat carries the result back (a dismissed row simply leaves
+    // `notices.items`). Optimistic local edits would only race it.
+    func markNoticesSeen(_ ids: [String]) {
+        send(.markNoticesSeen(ids: ids))
+    }
+
+    func dismissNotice(id: String) {
+        send(.dismissNotice(id: id))
+    }
+
+    func dismissAllNotices() {
+        send(.dismissAllNotices)
+    }
+
     private func send(_ command: ControlCommand) {
         let socketURL = socketURL
         Task.detached(priority: .utility) {
@@ -223,6 +241,7 @@ final class DigestClient {
         serviceStatus = digest.serviceStatus
         appUpdate = digest.appUpdate
         accountPresence = digest.accountPresence
+        notices = digest.notices
         nextRefreshAt = digest.engine.nextPollAt
         activeInterval = digest.engine.activeIntervalSeconds
         paceMultiplierMirror = digest.engine.paceMultiplier

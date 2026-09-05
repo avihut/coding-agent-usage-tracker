@@ -49,6 +49,7 @@ extension DigestQuery {
             "attribution-since", "distinct", "today-tokens", "today-cost", "window-tokens",
             "window-cost",
         ]).merging(tables(["accounts", "epochs"])) { lhs, _ in lhs },
+        "notices": scalars(["count", "indicator"]).merging(tables(["items"])) { lhs, _ in lhs },
         "budget": scalars(["used", "ceiling", "left", "fraction"]),
         "spend": scalars(["used", "limit", "left", "currency"]),
         "activity": scalars(["tokens", "prompts", "cost"])

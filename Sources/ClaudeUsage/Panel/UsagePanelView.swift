@@ -39,6 +39,10 @@ struct UsagePanelView: View {
     /// the incident banner. One popover, two attachment points, so the two
     /// entry points can never both present at once.
     @State private var statusAnchor: StatusAnchor?
+    /// A reset notice's click-through: the meter card it opened and the
+    /// moment to light there. Cleared when that popover closes, so a later
+    /// row hover opens the same meter's card with nothing lit.
+    @State private var litReset: (meter: String, at: Date)?
     /// Pointer inside the status popover or its dot; either keeps it open.
     @State private var hoveringStatus = false
     @State private var hoveringStatusDot = false
@@ -56,6 +60,7 @@ struct UsagePanelView: View {
         VStack(alignment: .leading, spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
+                    noticesSection
                     serviceStatusSection
                     errorBlock
                     content
@@ -105,7 +110,8 @@ struct UsagePanelView: View {
                 prediction: store.predictions[meter.label],
                 outcomes: store.windowOutcomes,
                 agentName: store.provider.agentName,
-                providerID: store.provider.id)
+                providerID: store.provider.id,
+                highlightReset: litReset?.meter == meter.id ? litReset?.at : nil)
                 .onHover { inside in
                     hoveringPopover = inside
                     if !inside { scheduleHideIfLeft() }
@@ -156,6 +162,7 @@ struct UsagePanelView: View {
                 // writes the failure back through the binding. They are
                 // mutually exclusive here so the second one always wins.
                 if meter != nil { statusAnchor = nil }
+                if meter == nil { litReset = nil }
                 openMeter = meter?.id
             })
     }
@@ -198,15 +205,64 @@ struct UsagePanelView: View {
         }
     }
 
+    /// Pending notifications (v0.93.0) — absent entirely when nothing is
+    /// pending. A running outage's row here IS the incident banner with a
+    /// lifecycle (same rail, same message, a running clock, no ×), so the
+    /// banner below yields to it rather than saying the same thing twice.
+    @ViewBuilder private var noticesSection: some View {
+        if let card = store.notices, !card.items.isEmpty {
+            NoticesSection(
+                card: card,
+                onDismiss: { id in withAnimation { store.dismissNotice(id: id) } },
+                onDismissAll: { withAnimation { store.dismissAllNotices() } },
+                canOpen: { store.provider.noticeDestination(for: $0) != nil },
+                onOpen: openNotice)
+        }
+    }
+
+    /// A click on a notice goes where the provider says: an official record
+    /// on the web (the incident's report), or — for events the vendor keeps
+    /// no record of, like a limit reset — the meter card that saw it, lit at
+    /// the moment. The card hangs off the meter the notice names, falling
+    /// back to the weekly meter; an event the vendor emptied every meter
+    /// for is the weekly story either way.
+    private func openNotice(_ notice: NoticeCard) {
+        guard let destination = store.provider.noticeDestination(for: notice) else { return }
+        switch destination {
+        case .web(let url):
+            NSWorkspace.shared.open(url)
+        case .meterHistory(let label, let at):
+            guard let meters = store.state.snapshot?.meters else { return }
+            let meter = meters.first { $0.label == label }
+                ?? meters.first { $0.rank == 1 }
+                ?? meters.first { $0.rank > 0 }
+                ?? meters.first
+            guard let meter else { return }
+            statusAnchor = nil
+            litReset = (meter.id, at)
+            openMeter = meter.id
+        }
+    }
+
+    /// Whether a pending notice already carries the running incident — then
+    /// the incident banner stays out (the notice row owns that surface, as
+    /// it owns the menu bar capsule).
+    private var incidentShownAsNotice: Bool {
+        store.notices?.items.contains { $0.ownsMenuBarSurface } ?? false
+    }
+
+    private func toggleStatusFromBanner() {
+        openMeter = nil
+        statusAnchor = statusAnchor == .banner ? nil : .banner
+    }
+
     /// The incident section (surface S4) — absent entirely when healthy, so
     /// a green day costs the panel no space at all. Maintenance stays out by
-    /// design (decision D2): the footer dot carries it.
+    /// design (decision D2): the footer dot carries it. Yields to the
+    /// Notifications section's ongoing row when one exists.
     @ViewBuilder private var serviceStatusSection: some View {
-        if let card = store.serviceStatus, card.hasIncident {
-            ServiceStatusBanner(card: card) {
-                openMeter = nil
-                statusAnchor = statusAnchor == .banner ? nil : .banner
-            }
+        if let card = store.serviceStatus, card.hasIncident, !incidentShownAsNotice {
+            ServiceStatusBanner(card: card, onTap: toggleStatusFromBanner)
         }
     }
 

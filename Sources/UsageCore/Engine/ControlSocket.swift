@@ -20,6 +20,11 @@ public enum ControlCommand: Codable, Sendable, Equatable {
     /// caller can't turn this into a hot loop.
     case refreshStatus
     case checkUpdates
+    /// A face rendered these pending notices — the ledger marks them seen.
+    case markNoticesSeen(ids: [String])
+    /// The person dismissed one notice (refused for an ongoing one).
+    case dismissNotice(id: String)
+    case dismissAllNotices
     case shutdown
 }
 

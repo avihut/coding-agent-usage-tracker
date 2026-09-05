@@ -87,6 +87,11 @@ public protocol UsageProvider: Sendable {
     /// generically — display assumptions like Gemini's daily cap, never
     /// secrets. Empty by default.
     var preferences: [ProviderPreference] { get }
+    /// Where a notification leads when clicked — the incident's report, a
+    /// vendor announcement, or (when the vendor keeps no public record of
+    /// the event) the meter's own history with the moment lit. Nil = the
+    /// row is inert. Default policy in `NoticeDestination.swift`.
+    func noticeDestination(for notice: NoticeCard) -> NoticeDestination?
 }
 
 extension UsageProvider {

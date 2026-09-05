@@ -168,9 +168,55 @@ struct LiveStateTests {
             serviceStatus: fixtureServiceStatus,
             appUpdate: fixtureAppUpdate,
             presence: fixturePresence,
+            notices: fixtureNotices,
             now: now,
             calendar: utc,
             locale: posix)
+    }
+
+    /// Both lifecycles, so the Rust mirror decodes every arm: the ongoing
+    /// outage (persistent, owns the glyph capsule — no indicator of its
+    /// own) and a dismissable vendor reset from the evening before that
+    /// lights the dot. Ledger order is what the builder receives: the
+    /// pending list, ongoing first.
+    private var fixtureNotices: [Notice] {
+        [
+            Notice(
+                id: Notice.outageID(incidentID: "q7txxvbsftgq"), kind: "outage",
+                occurredAt: date("2026-08-16T10:49:00Z"), ongoing: true,
+                seenAt: date("2026-08-16T11:00:00Z"),
+                recordedAt: date("2026-08-16T10:50:00Z"),
+                subject: "Degraded performance for multiple models", impact: "minor",
+                phase: "monitoring",
+                message: "A fix has been implemented and we are monitoring the results.",
+                components: ["claude.ai"], url: "https://stspg.io/tcsfmtc03xgm"),
+            Notice(
+                id: Notice.resetID(at: date("2026-08-15T18:10:30Z")), kind: "reset",
+                occurredAt: date("2026-08-15T18:10:30Z"), endedAt: date("2026-08-15T18:10:30Z"),
+                recordedAt: date("2026-08-15T18:12:00Z"),
+                meterLabel: "Weekly (all)", fromPercent: 71),
+        ]
+    }
+
+    /// Item 0.93.0: the digest carries pending notices pre-phrased, with the
+    /// menu bar indicator decided by the writer.
+    @Test func noticesArePhrasedAndTheIndicatorDecided() throws {
+        let state = buildFixture()
+        let card = try #require(state.notices)
+        #expect(card.pendingCount == 2)
+        #expect(card.indicator) // the reset has no surface of its own
+        let outage = try #require(card.items.first)
+        #expect(outage.ongoing && !outage.dismissable && outage.ownsMenuBarSurface)
+        #expect(outage.severity == "minor")
+        #expect(outage.when == "Ongoing · 1 hr 11 min")
+        let reset = try #require(card.items.last)
+        #expect(reset.kind == "reset" && reset.dismissable && !reset.ownsMenuBarSurface)
+        #expect(reset.title == "Limit reset · Claude")
+        #expect(reset.when == "~18:10 yesterday")
+        // An older writer publishes no card: readers must not invent one.
+        let bare = LiveState(
+            engine: state.engine, meters: [], menuBar: [], models: [], activity: state.activity)
+        #expect(bare.notices == nil)
     }
 
     /// Two accounts around a mid-morning switch, the second one open — with

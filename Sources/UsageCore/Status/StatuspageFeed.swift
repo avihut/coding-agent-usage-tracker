@@ -56,6 +56,35 @@ public struct StatuspageFeed: Sendable {
     }
 
     public var summaryURL: URL { base.appending(path: "api/v2/summary.json") }
+    /// The page's recent incident history (~50 newest, resolved included).
+    /// Same host, same anonymous GET; read on start and on wake only, so an
+    /// incident that opened AND closed while the Mac slept — gone from the
+    /// summary an hour after resolving — can still be reported as a notice
+    /// (spec §10 status-feed amendment, extended 2026-09-05).
+    public var incidentsURL: URL { base.appending(path: "api/v2/incidents.json") }
+
+    /// One plain GET of the incident history. Throws `FeedError`; the
+    /// caller treats a throw as "no history this time", never as state.
+    public func fetchIncidents() async throws -> [StatusIncident] {
+        var request = URLRequest(url: incidentsURL)
+        request.httpMethod = "GET"
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch {
+            throw FeedError.transport
+        }
+        guard let http = response as? HTTPURLResponse else { throw FeedError.transport }
+        guard (200..<300).contains(http.statusCode) else {
+            throw FeedError.badResponse(http.statusCode)
+        }
+        guard let history = try? StatuspageIncidents.decode(from: data) else {
+            throw FeedError.malformed
+        }
+        return StatuspageAdapter.history(from: history, fallbackDate: Date())
+    }
 
     /// One conditional GET. Throws `FeedError`; the poller turns a throw into
     /// a failure count, never into an incident.
@@ -195,6 +224,25 @@ public struct StatuspageSummary: Sendable, Decodable {
     }
 }
 
+/// The `incidents.json` payload: the same incident objects the summary
+/// carries, resolved ones included.
+public struct StatuspageIncidents: Sendable, Decodable {
+    public let incidents: [StatuspageSummary.Incident]?
+
+    public static func decode(from data: Data) throws -> StatuspageIncidents {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let text = try decoder.singleValueContainer().decode(String.self)
+            guard let date = FlexibleISO8601.date(from: text) else {
+                throw DecodingError.dataCorrupted(
+                    .init(codingPath: decoder.codingPath, debugDescription: "bad date '\(text)'"))
+            }
+            return date
+        }
+        return try decoder.decode(StatuspageIncidents.self, from: data)
+    }
+}
+
 /// Statuspage payload → the digest's normalized card. Pure and static: the
 /// poller owns the clock, the failure count, and the resolved-memory, so this
 /// is a deterministic function of (page, identity, timestamps) and tests
@@ -275,6 +323,17 @@ public enum StatuspageAdapter {
             resolved = .maintenance
         }
         return resolved.rawValue
+    }
+
+    /// The incident history, flattened, newest start first. Resolved
+    /// incidents keep their `resolvedAt`; the notice detector needs exactly
+    /// that to tell "closed while asleep" from "still open".
+    public static func history(
+        from page: StatuspageIncidents, fallbackDate: Date
+    ) -> [StatusIncident] {
+        (page.incidents ?? [])
+            .compactMap { incident(from: $0, fallbackDate: fallbackDate) }
+            .sorted { $0.startedAt > $1.startedAt }
     }
 
     /// One incident, flattened. The newest update by display time supplies

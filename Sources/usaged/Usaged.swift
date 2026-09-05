@@ -242,6 +242,15 @@ final class DaemonHost {
         case .checkUpdates:
             engine.checkForUpdates()
             return ControlReply(ok: true)
+        case .markNoticesSeen(let ids):
+            engine.markNoticesSeen(ids)
+            return ControlReply(ok: true)
+        case .dismissNotice(let id):
+            let ok = engine.dismissNotice(id: id)
+            return ControlReply(ok: ok, message: ok ? nil : "not dismissable")
+        case .dismissAllNotices:
+            engine.dismissAllNotices()
+            return ControlReply(ok: true)
         case .shutdown:
             log("shutdown by socket command")
             engine.shutdown()

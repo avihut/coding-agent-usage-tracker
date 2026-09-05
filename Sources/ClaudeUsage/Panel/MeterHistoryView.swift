@@ -100,6 +100,15 @@ struct MeterHistoryView: View {
     /// the meter without closing its window. Held apart from
     /// `hoveredReset` because nothing about it lights a window.
     @State private var hoveredGrant: ResetCliffs.Cliff?
+    /// A reset lit by the notice that opened this card (v0.93.0): the moment
+    /// a click on "Limit reset" points at. Drawn with a halo and spelled in
+    /// the readout until the pointer takes over the chart. Held apart from
+    /// `hoveredGrant` because nothing hovered put it there.
+    @State private var pinnedReset: Date?
+    /// Span/frame chosen FOR the pinned reset when the remembered ones
+    /// don't contain it — transient, never written to the per-meter prefs.
+    @State private var spanOverride: Span?
+    @State private var frameOverride: HistoryFrame?
     /// Which limit window the Current span shows: 0 = the live one, k = the
     /// k-th observed window before it (`pastWindows[k - 1]`). Paged by the
     /// ‹ › arrows under the chart and by a two-finger horizontal swipe.
@@ -108,12 +117,17 @@ struct MeterHistoryView: View {
     /// window slides in from the left, the way a timeline reads.
     @State private var pageSlide = -1
 
+    /// A reset moment to light on open — the notices section's click-through.
+    let highlightReset: Date?
+
     init(
         meter: Meter, samples: [UsageSample], timeline: [TokenSlot],
         pricing: PricingTable, prediction: UsagePrediction?,
         outcomes: [WindowOutcome] = [],
-        agentName: String, providerID: String
+        agentName: String, providerID: String,
+        highlightReset: Date? = nil
     ) {
+        self.highlightReset = highlightReset
         self.meter = meter
         self.samples = samples
         self.timeline = timeline
@@ -212,7 +226,8 @@ struct MeterHistoryView: View {
         meter.resetsAt.flatMap { $0 > Date() ? $0 : nil }
     }
 
-    private var effectiveSpan: Span { liveReset == nil ? .history : span }
+    private var effectiveSpan: Span { spanOverride ?? (liveReset == nil ? .history : span) }
+    private var effectiveFrame: HistoryFrame { frameOverride ?? historyFrame }
 
     /// The windows this meter was seen running through before the live one,
     /// newest first — the Current span's pages. Observational only
@@ -242,8 +257,49 @@ struct MeterHistoryView: View {
             return (reset.addingTimeInterval(-window), reset)
         }
         let now = Date()
-        return (now.addingTimeInterval(-historyFrame.length(now: now)), now)
+        return (now.addingTimeInterval(-effectiveFrame.length(now: now)), now)
     }
+
+    /// Lights the reset the opener pointed at. If the remembered span and
+    /// frame already show the moment, nothing else moves; otherwise the
+    /// card turns to History at the tightest frame that reaches back to it
+    /// — transiently, the person's own choices stay saved.
+    private func pinHighlight() {
+        spanOverride = nil
+        frameOverride = nil
+        pinnedReset = nil
+        guard let at = highlightReset else { return }
+        windowOffset = 0
+        let (start, end) = domain
+        if start <= at, at <= end {
+            pinnedReset = at
+            return
+        }
+        let now = Date()
+        spanOverride = .history
+        frameOverride = HistoryFrame.allCases.first {
+            now.addingTimeInterval(-$0.length(now: now)) <= at
+        } ?? .d30
+        pinnedReset = at
+    }
+
+    /// The measured cliff the pinned moment names, if the samples saw one
+    /// near it — the halo then sits on the measurement, and the readout
+    /// can say what the meter fell from.
+    private var pinnedCliff: ResetCliffs.Cliff? {
+        guard let pinnedReset else { return nil }
+        func distance(_ cliff: ResetCliffs.Cliff) -> TimeInterval {
+            abs(cliff.at.timeIntervalSince(pinnedReset))
+        }
+        guard let nearest = percentSeries.midWindow.min(by: { distance($0) < distance($1) }),
+              distance(nearest) <= 15 * 60
+        else { return nil }
+        return nearest
+    }
+
+    /// Where the halo stands: the measured cliff when there is one, else
+    /// the notice's own moment.
+    private var pinnedMoment: Date? { pinnedCliff?.at ?? pinnedReset }
 
     /// What one window of this meter is called: a session, a week, or a
     /// generic window — "this session" live, "previous session" one page
@@ -558,10 +614,11 @@ struct MeterHistoryView: View {
                 })
             }
             domainLabels
-            Text(resetReadout ?? grantReadout ?? segmentReadout ?? readout.map(readoutText) ?? hoverHint)
+            Text(resetReadout ?? grantReadout ?? pinnedReadout ?? segmentReadout
+                ?? readout.map(readoutText) ?? hoverHint)
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(readout == nil && segmentReadout == nil && resetReadout == nil
-                    && grantReadout == nil
+                    && grantReadout == nil && pinnedReadout == nil
                     ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.secondary))
                 .lineLimit(1)
                 .frame(height: 14, alignment: .leading)
@@ -589,9 +646,17 @@ struct MeterHistoryView: View {
             hoveredReset = nil
             hoveredGrant = nil
             windowOffset = 0
+            pinHighlight()
         }
-        // Flipping to History and back lands on the live window again.
-        .onChange(of: span) { windowOffset = 0 }
+        .onAppear(perform: pinHighlight)
+        .onChange(of: highlightReset) { pinHighlight() }
+        // Flipping to History and back lands on the live window again — and
+        // a deliberate span choice ends the opener's transient one.
+        .onChange(of: span) {
+            windowOffset = 0
+            spanOverride = nil
+        }
+        .onChange(of: historyFrame) { frameOverride = nil }
     }
 
     /// Grabbing distance is measured against this chart's pinned width —
@@ -654,7 +719,8 @@ struct MeterHistoryView: View {
             // lights via the curtains below.
             WindowPlot.resets(series.resets, hovered: hoveredReset, ceiling: ceiling)
             WindowPlot.midWindowResets(
-                series.midWindow.map(\.at), hovered: hoveredGrant?.at, ceiling: ceiling)
+                series.midWindow.map(\.at), hovered: hoveredGrant?.at,
+                highlighted: pinnedMoment, ceiling: ceiling)
             // Reset hover: curtain-dim everything outside the limit window
             // that ended at this line — the undimmed stretch IS the window
             // — with a solid twin marking where that window began. The
@@ -950,6 +1016,9 @@ struct MeterHistoryView: View {
                         switch phase {
                         case .active(let location):
                             guard let plotFrame = proxy.plotFrame else { return }
+                            // The pointer taking the chart ends the opener's
+                            // highlight; hover owns the marks from here.
+                            if pinnedReset != nil { pinnedReset = nil }
                             let origin = geo[plotFrame].origin
                             let date = proxy.value(atX: location.x - origin.x, as: Date.self)
                             let yValue = proxy.value(atY: location.y - origin.y, as: Double.self)
@@ -1153,6 +1222,14 @@ struct MeterHistoryView: View {
         hoveredGrant.map { grant in
             "Limit reset · ~\(timeLabel(grant.at))" + (grant.from > 0 ? " · from \(grant.from)%" : "")
         }
+    }
+
+    /// The lit reset's line, spelled like a hovered grant's — "from N%" only
+    /// when the samples measured the fall.
+    private var pinnedReadout: String? {
+        guard let pinnedMoment else { return nil }
+        let from = pinnedCliff.map(\.from) ?? 0
+        return "Limit reset · ~\(timeLabel(pinnedMoment))" + (from > 0 ? " · from \(from)%" : "")
     }
 
     /// "Wed 09:15 – Wed 11:30 · active 2 hr 15 min" while a nub is hovered;

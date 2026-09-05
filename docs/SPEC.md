@@ -327,7 +327,12 @@ Non-negotiable; flag rather than work around:
   parameters, nothing identifying — a poll tells the page nothing about the
   user that reaching the page at all would not. Nothing from the feed is
   written to disk; the normalized card rides in the digest like every other
-  rendered fact.
+  rendered fact. (Extended 2026-09-05, v0.93.0: the SAME host's
+  `/api/v2/incidents.json` — the page's public incident history — is read
+  once at engine start and once per wake, under the same anonymous terms, so
+  an outage that opened and closed while the Mac slept can be recorded as a
+  notification. No new destination; incidents the ledger already holds are
+  never altered by it.)
 
   Status hosts are declared per provider via `UsageProvider.statusFeed` and
   rendered on the settings privacy card on their own line — deliberately NOT
