@@ -116,6 +116,7 @@ public struct CodexActivitySource: LocalActivitySource {
         var currentModel = "unknown"
         var truncated = false
         var lineNumber = 0
+        var previousLastUsage: (input: Int, cached: Int, output: Int)?
         for line in data.split(separator: UInt8(ascii: "\n")) {
             lineNumber += 1
             if lineNumber % 2048 == 0, Task.isCancelled { return nil }
@@ -141,6 +142,17 @@ public struct CodexActivitySource: LocalActivitySource {
                 }
             case "token_count":
                 guard let usage = payload.info?.lastTokenUsage else { continue }
+                let tuple = (
+                    input: usage.inputTokens ?? 0,
+                    cached: usage.cachedInputTokens ?? 0,
+                    output: usage.outputTokens ?? 0)
+                if let previous = previousLastUsage,
+                   tuple.input == previous.input,
+                   tuple.cached == previous.cached,
+                   tuple.output == previous.output {
+                    continue
+                }
+                previousLastUsage = tuple
                 let cached = usage.cachedInputTokens ?? 0
                 let delta = TokenTally(
                     input: max(0, (usage.inputTokens ?? 0) - cached),
@@ -249,7 +261,11 @@ public struct CodexActivitySource: LocalActivitySource {
     }
 
     /// v2 (0.31.0): per-file session summaries joined the cache.
-    private static let cacheVersion = 2
+    /// v3: consecutive `token_count` events restating an identical
+    /// `last_token_usage` (resent after thread_rolled_back /
+    /// thread_settings_applied / compaction, when no new call completed) are
+    /// suppressed instead of summed. Bumping forces one full reparse.
+    private static let cacheVersion = 3
 
     private func parse(url: URL, mtime: Date, size: Int) -> FileRecord {
         var slots: [SlotKey: TokenTally] = [:]
@@ -264,6 +280,11 @@ public struct CodexActivitySource: LocalActivitySource {
         }
 
         if let data = try? Data(contentsOf: url) {
+            // A token_count that restates the previous event's last_token_usage
+            // adds no call — Codex resends the unchanged tuple after
+            // thread_rolled_back / thread_settings_applied / compaction, before
+            // any new call completes. Summing both double-counts that call.
+            var previousLastUsage: (input: Int, cached: Int, output: Int)?
             for line in data.split(separator: UInt8(ascii: "\n")) {
                 guard let record = try? JSONDecoder().decode(
                     CodexRollouts.RolloutLine.self, from: Data(line))
@@ -293,6 +314,17 @@ public struct CodexActivitySource: LocalActivitySource {
                     }
                 case "token_count":
                     guard let usage = payload.info?.lastTokenUsage else { continue }
+                    let tuple = (
+                        input: usage.inputTokens ?? 0,
+                        cached: usage.cachedInputTokens ?? 0,
+                        output: usage.outputTokens ?? 0)
+                    if let previous = previousLastUsage,
+                       tuple.input == previous.input,
+                       tuple.cached == previous.cached,
+                       tuple.output == previous.output {
+                        continue
+                    }
+                    previousLastUsage = tuple
                     let cached = usage.cachedInputTokens ?? 0
                     let delta = TokenTally(
                         input: max(0, (usage.inputTokens ?? 0) - cached),
