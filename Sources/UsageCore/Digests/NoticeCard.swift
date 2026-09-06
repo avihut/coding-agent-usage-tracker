@@ -22,8 +22,8 @@ public struct NoticesCard: Codable, Sendable, Equatable {
 
 public struct NoticeCard: Codable, Sendable, Equatable, Identifiable {
     public let id: String
-    /// `Notice.Kind.rawValue` — "reset" | "outage"; unknown kinds render
-    /// generically by title.
+    /// `Notice.Kind.rawValue` — "reset" | "outage" | "profileFound";
+    /// unknown kinds render generically by title.
     public let kind: String
     /// Incident impact for outages ("minor" | "major" | "critical"); nil
     /// for kinds without a severity (the reset wears the vendor's accent).
@@ -153,6 +153,14 @@ public enum NoticePhrasing {
                 title: title, detail: "\(name) · resolved",
                 when: dayRange(notice.occurredAt, end, now: now, calendar: calendar, locale: locale)
                     + " · \(length)")
+
+        case .profileFound:
+            let path = notice.subject ?? "another home"
+            let who = notice.message.map { "\($0) · " } ?? ""
+            return Words(
+                title: "Another \(serviceName) account",
+                detail: "\(who)\(path) — add it in Settings → Accounts to meter it.",
+                when: dayClock(notice.occurredAt, now: now, calendar: calendar, locale: locale))
 
         case nil:
             return Words(

@@ -233,11 +233,18 @@ public protocol LocalActivitySource: Sendable {
     /// transcript no longer exists on disk. Synchronous and potentially
     /// slow — call off-main.
     func sessionDetail(id: String) -> SessionDetail?
+    /// When the agent last wrote a session here — the dormancy and focus
+    /// signal (D9). Read-only stats; nil when nothing was ever written.
+    func lastActivity(now: Date) -> Date?
 }
 
 extension LocalActivitySource {
     public var providesSessions: Bool { false }
     public func sessionDetail(id: String) -> SessionDetail? { nil }
+    /// The capped mtime walk over the watch directories.
+    public func lastActivity(now: Date) -> Date? {
+        MTimeProbe.signal(directories: watchDirectories, recentSince: .distantPast).newest
+    }
 }
 
 /// The one sanctioned write into an agent's own configuration: how long it

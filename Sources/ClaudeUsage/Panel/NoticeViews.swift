@@ -14,7 +14,7 @@ enum NoticeStyle {
         case .outage:
             guard card.ongoing, let severity = card.severity else { return .secondary }
             return ServiceStatusStyle.color(for: ServiceStatusCard.Indicator.parse(severity))
-        case nil:
+        case .profileFound, nil:
             return .secondary
         }
     }

@@ -245,6 +245,8 @@ struct UsagePanelView: View {
             statusAnchor = nil
             litReset = (meter.id, at)
             openMeter = meter.id
+        case .accounts:
+            onOpenSettings()
         }
     }
 

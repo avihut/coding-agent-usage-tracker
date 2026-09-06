@@ -12,6 +12,8 @@ public enum NoticeDestination: Sendable, Equatable {
     /// notice (nil when unknown — the face falls back to its weekly meter);
     /// `at` is the instant to light.
     case meterHistory(meterLabel: String?, at: Date)
+    /// The Accounts settings card — where a discovered home is enrolled.
+    case accounts
 }
 
 extension UsageProvider {
@@ -34,6 +36,8 @@ extension UsageProvider {
             return outageDestination(url: notice.url).map { .web($0) }
         case .reset:
             return .meterHistory(meterLabel: notice.meterLabel, at: notice.occurredAt)
+        case .profileFound:
+            return .accounts
         case nil:
             return notice.url.flatMap(URL.init(string:)).map { .web($0) }
         }

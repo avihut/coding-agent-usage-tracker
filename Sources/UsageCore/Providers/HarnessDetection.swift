@@ -58,38 +58,11 @@ public enum HarnessDetector {
     }
 
     private static func measure(id: String, directories: [URL], now: Date) -> HarnessSignal {
-        let manager = FileManager.default
-        let cutoff = now.addingTimeInterval(-window)
-        var present = false
-        var recent = 0
-        var newest: Date?
-        var statted = 0
-
-        for directory in directories {
-            var isDirectory: ObjCBool = false
-            guard manager.fileExists(atPath: directory.path, isDirectory: &isDirectory),
-                  isDirectory.boolValue
-            else { continue }
-            present = true
-            guard let enumerator = manager.enumerator(
-                at: directory,
-                includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
-                options: [.skipsHiddenFiles])
-            else { continue }
-            for case let url as URL in enumerator {
-                guard statted < statCap else { break }
-                guard let values = try? url.resourceValues(
-                    forKeys: [.contentModificationDateKey, .isRegularFileKey]),
-                    values.isRegularFile == true
-                else { continue }
-                statted += 1
-                guard let modified = values.contentModificationDate else { continue }
-                if newest.map({ modified > $0 }) ?? true { newest = modified }
-                if modified >= cutoff { recent += 1 }
-            }
-        }
+        let signal = MTimeProbe.signal(
+            directories: directories, recentSince: now.addingTimeInterval(-window), cap: statCap)
         return HarnessSignal(
-            id: id, present: present, recentFiles: recent, newestActivity: newest)
+            id: id, present: signal.present, recentFiles: signal.recentFiles,
+            newestActivity: signal.newest)
     }
 }
 

@@ -82,6 +82,8 @@ public struct ClaudeProvider: UsageProvider {
             return outageDestination(url: notice.url).map { .web($0) }
         case .reset:
             return .meterHistory(meterLabel: notice.meterLabel, at: notice.occurredAt)
+        case .profileFound:
+            return .accounts
         case nil:
             return nil
         }
@@ -122,6 +124,7 @@ public struct ClaudeProvider: UsageProvider {
 public struct ClaudeActivitySource: LocalActivitySource {
     private let transcripts: TranscriptScanner
     private let prompts: PromptHistoryScanner
+    private let home: ClaudeHome
     private let root: URL
     public let displayPath: String
 
@@ -129,8 +132,39 @@ public struct ClaudeActivitySource: LocalActivitySource {
         let root = home.projectsDirectory
         self.transcripts = TranscriptScanner(root: root, cacheDirectory: cacheDirectory)
         self.prompts = PromptHistoryScanner(fileURL: home.promptHistoryURL)
+        self.home = home
         self.root = root
         self.displayPath = home.displayPath(of: root)
+    }
+
+    /// Cheap and exact where the generic walk is capped: the prompt history
+    /// is rewritten on every prompt, and a new session creates a file in
+    /// its project directory (bumping the directory's own mtime), so the
+    /// newest write is the newest of history.jsonl and the files inside the
+    /// eight most recently changed project directories — never a full walk
+    /// of a corpus with thousands of transcripts.
+    public func lastActivity(now: Date) -> Date? {
+        var newest = MTimeProbe.modified(home.promptHistoryURL)
+        let keys: Set<URLResourceKey> = [.contentModificationDateKey, .isDirectoryKey]
+        let projects = (try? FileManager.default.contentsOfDirectory(
+            at: root, includingPropertiesForKeys: Array(keys), options: [.skipsHiddenFiles])) ?? []
+        let recentDirectories = projects
+            .compactMap { url -> (URL, Date)? in
+                guard let values = try? url.resourceValues(forKeys: keys),
+                      values.isDirectory == true, let modified = values.contentModificationDate
+                else { return nil }
+                return (url, modified)
+            }
+            .sorted { $0.1 > $1.1 }
+            .prefix(8)
+        for (directory, _) in recentDirectories {
+            let signal = MTimeProbe.signal(
+                directories: [directory], recentSince: .distantPast, cap: 500, maxDepth: 3)
+            if let candidate = signal.newest, newest.map({ candidate > $0 }) ?? true {
+                newest = candidate
+            }
+        }
+        return newest
     }
 
     /// The standard home (`~/.claude/projects`).

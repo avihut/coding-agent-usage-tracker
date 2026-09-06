@@ -29,6 +29,9 @@ public struct Notice: Codable, Sendable, Equatable, Identifiable {
         case reset
         /// An incident on the provider's status page.
         case outage
+        /// Another agent home was found beside the standard one, signed in
+        /// and used, that nobody has enrolled or dismissed (D2, v0.96.0).
+        case profileFound
     }
 
     /// Stable across processes and re-observations: `reset|<epoch seconds
@@ -107,5 +110,11 @@ public struct Notice: Codable, Sendable, Equatable, Identifiable {
 
     public static func outageID(incidentID: String) -> String {
         "outage|\(incidentID)"
+    }
+
+    /// The discovery's identity is the profile it would become, so a
+    /// re-discovery finds the row and stays silent.
+    public static func profileFoundID(profileID: String) -> String {
+        "profile|\(profileID)"
     }
 }
