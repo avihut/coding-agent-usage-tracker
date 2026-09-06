@@ -146,4 +146,44 @@ struct NoticeLedgerTests {
         #expect(ledger.pending.count == 1)
         try? FileManager.default.removeItem(at: directory)
     }
+
+
+    // MARK: Profiles
+
+    @Test func resetsAreOneProfilesEvents() {
+        var ledger = NoticeLedger()
+        ledger.record(reset(10))  // a legacy row: no profile recorded
+        let personal = Notice(
+            id: Notice.resetID(profileID: "c982130e", at: at(10)), kind: "reset",
+            occurredAt: at(10), endedAt: at(10), recordedAt: at(10.1),
+            meterLabel: "Weekly (all)", fromPercent: 40, profileID: "c982130e")
+        let recorded = ledger.record(personal)
+        #expect(recorded)
+        #expect(ledger.notices.count == 2)
+
+        #expect(ledger.hasReset(near: at(10).addingTimeInterval(60)))
+        #expect(ledger.hasReset(profileID: "default", near: at(10)))
+        #expect(ledger.hasReset(profileID: "c982130e", near: at(10)))
+        #expect(!ledger.hasReset(profileID: "deadbeef", near: at(10)))
+        #expect(ledger.notices[0].profileIDOrDefault == "default")
+        #expect(ledger.notices[0].profileID == nil)
+        #expect(personal.id == "reset|c982130e|\(Int(at(10).timeIntervalSince1970) / 60 * 60)")
+        #expect(Notice.resetID(profileID: "default", at: at(10)) == Notice.resetID(at: at(10)))
+    }
+
+    @Test func aRowWithoutAProfileDecodesAsTheDefaultProfile() throws {
+        let json = """
+        {"version":1,"notices":[{"id":"reset|1786817400","kind":"reset","occurredAt":"2026-08-15T18:10:00Z",
+        "ongoing":false,"seenWhileOngoing":false,"recordedAt":"2026-08-15T18:12:00Z","components":[]}]}
+        """
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "notice-ledger-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try json.data(using: .utf8)!.write(to: directory.appending(path: "notices.json"))
+        let ledger = NoticeLedger(directory: directory)
+        #expect(ledger.notices.first?.profileID == nil)
+        #expect(ledger.notices.first?.profileIDOrDefault == "default")
+        #expect(ledger.hasReset(profileID: "default", near: FlexibleISO8601.date(from: "2026-08-15T18:10:00Z")!))
+        try? FileManager.default.removeItem(at: directory)
+    }
 }

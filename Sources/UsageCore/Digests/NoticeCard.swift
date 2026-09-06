@@ -47,12 +47,16 @@ public struct NoticeCard: Codable, Sendable, Equatable, Identifiable {
     /// — where a click lands when no official record exists. Nil for
     /// outages, and absent from digests written before it existed.
     public let meterLabel: String?
+    /// The profile (account) a reset belongs to; nil for account-wide
+    /// notices (outages), for a legacy default-profile row, and in digests
+    /// written before profiles existed.
+    public let profile: String?
 
     public init(
         id: String, kind: String, severity: String?, title: String, detail: String?,
         when: String, occurredAt: Date, endedAt: Date?, ongoing: Bool, dismissable: Bool,
         seen: Bool, ownsMenuBarSurface: Bool, url: String?, components: [String],
-        meterLabel: String? = nil
+        meterLabel: String? = nil, profile: String? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -69,6 +73,7 @@ public struct NoticeCard: Codable, Sendable, Equatable, Identifiable {
         self.url = url
         self.components = components
         self.meterLabel = meterLabel
+        self.profile = profile
     }
 }
 
@@ -103,7 +108,7 @@ public enum NoticePhrasing {
             // The ongoing outage IS the glyph capsule (`alarmingImpact`).
             ownsMenuBarSurface: notice.kindValue == .outage && notice.ongoing,
             url: notice.url, components: notice.components,
-            meterLabel: notice.meterLabel)
+            meterLabel: notice.meterLabel, profile: notice.profileID)
     }
 
     struct Words: Equatable {

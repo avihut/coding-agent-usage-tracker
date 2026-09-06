@@ -197,4 +197,34 @@ struct NoticeDetectorTests {
         // Still the summary poll's business to close it.
         #expect(ledger.notice(id: Notice.outageID(incidentID: "a"))?.ongoing == true)
     }
+
+
+    // MARK: Profiles
+
+    @Test func grantsStampTheProfileTheyWereReadFor() {
+        let samples = [sample(1, ["W": 71]), sample(2, ["W": 0])]
+        let personal = NoticeDetector.grants(samples: samples, since: nil, now: at(3), profileID: "c982130e")
+        #expect(personal.count == 1)
+        #expect(personal.first?.profileID == "c982130e")
+        #expect(personal.first?.id == Notice.resetID(profileID: "c982130e", at: at(1.5)))
+        #expect(personal.first?.id.hasPrefix("reset|c982130e|") == true)
+
+        // The default profile keeps the pre-profile id, stamped explicitly.
+        let standard = NoticeDetector.grants(samples: samples, since: nil, now: at(3))
+        #expect(standard.first?.id == Notice.resetID(at: at(1.5)))
+        #expect(standard.first?.profileID == "default")
+    }
+
+    @Test func theSameMinuteOnTwoProfilesIsTwoNotices() {
+        var ledger = NoticeLedger()
+        let samples = [sample(1, ["W": 71]), sample(2, ["W": 0])]
+        let first = NoticeDetector.noteGrants(samples: samples, since: nil, now: at(3), into: &ledger)
+        let second = NoticeDetector.noteGrants(
+            samples: samples, since: nil, now: at(3), into: &ledger, profileID: "c982130e")
+        let again = NoticeDetector.noteGrants(
+            samples: samples, since: nil, now: at(3), into: &ledger, profileID: "c982130e")
+        #expect(first && second && !again)
+        #expect(ledger.notices.count == 2)
+        #expect(Set(ledger.notices.map(\.profileIDOrDefault)) == ["default", "c982130e"])
+    }
 }

@@ -68,6 +68,12 @@ public struct Notice: Codable, Sendable, Equatable, Identifiable {
     public var meterLabel: String?
     /// That meter's percent going in.
     public var fromPercent: Int?
+    /// The profile (account) the notice belongs to — a reset is one
+    /// account's event, an outage is everyone's (nil). Rows written before
+    /// profiles existed carry nil and read as the default profile
+    /// (`profileIDOrDefault`), which is why default-profile reset ids keep
+    /// their pre-profile spelling.
+    public var profileID: String?
 
     public init(
         id: String, kind: String, occurredAt: Date, endedAt: Date? = nil,
@@ -75,7 +81,7 @@ public struct Notice: Codable, Sendable, Equatable, Identifiable {
         seenWhileOngoing: Bool = false, recordedAt: Date,
         subject: String? = nil, impact: String? = nil, phase: String? = nil,
         message: String? = nil, components: [String] = [], url: String? = nil,
-        meterLabel: String? = nil, fromPercent: Int? = nil
+        meterLabel: String? = nil, fromPercent: Int? = nil, profileID: String? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -94,6 +100,7 @@ public struct Notice: Codable, Sendable, Equatable, Identifiable {
         self.url = url
         self.meterLabel = meterLabel
         self.fromPercent = fromPercent
+        self.profileID = profileID
     }
 
     public var kindValue: Kind? { Kind(rawValue: kind) }
@@ -101,11 +108,22 @@ public struct Notice: Codable, Sendable, Equatable, Identifiable {
     /// Only a notice that is not bound to a live condition can be dismissed.
     public var isDismissable: Bool { !ongoing }
 
+    /// A legacy row (no profile recorded) belongs to the default profile.
+    public var profileIDOrDefault: String { profileID ?? StorageScope.defaultProfileID }
+
     /// The vendor reset's identity: to the minute, so two hosts reading the
     /// same pair of polls (or one host re-reading its history on start) name
-    /// the same event.
+    /// the same event. The default profile's spelling is the pre-profile
+    /// one, so a ledger written by an older build matches what this build
+    /// re-derives on start; other profiles insert their id.
     public static func resetID(at: Date) -> String {
         "reset|\(Int(at.timeIntervalSince1970) / 60 * 60)"
+    }
+
+    public static func resetID(profileID: String, at: Date) -> String {
+        profileID == StorageScope.defaultProfileID
+            ? resetID(at: at)
+            : "reset|\(profileID)|\(Int(at.timeIntervalSince1970) / 60 * 60)"
     }
 
     public static func outageID(incidentID: String) -> String {

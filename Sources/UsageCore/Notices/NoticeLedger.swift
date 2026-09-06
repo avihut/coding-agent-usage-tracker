@@ -56,10 +56,21 @@ public struct NoticeLedger: Sendable {
         }
     }
 
-    /// A reset notice already names an instant within tolerance of `at`.
+    /// A reset notice of the default profile already names an instant
+    /// within tolerance of `at`.
     public func hasReset(near at: Date, tolerance: TimeInterval = grantTolerance) -> Bool {
+        hasReset(profileID: StorageScope.defaultProfileID, near: at, tolerance: tolerance)
+    }
+
+    /// The per-profile form: resets are one account's events, so the same
+    /// minute on two profiles is two notices. Rows without a profile read
+    /// as the default's.
+    public func hasReset(
+        profileID: String, near at: Date, tolerance: TimeInterval = grantTolerance
+    ) -> Bool {
         notices.contains {
-            $0.kindValue == .reset && abs($0.occurredAt.timeIntervalSince(at)) <= tolerance
+            $0.kindValue == .reset && $0.profileIDOrDefault == profileID
+                && abs($0.occurredAt.timeIntervalSince(at)) <= tolerance
         }
     }
 

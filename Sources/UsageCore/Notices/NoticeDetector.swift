@@ -9,10 +9,12 @@ public enum NoticeDetector {
     /// instant however many meters dropped (`VendorGrants` rule), voiced by
     /// the meter that stood highest going in. `since` bounds the search so
     /// a per-fetch call walks a few recent samples and a start-up catch-up
-    /// walks two days — never the whole history.
+    /// walks two days — never the whole history. `profileID` names the
+    /// account whose samples these are; its resets are its own.
     public static func grants(
         samples: [UsageSample], since: Date?, now: Date,
-        tolerance: TimeInterval = NoticeLedger.grantTolerance
+        tolerance: TimeInterval = NoticeLedger.grantTolerance,
+        profileID: String = StorageScope.defaultProfileID
     ) -> [Notice] {
         // Fill FIRST over the recent tail, then trim: a stampless zeroed poll
         // inherits the stamp from the poll before it, and that pair is what
@@ -47,21 +49,25 @@ public enum NoticeDetector {
                 continue
             }
             notices.append(Notice(
-                id: Notice.resetID(at: hit.at), kind: Notice.Kind.reset.rawValue,
+                id: Notice.resetID(profileID: profileID, at: hit.at),
+                kind: Notice.Kind.reset.rawValue,
                 occurredAt: hit.at, endedAt: hit.at, ongoing: false, recordedAt: now,
-                meterLabel: hit.label, fromPercent: hit.from))
+                meterLabel: hit.label, fromPercent: hit.from, profileID: profileID))
         }
         return notices
     }
 
-    /// Records the grants not yet in the ledger. Returns whether it changed.
+    /// Records the grants not yet in the ledger — for this profile; the
+    /// same minute on another profile is another notice. Returns whether
+    /// it changed.
     @discardableResult
     public static func noteGrants(
-        samples: [UsageSample], since: Date?, now: Date, into ledger: inout NoticeLedger
+        samples: [UsageSample], since: Date?, now: Date, into ledger: inout NoticeLedger,
+        profileID: String = StorageScope.defaultProfileID
     ) -> Bool {
         var changed = false
-        for notice in grants(samples: samples, since: since, now: now)
-        where !ledger.hasReset(near: notice.occurredAt) {
+        for notice in grants(samples: samples, since: since, now: now, profileID: profileID)
+        where !ledger.hasReset(profileID: profileID, near: notice.occurredAt) {
             changed = ledger.record(notice, now: now) || changed
         }
         return changed
