@@ -109,6 +109,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private static func writeSnapshots(store: UsageStore, to directory: URL) {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        writeStatusItemSnapshots(to: directory)
         func write(_ renderer: ImageRenderer<some View>, _ name: String) {
             renderer.scale = 2
             guard let image = renderer.nsImage,
@@ -160,6 +161,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 domain: span, window: window, accent: ProviderStyle.accentColor,
                 timeline: store.tokenTimeline, plotHeight: 114)
             write(ImageRenderer(content: chart.padding(14).frame(width: 360)), "audit.png")
+        }
+    }
+
+    /// The menu bar item over FIXED models — one PNG per dressing the
+    /// renderer knows (plain digits, the ramp dot, the badge, stale, an
+    /// incident capsule with the notice dot, no data) at 2× over a dark
+    /// ground. Synthetic on purpose: a render of the live digits would
+    /// differ between two runs on data alone, and these exist to be
+    /// `cmp`-ed across renderer changes — the single-cell bar must stay
+    /// byte-identical when the multi-account cells land.
+    private static func writeStatusItemSnapshots(to directory: URL) {
+        func segment(_ tag: String, _ percent: Int, _ level: DisplayLevel, _ severity: Double?) -> MenuBarSegment {
+            MenuBarSegment(tag: tag, percent: percent, level: level, severity: severity)
+        }
+        let clean = [
+            segment("S", 42, .normal, 0), segment("W", 80, .warning, 0.55), segment("F", 25, .normal, nil),
+        ]
+        let alarmed = [
+            segment("S", 97, .critical, 0.9), segment("W", 80, .warning, 0.55), segment("F", 25, .normal, nil),
+        ]
+        let cases: [(String, StatusItemRenderer.Model)] = [
+            ("clean", .init(segments: clean, stale: false, glyph: "✳︎")),
+            ("badge", .init(segments: alarmed, stale: false, glyph: "✳︎")),
+            ("stale", .init(segments: clean, stale: true, glyph: "✳︎")),
+            ("incident", .init(segments: clean, stale: false, glyph: "✳︎", incident: .major, indicator: true)),
+            ("empty", .init(segments: nil, stale: true, glyph: "✳︎")),
+        ]
+        let height = NSStatusBar.system.thickness
+        let ground = NSColor(srgbRed: 0.11, green: 0.11, blue: 0.12, alpha: 1)
+        for (name, model) in cases {
+            let bar = StatusItemRenderer.image(for: model, height: height)
+            let padded = NSSize(width: ceil(bar.size.width) + 16, height: height + 8)
+            guard let rep = NSBitmapImageRep(
+                bitmapDataPlanes: nil, pixelsWide: Int(padded.width * 2), pixelsHigh: Int(padded.height * 2),
+                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)
+            else { continue }
+            rep.size = padded
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+            ground.setFill()
+            NSRect(origin: .zero, size: padded).fill()
+            bar.draw(in: NSRect(x: 8, y: 4, width: bar.size.width, height: height))
+            NSGraphicsContext.restoreGraphicsState()
+            try? rep.representation(using: .png, properties: [:])?
+                .write(to: directory.appending(path: "statusitem-\(name).png"))
         }
     }
 
