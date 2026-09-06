@@ -33,7 +33,8 @@ extension DeepQuery {
         }
 
         let ledgerDirectory = directory ?? StorageScope.supportDirectory(
-            bundleID: Bundle.main.bundleIdentifier ?? "com.avihu.ClaudeUsage", providerID: providerID)
+            bundleID: Bundle.main.bundleIdentifier ?? "com.avihu.ClaudeUsage", providerID: providerID,
+            profileID: StorageScope.defaultProfileID)
         let outcomes = WindowLedger(directory: ledgerDirectory).load()
 
         let resolvedMeter: (meterID: String, label: String)

@@ -140,8 +140,10 @@ struct UsageCLI {
         guard chosen == "claude" else {
             die("sync-digest is not wired for '\(chosen)' in the CLI yet", code: 11)
         }
-        let support = StorageScope.supportDirectory(bundleID: bundleID, providerID: chosen)
-        let caches = StorageScope.cachesDirectory(bundleID: bundleID, providerID: chosen)
+        let support = StorageScope.supportDirectory(
+            bundleID: bundleID, providerID: chosen, profileID: StorageScope.defaultProfileID)
+        let caches = StorageScope.cachesDirectory(
+            bundleID: bundleID, providerID: chosen, profileID: StorageScope.defaultProfileID)
 
         let root = FileManager.default.homeDirectoryForCurrentUser
             .appending(path: ".claude/projects")

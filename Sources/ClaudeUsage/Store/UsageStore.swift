@@ -42,7 +42,8 @@ final class UsageStore {
     private var sessionNames: [String: String] = [:]
     private var renamesFile: SessionRenames {
         SessionRenames(directory: StorageScope.supportDirectory(
-            bundleID: bundleID, providerID: providerValue.id))
+            bundleID: bundleID, providerID: providerValue.id,
+            profileID: StorageScope.defaultProfileID))
     }
     @ObservationIgnored private var roleTimer: Timer?
     /// Stale numbers after lid-open are what make these widgets feel broken
@@ -266,8 +267,10 @@ final class UsageStore {
     }
 
     var historyFileURL: URL {
-        StorageScope.supportDirectory(bundleID: bundleID, providerID: providerValue.id)
-            .appending(path: "history.json")
+        StorageScope.supportDirectory(
+            bundleID: bundleID, providerID: providerValue.id,
+            profileID: StorageScope.defaultProfileID
+        ).appending(path: "history.json")
     }
 
     static let defaultInterval = UsageEngine.defaultInterval

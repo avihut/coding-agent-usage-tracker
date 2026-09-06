@@ -88,12 +88,14 @@ final class DigestClient {
         self.digestURL = LiveState.fileURL(bundleID: bundleID)
         self.socketURL = EngineHostBroker.socketURL(bundleID: bundleID)
         let support = StorageScope.supportDirectory(
+            bundleID: bundleID, providerID: provider.id, profileID: StorageScope.defaultProfileID)
+        let providerSupport = StorageScope.providerDirectory(
             bundleID: bundleID, providerID: provider.id)
         self.localActivity = provider.makeLocalActivity(cacheDirectory: support)
         self.history = UsageHistory(directory: support)
         self.windowLedger = WindowLedger(directory: support)
         self.pricingService = PricingService(
-            cacheDirectory: support, fallback: provider.bundledRates,
+            cacheDirectory: providerSupport, fallback: provider.bundledRates,
             selector: provider.pricingSelector)
         self.pricing = pricingService.current()
 

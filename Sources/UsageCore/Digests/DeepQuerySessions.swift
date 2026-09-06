@@ -55,10 +55,10 @@ enum DeepQuerySessions {
     static func buildIndex(providerFlag: String?, now: Date) -> [Entry]? {
         let providerID = DeepQuery.resolveProviderID(flag: providerFlag)
         guard providerID == "claude" else { return nil }
-        let support = supportDirectory(providerID: providerID)
         let root = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".claude/projects")
-        let scan = TranscriptScanner(root: root, cacheDirectory: support).scan(now: now, persistCache: false)
-        return index(scan: scan, pricing: pricingTable(support: support))
+        let scan = TranscriptScanner(root: root, cacheDirectory: profileDirectory(providerID: providerID))
+            .scan(now: now, persistCache: false)
+        return index(scan: scan, pricing: pricingTable(support: providerDirectory(providerID: providerID)))
     }
 
     /// `transcript <path>`'s data layer: ONE transcript (plus the subagent
@@ -73,15 +73,25 @@ enum DeepQuerySessions {
     /// scanner's `root` is the file's own projects tree, which
     /// `sessionSummary(at:)` never consults — it's named for honesty.
     static func transcriptEntry(at url: URL, providerID: String) -> Entry? {
-        let support = supportDirectory(providerID: providerID)
         let root = url.deletingLastPathComponent().deletingLastPathComponent()
-        guard let summary = TranscriptScanner(root: root, cacheDirectory: support).sessionSummary(at: url)
+        guard let summary = TranscriptScanner(
+            root: root, cacheDirectory: profileDirectory(providerID: providerID)
+        ).sessionSummary(at: url)
         else { return nil }
-        return entry(summary, pricing: pricingTable(support: support))
+        return entry(summary, pricing: pricingTable(support: providerDirectory(providerID: providerID)))
     }
 
-    private static func supportDirectory(providerID: String) -> URL {
-        StorageScope.supportDirectory(bundleID: "com.avihu.ClaudeUsage", providerID: providerID)
+    /// The scan cache's home: the DEFAULT profile's directory (storage v3
+    /// — a per-account artifact).
+    private static func profileDirectory(providerID: String) -> URL {
+        StorageScope.supportDirectory(
+            bundleID: "com.avihu.ClaudeUsage", providerID: providerID,
+            profileID: StorageScope.defaultProfileID)
+    }
+
+    /// pricing.json's home: vendor-level, shared by every profile.
+    private static func providerDirectory(providerID: String) -> URL {
+        StorageScope.providerDirectory(bundleID: "com.avihu.ClaudeUsage", providerID: providerID)
     }
 
     /// The same disk-cached LiteLLM table the legacy dump used, bundled

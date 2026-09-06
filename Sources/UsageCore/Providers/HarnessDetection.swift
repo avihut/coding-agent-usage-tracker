@@ -129,7 +129,8 @@ public enum HarnessResolution {
     ) -> [(id: String, directories: [URL])] {
         providers.map { provider in
             let support = StorageScope.supportDirectory(
-                bundleID: bundleID, providerID: provider.id)
+                bundleID: bundleID, providerID: provider.id,
+                profileID: StorageScope.defaultProfileID)
             let directories =
                 provider.makeLocalActivity(cacheDirectory: support)?.watchDirectories ?? []
             return (provider.id, directories)

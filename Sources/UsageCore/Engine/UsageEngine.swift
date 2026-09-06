@@ -161,8 +161,15 @@ public final class UsageEngine {
         systemAccent: RGBColor? = nil
     ) {
         let bundleID = bundleID ?? Bundle.main.bundleIdentifier ?? "com.avihu.ClaudeUsage"
-        let support = StorageScope.supportDirectory(bundleID: bundleID, providerID: provider.id)
-        let caches = StorageScope.cachesDirectory(bundleID: bundleID, providerID: provider.id)
+        let profileID = StorageScope.defaultProfileID
+        let support = StorageScope.supportDirectory(
+            bundleID: bundleID, providerID: provider.id, profileID: profileID)
+        let caches = StorageScope.cachesDirectory(
+            bundleID: bundleID, providerID: provider.id, profileID: profileID)
+        // Vendor-level artifacts (pricing, notices) sit one level up, shared
+        // by every profile of the provider.
+        let providerSupport = StorageScope.providerDirectory(
+            bundleID: bundleID, providerID: provider.id)
         self.provider = provider
         self.defaults = defaults
         self.hostKind = host
@@ -181,7 +188,7 @@ public final class UsageEngine {
         self.presence = provider.accountIdentity == nil
             ? nil : AccountPresenceLedger(directory: support)
         self.pricingService = PricingService(
-            cacheDirectory: support, fallback: provider.bundledRates,
+            cacheDirectory: providerSupport, fallback: provider.bundledRates,
             selector: provider.pricingSelector)
         self.pricing = pricingService.current()
         let stored = defaults.double(forKey: Self.intervalKey)
@@ -189,13 +196,14 @@ public final class UsageEngine {
         let interval = stored >= 60 ? max(TriggerGate.floor, stored) : Self.defaultInterval
         self.activeInterval = interval
         self.cadence = AdaptiveCadence(activeInterval: interval, now: Date())
-        self.ceilingKey = StorageScope.scopedKey("apiHourlyCeiling", providerID: provider.id)
+        self.ceilingKey = StorageScope.scopedKey(
+            "apiHourlyCeiling", providerID: provider.id, profileID: profileID)
         let storedCeiling = defaults.integer(forKey: ceilingKey)
         self.ledger = RequestLedger(
             ceiling: storedCeiling > 0 ? storedCeiling : RequestLedger.defaultCeiling)
         self.samples = history.load()
         self.windowOutcomes = windowLedger.load()
-        self.noticeLedger = NoticeLedger(directory: support)
+        self.noticeLedger = NoticeLedger(directory: providerSupport)
         // Catch-up: grants already in the sample history that no ledger
         // recorded (the first run after the feature landed, a ledger lost).
         // Two days, matching the wake-time incident backfill's reach.

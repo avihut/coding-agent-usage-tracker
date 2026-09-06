@@ -97,11 +97,12 @@ extension DeepQuery {
     }
 
     /// Mirrors exactly how `UsageCLI`/`UsageEngine` build a `PricingService`
-    /// for the Claude provider (`StorageScope.supportDirectory` under this
+    /// for the Claude provider (`StorageScope.providerDirectory` under this
     /// app's bundle id — literal, matching every other call site in this
-    /// codebase; there's no shared constant for it).
+    /// codebase; there's no shared constant for it). Vendor-level: pricing
+    /// is shared by every profile of the provider.
     private static func defaultCacheDirectory(providerID: String) -> URL {
-        StorageScope.supportDirectory(bundleID: "com.avihu.ClaudeUsage", providerID: providerID)
+        StorageScope.providerDirectory(bundleID: "com.avihu.ClaudeUsage", providerID: providerID)
     }
 
     // MARK: - prices (the whole catalog)

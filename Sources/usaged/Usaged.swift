@@ -45,9 +45,9 @@ struct Usaged {
         // machine where the app already ran this is a marker-checked no-op.
         StorageMigration.migrate(
             support: StorageScope.rootSupportDirectory(bundleID: bundleID),
-            caches: StorageScope.cachesDirectory(bundleID: bundleID, providerID: "")
-                .deletingLastPathComponent(),
+            caches: StorageScope.cachesRootDirectory(bundleID: bundleID),
             providerID: "claude",
+            providerIDs: HarnessResolution.standardProviders().map(\.id),
             defaults: defaults)
 
         let host = DaemonHost(defaults: defaults)

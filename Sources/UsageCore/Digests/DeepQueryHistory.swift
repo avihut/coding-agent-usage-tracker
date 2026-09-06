@@ -58,7 +58,8 @@ extension DeepQuery {
         }
 
         let directory = historyDirectory ?? StorageScope.supportDirectory(
-            bundleID: Bundle.main.bundleIdentifier ?? "com.avihu.ClaudeUsage", providerID: providerID)
+            bundleID: Bundle.main.bundleIdentifier ?? "com.avihu.ClaudeUsage", providerID: providerID,
+            profileID: StorageScope.defaultProfileID)
         // `.sorted` makes synthetic test input well-defined; a no-op on a
         // real file, whose own `UsageHistory.thinned` already emits
         // chronological order.

@@ -18,9 +18,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let bundleID = Bundle.main.bundleIdentifier ?? "com.avihu.ClaudeUsage"
-        // Pre-registry builds kept one unscoped set of artifacts; move them
-        // into the claude scope before any store opens them.
-        StorageMigration.standard(bundleID: bundleID, providerID: "claude")
+        // Older layouts step forward before any store opens a file:
+        // pre-registry singletons into the claude scope (v1), and every
+        // provider's per-account artifacts into its default profile (v3).
+        StorageMigration.standard(
+            bundleID: bundleID,
+            providerIDs: HarnessResolution.standardProviders().map(\.id))
         // The registry chooses the vendor (detection or the user's Metering
         // pick) and installs its model catalog before any UI renders.
         let registry = ProviderRegistry(
