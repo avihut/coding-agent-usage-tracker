@@ -45,19 +45,22 @@ enum DeepQuerySessions {
         return Entry(summary: summary, cost: modelCosts.isEmpty ? nil : total, modelCosts: modelCosts)
     }
 
-    /// Resolves the provider, scans `~/.claude/projects` fresh
-    /// (`persistCache: false` — spec §10: the lease holder, app or usaged,
-    /// is the sole cache writer; a bare CLI run must never race or clobber
-    /// it), and prices every session against the same disk-cached pricing
-    /// table the legacy dump used. Nil when the resolved provider isn't
-    /// "claude" — the transcript format this scanner reads is Claude-only;
-    /// callers translate that into exit 11, `DeepQuery.exitWrongProvider`.
-    static func buildIndex(providerFlag: String?, now: Date) -> [Entry]? {
+    /// Resolves the provider, scans the selected profile's `projects` tree
+    /// fresh (`persistCache: false` — spec §10: the lease holder, app or
+    /// usaged, is the sole cache writer; a bare CLI run must never race or
+    /// clobber it), and prices every session against the same disk-cached
+    /// pricing table the legacy dump used. `home` nil = the standard home;
+    /// the read-only cache is the profile's own directory, so root and
+    /// cache always agree. Nil when the resolved provider isn't "claude" —
+    /// the transcript format this scanner reads is Claude-only; callers
+    /// translate that into exit 11, `DeepQuery.exitWrongProvider`.
+    static func buildIndex(providerFlag: String?, home: URL? = nil, profileID: String, now: Date) -> [Entry]? {
         let providerID = DeepQuery.resolveProviderID(flag: providerFlag)
         guard providerID == "claude" else { return nil }
-        let root = ClaudeHome.standard.projectsDirectory
-        let scan = TranscriptScanner(root: root, cacheDirectory: profileDirectory(providerID: providerID))
-            .scan(now: now, persistCache: false)
+        let root = (home.map { ClaudeHome(directory: $0) } ?? .standard).projectsDirectory
+        let scan = TranscriptScanner(
+            root: root, cacheDirectory: DeepQuery.profileDirectory(providerID: providerID, profileID: profileID)
+        ).scan(now: now, persistCache: false)
         return index(scan: scan, pricing: pricingTable(support: providerDirectory(providerID: providerID)))
     }
 
@@ -75,18 +78,12 @@ enum DeepQuerySessions {
     static func transcriptEntry(at url: URL, providerID: String) -> Entry? {
         let root = url.deletingLastPathComponent().deletingLastPathComponent()
         guard let summary = TranscriptScanner(
-            root: root, cacheDirectory: profileDirectory(providerID: providerID)
+            root: root,
+            cacheDirectory: DeepQuery.profileDirectory(
+                providerID: providerID, profileID: StorageScope.defaultProfileID)
         ).sessionSummary(at: url)
         else { return nil }
         return entry(summary, pricing: pricingTable(support: providerDirectory(providerID: providerID)))
-    }
-
-    /// The scan cache's home: the DEFAULT profile's directory (storage v3
-    /// — a per-account artifact).
-    private static func profileDirectory(providerID: String) -> URL {
-        StorageScope.supportDirectory(
-            bundleID: "com.avihu.ClaudeUsage", providerID: providerID,
-            profileID: StorageScope.defaultProfileID)
     }
 
     /// pricing.json's home: vendor-level, shared by every profile.
@@ -157,11 +154,44 @@ public enum DeepQuerySessionsCLI {
     /// noun gate checks this set alongside the other two.
     public static let nouns: Set<String> = ["sessions", "session", "transcript"]
 
-    public static func run(noun: String, arguments: [String], digest: LiveState?, now: Date) -> QueryOutput {
+    /// `environment`, `profiles`, `homes`: the account selector's inputs
+    /// (`DigestQuery.selectProfile`) — `sessions`/`session` answer for one
+    /// profile's shortlist and scan its HOME; `transcript` names its own
+    /// file and never selects. nil `profiles`/`homes` read the app's store
+    /// and the provider's facts; tests inject both.
+    public static func run(
+        noun: String, arguments: [String], digest: LiveState?, now: Date,
+        environment: [String: String] = [:], profiles: [Profile]? = nil,
+        homes: ProfileSelector.Homes? = nil
+    ) -> QueryOutput {
         let parsed = DigestQuery.parseArgs(arguments)
         if let error = parsed.error { return DigestQuery.badQuery(error) }
         if let rejection = DigestQuery.rejectInapplicableFlags(noun: noun, parsed: parsed) {
             return rejection
+        }
+
+        let providerID = DeepQuery.resolveProviderID(flag: parsed.flags["provider"])
+        let stored = profiles ?? DeepQuery.storedProfiles(providerID: providerID, now: now)
+        let view: DigestQuery.ProfileView
+        switch DigestQuery.selectProfile(
+            noun: noun, parsed: parsed, environment: environment, digest: digest,
+            profiles: stored, homes: homes ?? DeepQuery.storedHomes(providerID: providerID))
+        {
+        case .failure(let output): return output
+        case .success(let selected): view = selected
+        }
+        let digest = view.digest ?? digest
+
+        // The scan roots at the profile's home. A profile the writer names
+        // but the store holds no home for cannot be scanned honestly —
+        // rooting at the standard home would list the OTHER account's
+        // sessions — so any query that could scan refuses up front.
+        let home = stored.first { $0.id == view.id }?.home
+        let mayScan = parsed.flags["all"] != nil || (noun == "session" && parsed.flags["no-scan"] == nil)
+        if noun != "transcript", view.id != Profile.defaultID, home == nil, mayScan {
+            return DigestQuery.noMatch(
+                "account \(view.id) has no home on record — the transcript scan can't be rooted; "
+                    + "answer from the shortlist with --no-scan")
         }
 
         // Mirrors `DigestQuery.run`'s own `--max-age` gate (that function
@@ -201,7 +231,10 @@ public enum DeepQuerySessionsCLI {
         }
 
         let json = parsed.flags["json"] != nil
-        let scan = { DeepQuerySessions.buildIndex(providerFlag: parsed.flags["provider"], now: now) }
+        let scan = {
+            DeepQuerySessions.buildIndex(
+                providerFlag: parsed.flags["provider"], home: home, profileID: view.id, now: now)
+        }
         switch noun {
         case "sessions":
             return DigestQuery.runSessionsList(
@@ -213,7 +246,6 @@ public enum DeepQuerySessionsCLI {
         case "transcript":
             // Exit 11 ahead of the verb body, like every other Claude-only
             // path: the format this parser reads is Claude Code's.
-            let providerID = DeepQuery.resolveProviderID(flag: parsed.flags["provider"])
             guard providerID == "claude" else {
                 return QueryOutput(
                     stdout: "", note: "transcript reads Claude Code transcripts only; provider is '\(providerID)'",

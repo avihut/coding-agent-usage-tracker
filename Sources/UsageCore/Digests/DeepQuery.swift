@@ -28,6 +28,46 @@ public enum DeepQuery {
         return flag ?? (stored == "auto" ? nil : stored) ?? "claude"
     }
 
+    /// The app's own defaults domain — where the profile list lives. A bare
+    /// CLI's `.standard` is its OWN domain (the process name's), so the
+    /// suite is opened explicitly, exactly as usaged does; embedded in the
+    /// app bundle, `.standard` already IS that domain and the suite call
+    /// would return nil.
+    static func appDefaults() -> UserDefaults {
+        let bundleID = "com.avihu.ClaudeUsage"
+        if Bundle.main.bundleIdentifier == bundleID { return .standard }
+        return UserDefaults(suiteName: bundleID) ?? .standard
+    }
+
+    /// The enrolled profiles for a provider as the app and the daemon see
+    /// them (`ProfileStore.resolved`: the implicit default synthesized),
+    /// for a CLI run that must root a scan or a history read at one
+    /// account's home and directory. Empty for an unknown provider.
+    public static func storedProfiles(providerID: String, now: Date) -> [Profile] {
+        guard let provider = HarnessResolution.standardProviders().first(where: { $0.id == providerID })
+        else { return [] }
+        return ProfileStore.resolved(ProfileStore.load(from: appDefaults()), provider: provider, now: now)
+    }
+
+    /// The provider's home facts for the selector — its variable and its
+    /// standard home. `.none` for an unknown provider.
+    public static func storedHomes(providerID: String) -> ProfileSelector.Homes {
+        HarnessResolution.standardProviders().first { $0.id == providerID }
+            .map { ProfileSelector.Homes(provider: $0) } ?? .none
+    }
+
+    /// One profile's scoped support directory — where its history.json and
+    /// window-ledger.json live (storage v3). `roots` is injectable so the
+    /// resolution is testable without touching the real Application
+    /// Support tree.
+    public static func profileDirectory(
+        providerID: String, profileID: String, roots: StorageScope.Roots = .standard
+    ) -> URL {
+        StorageScope.supportDirectory(
+            bundleID: Bundle.main.bundleIdentifier ?? "com.avihu.ClaudeUsage", providerID: providerID,
+            profileID: profileID, roots: roots)
+    }
+
     /// `--last` accepts BOTH grammars the plan wrote for the deep list
     /// verbs: a bare integer is a row count (`windows week --last 8`), a
     /// suffixed duration is a time window (`history session --last 24h`).
@@ -54,9 +94,13 @@ public enum DeepQuery {
     /// digest reports its own exit 13; `prices` never does. Verbs that
     /// want METER LABELS (a scoped model name, a tag) but were handed a
     /// nil digest degrade to raw-id matching instead of erroring.
+    ///
+    /// `profiles`/`homes` nil = read the app's store and the provider's
+    /// facts (`storedProfiles`/`storedHomes`); tests inject both.
     public static func run(
         noun: String, arguments: [String], digest: LiveState?,
-        environment: [String: String], now: Date
+        environment: [String: String], now: Date,
+        profiles: [Profile]? = nil, homes: ProfileSelector.Homes? = nil
     ) -> QueryOutput {
         let parsed = DigestQuery.parseArgs(arguments)
         if let error = parsed.error { return DigestQuery.badQuery(error) }
@@ -75,11 +119,27 @@ public enum DeepQuery {
                 exitCode: exitWrongProvider)
         }
 
+        // `history`/`windows` read one profile's files; the meter selectors
+        // resolve against that profile's section. `prices`/`price` are the
+        // vendor's and select nothing (`accountNouns`).
+        let view: DigestQuery.ProfileView
+        switch DigestQuery.selectProfile(
+            noun: noun, parsed: parsed, environment: environment, digest: digest,
+            profiles: profiles ?? storedProfiles(providerID: providerID, now: now),
+            homes: homes ?? storedHomes(providerID: providerID))
+        {
+        case .failure(let output): return output
+        case .success(let selected): view = selected
+        }
+        let digest = view.digest ?? digest
+
         switch noun {
         case "windows":
-            return windowsVerb(parsed: parsed, digest: digest, providerID: providerID, now: now)
+            return windowsVerb(
+                parsed: parsed, digest: digest, providerID: providerID, profileID: view.id, now: now)
         case "history":
-            return historyVerb(parsed: parsed, digest: digest, providerID: providerID, now: now)
+            return historyVerb(
+                parsed: parsed, digest: digest, providerID: providerID, profileID: view.id, now: now)
         case "prices", "price":
             // Unlike windows/history, these two nouns share ONE handler —
             // `noun` travels in so it can enforce the plural/singular arity

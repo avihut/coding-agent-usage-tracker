@@ -106,6 +106,10 @@ public protocol UsageProvider: Sendable {
     /// The directory this instance reads; nil when the agent has no such
     /// notion (fixed paths, one sign-in).
     var homeDirectory: URL? { get }
+    /// The environment variable the agent reads its home from
+    /// (`CLAUDE_CONFIG_DIR`) — what lets `usage-cli` answer for the account
+    /// a shell is actually running under. Nil = no such variable.
+    var homeEnvironmentVariable: String? { get }
     /// This provider retargeted at another home — the same vendor facts,
     /// every path and credential lookup following the new directory.
     /// Providers without homes return themselves.
@@ -125,6 +129,7 @@ extension UsageProvider {
     /// Opt-in: one home, the implicit default profile.
     public var supportsMultipleHomes: Bool { false }
     public var homeDirectory: URL? { nil }
+    public var homeEnvironmentVariable: String? { nil }
     public func withHome(_ directory: URL) -> any UsageProvider { self }
     public func discoverHomes() -> [URL] { [] }
 }
@@ -233,9 +238,14 @@ public protocol LocalActivitySource: Sendable {
     /// transcript no longer exists on disk. Synchronous and potentially
     /// slow — call off-main.
     func sessionDetail(id: String) -> SessionDetail?
-    /// When the agent last wrote a session here — the dormancy and focus
-    /// signal (D9). Read-only stats; nil when nothing was ever written.
+    /// When the agent last wrote a session here — the dormancy signal and
+    /// the focus tie-break (D9). Read-only stats; nil when nothing was ever
+    /// written.
     func lastActivity(now: Date) -> Date?
+    /// How many session files the agent wrote here since `cutoff` — the
+    /// focus signal (D9 as amended: volume over a window, not the last
+    /// write). Read-only stats; zero when nothing was written.
+    func recentActivity(since cutoff: Date) -> Int
 }
 
 extension LocalActivitySource {
@@ -244,6 +254,12 @@ extension LocalActivitySource {
     /// The capped mtime walk over the watch directories.
     public func lastActivity(now: Date) -> Date? {
         MTimeProbe.signal(directories: watchDirectories, recentSince: .distantPast).newest
+    }
+    /// The same walk harness detection scores, over the probe's budget.
+    public func recentActivity(since cutoff: Date) -> Int {
+        MTimeProbe.signal(
+            directories: watchDirectories, recentSince: cutoff, cap: ProfileActivity.statCap
+        ).recentFiles
     }
 }
 

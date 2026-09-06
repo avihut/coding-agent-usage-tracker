@@ -33,6 +33,19 @@ struct DeepQueryFlagsTests {
         #expect(rejection("session", ["x", "--all"]) == nil)
         #expect(rejection("windows", ["w", "--last", "8"]) == nil)
         #expect(rejection("history", ["w", "--last", "24h"]) == nil)
+        for noun in ["status", "accounts", "account", "limits", "limit", "budget", "spend", "activity", "cost",
+                     "models", "model", "sessions", "session", "prompt", "get", "history", "windows"] {
+            #expect(rejection(noun, ["--account", "c982130e"]) == nil, "\(noun)")
+        }
+    }
+
+    @Test("--account is unknown to the provider-level nouns and to transcript")
+    func accountRejectedWhereNothingIsPerAccount() {
+        for noun in ["health", "notices", "prices", "price", "transcript"] {
+            let out = rejection(noun, ["--account", "c982130e"])
+            #expect(out?.exitCode == 19, "\(noun)")
+            #expect(out?.note == "unknown flag '--account'", "\(noun)")
+        }
     }
 
     @Test("deep verbs reject foreign M2 flags through DeepQuery.run itself")

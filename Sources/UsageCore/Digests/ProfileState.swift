@@ -208,7 +208,10 @@ extension LiveState {
     /// answers for the chosen profile with no per-reader code. Nil when the
     /// profile is unknown to the writer. A section without an engine (a
     /// dormant or disabled profile) projects an idle status: this writer's
-    /// own facts, nothing fetched, stale, no error.
+    /// own facts, nothing fetched, stale, no error. `engine.generatedAt` is
+    /// the HOST's heartbeat in every projection — the file's freshness,
+    /// which `--max-age` judges — while `fetchedAt`/`nextPollAt` stay the
+    /// section's own.
     public func viewing(profile profileID: String) -> LiveState? {
         guard let profiles else {
             return profileID == Profile.defaultID ? self : nil
@@ -216,7 +219,8 @@ extension LiveState {
         guard let section = profiles.first(where: { $0.id == profileID }) else { return nil }
         return LiveState(
             schemaVersion: schemaVersion, sessionsCap: sessionsCap,
-            engine: section.engine ?? EngineStatus.idle(from: engine),
+            engine: section.engine.map { $0.replacing(generatedAt: engine.generatedAt, nextPollAt: $0.nextPollAt) }
+                ?? EngineStatus.idle(from: engine),
             meters: section.meters ?? [], menuBar: section.menuBar ?? [],
             models: section.models ?? [],
             activity: section.activity ?? ActivityRollup.empty(timeZone: activity.timeZone),

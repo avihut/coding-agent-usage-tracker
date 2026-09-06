@@ -21,6 +21,9 @@ public enum Dormancy {
 public struct FocusCandidate: Sendable, Equatable {
     public let id: String
     public let order: Int
+    /// Session files written inside the trailing activity window
+    /// (`ProfileActivity.window`) — the volume that decides focus.
+    public let recentActivity: Int
     public let lastActivity: Date?
     /// enabled ∧ !dormant — may hold focus at all.
     public let eligible: Bool
@@ -28,9 +31,12 @@ public struct FocusCandidate: Sendable, Equatable {
     /// focused profile's digits are what the bar expands.
     public let shown: Bool
 
-    public init(id: String, order: Int, lastActivity: Date?, eligible: Bool, shown: Bool) {
+    public init(
+        id: String, order: Int, recentActivity: Int = 0, lastActivity: Date?, eligible: Bool, shown: Bool
+    ) {
         self.id = id
         self.order = order
+        self.recentActivity = recentActivity
         self.lastActivity = lastActivity
         self.eligible = eligible
         self.shown = shown
@@ -38,16 +44,22 @@ public struct FocusCandidate: Sendable, Equatable {
 }
 
 /// Which profile the top level of the digest, the expanded menu bar cell
-/// and the panel show by default. Focus FOLLOWS ACTIVITY (D9): the person's
-/// pin wins while it is eligible; otherwise the eligible profile with the
-/// newest session write, shown ones ahead of hidden ones, and the lowest
-/// order when nothing has ever written.
+/// and the panel show by default. Focus FOLLOWS ACTIVITY (D9, amended
+/// 2026-09-06): the person's pin wins while it is eligible; otherwise, shown
+/// profiles ahead of hidden ones, the one with the MOST session writes over
+/// the trailing fortnight, the newest write breaking ties, and the lowest
+/// order when nothing has ever written. Volume over a long window rather
+/// than the last write, because the last write follows whichever session
+/// is typing right now — two concurrent sessions in different homes
+/// flapped the bar between them — while a fortnight's count moves slowly
+/// and names the account this Mac is really used for.
 public enum FocusRule {
     public static func focused(_ candidates: [FocusCandidate], pin: String?) -> String? {
         let eligible = candidates.filter(\.eligible)
         if let pin, eligible.contains(where: { $0.id == pin }) { return pin }
         return eligible.sorted { a, b in
             if a.shown != b.shown { return a.shown }
+            if a.recentActivity != b.recentActivity { return a.recentActivity > b.recentActivity }
             let aWrite = a.lastActivity ?? .distantPast
             let bWrite = b.lastActivity ?? .distantPast
             if aWrite != bWrite { return aWrite > bWrite }
@@ -122,27 +134,41 @@ public enum MTimeProbe {
 }
 
 /// One reprobe's reading of a profile: who is signed in (the identity
-/// record, read-only) and when the agent last wrote a session there.
+/// record, read-only), when the agent last wrote a session there, and how
+/// many session files it wrote inside the activity window.
 public struct ProfileProbe: Sendable, Equatable {
     public let identity: AccountIdentity?
     public let lastActivityAt: Date?
+    public let recentFiles: Int
 
-    public init(identity: AccountIdentity?, lastActivityAt: Date?) {
+    public init(identity: AccountIdentity?, lastActivityAt: Date?, recentFiles: Int = 0) {
         self.identity = identity
         self.lastActivityAt = lastActivityAt
+        self.recentFiles = recentFiles
     }
 }
 
 public enum ProfileActivity {
-    /// Both reads for one home, through the provider retargeted at it.
-    /// `cacheDirectory` is the profile's own scoped directory — the
+    /// The focus rule's activity window — harness detection's, so "which
+    /// account is this Mac mostly using" and "which harness is this Mac
+    /// mostly using" are one story.
+    public static let window: TimeInterval = HarnessDetector.window
+    /// Stat budget for the window count. Harness detection sits on the
+    /// launch path and stops at 2,000; the reprobe runs off-main every ten
+    /// minutes and can afford a whole corpus, so this bound only keeps a
+    /// runaway tree from turning the probe into a scan.
+    public static let statCap = 10_000
+
+    /// All three reads for one home, through the provider retargeted at
+    /// it. `cacheDirectory` is the profile's own scoped directory — the
     /// scanner is only constructed here, never run, so nothing is written.
     public static func probe(
         provider: any UsageProvider, cacheDirectory: URL, now: Date
     ) -> ProfileProbe {
-        ProfileProbe(
+        let source = provider.makeLocalActivity(cacheDirectory: cacheDirectory)
+        return ProfileProbe(
             identity: provider.accountIdentity?.currentIdentity(),
-            lastActivityAt: provider.makeLocalActivity(cacheDirectory: cacheDirectory)?
-                .lastActivity(now: now))
+            lastActivityAt: source?.lastActivity(now: now),
+            recentFiles: source?.recentActivity(since: now.addingTimeInterval(-window)) ?? 0)
     }
 }

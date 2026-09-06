@@ -55,6 +55,11 @@ struct MeteringHostTests {
             try Data(identity.utf8).write(to: home.identityFileURL)
         }
 
+        /// One transcript of a given age under the home's projects tree.
+        func session(_ home: ClaudeHome, _ name: String, age: TimeInterval) throws {
+            try TempTree(root: home.directory).file("projects/-Users-t/\(name).jsonl", age: age, now: Date())
+        }
+
         func enroll(_ home: ClaudeHome, addedAgo: TimeInterval = 0, enabled: Bool = true, order: Int = 1) {
             var stored = ProfileStore.load(from: defaults)
             stored.removeAll { $0.id == home.profileID }
@@ -138,37 +143,45 @@ struct MeteringHostTests {
         #expect(host.statusSummary.contains("profiles 2"))
     }
 
-    @Test("focus follows the newest write, holds while the panel is open, and follows a pin")
+    @Test("focus follows the fortnight's volume, holds while the panel is open, and follows a pin")
     func focusFollowsActivity() async throws {
         let fixture = try Fixture()
         defer { fixture.tearDown() }
         try fixture.write(fixture.standard, historyAge: 3600)
         try fixture.write(fixture.personal, historyAge: 60)
+        // Two sessions on the default home this week; one, newer, on the personal home.
+        try fixture.session(fixture.standard, "one", age: 3 * 86400)
+        try fixture.session(fixture.standard, "two", age: 3600)
+        try fixture.session(fixture.personal, "solo", age: 60)
         fixture.enroll(fixture.personal)
         let host = fixture.makeHost()
         host.start()
         defer { host.shutdown() }
-        #expect(host.focusedProfileID == fixture.personalID)
-
-        // A newer write on the default home: applied on the next reprobe —
-        // unless the panel holds focus, in which case it lands on release.
-        host.holdFocus(true)
-        try fixture.write(fixture.standard, historyAge: 1)
-        host.reprobe()
-        let reprobed = await eventually { host.lastActivity["default"].map { Date().timeIntervalSince($0) < 30 } ?? false }
-        #expect(reprobed)
-        #expect(host.focusedProfileID == fixture.personalID)
-        host.holdFocus(false)
+        #expect(host.recentActivity["default"] == 2)
+        #expect(host.recentActivity[fixture.personalID] == 1)
         #expect(host.focusedProfileID == "default")
 
-        // A pin beats recency while it is eligible.
-        let pinned = await host.handle(.focusProfile(id: fixture.personalID))
-        #expect(pinned.ok)
+        // The personal home overtakes on volume: applied on the next
+        // reprobe — unless the panel holds focus, in which case it lands
+        // on release.
+        host.holdFocus(true)
+        try fixture.session(fixture.personal, "second", age: 30)
+        try fixture.session(fixture.personal, "third", age: 20)
+        host.reprobe()
+        let reprobed = await eventually { host.recentActivity[fixture.personalID] == 3 }
+        #expect(reprobed)
+        #expect(host.focusedProfileID == "default")
+        host.holdFocus(false)
         #expect(host.focusedProfileID == fixture.personalID)
-        #expect(ProfileStore.pin(from: fixture.defaults) == fixture.personalID)
+
+        // A pin beats volume while it is eligible.
+        let pinned = await host.handle(.focusProfile(id: "default"))
+        #expect(pinned.ok)
+        #expect(host.focusedProfileID == "default")
+        #expect(ProfileStore.pin(from: fixture.defaults) == "default")
         let cleared = await host.handle(.focusProfile(id: nil))
         #expect(cleared.ok)
-        #expect(host.focusedProfileID == "default")
+        #expect(host.focusedProfileID == fixture.personalID)
         let unknown = await host.handle(.focusProfile(id: "nope"))
         #expect(!unknown.ok)
     }

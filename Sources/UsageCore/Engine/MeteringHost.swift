@@ -76,6 +76,9 @@ public final class MeteringHost {
     /// Running engines: enrolled ∧ enabled ∧ awake.
     public private(set) var engines: [String: UsageEngine] = [:]
     public private(set) var lastActivity: [String: Date] = [:]
+    /// Session files each profile wrote inside `ProfileActivity.window`,
+    /// as of the last probe — what focus follows.
+    public private(set) var recentActivity: [String: Int] = [:]
     public private(set) var identities: [String: AccountIdentity] = [:]
     public private(set) var dormant: Set<String> = []
     public private(set) var focusedProfileID: String?
@@ -341,7 +344,8 @@ public final class MeteringHost {
         republish()
     }
 
-    /// An engine's FSEvents push: the newest write moves focus.
+    /// An engine's FSEvents push: the newest write is focus's tie-break
+    /// (the window count that decides it refreshes on the next reprobe).
     private func noteActivity(_ id: String, at: Date) {
         if let known = lastActivity[id], known > at { return }
         lastActivity[id] = at
@@ -367,14 +371,17 @@ public final class MeteringHost {
     private func recomputeFocus() -> Bool {
         let candidates = enrolledProfiles.map { profile in
             FocusCandidate(
-                id: profile.id, order: profile.order, lastActivity: lastActivity[profile.id],
+                id: profile.id, order: profile.order,
+                recentActivity: recentActivity[profile.id] ?? 0,
+                lastActivity: lastActivity[profile.id],
                 eligible: profile.enabled && !dormant.contains(profile.id),
                 shown: profile.showInMenuBar)
         }
         let next = FocusRule.focused(candidates, pin: pin)
         guard next != focusedProfileID, !focusHeld else { return false }
         focusedProfileID = next
-        log("focus → \(next ?? "none")")
+        let counts = candidates.map { "\($0.id) \($0.recentActivity)" }.joined(separator: ", ")
+        log("focus → \(next ?? "none") (files in \(Int(ProfileActivity.window / 86400))d: \(counts))")
         return true
     }
 
@@ -402,6 +409,7 @@ public final class MeteringHost {
         if let seen = probe.lastActivityAt, lastActivity[id].map({ seen > $0 }) ?? true {
             lastActivity[id] = seen
         }
+        recentActivity[id] = probe.recentFiles
         identities[id] = probe.identity
     }
 

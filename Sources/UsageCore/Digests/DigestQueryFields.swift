@@ -31,7 +31,9 @@ extension DigestQuery {
             "schema", "sessions-cap", "generated", "fetched", "age", "next-poll", "backoff", "gate-floor",
             "stale", "local", "pace", "pace.multiplier", "error", "error.code", "error.hint", "error.http",
             "accent", "system-accent", "forecast.ready", "forecast.remaining", "forecast.caption", "timezone",
+            "account",
         ]),
+        "accounts": scalars(["count", "focused", "selected"]).merging(tables(["items"])) { lhs, _ in lhs },
         "limit": scalars([
             "percent", "left", "label", "tag", "level", "rank", "severity", "risk", "resets-at", "resets-in",
             "caption", "window", "rate-window", "forces-warning", "scoped-model", "exhausted",

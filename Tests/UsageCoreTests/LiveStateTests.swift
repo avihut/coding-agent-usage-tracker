@@ -824,6 +824,8 @@ extension LiveStateTests {
 
         let personal = try #require(state.viewing(profile: "c982130e"))
         #expect(personal.engine.stale && personal.engine.fetchedAt == nil)
+        // The host's heartbeat is every projection's freshness.
+        #expect(personal.engine.generatedAt == state.engine.generatedAt)
         #expect(personal.engine.error == nil && personal.engine.nextPollAt == nil)
         #expect(personal.engine.pid == 4242 && personal.engine.providerID == "claude")
         #expect(personal.engine.planLabel == nil && personal.engine.apiBudgetUsed == nil)

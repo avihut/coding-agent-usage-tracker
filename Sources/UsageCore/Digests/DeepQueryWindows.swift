@@ -17,7 +17,8 @@ extension DeepQuery {
     /// path. Default parameter keeps `DeepQuery.run`'s call site compiling
     /// unchanged.
     static func windowsVerb(
-        parsed: DigestQuery.ParsedArgs, digest: LiveState?, providerID: String, now: Date,
+        parsed: DigestQuery.ParsedArgs, digest: LiveState?, providerID: String,
+        profileID: String = StorageScope.defaultProfileID, now: Date,
         directory: URL? = nil
     ) -> QueryOutput {
         var positionals = parsed.positionals
@@ -32,9 +33,8 @@ extension DeepQuery {
             return DigestQuery.unknownField(noun: "windows", field: field)
         }
 
-        let ledgerDirectory = directory ?? StorageScope.supportDirectory(
-            bundleID: Bundle.main.bundleIdentifier ?? "com.avihu.ClaudeUsage", providerID: providerID,
-            profileID: StorageScope.defaultProfileID)
+        let ledgerDirectory = directory
+            ?? DeepQuery.profileDirectory(providerID: providerID, profileID: profileID)
         let outcomes = WindowLedger(directory: ledgerDirectory).load()
 
         let resolvedMeter: (meterID: String, label: String)

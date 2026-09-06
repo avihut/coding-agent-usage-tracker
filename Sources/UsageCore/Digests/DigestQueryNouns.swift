@@ -17,7 +17,11 @@ import Foundation
 extension DigestQuery {
     // MARK: - status
 
-    static func runStatus(parsed: ParsedArgs, digest: LiveState, now: Date, json: Bool) -> QueryOutput {
+    /// `profileID` is the account this invocation answered for — the
+    /// `account` field, so a script can confirm which section it read.
+    static func runStatus(
+        parsed: ParsedArgs, digest: LiveState, now: Date, json: Bool, profileID: String = Profile.defaultID
+    ) -> QueryOutput {
         if parsed.flags["check"] != nil {
             return QueryOutput(stdout: "", exitCode: digest.engine.stale ? exitStale : exitOK)
         }
@@ -25,7 +29,9 @@ extension DigestQuery {
         let unix = parsed.flags["unix"] != nil
         let relative = parsed.flags["relative"] != nil
         func resolve(_ field: String, asJSON: Bool) -> QueryOutput {
-            statusField(field, digest: digest, now: now, json: asJSON, unix: unix, relative: relative)
+            statusField(
+                field, digest: digest, now: now, json: asJSON, unix: unix, relative: relative,
+                profileID: profileID)
         }
         if let output = multiFieldOutput(
             noun: "status", parsed: parsed, positionalField: parsed.positionals.first, json: json,
@@ -59,10 +65,12 @@ extension DigestQuery {
     }
 
     private static func statusField(
-        _ field: String, digest: LiveState, now: Date, json: Bool, unix: Bool, relative: Bool
+        _ field: String, digest: LiveState, now: Date, json: Bool, unix: Bool, relative: Bool,
+        profileID: String
     ) -> QueryOutput {
         let engine = digest.engine
         switch field {
+        case "account": return DigestQueryFormat.textField(profileID, json: json)
         case "provider": return DigestQueryFormat.textField(engine.providerID, json: json)
         case "service": return DigestQueryFormat.textField(engine.serviceName, json: json)
         case "agent": return DigestQueryFormat.textField(engine.agentName, json: json)

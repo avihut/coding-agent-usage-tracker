@@ -17,7 +17,8 @@ extension DeepQuery {
     /// so the fallback literal would otherwise point every hermetic test
     /// at the REAL user's `~/Library/Application Support` history file).
     static func historyVerb(
-        parsed: DigestQuery.ParsedArgs, digest: LiveState?, providerID: String, now: Date,
+        parsed: DigestQuery.ParsedArgs, digest: LiveState?, providerID: String,
+        profileID: String = StorageScope.defaultProfileID, now: Date,
         historyDirectory: URL? = nil
     ) -> QueryOutput {
         var positionals = parsed.positionals
@@ -57,9 +58,8 @@ extension DeepQuery {
             cutoffs.append(cutoff)
         }
 
-        let directory = historyDirectory ?? StorageScope.supportDirectory(
-            bundleID: Bundle.main.bundleIdentifier ?? "com.avihu.ClaudeUsage", providerID: providerID,
-            profileID: StorageScope.defaultProfileID)
+        let directory = historyDirectory
+            ?? DeepQuery.profileDirectory(providerID: providerID, profileID: profileID)
         // `.sorted` makes synthetic test input well-defined; a no-op on a
         // real file, whose own `UsageHistory.thinned` already emits
         // chronological order.

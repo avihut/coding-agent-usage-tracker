@@ -53,6 +53,7 @@ public struct ClaudeProvider: UsageProvider {
     public var supportsMultipleHomes: Bool { true }
 
     public var homeDirectory: URL? { home.directory }
+    public var homeEnvironmentVariable: String? { "CLAUDE_CONFIG_DIR" }
 
     /// The same vendor, another directory: fresh credential chain, identity
     /// file, scanners and settings for THAT home; the HTTP client is shared

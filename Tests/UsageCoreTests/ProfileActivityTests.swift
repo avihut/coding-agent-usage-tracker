@@ -34,23 +34,35 @@ struct FocusRuleTests {
     private let now = Date(timeIntervalSince1970: 1_757_000_000)
 
     private func candidate(
-        _ id: String, order: Int = 0, ago: TimeInterval? = nil, eligible: Bool = true, shown: Bool = true
+        _ id: String, order: Int = 0, files: Int = 0, ago: TimeInterval? = nil, eligible: Bool = true,
+        shown: Bool = true
     ) -> FocusCandidate {
         FocusCandidate(
-            id: id, order: order, lastActivity: ago.map { now.addingTimeInterval(-$0) },
+            id: id, order: order, recentActivity: files, lastActivity: ago.map { now.addingTimeInterval(-$0) },
             eligible: eligible, shown: shown)
     }
 
-    @Test("the newest write wins")
-    func newestWrite() {
+    @Test("the most session files over the window wins, however recent the other's last write")
+    func volumeBeatsRecency() {
         let focused = FocusRule.focused(
-            [candidate("default", ago: 3600), candidate("c982130e", ago: 60)], pin: nil)
-        #expect(focused == "c982130e")
+            [candidate("default", files: 312, ago: 3600), candidate("c982130e", files: 41, ago: 60)], pin: nil)
+        #expect(focused == "default")
     }
 
-    @Test("a pin beats recency while it is eligible")
+    @Test("equal volume: the newest write breaks the tie")
+    func recencyBreaksTies() {
+        let focused = FocusRule.focused(
+            [candidate("default", files: 5, ago: 3600), candidate("c982130e", files: 5, ago: 60)], pin: nil)
+        #expect(focused == "c982130e")
+        // Nothing counted yet (a fresh host before its first reprobe): still the newest write.
+        let uncounted = FocusRule.focused(
+            [candidate("default", ago: 3600), candidate("c982130e", ago: 60)], pin: nil)
+        #expect(uncounted == "c982130e")
+    }
+
+    @Test("a pin beats volume and recency while it is eligible")
     func pinWins() {
-        let candidates = [candidate("default", ago: 3600), candidate("c982130e", ago: 60)]
+        let candidates = [candidate("default", files: 1, ago: 3600), candidate("c982130e", files: 9, ago: 60)]
         #expect(FocusRule.focused(candidates, pin: "default") == "default")
         #expect(FocusRule.focused(candidates, pin: "unknown") == "c982130e")
     }
@@ -64,11 +76,11 @@ struct FocusRuleTests {
         #expect(FocusRule.focused(candidates, pin: "c982130e") == "default")
     }
 
-    @Test("shown profiles are preferred over hidden ones")
+    @Test("shown profiles are preferred over hidden ones, whatever their volume")
     func shownPreferred() {
         let candidates = [
-            candidate("default", ago: 3600, shown: true),
-            candidate("c982130e", ago: 60, shown: false),
+            candidate("default", files: 2, ago: 3600, shown: true),
+            candidate("c982130e", files: 40, ago: 60, shown: false),
         ]
         #expect(FocusRule.focused(candidates, pin: nil) == "default")
         // Unless nothing shown exists.
@@ -124,11 +136,14 @@ struct LastActivityProbeTests {
         defer { root.tearDown() }
         let now = Date()
         try root.file("sessions/2026/09/06/rollout-1.jsonl", age: 300, now: now)
+        try root.file("sessions/2026/08/01/rollout-0.jsonl", age: 36 * 86400, now: now)
         let source = CodexActivitySource(root: root.url("sessions"), cacheDirectory: root.url("cache"))
         let last = try #require(source.lastActivity(now: now))
         #expect(abs(last.timeIntervalSince(now.addingTimeInterval(-300))) < 2)
+        #expect(source.recentActivity(since: now.addingTimeInterval(-ProfileActivity.window)) == 1)
         let empty = CodexActivitySource(root: root.url("none"), cacheDirectory: root.url("cache"))
         #expect(empty.lastActivity(now: now) == nil)
+        #expect(empty.recentActivity(since: .distantPast) == 0)
     }
 
     @Test("Claude's probe takes the newest of the prompt history and recent project files")
@@ -163,7 +178,7 @@ struct LastActivityProbeTests {
         #expect(ClaudeActivitySource(home: bare, cacheDirectory: homes.userHome).lastActivity(now: now) == nil)
     }
 
-    @Test("ProfileActivity.probe reads the identity record and the last write")
+    @Test("ProfileActivity.probe reads the identity record, the last write, and the window's file count")
     func probe() throws {
         let homes = try TempHomes()
         defer { homes.tearDown() }
@@ -171,6 +186,9 @@ struct LastActivityProbeTests {
         let home = homes.home(".claude-personal")
         let tree = TempTree(root: home.directory)
         try tree.file("history.jsonl", age: 30, now: now)
+        try tree.file("projects/-Users-x-a/s1.jsonl", age: 2 * 86400, now: now)
+        try tree.file("projects/-Users-x-a/s1/subagents/agent.jsonl", age: 2 * 86400, now: now)
+        try tree.file("projects/-Users-x-b/s2.jsonl", age: 20 * 86400, now: now)
         try tree.write(".claude.json", """
         {"oauthAccount":{"accountUuid":"u1","organizationUuid":"o1","emailAddress":"p@example.com"}}
         """)
@@ -178,6 +196,14 @@ struct LastActivityProbeTests {
         let probe = ProfileActivity.probe(provider: provider, cacheDirectory: homes.userHome, now: now)
         #expect(probe.identity?.email == "p@example.com")
         #expect(abs(probe.lastActivityAt!.timeIntervalSince(now.addingTimeInterval(-30))) < 2)
+        // The prompt history is not a session file; the 20-day-old transcript is outside the window.
+        #expect(probe.recentFiles == 2)
+
+        // A home with no projects tree counts nothing and is not an error.
+        let bare = homes.home(".claude-bare")
+        let bareProbe = ProfileActivity.probe(
+            provider: ClaudeProvider(home: bare), cacheDirectory: homes.userHome, now: now)
+        #expect(bareProbe.recentFiles == 0 && bareProbe.lastActivityAt == nil)
     }
 }
 

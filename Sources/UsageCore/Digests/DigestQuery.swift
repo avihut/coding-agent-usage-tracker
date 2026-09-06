@@ -45,9 +45,20 @@ public enum DigestQuery {
     /// anything else); public so a caller can enumerate it without a
     /// second copy of the list.
     public static let nouns: Set<String> = [
-        "status", "health", "account", "notices", "limits", "limit", "budget", "spend",
+        "status", "health", "account", "accounts", "notices", "limits", "limit", "budget", "spend",
         "activity", "cost", "models", "model",
         "sessions", "session", "prompt", "get",
+    ]
+
+    /// The nouns `--account` (and the provider's home variable) select for:
+    /// everything that reads one profile's section or its files. The
+    /// provider-level cards (`health`, `notices`), the vendor price list and
+    /// `transcript` (its path IS the account) refuse the flag as unknown and
+    /// never consult the environment — a status line under an unenrolled
+    /// `CLAUDE_CONFIG_DIR` still gets its prices and its health.
+    static let accountNouns: Set<String> = [
+        "status", "accounts", "account", "limits", "limit", "budget", "spend", "activity", "cost",
+        "models", "model", "sessions", "session", "prompt", "get", "history", "windows",
     ]
 
     /// `all`/`background`/`no-background` are M2 deep-verb flags —
@@ -71,7 +82,7 @@ public enum DigestQuery {
     /// here for the same one-shared-parser reason as the booleans above.
     private static let valueFlags: Set<String> = [
         "max-age", "digest", "provider", "day", "range", "since", "limit",
-        "project", "branch", "last", "fields",
+        "project", "branch", "last", "fields", "account",
     ]
 
     /// Which nouns each M2 flag is real for. Everything else gets the
@@ -89,6 +100,7 @@ public enum DigestQuery {
         // A comma list is legal wherever a single field name is — and only
         // where the noun actually renders one (`multiFieldNouns`).
         "fields": multiFieldNouns,
+        "account": accountNouns,
     ]
 
     static func rejectInapplicableFlags(noun: String, parsed: ParsedArgs) -> QueryOutput? {
@@ -101,9 +113,15 @@ public enum DigestQuery {
 
     // MARK: - Entry point
 
+    /// `profiles` and `homes` are the CLI's to supply (the app's stored
+    /// profile list and the provider's home facts — `DeepQuery
+    /// .storedProfiles`/`.storedHomes`); this function stays a pure
+    /// function of its arguments. With the defaults, only the digest's own
+    /// profiles are selectable and the environment selects nothing.
     public static func run(
         arguments: [String], digest: LiveState, rawDigest: Data,
-        environment: [String: String], now: Date
+        environment: [String: String], now: Date,
+        profiles: [Profile] = [], homes: ProfileSelector.Homes = .none
     ) -> QueryOutput {
         guard let noun = arguments.first else {
             return badQuery("no noun given — usage-cli <noun> [selector] [field] [flags]")
@@ -114,6 +132,21 @@ public enum DigestQuery {
         let parsed = parseArgs(Array(arguments.dropFirst()))
         if let error = parsed.error { return badQuery(error) }
         if let rejection = rejectInapplicableFlags(noun: noun, parsed: parsed) { return rejection }
+
+        // Which account answers — decided BEFORE the freshness gate, so
+        // `--max-age` judges the view that will be read. `get` walks the
+        // re-encoded view when a section was lifted; the focused profile's
+        // bytes stay the writer's own.
+        let view: ProfileView
+        switch selectProfile(
+            noun: noun, parsed: parsed, environment: environment, digest: digest,
+            profiles: profiles, homes: homes)
+        {
+        case .failure(let output): return output
+        case .success(let selected): view = selected
+        }
+        let digest = view.digest ?? digest
+        let rawDigest = view.projected ? ((try? LiveState.encoder().encode(digest)) ?? rawDigest) : rawDigest
 
         if let maxAgeText = parsed.flags["max-age"] {
             guard let maxAge = parseDuration(maxAgeText) else {
@@ -135,9 +168,13 @@ public enum DigestQuery {
         let raw = parsed.flags["raw"] != nil
 
         switch noun {
-        case "status": return runStatus(parsed: parsed, digest: digest, now: now, json: json)
+        case "status":
+            return runStatus(parsed: parsed, digest: digest, now: now, json: json, profileID: view.id)
         case "health": return runHealth(parsed: parsed, digest: digest, now: now, json: json)
         case "account": return runAccount(parsed: parsed, digest: digest, now: now, json: json)
+        case "accounts":
+            return runAccounts(
+                parsed: parsed, digest: digest, now: now, json: json, raw: raw, selectedID: view.id)
         case "notices": return runNotices(parsed: parsed, digest: digest, json: json, raw: raw)
         case "limits": return runLimits(parsed: parsed, digest: digest, json: json, raw: raw)
         case "limit": return runLimit(parsed: parsed, digest: digest, now: now, json: json)
@@ -163,6 +200,53 @@ public enum DigestQuery {
         case "get": return runGet(parsed: parsed, rawDigest: rawDigest, digest: digest, json: json)
         default: return badQuery("unknown noun '\(noun)'")
         }
+    }
+
+    // MARK: - Account selection
+
+    /// The digest as the selected profile sees it. `projected` = a section
+    /// other than the top level was lifted (so raw bytes must be
+    /// re-encoded); `digest` is nil only when the caller had none.
+    struct ProfileView {
+        let id: String
+        let digest: LiveState?
+        let projected: Bool
+    }
+
+    /// Shared by every entry point that answers per profile (`run` here,
+    /// `DeepQuery.run`, `DeepQuerySessionsCLI.run`). A noun outside
+    /// `accountNouns` is never selected for — it answers for the writer's
+    /// top level whatever the environment says. An unknown selection is
+    /// exit 20 with every known id listed; a profile the store enrolled but
+    /// the writer has not published yet is 20 too, worded apart.
+    static func selectProfile(
+        noun: String, parsed: ParsedArgs, environment: [String: String], digest: LiveState?,
+        profiles: [Profile], homes: ProfileSelector.Homes
+    ) -> Outcome<ProfileView> {
+        guard accountNouns.contains(noun) else {
+            return .success(ProfileView(
+                id: digest?.focusedProfile ?? Profile.defaultID, digest: digest, projected: false))
+        }
+        let selection: ProfileSelector.Selection
+        switch ProfileSelector.resolve(
+            flag: parsed.flags["account"], environment: environment, digest: digest,
+            profiles: profiles, homes: homes)
+        {
+        case .failure(let unknown): return .failure(noMatch(unknown.message))
+        case .success(let resolved): selection = resolved
+        }
+        guard let digest else {
+            return .success(ProfileView(id: selection.id, digest: nil, projected: false))
+        }
+        let focusedID = digest.focusedProfile ?? Profile.defaultID
+        if selection.id == focusedID {
+            return .success(ProfileView(id: selection.id, digest: digest, projected: false))
+        }
+        guard let view = digest.viewing(profile: selection.id) else {
+            return .failure(noMatch(
+                "account \(selection.id) is enrolled but not in the digest yet — the engine publishes it within a poll"))
+        }
+        return .success(ProfileView(id: selection.id, digest: view, projected: true))
     }
 
     // MARK: - Argument parsing

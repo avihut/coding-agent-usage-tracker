@@ -345,7 +345,8 @@ struct UsageCLI {
         if DeepQuerySessionsCLI.nouns.contains(noun) {
             let digest = digestData.flatMap { try? LiveState.decoder().decode(LiveState.self, from: $0) }
             let output = DeepQuerySessionsCLI.run(
-                noun: noun, arguments: Array(arguments.dropFirst()), digest: digest, now: Date())
+                noun: noun, arguments: Array(arguments.dropFirst()), digest: digest, now: Date(),
+                environment: ProcessInfo.processInfo.environment)
             emit(output)
             return
         }
@@ -363,9 +364,16 @@ struct UsageCLI {
                 "live-state digest at \(fileURL.path) does not decode (\(type(of: error))) — regenerate it",
                 code: 13)
         }
+        // The account selector's inputs: the app's stored profile list
+        // (the daemon's own view of it) and the digest's provider's home
+        // facts — `--account` and `$CLAUDE_CONFIG_DIR` resolve against
+        // these; `DigestQuery.run` itself stays pure.
+        let now = Date()
         let output = DigestQuery.run(
             arguments: arguments, digest: digest, rawDigest: data,
-            environment: ProcessInfo.processInfo.environment, now: Date())
+            environment: ProcessInfo.processInfo.environment, now: now,
+            profiles: DeepQuery.storedProfiles(providerID: digest.engine.providerID, now: now),
+            homes: DeepQuery.storedHomes(providerID: digest.engine.providerID))
         emit(output)
     }
 

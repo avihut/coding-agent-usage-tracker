@@ -36,6 +36,7 @@ struct DigestQueryFieldsTests {
         "status": ["status"],
         "health": ["health"],
         "account": ["account"],
+        "accounts": ["accounts"],
         "notices": ["notices"],
         "limit": ["limit", "session"],
         "budget": ["budget"],
