@@ -83,6 +83,36 @@ struct EngineHostTests {
         #expect(interval == ControlReply(ok: true, message: "interval 300"))
     }
 
+    @Test("the profile verbs round-trip over the socket")
+    func profileVerbsRoundTrip() async throws {
+        let url = shortTemp("control.sock")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let socket = ControlSocket(socketURL: url) { command in
+            switch command {
+            case .focusProfile(let id): ControlReply(ok: true, message: "focus \(id ?? "auto")")
+            case .refreshProfile(let id): ControlReply(ok: true, message: "refresh \(id)")
+            case .setProfileEnabled(let id, let enabled): ControlReply(ok: true, message: "\(id) \(enabled)")
+            case .profilesChanged: ControlReply(ok: true, message: "reloaded")
+            default: ControlReply(ok: false, message: "unhandled")
+            }
+        }
+        try socket.start()
+        defer { socket.stop() }
+
+        let pinned = await Task.detached { ControlSocket.send(.focusProfile(id: "c982130e"), to: url) }.value
+        #expect(pinned == ControlReply(ok: true, message: "focus c982130e"))
+        let cleared = await Task.detached { ControlSocket.send(.focusProfile(id: nil), to: url) }.value
+        #expect(cleared == ControlReply(ok: true, message: "focus auto"))
+        let refreshed = await Task.detached { ControlSocket.send(.refreshProfile(id: "default"), to: url) }.value
+        #expect(refreshed == ControlReply(ok: true, message: "refresh default"))
+        let toggled = await Task.detached {
+            ControlSocket.send(.setProfileEnabled(id: "x", enabled: false), to: url)
+        }.value
+        #expect(toggled == ControlReply(ok: true, message: "x false"))
+        let reloaded = await Task.detached { ControlSocket.send(.profilesChanged, to: url) }.value
+        #expect(reloaded == ControlReply(ok: true, message: "reloaded"))
+    }
+
     @Test("sending into a dead socket path returns nil, not an error")
     func socketDead() {
         let url = shortTemp("control.sock")

@@ -7,10 +7,16 @@ import Observation
 /// uniformly applied (spec §9).
 ///
 /// Core so any host process can run it: the menu bar app embeds it behind
-/// the `UsageStore` façade; `usaged` runs it as the launchd engine. Hosts
-/// inject their `UserDefaults` domain — the app passes `.standard`, the
-/// daemon the app's suite (same cfprefsd domain, different process) — and
-/// forward their platform wake signal to `noteWake()`.
+/// the `UsageStore` façade; `usaged` runs it as the launchd engine. Since
+/// 0.96.0 ONE engine meters ONE profile (an agent home under a provider)
+/// and `MeteringHost` runs one per enrolled profile: the vendor-level
+/// pieces — pricing, status, the notice ledger — live in the shared
+/// `ProviderServices`, the digest is folded by the host from the state
+/// each engine hands its `publish` sink, and the host owns the lease, the
+/// socket, the network monitor, and the update checker. Hosts inject
+/// their `UserDefaults` domain — the app passes `.standard`, the daemon the
+/// app's suite (same cfprefsd domain, different process) — and forward
+/// their platform wake signal to `noteWake()`.
 @MainActor
 @Observable
 public final class UsageEngine {
@@ -47,17 +53,9 @@ public final class UsageEngine {
     /// Per-session rollups from the last transcript scan, newest activity
     /// first; feeds the Sessions window's sidebar.
     public private(set) var sessions: [SessionSummary] = []
-    /// Best pricing table available (live feed, disk cache, or bundled).
-    public private(set) var pricing: PricingTable
-    public private(set) var isRefreshingPricing = false
-    /// Last manual pricing-refresh failure; cleared on the next attempt.
-    public private(set) var pricingRefreshError: String?
-    /// The provider's service health, or nil when it declares no status feed
-    /// (absent is not healthy — see `ServiceStatusCard`).
-    public private(set) var serviceStatus: ServiceStatusCard?
-    /// This app's newest published release, or nil when no updater runs
-    /// (source-managed builds check nothing — see `AppUpdateCard`).
-    public private(set) var appUpdate: AppUpdateCard?
+    /// Best pricing table available — the provider services' table, shared
+    /// by every profile of the provider.
+    public var pricing: PricingTable { services.pricing }
     /// The signed-in-account presence card, rebuilt on every publish; nil
     /// when the provider declares no identity source, or before the first
     /// observation. Absent never means "no account" (spec §10 amendment
@@ -67,14 +65,9 @@ public final class UsageEngine {
     /// sidebar labels its rows against this. Nil when nothing tracks
     /// accounts.
     public var presenceTimeline: AccountTimeline? { presence?.timeline }
-    /// Pending notifications as the digest phrases them, rebuilt on every
-    /// publish — the hosting app's panel and menu bar read this; a client
-    /// reads the same card off the digest.
-    public private(set) var notices: NoticesCard?
-    /// Every incident within retention — the charts' outage floor. Derived
-    /// from the notice ledger's whole record (dismissed rows included) at
-    /// each publish; empty when the provider declares no status feed.
-    public private(set) var outages: [OutageSpan] = []
+    /// The engine's latest publish — the host folds one per profile into
+    /// the digest it writes.
+    public private(set) var lastPublished: LiveState?
 
     /// The one metered service this instance tracks. Everything
     /// vendor-specific — endpoints, paths, names, links — flows from here.
@@ -92,27 +85,25 @@ public final class UsageEngine {
     /// through `SystemAccentPalette`) — published so terminal clients tint
     /// normal-state fills like the app's own controls. Nil = provider accent.
     private let systemAccent: RGBColor?
-    /// Publishes live-state.json after every landing point — consumer
-    /// interfaces (the TUI, a client-mode app) render from that file.
-    private let publisher: StatePublisher
+    /// The profile (account) this engine meters — `default` for the
+    /// provider's standard home.
+    public let profileID: String
+    /// Vendor-level services shared by every profile's engine: pricing,
+    /// the status poller, the notice ledger's one writer.
+    public let services: ProviderServices
+    /// Where each landing point's digest goes — the host folds it into
+    /// live-state.json beside the other profiles' sections.
+    private let publish: @MainActor (LiveState) -> Void
+    /// The FSEvents push signal, forwarded to the host for focus (D9).
+    public var onAgentActivity: ((Date) -> Void)?
     private let service: UsageService
     private let history: UsageHistory
     private let windowLedger: WindowLedger
-    private let pricingService: PricingService
     private var gate: TriggerGate
     private let scheduler = Scheduler()
     private var cadence: AdaptiveCadence
     private var ledger: RequestLedger
     private var watcher: AgentActivityWatcher?
-    /// Polls the provider's status page; nil when the provider declares no
-    /// feed. Its cadence is entirely its own — status has nothing to do with
-    /// the usage poll's gate, backoff, or activity signal.
-    private var statusPoller: StatusPoller?
-    /// Checks the distribution channel's release feed; nil when the install
-    /// belongs to no channel (bare executables) or its channel declares no
-    /// feed (`Distribution`). App-scoped, so it neither rides the provider
-    /// seam nor cares which harness is metered.
-    private var updateChecker: UpdateChecker?
     /// Reads "who is signed in" from the agent's own local record; nil when
     /// the provider declares none. A plain file read — never the Keychain,
     /// never the network (spec §10 amendment 2026-08-25).
@@ -120,20 +111,14 @@ public final class UsageEngine {
     /// The observed-epochs presence ledger; nil exactly when
     /// `identitySource` is. Engine-confined single writer, like `history`.
     private var presence: AccountPresenceLedger?
-    /// What the engine noticed and hasn't been told to forget — vendor
-    /// resets read off the samples, incidents read off the status card.
-    /// Engine-confined single writer like `history`; faces mark seen and
-    /// dismiss over the control socket.
-    private var noticeLedger: NoticeLedger
     private var lastActivityScan: Date?
     /// Single-flight for transcript scans: a window-open force-scan must not
     /// overlap an FSEvents-triggered one — two concurrent scans race their
     /// MainActor assignments and can land stale-last.
     private var isScanningActivity = false
-    private var lastPricingAttempt: Date?
 
     public static let defaultInterval: TimeInterval = 300
-    private static let intervalKey = "refreshIntervalSeconds"
+    static let intervalKey = "refreshIntervalSeconds"
     public static let warningThresholdKey = "warningThresholdPercent"
     public static let criticalThresholdKey = "criticalThresholdPercent"
     /// The learned endpoint budget is a fact about THIS provider's API, so
@@ -151,26 +136,39 @@ public final class UsageEngine {
     /// state, "never" hides the feature.
     public var providesSessions: Bool { localActivity?.providesSessions ?? false }
 
+    /// The user's active pace as stored — the host reads it for the digest
+    /// before any engine exists. Stored 60s choices predate the 180s floor:
+    /// clamp, don't honor.
+    public static func activeInterval(from defaults: UserDefaults) -> TimeInterval {
+        let stored = defaults.double(forKey: intervalKey)
+        return stored >= 60 ? max(TriggerGate.floor, stored) : defaultInterval
+    }
+
+    /// `launchDelay` > 0 defers the launch poll (the host staggers its
+    /// engines across the gate floor); the cached snapshot renders in the
+    /// meantime. `publish` receives every landing point's digest.
     public init(
-        provider: any UsageProvider = ClaudeProvider(),
+        provider: any UsageProvider,
+        profileID: String,
+        services: ProviderServices,
         service: UsageService? = nil,
-        defaults: UserDefaults = .standard,
-        bundleID: String? = nil,
-        host: Host = .app,
+        defaults: UserDefaults,
+        bundleID: String,
+        roots: StorageScope.Roots = .standard,
+        host: Host,
         gateSeed: Date? = nil,
-        systemAccent: RGBColor? = nil
+        systemAccent: RGBColor? = nil,
+        launchDelay: TimeInterval = 0,
+        publish: @escaping @MainActor (LiveState) -> Void
     ) {
-        let bundleID = bundleID ?? Bundle.main.bundleIdentifier ?? "com.avihu.ClaudeUsage"
-        let profileID = StorageScope.defaultProfileID
         let support = StorageScope.supportDirectory(
-            bundleID: bundleID, providerID: provider.id, profileID: profileID)
+            bundleID: bundleID, providerID: provider.id, profileID: profileID, roots: roots)
         let caches = StorageScope.cachesDirectory(
-            bundleID: bundleID, providerID: provider.id, profileID: profileID)
-        // Vendor-level artifacts (pricing, notices) sit one level up, shared
-        // by every profile of the provider.
-        let providerSupport = StorageScope.providerDirectory(
-            bundleID: bundleID, providerID: provider.id)
+            bundleID: bundleID, providerID: provider.id, profileID: profileID, roots: roots)
         self.provider = provider
+        self.profileID = profileID
+        self.services = services
+        self.publish = publish
         self.defaults = defaults
         self.hostKind = host
         self.systemAccent = systemAccent
@@ -178,7 +176,6 @@ public final class UsageEngine {
         // host's last fetch (the digest's stamp) — a handover must never
         // double-poll inside the floor.
         self.gate = TriggerGate(lastAllowed: gateSeed)
-        self.publisher = StatePublisher(fileURL: LiveState.fileURL(bundleID: bundleID))
         self.localActivity = provider.makeLocalActivity(cacheDirectory: support)
         self.service = service
             ?? UsageService(provider: provider, cache: UsageCache(directory: caches))
@@ -187,13 +184,7 @@ public final class UsageEngine {
         self.identitySource = provider.accountIdentity
         self.presence = provider.accountIdentity == nil
             ? nil : AccountPresenceLedger(directory: support)
-        self.pricingService = PricingService(
-            cacheDirectory: providerSupport, fallback: provider.bundledRates,
-            selector: provider.pricingSelector)
-        self.pricing = pricingService.current()
-        let stored = defaults.double(forKey: Self.intervalKey)
-        // Stored 60s choices predate the 180s floor — clamp, don't honor.
-        let interval = stored >= 60 ? max(TriggerGate.floor, stored) : Self.defaultInterval
+        let interval = Self.activeInterval(from: defaults)
         self.activeInterval = interval
         self.cadence = AdaptiveCadence(activeInterval: interval, now: Date())
         self.ceilingKey = StorageScope.scopedKey(
@@ -203,18 +194,20 @@ public final class UsageEngine {
             ceiling: storedCeiling > 0 ? storedCeiling : RequestLedger.defaultCeiling)
         self.samples = history.load()
         self.windowOutcomes = windowLedger.load()
-        self.noticeLedger = NoticeLedger(directory: providerSupport)
         // Catch-up: grants already in the sample history that no ledger
         // recorded (the first run after the feature landed, a ledger lost).
         // Two days, matching the wake-time incident backfill's reach.
-        NoticeDetector.noteGrants(
-            samples: samples, since: Date().addingTimeInterval(-Self.noticeCatchUp),
-            now: Date(), into: &noticeLedger)
+        let catchUpSince = Date().addingTimeInterval(-ProviderServices.noticeCatchUp)
+        let catchUpSamples = samples
+        services.notices.mutate {
+            NoticeDetector.noteGrants(
+                samples: catchUpSamples, since: catchUpSince, now: Date(), into: &$0,
+                profileID: profileID)
+        }
 
         scheduler.onTrigger = { [weak self] reason in
             self?.refresh(reason)
         }
-        scheduler.start()
         // The agent writing a transcript is the push signal that the service
         // is in use. When its directories don't exist (the agent never ran
         // on this machine) the pull signal — percentages moving between
@@ -224,64 +217,22 @@ public final class UsageEngine {
         ) { [weak self] in
             self?.noteLocalAgentActivity()
         }
-        if case .statuspage(let base, let pageURL) = provider.statusFeed {
-            let poller = StatusPoller(
-                feed: StatuspageFeed(base: base), providerID: provider.id,
-                pageURL: pageURL.absoluteString)
-            poller.onCard = { [weak self] card in
-                guard let self, !self.isShutDown else { return }
-                self.serviceStatus = card
-                // An incident opening, changing, or resolving is a notice
-                // transition; the ledger reads every card.
-                NoticeDetector.apply(card: card, now: Date(), into: &self.noticeLedger)
-                // A card change is a landing point like any other — consumers
-                // learn about an incident from the digest, not from polling.
-                self.publishState()
-            }
-            poller.onHistory = { [weak self] history in
-                guard let self, !self.isShutDown else { return }
-                let now = Date()
-                // Two days of incidents are news; the rest of the retention
-                // window lands as already-dismissed facts for the charts'
-                // outage floor, so a fresh ledger never floods the panel.
-                if NoticeDetector.backfill(
-                    history: history, since: now.addingTimeInterval(-Self.noticeCatchUp),
-                    factsSince: now.addingTimeInterval(-OutageTimeline.retention),
-                    now: now, into: &self.noticeLedger) {
-                    self.publishState(now: now)
-                }
-            }
-            statusPoller = poller
-            poller.start()
-        }
-        // Both GitHub flavors poll the feed — a source checkout can't
-        // self-install but still deserves to know it's behind. The drill's
-        // override both supplies the URL and forces the checker on.
-        let channel = Distribution.channel(for: Bundle.main.bundleURL)
-        let feedOverride = defaults.string(forKey: UpdateChecker.feedOverrideKey)
-            .flatMap(URL.init(string:))
-        if let feedURL = feedOverride ?? channel?.updateFeedURL {
-            let checker = UpdateChecker(
-                feed: UpdateFeed(latestReleaseURL: feedURL),
-                currentVersion: AppIdentity.version, defaults: defaults)
-            checker.onCard = { [weak self] card in
-                guard let self, !self.isShutDown else { return }
-                self.appUpdate = card
-                self.publishState()
-            }
-            updateChecker = checker
-            checker.start()
-        }
         // Who is signed in, before anything scans or publishes: the first
         // scan's attribution must run against a timeline that already
         // includes the present.
         observeAccountIdentity()
-        refresh(.launch)
+        if launchDelay > 0 {
+            scheduler.schedule(after: launchDelay)
+            nextRefreshAt = scheduler.nextFireDate
+        } else {
+            refresh(.launch)
+        }
         // A seeded gate can deny that launch poll (the previous host
         // fetched moments ago — a takeover inside the floor; isRefreshing
-        // stays false on the denied path). The cache holds that same
-        // fetch: present it as live rather than a loading shell — the
-        // already-scheduled poll replaces it soon enough.
+        // stays false on the denied path), and a staggered engine hasn't
+        // polled yet. The cache holds the last fetch: present it as live
+        // rather than a loading shell — the scheduled poll replaces it
+        // soon enough.
         if !isRefreshing, case .loading = state,
            let snapshot = self.service.cachedSnapshot(thresholds: currentThresholds()) {
             state = .live(snapshot)
@@ -301,57 +252,30 @@ public final class UsageEngine {
         presence?.flush()
         scheduler.stop()
         watcher = nil
-        statusPoller?.stop()
-        statusPoller = nil
-        updateChecker?.stop()
-        updateChecker = nil
         nextRefreshAt = nil
     }
 
     /// A wake impulse from the host process — the app's NSWorkspace
     /// observer, the daemon's IOKit power callback. Stale numbers after
-    /// lid-open are what make these widgets feel broken (spec §9) — and a
-    /// status card from before the lid closed is stale in exactly the same
-    /// way, so both refresh here.
+    /// lid-open are what make these widgets feel broken (spec §9). The
+    /// status and history pokes are the provider services' — once per
+    /// provider, not once per engine.
     public func noteWake() {
         // A lid-open is the classic moment a login changed elsewhere-in-time
         // (the user was away); look before the wake poll publishes anything.
         observeAccountIdentity()
         refresh(.wake)
-        statusPoller?.pollNow()
-        // An incident that opened and closed during the sleep is gone from
-        // the summary an hour after resolving; the history read finds it.
-        statusPoller?.pollHistoryNow()
-        updateChecker?.pokeIfStale()
     }
 
-    /// How far back a start-up or wake catch-up reaches for grants in the
-    /// sample history and resolved incidents in the page's history.
-    static let noticeCatchUp: TimeInterval = 48 * 3600
-
-    // MARK: - Notices
-
-    /// A face rendered these pending notices (the panel opened, the hover
-    /// popover showed, the TUI drew). Seen is not dismissed: the indicator
-    /// stays until a click, but an ongoing outage's epilogue will read
-    /// "ended" rather than recount what was watched.
-    public func markNoticesSeen(_ ids: [String]) {
-        guard !isShutDown, !ids.isEmpty else { return }
-        if noticeLedger.markSeen(ids: ids) { publishState() }
+    /// The host's one network monitor saw the path come back.
+    public func noteNetworkRestored() {
+        refresh(.networkRestored)
     }
 
-    /// The person's ×. False when the notice is ongoing (or unknown).
-    @discardableResult
-    public func dismissNotice(id: String) -> Bool {
-        guard !isShutDown else { return false }
-        let ok = noticeLedger.dismiss(id: id)
-        if ok { publishState() }
-        return ok
-    }
-
-    public func dismissAllNotices() {
-        guard !isShutDown else { return }
-        if noticeLedger.dismissAll() { publishState() }
+    /// Republish on the host's request — a provider-level card changed and
+    /// the host wants this profile's section fresh beside it.
+    public func publishNow() {
+        publishState()
     }
 
     /// One presence observation — rides every landing point that could
@@ -369,20 +293,6 @@ public final class UsageEngine {
         let changed = ledger.observe(identitySource.currentIdentity(), at: now)
         presence = ledger
         if changed { publishState(now: now) }
-    }
-
-    /// An out-of-band status read — the control socket's `refreshStatus`,
-    /// which the app fires when a panel opens on an aging card. Rationed by
-    /// the feed's own CDN spacing, so poking is always safe.
-    public func refreshServiceStatus() {
-        statusPoller?.pollNow()
-    }
-
-    /// A user-asked release check — Settings' "Check Now", the control
-    /// socket's `checkUpdates`. Floor-gated in the checker, so clicking in
-    /// a loop can't turn into a hot loop against GitHub.
-    public func checkForUpdates() {
-        updateChecker?.checkNow()
     }
 
     public func refresh(_ reason: RefreshReason) {
@@ -442,21 +352,26 @@ public final class UsageEngine {
                 // The vendor emptying a meter inside its window is news;
                 // the recent tail is enough to see the drop, the ledger's
                 // tolerance keeps a re-read from filing it twice.
-                NoticeDetector.noteGrants(
-                    samples: samples, since: Date().addingTimeInterval(-3 * 3600),
-                    now: Date(), into: &noticeLedger)
+                let recent = samples
+                services.notices.mutate {
+                    NoticeDetector.noteGrants(
+                        samples: recent, since: Date().addingTimeInterval(-3 * 3600),
+                        now: Date(), into: &$0, profileID: profileID)
+                }
                 recomputePredictions(for: snapshot)
             }
             // The heartbeat: every completed cycle rewrites the digest, so
             // its freshness IS the engine's liveness signal.
             publishState()
-            await refreshPricingIfNeeded()
+            await services.refreshPricingIfStale()
         }
     }
 
-    /// Snapshots the whole renderable state into live-state.json. Cheap on
-    /// the main actor (array mirrors and per-meter assembly over capped
-    /// series); encoding and IO happen on the publisher's own queue.
+    /// Snapshots this profile's renderable state and hands it to the host,
+    /// which folds it into live-state.json. Cheap on the main actor (array
+    /// mirrors and per-meter assembly over capped series); the host's
+    /// publisher does the encoding and IO off-main. Provider-level cards
+    /// (status, update, notices, outages) are the host's to attach.
     private func publishState(now: Date = Date()) {
         guard !isShutDown else { return }
         let grace = defaults.object(forKey: ActivityGrace.storageKey) == nil
@@ -483,19 +398,13 @@ public final class UsageEngine {
             backoffUntil: cadence.backoffUntil,
             apiBudget: isLocalProvider ? nil : apiBudget(now: now),
             systemAccent: systemAccent,
-            serviceStatus: serviceStatus,
-            appUpdate: appUpdate,
             presence: presence.map {
                 AccountPresenceInput(epochs: $0.epochs, observedAt: $0.observedAt)
             },
-            notices: noticeLedger.pending,
-            outages: provider.statusFeed == nil
-                ? nil : OutageTimeline.spans(from: noticeLedger.notices, now: now),
             now: now)
         accountPresence = digest.accountPresence
-        notices = digest.notices
-        outages = digest.outages ?? []
-        publisher.publish(digest)
+        lastPublished = digest
+        publish(digest)
     }
 
     /// How close the last hour of requests is to the endpoint's estimated
@@ -549,39 +458,6 @@ public final class UsageEngine {
         publishState()
     }
 
-    /// Piggybacks on usage refreshes: at most one feed fetch attempt per
-    /// hour, and only while the table is older than a day (or bundled).
-    private func refreshPricingIfNeeded() async {
-        let now = Date()
-        guard pricing.isStale(now: now) else { return }
-        if let last = lastPricingAttempt, now.timeIntervalSince(last) < 3600 { return }
-        lastPricingAttempt = now
-        if let fresh = await pricingService.refreshIfStale(now: now) {
-            pricing = fresh
-            publishState()
-        }
-    }
-
-    /// The settings screen's refresh button — always fetches (the automatic
-    /// path above stays daily). Single-flighted; failure text lands beside
-    /// the button instead of in a log nobody reads.
-    public func refreshPricingNow() {
-        guard !isRefreshingPricing else { return }
-        isRefreshingPricing = true
-        pricingRefreshError = nil
-        Task {
-            do {
-                pricing = try await pricingService.refreshNow()
-                publishState()
-            } catch let error as PricingFeedError {
-                pricingRefreshError = error.shortText
-            } catch {
-                pricingRefreshError = "unexpected error"
-            }
-            isRefreshingPricing = false
-        }
-    }
-
     /// The FSEvents watcher saw the agent write a transcript: snap the
     /// cadence back to the active pace, and fetch now whenever the displayed
     /// data is older than that pace, so re-engaging always catches the meters
@@ -589,6 +465,7 @@ public final class UsageEngine {
     /// warm the whole time.
     func noteLocalAgentActivity() {
         let now = Date()
+        onAgentActivity?(now)
         cadence.noteActivity(at: now)
         scanActivity() // transcripts changed; the heatmap follows (1/min throttle)
         guard !cadence.isBackingOff(now: now) else { return }

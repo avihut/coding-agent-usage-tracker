@@ -95,14 +95,13 @@ struct Usaged {
     }
 }
 
-/// Owns the daemon's moving parts and the engine's lifecycle (a provider
-/// switch rebuilds the engine in place, keeping socket and lease).
+/// Owns the daemon's moving parts and the metering host's lifecycle (a
+/// provider switch rebuilds the host in place, keeping the lease).
 @MainActor
 final class DaemonHost {
     private let defaults: UserDefaults
     private let lease: EngineLease
-    private var engine: UsageEngine?
-    private var socket: ControlSocket?
+    private var host: MeteringHost?
     private var wake: WakeMonitor?
     private var markerTimer: Timer?
     private var leaseTimer: Timer?
@@ -128,11 +127,11 @@ final class DaemonHost {
         markerTimer = marker
 
         tryAcquire()
-        guard engine == nil else { return }
+        guard host == nil else { return }
         let retry = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { _ in
             Task { @MainActor in
                 self.tryAcquire()
-                if self.engine != nil { self.leaseTimer?.invalidate() }
+                if self.host != nil { self.leaseTimer?.invalidate() }
             }
         }
         retry.tolerance = 0.5
@@ -145,24 +144,25 @@ final class DaemonHost {
     }
 
     private func tryAcquire() {
-        guard engine == nil, lease.acquire() else { return }
+        guard host == nil, lease.acquire() else { return }
         log("lease acquired — hosting the engine")
-        startEngine()
-        startSocket()
+        startHost()
         wake = WakeMonitor { [weak self] in
-            self?.engine?.noteWake()
+            self?.host?.noteWake()
         }
         scheduleDailyRedetect()
     }
 
-    private func startEngine() {
+    /// The host binds the control socket, runs one engine per enrolled
+    /// profile beside the provider services, and folds the digest.
+    private func startHost() {
         let provider = resolveProvider()
         activeProviderID = provider.id
         // Model names in the digest come from the active catalog, exactly
         // as the app's registry installs it.
         ModelNames.catalog = provider.modelCatalog
-        // Seed the refresh gate from the previous host's digest so the
-        // handover cannot double-poll inside the floor.
+        // Seed each profile's refresh gate from the previous host's digest
+        // so the handover cannot double-poll inside the floor.
         let previous = try? LiveState.decoder().decode(
             LiveState.self,
             from: Data(contentsOf: LiveState.fileURL(bundleID: Usaged.bundleID)))
@@ -171,10 +171,32 @@ final class DaemonHost {
         // through the pinned dark-appearance swatch table.
         let accentChoice = UserDefaults.standard.object(
             forKey: SystemAccentPalette.defaultsKey) as? Int
-        engine = UsageEngine(
-            provider: provider, defaults: defaults, bundleID: Usaged.bundleID,
-            host: .daemon, gateSeed: previous?.engine.fetchedAt,
+        let host = MeteringHost(
+            provider: provider, defaults: defaults,
+            configuration: MeteringHost.Configuration(
+                bundleID: Usaged.bundleID, kind: .daemon,
+                updateFeedURL: MeteringHost.Configuration.updateFeedURL(defaults: defaults)),
+            gateSeeds: previous?.gateSeeds() ?? [:],
             systemAccent: SystemAccentPalette.color(appleAccentColor: accentChoice))
+        host.onLog = { [weak self] message in self?.log(message) }
+        host.onSetProvider = { [weak self] id in
+            guard let self else { return ControlReply(ok: false, message: "host gone") }
+            self.defaults.set(id, forKey: HarnessResolution.selectionKey)
+            self.rebuildHost()
+            return ControlReply(ok: true, message: "provider \(self.activeProviderID)")
+        }
+        host.onShutdown = { [weak self] in
+            guard let self else { return ControlReply(ok: false, message: "host gone") }
+            self.log("shutdown by socket command")
+            self.host?.shutdown()
+            self.lease.release()
+            // Reply races process exit by design; the socket write happens
+            // before this task yields back.
+            Task { @MainActor in exit(0) }
+            return ControlReply(ok: true, message: "stopping")
+        }
+        self.host = host
+        host.start()
     }
 
     private func resolveProvider() -> any UsageProvider {
@@ -190,77 +212,9 @@ final class DaemonHost {
         return providers.first { $0.id == id } ?? providers[0]
     }
 
-    private func rebuildEngine() {
-        engine?.shutdown()
-        startEngine()
-    }
-
-    private func startSocket() {
-        let socket = ControlSocket(
-            socketURL: EngineHostBroker.socketURL(bundleID: Usaged.bundleID)
-        ) { [weak self] command in
-            await self?.handle(command) ?? ControlReply(ok: false, message: "host gone")
-        }
-        do {
-            try socket.start()
-            self.socket = socket
-        } catch {
-            log("control socket failed to bind: \(error)")
-        }
-    }
-
-    private func handle(_ command: ControlCommand) async -> ControlReply {
-        guard let engine else { return ControlReply(ok: false, message: "engine not running") }
-        switch command {
-        case .status:
-            return ControlReply(
-                ok: true,
-                message: "daemon pid \(ProcessInfo.processInfo.processIdentifier), "
-                    + "provider \(activeProviderID), v\(AppIdentity.version)")
-        case .refresh:
-            engine.refresh(.manual)
-            return ControlReply(ok: true, message: "refresh requested (gate may coalesce)")
-        case .setInterval(let seconds):
-            engine.setActiveInterval(seconds)
-            return ControlReply(ok: true, message: "interval \(Int(engine.activeInterval))s")
-        case .setProvider(let id):
-            defaults.set(id, forKey: HarnessResolution.selectionKey)
-            rebuildEngine()
-            return ControlReply(ok: true, message: "provider \(activeProviderID)")
-        case .settingsChanged:
-            engine.thresholdsChanged()
-            return ControlReply(ok: true)
-        case .refreshPricing:
-            engine.refreshPricingNow()
-            return ControlReply(ok: true)
-        case .scanNow:
-            engine.scanActivity(force: true)
-            return ControlReply(ok: true)
-        case .refreshStatus:
-            engine.refreshServiceStatus()
-            return ControlReply(ok: true)
-        case .checkUpdates:
-            engine.checkForUpdates()
-            return ControlReply(ok: true)
-        case .markNoticesSeen(let ids):
-            engine.markNoticesSeen(ids)
-            return ControlReply(ok: true)
-        case .dismissNotice(let id):
-            let ok = engine.dismissNotice(id: id)
-            return ControlReply(ok: ok, message: ok ? nil : "not dismissable")
-        case .dismissAllNotices:
-            engine.dismissAllNotices()
-            return ControlReply(ok: true)
-        case .shutdown:
-            log("shutdown by socket command")
-            engine.shutdown()
-            socket?.stop()
-            lease.release()
-            // Reply races process exit by design; the socket write happens
-            // before this task yields back.
-            Task { @MainActor in exit(0) }
-            return ControlReply(ok: true, message: "stopping")
-        }
+    private func rebuildHost() {
+        host?.shutdown()
+        startHost()
     }
 
     /// Auto mode follows the machine: a daily pass re-ranks the harness
@@ -276,7 +230,7 @@ final class DaemonHost {
                 let winner = self.resolveProvider()
                 if winner.id != self.activeProviderID {
                     self.log("redetect: \(self.activeProviderID) → \(winner.id)")
-                    self.rebuildEngine()
+                    self.rebuildHost()
                 }
             }
         }

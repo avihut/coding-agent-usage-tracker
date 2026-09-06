@@ -83,9 +83,11 @@ final class StatusItemController: NSResponder {
         return host
     }
 
-    /// Re-binds every surface to a new active store and retires the old
-    /// one. The registry already installed the new provider's model catalog
-    /// before calling here, so the rebuilt views name models correctly.
+    /// Re-binds every surface to a new active store — a provider switch or
+    /// a focus change. The registry retires faces (a face's engine is the
+    /// host's, its client reader its own) and already installed the new
+    /// provider's model catalog before calling here, so the rebuilt views
+    /// name models correctly.
     private func adopt(_ newStore: UsageStore) {
         guard newStore !== store else { return }
         hoverTask?.cancel()
@@ -97,9 +99,7 @@ final class StatusItemController: NSResponder {
         // before the outgoing store shuts down under the window's views.
         sessionsController?.close()
         sessionsController = nil
-        let outgoing = store
         store = newStore
-        outgoing.shutdown()
         popover.contentViewController = makePanelHost()
         observeState()
         render()

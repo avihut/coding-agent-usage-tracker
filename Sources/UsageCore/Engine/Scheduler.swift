@@ -1,19 +1,17 @@
 import Foundation
-import Network
 
 /// Emits refresh triggers; owns no refresh logic or cadence. The engine
 /// decides whether a trigger actually runs (gate + single-flight + backoff)
 /// and schedules every fire one-shot, so the delay can change between polls.
-/// System wake is the one impulse the host process must supply itself
-/// (`UsageEngine.noteWake()`) — the app's NSWorkspace observer and the
-/// daemon's IOKit power callback both live outside core.
+/// The other impulses arrive from the host process: system wake
+/// (`UsageEngine.noteWake()` — the app's NSWorkspace observer, the daemon's
+/// IOKit power callback) and network restore (`noteNetworkRestored()`, from
+/// the host's one `NetworkMonitor`).
 @MainActor
 final class Scheduler {
     var onTrigger: ((UsageEngine.RefreshReason) -> Void)?
 
     private var timer: Timer?
-    private var pathMonitor: NWPathMonitor?
-    private var networkWasSatisfied = true
 
     /// When the pending one-shot will fire; nil once it has fired, which is
     /// how the engine tells a live timer from a spent one.
@@ -22,30 +20,10 @@ final class Scheduler {
         return timer.fireDate
     }
 
-    /// Starts the event sources. Polling is driven by `schedule(after:)`.
-    func start() {
-        let monitor = NWPathMonitor()
-        monitor.pathUpdateHandler = { [weak self] path in
-            let satisfied = path.status == .satisfied
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                if satisfied && !self.networkWasSatisfied {
-                    self.onTrigger?(.networkRestored)
-                }
-                self.networkWasSatisfied = satisfied
-            }
-        }
-        monitor.start(queue: DispatchQueue(label: "com.avihu.ClaudeUsage.network-monitor"))
-        pathMonitor = monitor
-    }
-
-    /// Tears the event sources down — the path monitor would otherwise keep
-    /// its queue alive. Called when the engine's host retires it.
+    /// Tears the timer down. Called when the engine's host retires it.
     func stop() {
         timer?.invalidate()
         timer = nil
-        pathMonitor?.cancel()
-        pathMonitor = nil
         onTrigger = nil
     }
 

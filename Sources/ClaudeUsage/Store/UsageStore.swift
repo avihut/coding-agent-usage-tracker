@@ -3,88 +3,89 @@ import Foundation
 import Observation
 import UsageCore
 
-/// The app's single source of truth — a thin façade with two modes behind
+/// One profile's (account's) face — a thin façade with two modes behind
 /// one historical member surface (Observation tracks straight through the
 /// computed forwards, so views and controllers never know which mode is
 /// live):
 ///
-/// - **hosting**: no daemon anywhere — the app takes the engine lease and
-///   runs core `UsageEngine` in-process (the embedded fallback).
-/// - **client**: `usaged` holds the engine — the app renders its digest
-///   through `DigestClient` and sends commands over the control socket.
+/// - **hosting**: this app holds the engine lease and runs core
+///   `MeteringHost`; the face reads its own profile's engine off the host
+///   (nil while the profile is dormant or disabled — nothing runs for it).
+/// - **client**: `usaged` holds the engine — the face renders its profile's
+///   section of the digest through `DigestClient` and sends commands over
+///   the control socket.
 ///
-/// The daemon wins: a hosting app yields within ~30s of a daemon
-/// announcing itself (daemon.alive marker), and a client app takes over
-/// only when the digest heartbeat is stale beyond doubt AND the lease is
-/// free — seeding the refresh gate from the dead host's last fetch so a
-/// handover never double-polls.
+/// Host arbitration — who holds the lease, when to yield, when to take
+/// over — is the registry's (`ProviderRegistry`), ONCE per process; a face
+/// only flips modes when told (`adopt`). Provider-level facts (status,
+/// update, notices, outages) come from the host or the digest's top level;
+/// the launch hatches' fakes overlay them here.
 @MainActor
 @Observable
 final class UsageStore {
-    private enum Mode {
-        case hosting(UsageEngine)
+    enum Mode {
+        case hosting(MeteringHost)
         case client(DigestClient)
     }
 
     private var mode: Mode
-    @ObservationIgnored private let lease: EngineLease
-    /// The host trio travels together: whoever runs the engine also runs
-    /// the publisher (inside the engine) and this command socket — a TUI
-    /// against the app-hosted engine works identically to one against
-    /// usaged.
-    @ObservationIgnored private var socket: ControlSocket?
-    @ObservationIgnored private let bundleID: String
+    @ObservationIgnored let bundleID: String
     @ObservationIgnored private let providerValue: any UsageProvider
-    @ObservationIgnored private let serviceOverride: UsageService?
+    /// The profile this face renders.
+    let profile: Profile
+    /// Set by the registry from the host's (or the digest's) facts.
+    var isFocused = false
+    var isDormant = false
+    var lastActivityAt: Date?
     /// User-chosen session names, overlaid on derived titles in `sessions`.
     /// Observable state: a rename re-renders every surface that shows the
     /// title (sidebar, shortlist, detail header) in the same tick.
     private var sessionNames: [String: String] = [:]
     private var renamesFile: SessionRenames {
         SessionRenames(directory: StorageScope.supportDirectory(
-            bundleID: bundleID, providerID: providerValue.id,
-            profileID: StorageScope.defaultProfileID))
+            bundleID: bundleID, providerID: providerValue.id, profileID: profile.id))
     }
-    @ObservationIgnored private var roleTimer: Timer?
-    /// Stale numbers after lid-open are what make these widgets feel broken
-    /// (spec §9) — refresh on wake. NSWorkspace is AppKit, so the observer
-    /// lives here rather than in the engine; usaged wires IOKit's power
-    /// callback to the same seam.
-    @ObservationIgnored private var wakeObserver: NSObjectProtocol?
+
+    /// This profile's engine while hosting; nil in client mode and while
+    /// no engine runs for the profile (dormant, disabled, reconciling).
+    private var engine: UsageEngine? {
+        if case .hosting(let host) = mode { return host.engines[profile.id] }
+        return nil
+    }
 
     var state: DisplayState {
         switch mode {
-        case .hosting(let engine): engine.state
+        case .hosting: engine?.state ?? .loading
         case .client(let client): client.state
         }
     }
     var isRefreshing: Bool {
         switch mode {
-        case .hosting(let engine): engine.isRefreshing
+        case .hosting: engine?.isRefreshing ?? false
         case .client(let client): client.isRefreshing
         }
     }
     var activeInterval: TimeInterval {
         switch mode {
-        case .hosting(let engine): engine.activeInterval
+        case .hosting(let host): host.activeInterval
         case .client(let client): client.activeInterval
         }
     }
     var nextRefreshAt: Date? {
         switch mode {
-        case .hosting(let engine): engine.nextRefreshAt
+        case .hosting: engine?.nextRefreshAt
         case .client(let client): client.nextRefreshAt
         }
     }
     var samples: [UsageSample] {
         switch mode {
-        case .hosting(let engine): engine.samples
+        case .hosting: engine?.samples ?? []
         case .client(let client): client.samples
         }
     }
     var windowOutcomes: [WindowOutcome] {
         switch mode {
-        case .hosting(let engine): engine.windowOutcomes
+        case .hosting: engine?.windowOutcomes ?? []
         case .client(let client): client.windowOutcomes
         }
     }
@@ -95,32 +96,32 @@ final class UsageStore {
     var outages: [OutageSpan] {
         if let fakeOutages { return fakeOutages }
         switch mode {
-        case .hosting(let engine): return engine.outages
+        case .hosting(let host): return host.outages
         case .client(let client): return client.outages
         }
     }
     private var fakeOutages: [OutageSpan]?
     var predictions: [String: UsagePrediction] {
         switch mode {
-        case .hosting(let engine): engine.predictions
+        case .hosting: engine?.predictions ?? [:]
         case .client(let client): client.predictions
         }
     }
     var profiles: [String: WeeklyProfile] {
         switch mode {
-        case .hosting(let engine): engine.profiles
+        case .hosting: engine?.profiles ?? [:]
         case .client(let client): client.profiles
         }
     }
     var activity: [DailyActivity] {
         switch mode {
-        case .hosting(let engine): engine.activity
+        case .hosting: engine?.activity ?? []
         case .client(let client): client.activity
         }
     }
     var tokenTimeline: [TokenSlot] {
         switch mode {
-        case .hosting(let engine): engine.tokenTimeline
+        case .hosting: engine?.tokenTimeline ?? []
         case .client(let client): client.tokenTimeline
         }
     }
@@ -133,25 +134,25 @@ final class UsageStore {
     /// The scan's own summaries, derived titles intact.
     private var rawSessions: [SessionSummary] {
         switch mode {
-        case .hosting(let engine): engine.sessions
+        case .hosting: engine?.sessions ?? []
         case .client(let client): client.sessions
         }
     }
     var pricing: PricingTable {
         switch mode {
-        case .hosting(let engine): engine.pricing
+        case .hosting(let host): host.services.pricing
         case .client(let client): client.pricing
         }
     }
     var isRefreshingPricing: Bool {
         switch mode {
-        case .hosting(let engine): engine.isRefreshingPricing
+        case .hosting(let host): host.services.isRefreshingPricing
         case .client: false
         }
     }
     var pricingRefreshError: String? {
         switch mode {
-        case .hosting(let engine): engine.pricingRefreshError
+        case .hosting(let host): host.services.pricingRefreshError
         case .client: nil
         }
     }
@@ -161,7 +162,7 @@ final class UsageStore {
     var serviceStatus: ServiceStatusCard? {
         if let fakeServiceStatus { return fakeServiceStatus }
         switch mode {
-        case .hosting(let engine): return engine.serviceStatus
+        case .hosting(let host): return host.serviceStatus
         case .client(let client): return client.serviceStatus
         }
     }
@@ -176,7 +177,7 @@ final class UsageStore {
     var notices: NoticesCard? {
         if let fakeNotices { return fakeNotices }
         switch mode {
-        case .hosting(let engine): return engine.notices
+        case .hosting(let host): return host.notices
         case .client(let client): return client.notices
         }
     }
@@ -193,7 +194,7 @@ final class UsageStore {
     var appUpdate: AppUpdateCard? {
         if let fakeAppUpdate { return fakeAppUpdate }
         switch mode {
-        case .hosting(let engine): return engine.appUpdate
+        case .hosting(let host): return host.appUpdate
         case .client(let client): return client.appUpdate
         }
     }
@@ -208,7 +209,7 @@ final class UsageStore {
     var accountPresence: AccountPresenceCard? {
         if let fakeAccountPresence { return fakeAccountPresence }
         switch mode {
-        case .hosting(let engine): return engine.accountPresence
+        case .hosting: return engine?.accountPresence
         case .client(let client): return client.accountPresence
         }
     }
@@ -240,13 +241,13 @@ final class UsageStore {
     var provider: any UsageProvider { providerValue }
     var localActivity: (any LocalActivitySource)? {
         switch mode {
-        case .hosting(let engine): engine.localActivity
+        case .hosting: engine?.localActivity
         case .client(let client): client.localActivity
         }
     }
     var isShutDown: Bool {
         switch mode {
-        case .hosting(let engine): engine.isShutDown
+        case .hosting: engine?.isShutDown ?? true
         case .client(let client): client.isShutDown
         }
     }
@@ -268,8 +269,7 @@ final class UsageStore {
 
     var historyFileURL: URL {
         StorageScope.supportDirectory(
-            bundleID: bundleID, providerID: providerValue.id,
-            profileID: StorageScope.defaultProfileID
+            bundleID: bundleID, providerID: providerValue.id, profileID: profile.id
         ).appending(path: "history.json")
     }
 
@@ -306,282 +306,107 @@ final class UsageStore {
         try? renamesFile.save(sessionNames)
     }
 
-    init(provider: any UsageProvider = ClaudeProvider(), service: UsageService? = nil) {
-        let bundleID = Bundle.main.bundleIdentifier ?? "com.avihu.ClaudeUsage"
-        self.bundleID = bundleID
+    init(profile: Profile, provider: any UsageProvider, bundleID: String, mode: Mode) {
+        self.profile = profile
         self.providerValue = provider
-        self.serviceOverride = service
-        self.lease = EngineLease(lockURL: EngineHostBroker.lockURL(bundleID: bundleID))
-
-        let daemonAlive = Self.daemonMarkerAge(bundleID: bundleID)
-            .map { $0 < EngineHostBroker.daemonAliveWindow } ?? false
-        let role = EngineHostBroker.role(
-            leaseHeldByOther: EngineLease.isHeld(at: lease.lockURL),
-            daemonAlive: daemonAlive)
-        if role == .host, lease.acquire() {
-            let engine = UsageEngine(
-                provider: provider, service: service, defaults: .standard,
-                bundleID: bundleID, host: .app,
-                systemAccent: Self.systemAccent())
-            mode = .hosting(engine)
-            startSocket(for: engine)
-        } else {
-            mode = .client(DigestClient(provider: provider, bundleID: bundleID))
-            // An explicit Metering pick must reach the daemon; auto
-            // converges on its own (same selection key, same signals).
-            let selection = UserDefaults.standard.string(
-                forKey: HarnessResolution.selectionKey)
-            if let selection, selection != HarnessResolution.automatic,
-               selection == provider.id {
-                if case .client(let client) = mode {
-                    client.requestProviderSwitch(provider.id)
-                }
-            }
-        }
-
-        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
-            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                if case .hosting(let engine) = self.mode { engine.noteWake() }
-                // A client checks the host survived the sleep right away.
-                self.evaluateRole()
-            }
-        }
-        let timer = Timer.scheduledTimer(
-            withTimeInterval: EngineHostBroker.checkInterval, repeats: true
-        ) { _ in
-            Task { @MainActor [weak self] in self?.evaluateRole() }
-        }
-        timer.tolerance = 5
-        roleTimer = timer
+        self.bundleID = bundleID
+        self.mode = mode
         sessionNames = renamesFile.load()
-
-        // Auto-install (spec §10 re-amendment 2026-08-16): every launch
-        // converges the usaged launch agent — install when absent, repoint
-        // when the app moved, restart a stale-version daemon — honoring
-        // the sticky opt-out. Detached: launchctl round-trips are process
-        // spawns. When the daemon comes up, the ordinary arbitration
-        // yields to it within ~30s; nothing here touches the mode.
-        let embedded = Self.embeddedUsagedBinary()
-        Task.detached(priority: .utility) {
-            LaunchAgentInstaller.ensure(
-                binary: embedded, defaults: .standard, bundleID: bundleID)
-        }
     }
 
-    /// This bundle's own usaged; nil for unbundled dev runs, where ensure
-    /// falls back to whatever app copy LaunchServices knows about.
-    private static func embeddedUsagedBinary() -> URL? {
-        let embedded = Bundle.main.bundleURL.appending(path: "Contents/MacOS/usaged")
-        return FileManager.default.fileExists(atPath: embedded.path) ? embedded : nil
+    /// A face over a digest that never changes — the launch hatches'
+    /// synthetic profile.
+    convenience init(profile: Profile, provider: any UsageProvider, bundleID: String, fixed: LiveState) {
+        self.init(
+            profile: profile, provider: provider, bundleID: bundleID,
+            mode: .client(DigestClient(
+                profileID: profile.id, provider: provider, feed: DigestFeed(fixed: fixed),
+                bundleID: bundleID)))
     }
 
-    /// Retires this store: stops whichever mode runs, releases the lease
-    /// and the wake observer.
+    /// The registry flips every face in one turn when the process's role
+    /// changes. A retired client is shut down; a host's engines are the
+    /// host's to retire.
+    func adopt(_ newMode: Mode) {
+        if case .client(let client) = mode { client.shutdown() }
+        mode = newMode
+    }
+
+    /// Retires this face. Engines belong to the host; only a client-mode
+    /// reader is this face's own.
     func shutdown() {
-        switch mode {
-        case .hosting(let engine):
-            engine.shutdown()
-            socket?.stop()
-            socket = nil
-            lease.release()
-        case .client(let client):
-            client.shutdown()
-        }
-        roleTimer?.invalidate()
-        roleTimer = nil
-        if let wakeObserver {
-            NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver)
-        }
-        wakeObserver = nil
-    }
-
-    /// The app-hosted engine answers the same socket verbs usaged does,
-    /// minus process-lifecycle ones — a provider switch belongs to the
-    /// registry here, and nobody shuts an app down over a socket.
-    private func startSocket(for engine: UsageEngine) {
-        let socket = ControlSocket(
-            socketURL: EngineHostBroker.socketURL(bundleID: bundleID)
-        ) { [weak engine] command in
-            guard let engine else { return ControlReply(ok: false, message: "engine gone") }
-            switch command {
-            case .status:
-                return ControlReply(
-                    ok: true,
-                    message: "app pid \(ProcessInfo.processInfo.processIdentifier), "
-                        + "provider \(engine.provider.id), v\(AppIdentity.version)")
-            case .refresh:
-                engine.refresh(.manual)
-                return ControlReply(ok: true, message: "refresh requested (gate may coalesce)")
-            case .setInterval(let seconds):
-                engine.setActiveInterval(seconds)
-                return ControlReply(ok: true, message: "interval \(Int(engine.activeInterval))s")
-            case .settingsChanged:
-                engine.thresholdsChanged()
-                return ControlReply(ok: true)
-            case .refreshPricing:
-                engine.refreshPricingNow()
-                return ControlReply(ok: true)
-            case .scanNow:
-                engine.scanActivity(force: true)
-                return ControlReply(ok: true)
-            case .refreshStatus:
-                engine.refreshServiceStatus()
-                return ControlReply(ok: true)
-            case .checkUpdates:
-                engine.checkForUpdates()
-                return ControlReply(ok: true)
-            case .markNoticesSeen(let ids):
-                engine.markNoticesSeen(ids)
-                return ControlReply(ok: true)
-            case .dismissNotice(let id):
-                let ok = engine.dismissNotice(id: id)
-                return ControlReply(ok: ok, message: ok ? nil : "not dismissable")
-            case .dismissAllNotices:
-                engine.dismissAllNotices()
-                return ControlReply(ok: true)
-            case .setProvider, .shutdown:
-                return ControlReply(
-                    ok: false, message: "not while the app hosts — use the app's Metering menu")
-            }
-        }
-        do {
-            try socket.start()
-            self.socket = socket
-        } catch {
-            // The pane still renders; only remote commands are lost.
-        }
-    }
-
-    /// The Mac's control accent for the digest, resolved in the dark
-    /// appearance so the app publishes the same sRGB the daemon's pinned
-    /// `SystemAccentPalette` table would — terminal grounds are dark, and
-    /// RiskRamp pins its endpoints in the same appearance.
-    private static func systemAccent() -> UsageCore.RGBColor? {
-        var accent: UsageCore.RGBColor?
-        NSAppearance(named: .darkAqua)?.performAsCurrentDrawingAppearance {
-            guard let color = NSColor.controlAccentColor.usingColorSpace(.sRGB) else { return }
-            accent = UsageCore.RGBColor(
-                red: color.redComponent, green: color.greenComponent,
-                blue: color.blueComponent)
-        }
-        return accent
-    }
-
-    // MARK: - Host arbitration
-
-    private static func daemonMarkerAge(bundleID: String) -> TimeInterval? {
-        let marker = EngineHostBroker.daemonMarkerURL(bundleID: bundleID)
-        guard let attributes = try? FileManager.default.attributesOfItem(atPath: marker.path),
-              let modified = attributes[.modificationDate] as? Date
-        else { return nil }
-        return Date().timeIntervalSince(modified)
-    }
-
-    private func evaluateRole() {
-        guard !isShutDown else { return }
-        switch mode {
-        case .hosting(let engine):
-            let markerAge = Self.daemonMarkerAge(bundleID: bundleID)
-            guard EngineHostBroker.shouldYield(daemonMarkerAge: markerAge) else { return }
-            // The daemon wins: stop the embedded engine, free the lease
-            // and the socket path, render the daemon's digest from here on.
-            engine.shutdown()
-            socket?.stop()
-            socket = nil
-            lease.release()
-            mode = .client(DigestClient(provider: providerValue, bundleID: bundleID))
-        case .client(let client):
-            guard let staleness = client.digestStaleness else { return }
-            guard EngineHostBroker.heartbeatStale(
-                generatedAt: staleness.generatedAt,
-                nextPollAt: staleness.nextPollAt,
-                now: Date())
-            else { return }
-            // The host looks dead — but a held lease is a live process, so
-            // the lease decides, not the heuristic.
-            guard lease.acquire() else { return }
-            let seed = client.state.snapshot?.fetchedAt
-            client.shutdown()
-            let engine = UsageEngine(
-                provider: providerValue, service: serviceOverride,
-                defaults: .standard, bundleID: bundleID, host: .app,
-                gateSeed: seed, systemAccent: Self.systemAccent())
-            mode = .hosting(engine)
-            startSocket(for: engine)
-        }
+        if case .client(let client) = mode { client.shutdown() }
     }
 
     // MARK: - Forwards
 
     func refresh(_ reason: UsageEngine.RefreshReason) {
         switch mode {
-        case .hosting(let engine): engine.refresh(reason)
+        case .hosting: engine?.refresh(reason)
         case .client(let client): client.refresh()
         }
     }
 
     func apiBudget(now: Date) -> (used: Int, ceiling: Int, fraction: Double) {
         switch mode {
-        case .hosting(let engine): engine.apiBudget(now: now)
+        case .hosting: engine?.apiBudget(now: now) ?? (0, RequestLedger.defaultCeiling, 0)
         case .client(let client): client.apiBudgetMirror
         }
     }
 
     func thresholdsChanged() {
         switch mode {
-        case .hosting(let engine): engine.thresholdsChanged()
+        case .hosting(let host): host.thresholdsChanged()
         case .client(let client): client.thresholdsChanged()
         }
     }
 
     func refreshPricingNow() {
         switch mode {
-        case .hosting(let engine): engine.refreshPricingNow()
+        case .hosting(let host): host.refreshPricingNow()
         case .client(let client): client.refreshPricingNow()
         }
     }
 
     func paceMultiplier(now: Date) -> Int {
         switch mode {
-        case .hosting(let engine): engine.paceMultiplier(now: now)
+        case .hosting: engine?.paceMultiplier(now: now) ?? 1
         case .client(let client): client.paceMultiplierMirror
         }
     }
 
     func scanActivity(force: Bool = false) {
         switch mode {
-        case .hosting(let engine): engine.scanActivity(force: force)
+        case .hosting: engine?.scanActivity(force: force)
         case .client(let client): client.scanActivity(force: force)
         }
     }
 
     func sessionDetail(id: String) async -> SessionDetail? {
         switch mode {
-        case .hosting(let engine): await engine.sessionDetail(id: id)
+        case .hosting: await engine?.sessionDetail(id: id)
         case .client(let client): await client.sessionDetail(id: id)
         }
     }
 
+    /// The pace is one setting for every profile's engine.
     func setActiveInterval(_ interval: TimeInterval) {
         switch mode {
-        case .hosting(let engine): engine.setActiveInterval(interval)
+        case .hosting(let host): host.setActiveInterval(interval)
         case .client(let client): client.setActiveInterval(interval)
         }
     }
 
     /// Asks for a fresher status card when the one on hand is aging — fired
     /// as the panel opens (decision D6). Cheap and fire-and-forget: the
-    /// engine rations it against the feed's own cache window, and a daemon
+    /// host rations it against the feed's own cache window, and a daemon
     /// too old to know the verb just refuses the command.
     func pokeServiceStatus() {
         guard fakeServiceStatus == nil else { return }
         switch mode {
-        case .hosting(let engine):
+        case .hosting(let host):
             guard Self.cardIsAging(serviceStatus) else { return }
-            engine.refreshServiceStatus()
+            host.refreshServiceStatus()
         case .client(let client):
             client.pokeServiceStatusIfAging()
         }
@@ -616,12 +441,12 @@ final class UsageStore {
     func markNoticesSeen(_ ids: [String]) {
         guard !ids.isEmpty, fakeNotices == nil else { return }
         switch mode {
-        case .hosting(let engine): engine.markNoticesSeen(ids)
+        case .hosting(let host): host.markNoticesSeen(ids)
         case .client(let client): client.markNoticesSeen(ids)
         }
     }
 
-    /// The ×. The engine refuses an ongoing notice; the fake drops the row
+    /// The ×. The host refuses an ongoing notice; the fake drops the row
     /// so the hatch's click path reads like the real one.
     func dismissNotice(id: String) {
         if let fake = fakeNotices {
@@ -629,7 +454,7 @@ final class UsageStore {
             return
         }
         switch mode {
-        case .hosting(let engine): engine.dismissNotice(id: id)
+        case .hosting(let host): host.dismissNotice(id: id)
         case .client(let client): client.dismissNotice(id: id)
         }
     }
@@ -640,7 +465,7 @@ final class UsageStore {
             return
         }
         switch mode {
-        case .hosting(let engine): engine.dismissAllNotices()
+        case .hosting(let host): host.dismissAllNotices()
         case .client(let client): client.dismissAllNotices()
         }
     }
@@ -687,7 +512,7 @@ final class UsageStore {
             timeline = fakeTimeline(fakeAccountPresence)
         } else {
             switch mode {
-            case .hosting(let engine): timeline = engine.presenceTimeline
+            case .hosting: timeline = engine?.presenceTimeline
             case .client(let client): timeline = client.presenceTimeline
             }
         }
@@ -707,14 +532,14 @@ final class UsageStore {
         })
     }
 
-    /// A user-asked release check — Settings' "Check Now". Hosting engines
-    /// check directly; a client asks the daemon over the socket (an old
+    /// A user-asked release check — Settings' "Check Now". A hosting app
+    /// checks directly; a client asks the daemon over the socket (an old
     /// daemon just refuses the verb, and the button's caption stays honest
     /// because the card's `checkedAt` won't move).
     func checkForUpdates() {
         guard fakeAppUpdate == nil else { return }
         switch mode {
-        case .hosting(let engine): engine.checkForUpdates()
+        case .hosting(let host): host.checkForUpdates()
         case .client(let client): client.requestUpdateCheck()
         }
     }

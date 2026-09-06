@@ -30,19 +30,22 @@ public enum EngineHostBroker {
 
     // MARK: - Artifact paths (beside the digest, bundle root)
 
-    public static func lockURL(bundleID: String) -> URL {
-        StorageScope.rootSupportDirectory(bundleID: bundleID).appending(path: "engine.lock")
+    public static func lockURL(bundleID: String, roots: StorageScope.Roots = .standard) -> URL {
+        StorageScope.rootSupportDirectory(bundleID: bundleID, roots: roots)
+            .appending(path: "engine.lock")
     }
 
-    public static func socketURL(bundleID: String) -> URL {
-        StorageScope.rootSupportDirectory(bundleID: bundleID).appending(path: "control.sock")
+    public static func socketURL(bundleID: String, roots: StorageScope.Roots = .standard) -> URL {
+        StorageScope.rootSupportDirectory(bundleID: bundleID, roots: roots)
+            .appending(path: "control.sock")
     }
 
     /// Touched by usaged every 2s — how an app that HOLDS the lease learns
     /// a daemon wants it (the daemon cannot bind the socket or take the
     /// lease while the app holds it, so it needs one writable signal).
-    public static func daemonMarkerURL(bundleID: String) -> URL {
-        StorageScope.rootSupportDirectory(bundleID: bundleID).appending(path: "daemon.alive")
+    public static func daemonMarkerURL(bundleID: String, roots: StorageScope.Roots = .standard) -> URL {
+        StorageScope.rootSupportDirectory(bundleID: bundleID, roots: roots)
+            .appending(path: "daemon.alive")
     }
 
     // MARK: - Decisions

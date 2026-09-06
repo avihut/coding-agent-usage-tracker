@@ -110,8 +110,8 @@ public struct LiveState: Codable, Sendable, Equatable {
     /// `<App Support>/<bundleID>/live-state.json` — the bundle root, above
     /// the provider scopes: one engine, one file, whichever provider it
     /// currently meters.
-    public static func fileURL(bundleID: String) -> URL {
-        StorageScope.rootSupportDirectory(bundleID: bundleID).appending(path: fileName)
+    public static func fileURL(bundleID: String, roots: StorageScope.Roots = .standard) -> URL {
+        StorageScope.rootSupportDirectory(bundleID: bundleID, roots: roots).appending(path: fileName)
     }
 
     /// The pinned wire settings. sortedKeys makes rewrites byte-stable when

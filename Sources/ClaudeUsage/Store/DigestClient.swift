@@ -2,13 +2,15 @@ import Foundation
 import Observation
 import UsageCore
 
-/// The app's client mode: renders a daemon-hosted engine. State arrives
-/// through live-state.json (rebuilt into the same core types the views
-/// already consume); commands go back over the control socket. Everything
+/// The app's client mode, per profile: renders ONE profile's section of a
+/// daemon-hosted digest. State arrives through the shared `DigestFeed`
+/// (rebuilt into the same core types the views already consume — the
+/// section projected onto the top level by `LiveState.viewing`, provider
+/// cards intact); commands go back over the control socket. Everything
 /// this class touches on disk it touches READ-ONLY — the digest, the
-/// sample history, the window ledger, the pricing cache, and the
-/// transcript trees (scans never persist their parse cache) — the lease
-/// holder stays the sole writer.
+/// profile's sample history and window ledger, the provider's pricing
+/// cache, and the transcript trees (scans never persist their parse
+/// cache) — the lease holder stays the sole writer.
 @MainActor
 @Observable
 final class DigestClient {
@@ -70,25 +72,27 @@ final class DigestClient {
     let provider: any UsageProvider
     let localActivity: (any LocalActivitySource)?
     private(set) var isShutDown = false
+    /// True while the host's digest carries no section for this profile —
+    /// a pre-profile daemon asked about a second account, or a profile the
+    /// host hasn't reconciled yet.
+    private(set) var isUnknownToHost = false
 
+    let profileID: String
     private let bundleID: String
-    private let digestURL: URL
-    private let socketURL: URL
+    private let feed: DigestFeed
     private let history: UsageHistory
     private let windowLedger: WindowLedger
     private let pricingService: PricingService
-    private var watchTimer: Timer?
-    private var lastDigestModified: Date?
     private var lastScan: Date?
     private var isScanning = false
 
-    init(provider: any UsageProvider, bundleID: String) {
+    init(profileID: String, provider: any UsageProvider, feed: DigestFeed, bundleID: String) {
+        self.profileID = profileID
         self.provider = provider
+        self.feed = feed
         self.bundleID = bundleID
-        self.digestURL = LiveState.fileURL(bundleID: bundleID)
-        self.socketURL = EngineHostBroker.socketURL(bundleID: bundleID)
         let support = StorageScope.supportDirectory(
-            bundleID: bundleID, providerID: provider.id, profileID: StorageScope.defaultProfileID)
+            bundleID: bundleID, providerID: provider.id, profileID: profileID)
         let providerSupport = StorageScope.providerDirectory(
             bundleID: bundleID, providerID: provider.id)
         self.localActivity = provider.makeLocalActivity(cacheDirectory: support)
@@ -99,35 +103,27 @@ final class DigestClient {
             selector: provider.pricingSelector)
         self.pricing = pricingService.current()
 
-        reloadDigest()
+        applyFromFeed()
         reloadArtifacts()
         scanActivity(force: true)
-        // A 2s stat is the reload signal — cheaper and simpler than
-        // re-arming a DispatchSource across the publisher's atomic renames.
-        let timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { _ in
-            Task { @MainActor [weak self] in self?.tick() }
-        }
-        timer.tolerance = 0.5
-        watchTimer = timer
+        observeFeed()
     }
 
-    /// The digest heartbeat's age — the façade's takeover check reads it.
+    /// The digest heartbeat's age — the registry's takeover check reads it.
     var digestStaleness: (generatedAt: Date, nextPollAt: Date?)? {
-        digestGeneratedAt.map { ($0, nextRefreshAt) }
+        feed.digestStaleness
     }
 
     func shutdown() {
         guard !isShutDown else { return }
         isShutDown = true
-        watchTimer?.invalidate()
-        watchTimer = nil
     }
 
     // MARK: - Commands (socket)
 
     func refresh() {
         isRefreshing = true
-        send(.refresh)
+        send(ClientVerbs.refresh(profileID: profileID, legacyHost: feed.isLegacyHost))
     }
 
     func setActiveInterval(_ interval: TimeInterval) {
@@ -176,10 +172,7 @@ final class DigestClient {
     }
 
     private func send(_ command: ControlCommand) {
-        let socketURL = socketURL
-        Task.detached(priority: .utility) {
-            _ = ControlSocket.send(command, to: socketURL)
-        }
+        feed.send(command)
     }
 
     // MARK: - Local read-only work
@@ -221,25 +214,35 @@ final class DigestClient {
 
     // MARK: - Digest intake
 
-    private func tick() {
+    /// Tracking is one-shot and re-arms itself: every heartbeat the feed
+    /// decodes lands here once, and this profile's section is what gets
+    /// applied.
+    private func observeFeed() {
         guard !isShutDown else { return }
-        guard let attributes = try? FileManager.default.attributesOfItem(atPath: digestURL.path),
-              let modified = attributes[.modificationDate] as? Date
-        else { return }
-        if let lastDigestModified, modified <= lastDigestModified { return }
-        lastDigestModified = modified
-        reloadDigest()
-        reloadArtifacts()
-        // The digest changing usually means the engine scanned or fetched;
-        // follow with our own read-only scan (throttled).
-        scanActivity()
+        let feed = feed
+        withObservationTracking {
+            _ = feed.digest
+        } onChange: {
+            Task { @MainActor [weak self] in
+                guard let self, !self.isShutDown else { return }
+                self.applyFromFeed()
+                self.reloadArtifacts()
+                // The digest changing usually means the engine scanned or
+                // fetched; follow with our own read-only scan (throttled).
+                self.scanActivity()
+                self.observeFeed()
+            }
+        }
     }
 
-    private func reloadDigest() {
-        guard let data = try? Data(contentsOf: digestURL),
-              let digest = try? LiveState.decoder().decode(LiveState.self, from: data)
-        else { return }
-        apply(digest)
+    private func applyFromFeed() {
+        guard let digest = feed.digest else { return }
+        guard let section = digest.viewing(profile: profileID) else {
+            isUnknownToHost = true
+            return
+        }
+        isUnknownToHost = false
+        apply(section)
     }
 
     private func apply(_ digest: LiveState) {

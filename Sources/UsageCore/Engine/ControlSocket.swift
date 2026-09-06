@@ -25,6 +25,16 @@ public enum ControlCommand: Codable, Sendable, Equatable {
     /// The person dismissed one notice (refused for an ongoing one).
     case dismissNotice(id: String)
     case dismissAllNotices
+    /// Pin the focus on one profile; nil clears the pin so focus follows
+    /// activity again (0.96.0).
+    case focusProfile(id: String?)
+    /// Manual refresh of ONE profile's engine (`refresh` targets the
+    /// focused one).
+    case refreshProfile(id: String)
+    case setProfileEnabled(id: String, enabled: Bool)
+    /// The profile list changed in some other process — re-read defaults
+    /// and reconcile engines.
+    case profilesChanged
     case shutdown
 }
 
@@ -141,6 +151,15 @@ public final class ControlSocket: @unchecked Sendable {
     public static func send(
         _ command: ControlCommand, to socketURL: URL, timeout: TimeInterval = 3
     ) -> ControlReply? {
+        guard let data = try? JSONEncoder().encode(command) else { return nil }
+        return sendLine(data, to: socketURL, timeout: timeout)
+    }
+
+    /// The wire seam under `send`: one raw line out, one reply line back —
+    /// how a test proves an unreadable verb is refused, not dropped.
+    public static func sendLine(
+        _ line: Data, to socketURL: URL, timeout: TimeInterval = 3
+    ) -> ControlReply? {
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { return nil }
         defer { close(fd) }
@@ -164,7 +183,7 @@ public final class ControlSocket: @unchecked Sendable {
             }
         }
         guard connected == 0 else { return nil }
-        guard var data = try? JSONEncoder().encode(command) else { return nil }
+        var data = line
         data.append(0x0A)
         let sent = data.withUnsafeBytes { bytes in
             Darwin.send(fd, bytes.baseAddress, bytes.count, 0)
