@@ -38,8 +38,9 @@ struct LiveStateTests {
     /// A fully-populated, deterministic engine state: one crafted pricing
     /// table (never the bundled feed — it re-vendors), two meters with a
     /// forecast, samples crossing a reset, minute slots, and three days of
-    /// activity including an unpriced model.
-    private func buildFixture() -> LiveState {
+    /// activity including an unpriced model. This is ONE profile's section
+    /// — the focused one; the provider cards are the host's (`buildFixture`).
+    private func buildFocusedSection() -> LiveState {
         let now = date("2026-08-16T12:00:00Z")
         let provider = ClaudeProvider()
         let pricing = PricingTable(
@@ -165,14 +166,54 @@ struct LiveStateTests {
             backoffUntil: nil,
             apiBudget: (used: 7, ceiling: 20, fraction: 0.35),
             systemAccent: SystemAccentPalette.color(appleAccentColor: 4),
-            serviceStatus: fixtureServiceStatus,
-            appUpdate: fixtureAppUpdate,
             presence: fixturePresence,
-            notices: fixtureNotices,
-            outages: OutageTimeline.spans(from: fixtureNotices + fixtureOutageFacts, now: now),
             now: now,
             calendar: utc,
             locale: posix)
+    }
+
+    /// The default profile's record and a DORMANT personal one (0.96.0).
+    private var fixtureProfiles: (standard: Profile, personal: Profile) {
+        let added = date("2026-08-01T00:00:00Z")
+        return (
+            Profile(
+                id: "default", providerID: "claude",
+                home: URL(filePath: "/Users/someone/.claude"), order: 0, addedAt: added),
+            Profile(
+                id: "c982130e", providerID: "claude",
+                home: URL(filePath: "/Users/someone/.claude-personal"), nickname: "Personal",
+                order: 1, addedAt: added)
+        )
+    }
+
+    /// The host's digest: the focused default profile's section beside a
+    /// dormant personal profile whose engine never ran (nil numbers, never
+    /// zeros), folded by the composer with the provider cards. The top
+    /// level mirrors the focused section verbatim, so every pre-profile
+    /// assertion below still holds against it.
+    private func buildFixture() -> LiveState {
+        let now = date("2026-08-16T12:00:00Z")
+        let profiles = fixtureProfiles
+        return MeteringDigest.compose(
+            sections: [
+                ProfileSection(
+                    profile: profiles.standard, label: "work@example.com", monogram: "W",
+                    dormant: false, lastActivityAt: date("2026-08-16T11:30:00Z"),
+                    homeDisplayPath: "~/.claude", state: buildFocusedSection()),
+                ProfileSection(
+                    profile: profiles.personal, label: "Personal", monogram: "P",
+                    dormant: true, lastActivityAt: date("2026-07-01T09:00:00Z"),
+                    homeDisplayPath: "~/.claude-personal", state: nil),
+            ],
+            focused: "default", provider: ClaudeProvider(), host: "app", pid: 4242,
+            appVersion: "0.65.0",
+            systemAccent: SystemAccentPalette.color(appleAccentColor: 4),
+            activeInterval: 300,
+            serviceStatus: fixtureServiceStatus, appUpdate: fixtureAppUpdate,
+            notices: fixtureNotices,
+            outages: OutageTimeline.spans(from: fixtureNotices + fixtureOutageFacts, now: now),
+            nextReprobeAt: date("2026-08-16T12:10:00Z"),
+            now: now, calendar: utc, locale: posix)
     }
 
     /// A resolved, already-dismissed incident from two days before — a fact
@@ -706,5 +747,178 @@ extension LiveStateTests {
         #expect(background.project == nil)
         #expect(background.cost == nil)
         #expect(background.tokens == 0)
+    }
+}
+
+extension LiveStateTests {
+    /// 0.96.0: profiles ride beside the focused top level — the section the
+    /// top level mirrors, and a dormant one with nil numbers.
+    @Test func profilesRideBesideTheFocusedTopLevel() throws {
+        let state = buildFixture()
+        #expect(state.focusedProfile == "default")
+        let profiles = try #require(state.profiles)
+        #expect(profiles.map(\.id) == ["default", "c982130e"])
+
+        let focused = profiles[0]
+        #expect(focused.isFocused && !focused.dormant && focused.enabled)
+        #expect(focused.label == "work@example.com" && focused.monogram == "W")
+        #expect(focused.homeDisplayPath == "~/.claude")
+        // The top level IS the focused section: same engine (the heartbeat
+        // and the earliest poll coincide with the section's own), same
+        // meters, same everything the section carries.
+        #expect(focused.engine == state.engine)
+        #expect(focused.meters == state.meters)
+        #expect(focused.menuBar == state.menuBar)
+        #expect(focused.models == state.models)
+        #expect(focused.activity == state.activity)
+        #expect(focused.sessions == state.sessions)
+        #expect(focused.accountPresence == state.accountPresence)
+        #expect(state.engine.generatedAt == date("2026-08-16T12:00:00Z"))
+        #expect(state.engine.nextPollAt == date("2026-08-16T12:03:00Z"))
+
+        let dormant = profiles[1]
+        #expect(dormant.dormant && !dormant.isFocused)
+        #expect(dormant.nickname == "Personal" && dormant.label == "Personal")
+        #expect(dormant.lastActivityAt == date("2026-07-01T09:00:00Z"))
+        #expect(dormant.engine == nil)
+        #expect(dormant.meters == nil && dormant.menuBar == nil && dormant.models == nil)
+        #expect(dormant.activity == nil && dormant.sessions == nil)
+
+        // Only the awake, shown profile gets a cell; its own reset lights it.
+        let cells = try #require(state.menuBarCells)
+        #expect(cells.map(\.profile) == ["default"])
+        #expect(cells[0].segments == state.menuBar)
+        #expect(cells[0].glyph == "✳︎" && cells[0].monogram == "W")
+        #expect(!cells[0].stale)
+        #expect(cells[0].worstSeverity == 0.4)
+        #expect(cells[0].indicator)
+    }
+
+    /// A pre-0.96 digest has none of the three keys: nil, and its top level
+    /// is the one and only default profile.
+    @Test func aPreProfileDigestReadsAsTheDefaultProfileAlone() throws {
+        let state = buildFixture()
+        var object = try #require(
+            try JSONSerialization.jsonObject(
+                with: try LiveState.encoder().encode(state)) as? [String: Any])
+        for key in ["focusedProfile", "profiles", "menuBarCells"] {
+            object.removeValue(forKey: key)
+        }
+        let data = try JSONSerialization.data(withJSONObject: object)
+        let legacy = try LiveState.decoder().decode(LiveState.self, from: data)
+        #expect(legacy.profiles == nil && legacy.focusedProfile == nil && legacy.menuBarCells == nil)
+        #expect(legacy.profileIDs == ["default"])
+        #expect(legacy.viewing(profile: "default") == legacy)
+        #expect(legacy.viewing(profile: "c982130e") == nil)
+        #expect(legacy.gateSeeds() == ["default": date("2026-08-16T11:58:00Z")])
+    }
+
+    /// `viewing` projects one section onto the top level with the provider
+    /// cards intact — the CLI's `--account` and the client face's seam.
+    @Test func viewingProjectsASectionOntoTheTopLevel() throws {
+        let state = buildFixture()
+        let standard = try #require(state.viewing(profile: "default"))
+        #expect(standard.engine == state.engine && standard.meters == state.meters)
+        #expect(standard.sessionsCap == state.sessionsCap)
+        #expect(standard.notices == state.notices && standard.outages == state.outages)
+
+        let personal = try #require(state.viewing(profile: "c982130e"))
+        #expect(personal.engine.stale && personal.engine.fetchedAt == nil)
+        #expect(personal.engine.error == nil && personal.engine.nextPollAt == nil)
+        #expect(personal.engine.pid == 4242 && personal.engine.providerID == "claude")
+        #expect(personal.engine.planLabel == nil && personal.engine.apiBudgetUsed == nil)
+        #expect(personal.meters.isEmpty && personal.menuBar.isEmpty && personal.models.isEmpty)
+        #expect(personal.activity.todayTokens == 0 && personal.activity.todayCost == nil)
+        #expect(personal.sessions.isEmpty && personal.accountPresence == nil)
+        // Provider cards and the profile list travel with the projection.
+        #expect(personal.serviceStatus == state.serviceStatus)
+        #expect(personal.appUpdate == state.appUpdate)
+        #expect(personal.notices == state.notices)
+        #expect(personal.profiles == state.profiles)
+        #expect(personal.focusedProfile == "default")
+        #expect(state.viewing(profile: "nope") == nil)
+        #expect(ProfileSectionResolver.section(of: state, profileID: "c982130e") == personal)
+
+        #expect(state.gateSeeds() == ["default": date("2026-08-16T11:58:00Z")])
+        #expect(state.profileIDs == ["default", "c982130e"])
+    }
+
+    /// No publishable focused section: a readable loading top level — stale,
+    /// nothing fetched, no invented error, the reprobe as the heartbeat's
+    /// next poll — so a client never mistakes an all-dormant host for dead.
+    @Test func noPublishableFocusedSectionYieldsALoadingTopLevel() throws {
+        let now = date("2026-08-16T12:00:00Z")
+        let state = MeteringDigest.compose(
+            sections: [
+                ProfileSection(
+                    profile: fixtureProfiles.personal, label: "Personal", monogram: "P",
+                    dormant: true, lastActivityAt: nil, homeDisplayPath: "~/.claude-personal",
+                    state: nil)
+            ],
+            focused: nil, provider: ClaudeProvider(), host: "daemon", pid: 7, appVersion: "0.96.0",
+            systemAccent: nil, activeInterval: 300, serviceStatus: nil, appUpdate: nil,
+            notices: [], outages: [], nextReprobeAt: date("2026-08-16T12:10:00Z"),
+            now: now, calendar: utc, locale: posix)
+        #expect(state.engine.stale && state.engine.fetchedAt == nil && state.engine.error == nil)
+        #expect(state.engine.host == "daemon" && state.engine.pid == 7)
+        #expect(state.engine.generatedAt == now)
+        #expect(state.engine.nextPollAt == date("2026-08-16T12:10:00Z"))
+        #expect(state.meters.isEmpty && state.menuBar.isEmpty)
+        #expect(state.focusedProfile == "c982130e")
+        #expect(state.profiles?.count == 1)
+        #expect(state.menuBarCells == [])
+        #expect(state.notices?.items.isEmpty == true)
+        #expect(state.gateSeeds().isEmpty)
+    }
+
+    /// A reset belongs to one profile: the card names it, and only that
+    /// profile's cell lights up.
+    @Test func resetsLightTheirOwnProfilesCell() throws {
+        let now = date("2026-08-16T12:00:00Z")
+        let at = date("2026-08-16T11:20:00Z")
+        let personalReset = Notice(
+            id: Notice.resetID(profileID: "c982130e", at: at), kind: "reset", occurredAt: at,
+            endedAt: at, recordedAt: at, meterLabel: "Weekly (all)", fromPercent: 30,
+            profileID: "c982130e")
+        let profiles = fixtureProfiles
+        let state = MeteringDigest.compose(
+            sections: [
+                ProfileSection(
+                    profile: profiles.standard, label: "work@example.com", monogram: "W",
+                    dormant: false, lastActivityAt: now, homeDisplayPath: "~/.claude",
+                    state: buildFocusedSection()),
+                ProfileSection(
+                    profile: profiles.personal, label: "Personal", monogram: "P",
+                    dormant: false, lastActivityAt: now, homeDisplayPath: "~/.claude-personal",
+                    state: nil),
+            ],
+            focused: "c982130e", provider: ClaudeProvider(), host: "app", pid: 4242,
+            appVersion: "0.65.0", systemAccent: nil, activeInterval: 300,
+            serviceStatus: nil, appUpdate: nil, notices: [personalReset], outages: nil,
+            nextReprobeAt: nil, now: now, calendar: utc, locale: posix)
+        // Focus on a profile without a publishable section: the top level
+        // is the loading state, and the heartbeat still names the other
+        // engine's next poll.
+        #expect(state.focusedProfile == "c982130e")
+        #expect(state.engine.fetchedAt == nil && state.engine.stale)
+        #expect(state.engine.nextPollAt == date("2026-08-16T12:03:00Z"))
+        let cells = try #require(state.menuBarCells)
+        #expect(cells.map(\.profile) == ["default", "c982130e"])
+        #expect(!cells[0].indicator && cells[1].indicator)
+        #expect(cells[1].segments.isEmpty && cells[1].stale && cells[1].worstSeverity == nil)
+        #expect(state.notices?.items.first?.profile == "c982130e")
+    }
+
+    @Test func digestVocabularyRebuildsCoreTypes() {
+        #expect(DisplayLevel(digestName: "warning") == .warning)
+        #expect(DisplayLevel(digestName: "critical") == .critical)
+        #expect(DisplayLevel(digestName: "whatever") == .normal)
+        #expect(UsagePrediction.Verdict(digestName: "red") == .red)
+        #expect(UsagePrediction.Verdict(digestName: "x") == .green)
+        #expect(UsagePrediction.Basis(digestName: "weeklyProfile") == .weeklyProfile)
+        #expect(UsagePrediction.Basis(digestName: "x") == .recentOnly)
+        let segment = MenuBarSegment(
+            SegmentStatus(tag: "W", percent: 80, level: "warning", severity: 0.55, risk: nil))
+        #expect(segment == MenuBarSegment(tag: "W", percent: 80, level: .warning, severity: 0.55))
     }
 }

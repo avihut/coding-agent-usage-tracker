@@ -67,16 +67,30 @@ public struct LiveState: Codable, Sendable, Equatable {
     /// no outages (no status feed, or an older build); empty means none in
     /// the last 56 days. Nil ≠ empty.
     public let outages: [OutageSpan]?
+    /// The profile whose section the top level mirrors (0.96.0). Nil = a
+    /// writer before profiles existed, which metered exactly one home.
+    public let focusedProfile: String?
+    /// Every enrolled profile's section, in the person's order (0.96.0).
+    /// Nil = a pre-profile writer; a reader treats its top level as the one
+    /// and only `default` profile.
+    public let profiles: [ProfileState]?
+    /// The menu bar cells in bar order — enabled, awake, wanted-in-the-bar
+    /// profiles — decided by the writer (0.96.0). Nil = a pre-profile
+    /// writer; the bar then draws `menuBar` alone.
+    public let menuBarCells: [MenuBarCell]?
 
     public init(
+        schemaVersion: Int = Self.schemaVersion,
+        sessionsCap: Int? = LiveStateBuilder.sessionsCap,
         engine: EngineStatus, meters: [LiveMeter], menuBar: [SegmentStatus],
         models: [ModelRow], activity: ActivityRollup, sessions: [SessionCard] = [],
         serviceStatus: ServiceStatusCard? = nil, appUpdate: AppUpdateCard? = nil,
         accountPresence: AccountPresenceCard? = nil, notices: NoticesCard? = nil,
-        outages: [OutageSpan]? = nil
+        outages: [OutageSpan]? = nil, focusedProfile: String? = nil,
+        profiles: [ProfileState]? = nil, menuBarCells: [MenuBarCell]? = nil
     ) {
-        self.schemaVersion = Self.schemaVersion
-        self.sessionsCap = LiveStateBuilder.sessionsCap
+        self.schemaVersion = schemaVersion
+        self.sessionsCap = sessionsCap
         self.engine = engine
         self.meters = meters
         self.menuBar = menuBar
@@ -88,6 +102,9 @@ public struct LiveState: Codable, Sendable, Equatable {
         self.accountPresence = accountPresence
         self.notices = notices
         self.outages = outages
+        self.focusedProfile = focusedProfile
+        self.profiles = profiles
+        self.menuBarCells = menuBarCells
     }
 
     /// `<App Support>/<bundleID>/live-state.json` — the bundle root, above

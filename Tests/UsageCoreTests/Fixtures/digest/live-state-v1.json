@@ -244,6 +244,7 @@
       "red" : 0
     }
   },
+  "focusedProfile" : "default",
   "menuBar" : [
     {
       "level" : "normal",
@@ -263,6 +264,38 @@
     {
       "level" : "normal",
       "tag" : "M"
+    }
+  ],
+  "menuBarCells" : [
+    {
+      "glyph" : "✳︎",
+      "indicator" : true,
+      "monogram" : "W",
+      "profile" : "default",
+      "providerID" : "claude",
+      "segments" : [
+        {
+          "level" : "normal",
+          "percent" : 53,
+          "risk" : {
+            "blue" : 0.1142,
+            "green" : 0.6118,
+            "red" : 1
+          },
+          "severity" : 0.4,
+          "tag" : "S"
+        },
+        {
+          "level" : "warning",
+          "tag" : "W"
+        },
+        {
+          "level" : "normal",
+          "tag" : "M"
+        }
+      ],
+      "stale" : false,
+      "worstSeverity" : 0.4
     }
   ],
   "meters" : [
@@ -1084,6 +1117,1090 @@
       "start" : "2026-08-16T10:49:00Z",
       "title" : "Degraded performance for multiple models",
       "url" : "https:\/\/stspg.io\/tcsfmtc03xgm"
+    }
+  ],
+  "profiles" : [
+    {
+      "accountPresence" : {
+        "accounts" : [
+          {
+            "ref" : {
+              "accountUuid" : "acct-work",
+              "displayName" : "Work Person",
+              "email" : "work@example.com",
+              "label" : "work@example.com",
+              "organizationName" : "Work Inc",
+              "organizationUuid" : "org-work",
+              "tier" : "default_claude_max_5x"
+            },
+            "todayTokens" : 55,
+            "windowTokens" : 55
+          },
+          {
+            "ref" : {
+              "accountUuid" : "acct-primary",
+              "displayName" : "Primary Person",
+              "email" : "primary@example.com",
+              "label" : "primary@example.com",
+              "organizationName" : "Primary's Organization",
+              "organizationUuid" : "org-primary",
+              "tier" : "default_claude_max_20x"
+            },
+            "todayCost" : 0.004,
+            "todayTokens" : 480,
+            "windowCost" : 0.004,
+            "windowTokens" : 480
+          }
+        ],
+        "ambiguous" : {
+          "todayCost" : 0.0004,
+          "todayTokens" : 48,
+          "windowCost" : 0.0004,
+          "windowTokens" : 48
+        },
+        "attributionSince" : "2026-08-16T08:00:00Z",
+        "current" : {
+          "accountUuid" : "acct-work",
+          "displayName" : "Work Person",
+          "email" : "work@example.com",
+          "label" : "work@example.com",
+          "organizationName" : "Work Inc",
+          "organizationUuid" : "org-work",
+          "tier" : "default_claude_max_5x"
+        },
+        "distinctAccounts" : 2,
+        "epochs" : [
+          {
+            "closed" : false,
+            "firstObservedAt" : "2026-08-16T08:00:00Z",
+            "label" : "primary@example.com",
+            "lastObservedAt" : "2026-08-16T10:05:00Z",
+            "organizationName" : "Primary's Organization"
+          },
+          {
+            "closed" : false,
+            "firstObservedAt" : "2026-08-16T11:00:00Z",
+            "label" : "work@example.com",
+            "lastObservedAt" : "2026-08-16T11:58:00Z",
+            "organizationName" : "Work Inc"
+          }
+        ],
+        "observedAt" : "2026-08-16T11:58:00Z",
+        "since" : "2026-08-16T11:00:00Z",
+        "unattributed" : {
+          "todayCost" : 0.0001,
+          "todayTokens" : 12,
+          "windowTokens" : 0
+        }
+      },
+      "activity" : {
+        "days" : [
+          {
+            "dayKey" : "2026-08-14",
+            "prompts" : 4,
+            "tokens" : 0
+          },
+          {
+            "cost" : 0.065,
+            "dayKey" : "2026-08-15",
+            "prompts" : 6,
+            "tokens" : 9000
+          },
+          {
+            "cost" : 0.004,
+            "dayKey" : "2026-08-16",
+            "prompts" : 2,
+            "tokens" : 535
+          }
+        ],
+        "hourDays" : [
+          {
+            "dayKey" : "2026-08-16",
+            "hours" : [
+              {
+                "cost" : 0.0001,
+                "hour" : 7,
+                "tokens" : 12
+              },
+              {
+                "cost" : 0.0044,
+                "hour" : 10,
+                "tokens" : 528
+              },
+              {
+                "hour" : 11,
+                "tokens" : 55
+              }
+            ]
+          }
+        ],
+        "modelDays" : [
+          {
+            "dayKey" : "2026-08-15",
+            "models" : [
+              {
+                "color" : {
+                  "blue" : 0.341,
+                  "green" : 0.467,
+                  "red" : 0.851
+                },
+                "cost" : 0.065,
+                "displayName" : "Fable 5",
+                "id" : "claude-fable-5",
+                "tally" : {
+                  "cacheCreation" : 0,
+                  "cacheCreation1h" : 0,
+                  "cacheRead" : 0,
+                  "input" : 8000,
+                  "output" : 1000
+                }
+              }
+            ]
+          },
+          {
+            "dayKey" : "2026-08-16",
+            "models" : [
+              {
+                "color" : {
+                  "blue" : 0.341,
+                  "green" : 0.467,
+                  "red" : 0.851
+                },
+                "cost" : 0.004,
+                "displayName" : "Fable 5",
+                "id" : "claude-fable-5",
+                "tally" : {
+                  "cacheCreation" : 0,
+                  "cacheCreation1h" : 0,
+                  "cacheRead" : 0,
+                  "input" : 400,
+                  "output" : 80
+                }
+              },
+              {
+                "color" : {
+                  "blue" : 0.341,
+                  "green" : 0.467,
+                  "red" : 0.851
+                },
+                "displayName" : "mystery-model",
+                "id" : "mystery-model",
+                "tally" : {
+                  "cacheCreation" : 0,
+                  "cacheCreation1h" : 0,
+                  "cacheRead" : 0,
+                  "input" : 50,
+                  "output" : 5
+                }
+              }
+            ]
+          }
+        ],
+        "timeZone" : "GMT",
+        "todayCost" : 0.004,
+        "todayHours" : [
+          {
+            "cost" : 0.0001,
+            "hour" : 7,
+            "tokens" : 12
+          },
+          {
+            "cost" : 0.0044,
+            "hour" : 10,
+            "tokens" : 528
+          },
+          {
+            "hour" : 11,
+            "tokens" : 55
+          }
+        ],
+        "todayPrompts" : 2,
+        "todayTokens" : 535
+      },
+      "dormant" : false,
+      "enabled" : true,
+      "engine" : {
+        "accent" : {
+          "blue" : 0.341,
+          "green" : 0.467,
+          "red" : 0.851
+        },
+        "activeIntervalSeconds" : 300,
+        "agentName" : "Claude Code",
+        "apiBudgetCeiling" : 20,
+        "apiBudgetFraction" : 0.35,
+        "apiBudgetUsed" : 7,
+        "appVersion" : "0.65.0",
+        "fetchedAt" : "2026-08-16T11:58:00Z",
+        "forecastProfile" : {
+          "caption" : "Personalized forecast activates in 11 days — learning your weekly rhythm.",
+          "historySpanSeconds" : 259200,
+          "isReady" : false,
+          "remainingSeconds" : 950400
+        },
+        "gateFloorSeconds" : 180,
+        "generatedAt" : "2026-08-16T12:00:00Z",
+        "glyph" : "✳︎",
+        "host" : "app",
+        "isLocalProvider" : false,
+        "nextPollAt" : "2026-08-16T12:03:00Z",
+        "paceMultiplier" : 1,
+        "pid" : 4242,
+        "planLabel" : "Max plan · 1x",
+        "planRateLimitTier" : "default_max_1x",
+        "planSubscriptionType" : "max",
+        "providerID" : "claude",
+        "serviceName" : "Claude",
+        "stale" : false,
+        "systemAccent" : {
+          "blue" : 1,
+          "green" : 0.478,
+          "red" : 0
+        }
+      },
+      "homeDisplayPath" : "~\/.claude",
+      "id" : "default",
+      "isFocused" : true,
+      "label" : "work@example.com",
+      "lastActivityAt" : "2026-08-16T11:30:00Z",
+      "menuBar" : [
+        {
+          "level" : "normal",
+          "percent" : 53,
+          "risk" : {
+            "blue" : 0.1142,
+            "green" : 0.6118,
+            "red" : 1
+          },
+          "severity" : 0.4,
+          "tag" : "S"
+        },
+        {
+          "level" : "warning",
+          "tag" : "W"
+        },
+        {
+          "level" : "normal",
+          "tag" : "M"
+        }
+      ],
+      "meters" : [
+        {
+          "forcesWarning" : false,
+          "forecast" : {
+            "baselineRatePerHour" : 6,
+            "basis" : "windowAverage",
+            "curve" : [
+              {
+                "percent" : 53,
+                "t" : "2026-08-16T12:00:00Z"
+              },
+              {
+                "percent" : 78,
+                "t" : "2026-08-16T14:00:00Z"
+              }
+            ],
+            "paceFactor" : 1.5,
+            "projectedAtReset" : 78,
+            "ratePerHour" : 12,
+            "rawVerdict" : "green",
+            "severity" : 0.4,
+            "verdict" : "green"
+          },
+          "id" : "session",
+          "label" : "Session (5h)",
+          "level" : "normal",
+          "limitWindow" : 18000,
+          "modelSeries" : [
+            {
+              "color" : {
+                "blue" : 0.341,
+                "green" : 0.467,
+                "red" : 0.851
+              },
+              "displayName" : "Fable 5",
+              "model" : "claude-fable-5",
+              "points" : [
+                {
+                  "percent" : 0,
+                  "t" : "2026-08-16T10:00:00Z"
+                },
+                {
+                  "percent" : 43.63636363636364,
+                  "t" : "2026-08-16T10:05:00Z"
+                },
+                {
+                  "percent" : 43.63636363636364,
+                  "t" : "2026-08-16T10:10:00Z"
+                },
+                {
+                  "percent" : 43.63636363636364,
+                  "t" : "2026-08-16T10:15:00Z"
+                },
+                {
+                  "percent" : 43.63636363636364,
+                  "t" : "2026-08-16T10:20:00Z"
+                },
+                {
+                  "percent" : 43.63636363636364,
+                  "t" : "2026-08-16T10:25:00Z"
+                },
+                {
+                  "percent" : 43.63636363636364,
+                  "t" : "2026-08-16T10:30:00Z"
+                },
+                {
+                  "percent" : 48,
+                  "t" : "2026-08-16T10:35:00Z"
+                },
+                {
+                  "percent" : 48,
+                  "t" : "2026-08-16T10:41:40Z"
+                },
+                {
+                  "percent" : 48,
+                  "t" : "2026-08-16T10:46:40Z"
+                },
+                {
+                  "percent" : 48,
+                  "t" : "2026-08-16T10:51:40Z"
+                },
+                {
+                  "percent" : 48,
+                  "t" : "2026-08-16T10:56:40Z"
+                },
+                {
+                  "percent" : 48,
+                  "t" : "2026-08-16T11:01:40Z"
+                },
+                {
+                  "percent" : 48,
+                  "t" : "2026-08-16T11:06:40Z"
+                },
+                {
+                  "percent" : 48,
+                  "t" : "2026-08-16T11:11:40Z"
+                },
+                {
+                  "percent" : 48,
+                  "t" : "2026-08-16T11:16:40Z"
+                },
+                {
+                  "percent" : 48,
+                  "t" : "2026-08-16T11:21:40Z"
+                },
+                {
+                  "percent" : 48,
+                  "t" : "2026-08-16T11:26:40Z"
+                },
+                {
+                  "percent" : 48,
+                  "t" : "2026-08-16T11:31:40Z"
+                },
+                {
+                  "percent" : 48,
+                  "t" : "2026-08-16T11:36:40Z"
+                },
+                {
+                  "percent" : 48,
+                  "t" : "2026-08-16T11:41:40Z"
+                },
+                {
+                  "percent" : 48,
+                  "t" : "2026-08-16T11:46:40Z"
+                },
+                {
+                  "percent" : 48,
+                  "t" : "2026-08-16T11:51:40Z"
+                },
+                {
+                  "percent" : 48,
+                  "t" : "2026-08-16T11:56:40Z"
+                },
+                {
+                  "percent" : 48,
+                  "t" : "2026-08-16T12:03:20Z"
+                },
+                {
+                  "percent" : 48,
+                  "t" : "2026-08-16T12:08:20Z"
+                },
+                {
+                  "percent" : 48,
+                  "t" : "2026-08-16T12:13:20Z"
+                },
+                {
+                  "percent" : 48,
+                  "t" : "2026-08-16T12:18:20Z"
+                },
+                {
+                  "percent" : 48,
+                  "t" : "2026-08-16T12:23:20Z"
+                },
+                {
+                  "percent" : 48,
+                  "t" : "2026-08-16T12:28:20Z"
+                },
+                {
+                  "percent" : 48,
+                  "t" : "2026-08-16T12:33:20Z"
+                },
+                {
+                  "percent" : 48,
+                  "t" : "2026-08-16T12:38:20Z"
+                },
+                {
+                  "percent" : 48,
+                  "t" : "2026-08-16T12:43:20Z"
+                },
+                {
+                  "percent" : 48,
+                  "t" : "2026-08-16T12:48:20Z"
+                },
+                {
+                  "percent" : 48,
+                  "t" : "2026-08-16T12:53:20Z"
+                },
+                {
+                  "percent" : 48,
+                  "t" : "2026-08-16T12:58:20Z"
+                },
+                {
+                  "percent" : 48,
+                  "t" : "2026-08-16T13:03:20Z"
+                },
+                {
+                  "percent" : 48,
+                  "t" : "2026-08-16T13:08:20Z"
+                },
+                {
+                  "percent" : 48,
+                  "t" : "2026-08-16T13:13:20Z"
+                },
+                {
+                  "percent" : 48,
+                  "t" : "2026-08-16T13:18:20Z"
+                },
+                {
+                  "percent" : 48,
+                  "t" : "2026-08-16T13:25:00Z"
+                },
+                {
+                  "percent" : 48,
+                  "t" : "2026-08-16T13:30:00Z"
+                },
+                {
+                  "percent" : 48,
+                  "t" : "2026-08-16T13:35:00Z"
+                },
+                {
+                  "percent" : 48,
+                  "t" : "2026-08-16T13:40:00Z"
+                },
+                {
+                  "percent" : 48,
+                  "t" : "2026-08-16T13:45:00Z"
+                },
+                {
+                  "percent" : 48,
+                  "t" : "2026-08-16T13:50:00Z"
+                },
+                {
+                  "percent" : 48,
+                  "t" : "2026-08-16T13:55:00Z"
+                },
+                {
+                  "percent" : 48,
+                  "t" : "2026-08-16T14:00:00Z"
+                }
+              ]
+            },
+            {
+              "color" : {
+                "blue" : 0.341,
+                "green" : 0.467,
+                "red" : 0.851
+              },
+              "displayName" : "mystery-model",
+              "model" : "mystery-model",
+              "points" : [
+                {
+                  "percent" : 0,
+                  "t" : "2026-08-16T11:30:00Z"
+                },
+                {
+                  "percent" : 5,
+                  "t" : "2026-08-16T11:33:20Z"
+                },
+                {
+                  "percent" : 5,
+                  "t" : "2026-08-16T11:36:40Z"
+                },
+                {
+                  "percent" : 5,
+                  "t" : "2026-08-16T11:40:00Z"
+                },
+                {
+                  "percent" : 5,
+                  "t" : "2026-08-16T11:43:20Z"
+                },
+                {
+                  "percent" : 5,
+                  "t" : "2026-08-16T11:46:40Z"
+                },
+                {
+                  "percent" : 5,
+                  "t" : "2026-08-16T11:48:20Z"
+                },
+                {
+                  "percent" : 5,
+                  "t" : "2026-08-16T11:51:40Z"
+                },
+                {
+                  "percent" : 5,
+                  "t" : "2026-08-16T11:55:00Z"
+                },
+                {
+                  "percent" : 5,
+                  "t" : "2026-08-16T11:58:20Z"
+                },
+                {
+                  "percent" : 5,
+                  "t" : "2026-08-16T12:01:40Z"
+                },
+                {
+                  "percent" : 5,
+                  "t" : "2026-08-16T12:05:00Z"
+                },
+                {
+                  "percent" : 5,
+                  "t" : "2026-08-16T12:08:20Z"
+                },
+                {
+                  "percent" : 5,
+                  "t" : "2026-08-16T12:11:40Z"
+                },
+                {
+                  "percent" : 5,
+                  "t" : "2026-08-16T12:15:00Z"
+                },
+                {
+                  "percent" : 5,
+                  "t" : "2026-08-16T12:18:20Z"
+                },
+                {
+                  "percent" : 5,
+                  "t" : "2026-08-16T12:21:40Z"
+                },
+                {
+                  "percent" : 5,
+                  "t" : "2026-08-16T12:25:00Z"
+                },
+                {
+                  "percent" : 5,
+                  "t" : "2026-08-16T12:26:40Z"
+                },
+                {
+                  "percent" : 5,
+                  "t" : "2026-08-16T12:30:00Z"
+                },
+                {
+                  "percent" : 5,
+                  "t" : "2026-08-16T12:33:20Z"
+                },
+                {
+                  "percent" : 5,
+                  "t" : "2026-08-16T12:36:40Z"
+                },
+                {
+                  "percent" : 5,
+                  "t" : "2026-08-16T12:40:00Z"
+                },
+                {
+                  "percent" : 5,
+                  "t" : "2026-08-16T12:43:20Z"
+                },
+                {
+                  "percent" : 5,
+                  "t" : "2026-08-16T12:46:40Z"
+                },
+                {
+                  "percent" : 5,
+                  "t" : "2026-08-16T12:50:00Z"
+                },
+                {
+                  "percent" : 5,
+                  "t" : "2026-08-16T12:53:20Z"
+                },
+                {
+                  "percent" : 5,
+                  "t" : "2026-08-16T12:56:40Z"
+                },
+                {
+                  "percent" : 5,
+                  "t" : "2026-08-16T13:00:00Z"
+                },
+                {
+                  "percent" : 5,
+                  "t" : "2026-08-16T13:03:20Z"
+                },
+                {
+                  "percent" : 5,
+                  "t" : "2026-08-16T13:05:00Z"
+                },
+                {
+                  "percent" : 5,
+                  "t" : "2026-08-16T13:08:20Z"
+                },
+                {
+                  "percent" : 5,
+                  "t" : "2026-08-16T13:11:40Z"
+                },
+                {
+                  "percent" : 5,
+                  "t" : "2026-08-16T13:15:00Z"
+                },
+                {
+                  "percent" : 5,
+                  "t" : "2026-08-16T13:18:20Z"
+                },
+                {
+                  "percent" : 5,
+                  "t" : "2026-08-16T13:21:40Z"
+                },
+                {
+                  "percent" : 5,
+                  "t" : "2026-08-16T13:25:00Z"
+                },
+                {
+                  "percent" : 5,
+                  "t" : "2026-08-16T13:28:20Z"
+                },
+                {
+                  "percent" : 5,
+                  "t" : "2026-08-16T13:31:40Z"
+                },
+                {
+                  "percent" : 5,
+                  "t" : "2026-08-16T13:35:00Z"
+                },
+                {
+                  "percent" : 5,
+                  "t" : "2026-08-16T13:38:20Z"
+                },
+                {
+                  "percent" : 5,
+                  "t" : "2026-08-16T13:41:40Z"
+                },
+                {
+                  "percent" : 5,
+                  "t" : "2026-08-16T13:43:20Z"
+                },
+                {
+                  "percent" : 5,
+                  "t" : "2026-08-16T13:46:40Z"
+                },
+                {
+                  "percent" : 5,
+                  "t" : "2026-08-16T13:50:00Z"
+                },
+                {
+                  "percent" : 5,
+                  "t" : "2026-08-16T13:53:20Z"
+                },
+                {
+                  "percent" : 5,
+                  "t" : "2026-08-16T13:56:40Z"
+                },
+                {
+                  "percent" : 5,
+                  "t" : "2026-08-16T14:00:00Z"
+                }
+              ]
+            }
+          ],
+          "percent" : 53,
+          "rank" : 0,
+          "rateWindowSeconds" : 2700,
+          "resetCaption" : "resets in 2h",
+          "resetsAt" : "2026-08-16T14:00:00Z",
+          "risk" : {
+            "blue" : 0.1142,
+            "green" : 0.6118,
+            "red" : 1
+          },
+          "series" : [
+            {
+              "percent" : 91,
+              "t" : "2026-08-16T09:30:00Z"
+            },
+            {
+              "percent" : 91,
+              "t" : "2026-08-16T09:40:00Z"
+            },
+            {
+              "percent" : 0,
+              "t" : "2026-08-16T09:40:01Z"
+            },
+            {
+              "percent" : 12,
+              "t" : "2026-08-16T10:00:00Z"
+            },
+            {
+              "percent" : 53,
+              "t" : "2026-08-16T11:58:00Z"
+            }
+          ],
+          "stretches" : [
+            {
+              "end" : "2026-08-16T10:02:00Z",
+              "exhausted" : false,
+              "start" : "2026-08-16T10:00:00Z"
+            },
+            {
+              "end" : "2026-08-16T10:31:00Z",
+              "exhausted" : false,
+              "start" : "2026-08-16T10:30:00Z"
+            },
+            {
+              "end" : "2026-08-16T11:31:00Z",
+              "exhausted" : false,
+              "start" : "2026-08-16T11:30:00Z"
+            }
+          ],
+          "tag" : "S"
+        },
+        {
+          "forcesWarning" : false,
+          "id" : "weekly_all",
+          "label" : "Weekly (all)",
+          "level" : "warning",
+          "modelSeries" : [
+            {
+              "color" : {
+                "blue" : 0.341,
+                "green" : 0.467,
+                "red" : 0.851
+              },
+              "displayName" : "Fable 5",
+              "model" : "claude-fable-5",
+              "points" : [
+                {
+                  "percent" : 0,
+                  "t" : "2026-08-16T06:56:00Z"
+                },
+                {
+                  "percent" : 2.2222222222222223,
+                  "t" : "2026-08-16T07:04:00Z"
+                },
+                {
+                  "percent" : 2.2222222222222223,
+                  "t" : "2026-08-16T07:12:00Z"
+                },
+                {
+                  "percent" : 2.2222222222222223,
+                  "t" : "2026-08-16T07:20:00Z"
+                },
+                {
+                  "percent" : 2.2222222222222223,
+                  "t" : "2026-08-16T07:28:00Z"
+                },
+                {
+                  "percent" : 2.2222222222222223,
+                  "t" : "2026-08-16T07:36:00Z"
+                },
+                {
+                  "percent" : 2.2222222222222223,
+                  "t" : "2026-08-16T07:44:00Z"
+                },
+                {
+                  "percent" : 2.2222222222222223,
+                  "t" : "2026-08-16T07:52:00Z"
+                },
+                {
+                  "percent" : 2.2222222222222223,
+                  "t" : "2026-08-16T08:00:00Z"
+                },
+                {
+                  "percent" : 2.2222222222222223,
+                  "t" : "2026-08-16T08:08:00Z"
+                },
+                {
+                  "percent" : 2.2222222222222223,
+                  "t" : "2026-08-16T08:16:00Z"
+                },
+                {
+                  "percent" : 2.2222222222222223,
+                  "t" : "2026-08-16T08:24:00Z"
+                },
+                {
+                  "percent" : 2.2222222222222223,
+                  "t" : "2026-08-16T08:32:00Z"
+                },
+                {
+                  "percent" : 2.2222222222222223,
+                  "t" : "2026-08-16T08:40:00Z"
+                },
+                {
+                  "percent" : 2.2222222222222223,
+                  "t" : "2026-08-16T08:48:00Z"
+                },
+                {
+                  "percent" : 2.2222222222222223,
+                  "t" : "2026-08-16T08:56:00Z"
+                },
+                {
+                  "percent" : 2.2222222222222223,
+                  "t" : "2026-08-16T09:04:00Z"
+                },
+                {
+                  "percent" : 2.2222222222222223,
+                  "t" : "2026-08-16T09:12:00Z"
+                },
+                {
+                  "percent" : 2.2222222222222223,
+                  "t" : "2026-08-16T09:20:00Z"
+                },
+                {
+                  "percent" : 2.2222222222222223,
+                  "t" : "2026-08-16T09:28:00Z"
+                },
+                {
+                  "percent" : 2.2222222222222223,
+                  "t" : "2026-08-16T09:36:00Z"
+                },
+                {
+                  "percent" : 2.2222222222222223,
+                  "t" : "2026-08-16T09:44:00Z"
+                },
+                {
+                  "percent" : 2.2222222222222223,
+                  "t" : "2026-08-16T09:52:00Z"
+                },
+                {
+                  "percent" : 2.2222222222222223,
+                  "t" : "2026-08-16T10:00:00Z"
+                },
+                {
+                  "percent" : 91.1111111111111,
+                  "t" : "2026-08-16T10:08:00Z"
+                },
+                {
+                  "percent" : 91.1111111111111,
+                  "t" : "2026-08-16T10:16:00Z"
+                },
+                {
+                  "percent" : 91.1111111111111,
+                  "t" : "2026-08-16T10:24:00Z"
+                },
+                {
+                  "percent" : 100,
+                  "t" : "2026-08-16T10:32:00Z"
+                },
+                {
+                  "percent" : 100,
+                  "t" : "2026-08-16T10:40:00Z"
+                },
+                {
+                  "percent" : 100,
+                  "t" : "2026-08-16T10:48:00Z"
+                },
+                {
+                  "percent" : 100,
+                  "t" : "2026-08-16T10:56:00Z"
+                },
+                {
+                  "percent" : 100,
+                  "t" : "2026-08-16T11:04:00Z"
+                },
+                {
+                  "percent" : 100,
+                  "t" : "2026-08-16T11:12:00Z"
+                },
+                {
+                  "percent" : 100,
+                  "t" : "2026-08-16T11:20:00Z"
+                },
+                {
+                  "percent" : 100,
+                  "t" : "2026-08-16T11:28:00Z"
+                },
+                {
+                  "percent" : 100,
+                  "t" : "2026-08-16T11:36:00Z"
+                },
+                {
+                  "percent" : 100,
+                  "t" : "2026-08-16T11:44:00Z"
+                },
+                {
+                  "percent" : 100,
+                  "t" : "2026-08-16T11:52:00Z"
+                },
+                {
+                  "percent" : 100,
+                  "t" : "2026-08-16T12:00:00Z"
+                }
+              ]
+            },
+            {
+              "color" : {
+                "blue" : 0.341,
+                "green" : 0.467,
+                "red" : 0.851
+              },
+              "displayName" : "mystery-model",
+              "model" : "mystery-model",
+              "points" : [
+                {
+                  "percent" : 0,
+                  "t" : "2026-08-16T11:28:00Z"
+                },
+                {
+                  "percent" : 10.185185185185185,
+                  "t" : "2026-08-16T11:36:00Z"
+                },
+                {
+                  "percent" : 10.185185185185185,
+                  "t" : "2026-08-16T11:44:00Z"
+                },
+                {
+                  "percent" : 10.185185185185185,
+                  "t" : "2026-08-16T11:52:00Z"
+                },
+                {
+                  "percent" : 10.185185185185185,
+                  "t" : "2026-08-16T12:00:00Z"
+                }
+              ]
+            }
+          ],
+          "rank" : 1,
+          "rateWindowSeconds" : 14400,
+          "series" : [
+
+          ],
+          "stretches" : [
+            {
+              "end" : "2026-08-16T07:01:00Z",
+              "exhausted" : false,
+              "start" : "2026-08-16T07:00:00Z"
+            },
+            {
+              "end" : "2026-08-16T10:02:00Z",
+              "exhausted" : false,
+              "start" : "2026-08-16T10:00:00Z"
+            },
+            {
+              "end" : "2026-08-16T10:31:00Z",
+              "exhausted" : false,
+              "start" : "2026-08-16T10:30:00Z"
+            },
+            {
+              "end" : "2026-08-16T11:31:00Z",
+              "exhausted" : false,
+              "start" : "2026-08-16T11:30:00Z"
+            }
+          ],
+          "tag" : "W"
+        }
+      ],
+      "models" : [
+        {
+          "color" : {
+            "blue" : 0.341,
+            "green" : 0.467,
+            "red" : 0.851
+          },
+          "cost" : 0.004,
+          "displayName" : "Fable 5",
+          "id" : "claude-fable-5",
+          "tally" : {
+            "cacheCreation" : 0,
+            "cacheCreation1h" : 0,
+            "cacheRead" : 0,
+            "input" : 400,
+            "output" : 80
+          }
+        },
+        {
+          "color" : {
+            "blue" : 0.341,
+            "green" : 0.467,
+            "red" : 0.851
+          },
+          "displayName" : "mystery-model",
+          "id" : "mystery-model",
+          "tally" : {
+            "cacheCreation" : 0,
+            "cacheCreation1h" : 0,
+            "cacheRead" : 0,
+            "input" : 50,
+            "output" : 5
+          }
+        }
+      ],
+      "monogram" : "W",
+      "providerID" : "claude",
+      "sessions" : [
+        {
+          "accounts" : [
+            "primary@example.com",
+            "work@example.com"
+          ],
+          "activeSeconds" : 5400,
+          "apiCalls" : 40,
+          "branch" : "main",
+          "cost" : 0.069,
+          "end" : "2026-08-16T11:30:00Z",
+          "id" : "session-a",
+          "modelColors" : [
+            {
+              "blue" : 0.341,
+              "green" : 0.467,
+              "red" : 0.851
+            },
+            {
+              "blue" : 0.341,
+              "green" : 0.467,
+              "red" : 0.851
+            }
+          ],
+          "project" : "main",
+          "prompts" : 12,
+          "startedAt" : "2026-08-16T09:00:00Z",
+          "title" : "Wire the digest's sessions section",
+          "tokens" : 9535
+        },
+        {
+          "accounts" : [
+
+          ],
+          "activeSeconds" : 1800,
+          "apiCalls" : 3,
+          "end" : "2026-08-15T20:30:00Z",
+          "id" : "session-b",
+          "modelColors" : [
+
+          ],
+          "prompts" : 1,
+          "startedAt" : "2026-08-15T20:00:00Z",
+          "title" : "A background run",
+          "tokens" : 0
+        }
+      ]
+    },
+    {
+      "dormant" : true,
+      "enabled" : true,
+      "homeDisplayPath" : "~\/.claude-personal",
+      "id" : "c982130e",
+      "isFocused" : false,
+      "label" : "Personal",
+      "lastActivityAt" : "2026-07-01T09:00:00Z",
+      "monogram" : "P",
+      "nickname" : "Personal",
+      "providerID" : "claude"
     }
   ],
   "schemaVersion" : 1,

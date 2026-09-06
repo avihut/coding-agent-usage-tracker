@@ -59,6 +59,76 @@ pub struct LiveState {
     /// does not draw the floor yet.
     #[serde(default)]
     pub outages: Option<Vec<OutageSpan>>,
+    /// The profile whose section the top level mirrors (0.96.0). `None`
+    /// means a writer before profiles existed, which metered one home.
+    #[serde(default)]
+    pub focused_profile: Option<String>,
+    /// Every enrolled profile's section, in the person's order (0.96.0).
+    /// `None` = a pre-profile writer: the top level is the one and only
+    /// `default` profile. None ≠ a single-element list.
+    #[serde(default)]
+    pub profiles: Option<Vec<ProfileState>>,
+    /// The menu bar cells in bar order, decided by the writer (0.96.0).
+    /// `None` = a pre-profile writer; the header then draws `menu_bar`
+    /// alone. Mirrored for completeness; the TUI draws one cell today.
+    #[serde(default)]
+    pub menu_bar_cells: Option<Vec<MenuBarCell>>,
+}
+
+/// Mirror of `ProfileState`: one profile's (account's) section. Identity
+/// facts are always present; the metering sections are `None` for a
+/// profile whose engine is not running (dormant or disabled) — absent,
+/// never zero.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileState {
+    pub id: String,
+    #[serde(rename = "providerID")]
+    pub provider_id: String,
+    pub label: String,
+    #[serde(default)]
+    pub nickname: Option<String>,
+    pub monogram: String,
+    pub enabled: bool,
+    pub is_focused: bool,
+    pub dormant: bool,
+    #[serde(with = "time::serde::rfc3339::option", default)]
+    pub last_activity_at: Option<OffsetDateTime>,
+    /// "~/.claude-personal" — tilde form only; the digest carries no paths.
+    #[serde(default)]
+    pub home_display_path: Option<String>,
+    #[serde(default)]
+    pub engine: Option<EngineStatus>,
+    #[serde(default)]
+    pub meters: Option<Vec<LiveMeter>>,
+    #[serde(default)]
+    pub menu_bar: Option<Vec<SegmentStatus>>,
+    #[serde(default)]
+    pub models: Option<Vec<ModelRow>>,
+    #[serde(default)]
+    pub activity: Option<ActivityRollup>,
+    #[serde(default)]
+    pub sessions: Option<Vec<SessionCard>>,
+    #[serde(default)]
+    pub account_presence: Option<AccountPresenceCard>,
+}
+
+/// Mirror of `MenuBarCell`: one profile's cell in the menu bar, decided by
+/// the writer — its digits, staleness, and whether its own pending resets
+/// light it (outages never do; they own the glyph).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MenuBarCell {
+    pub profile: String,
+    #[serde(rename = "providerID")]
+    pub provider_id: String,
+    pub glyph: String,
+    pub monogram: String,
+    pub segments: Vec<SegmentStatus>,
+    pub stale: bool,
+    #[serde(default)]
+    pub worst_severity: Option<f64>,
+    pub indicator: bool,
 }
 
 /// Mirror of `OutageSpan`: one incident as a span. `end` is `None` while
@@ -121,6 +191,10 @@ pub struct NoticeCard {
     /// The meter a reset was read from; absent from older writers.
     #[serde(default)]
     pub meter_label: Option<String>,
+    /// The profile (account) a reset belongs to (0.96.0); absent for
+    /// account-wide notices, legacy rows, and older writers.
+    #[serde(default)]
+    pub profile: Option<String>,
 }
 
 /// Mirror of `AppUpdateCard` — the newest GitHub release the engine host
@@ -981,5 +1055,61 @@ mod wave4_tests {
         assert!(live.ongoing && live.end.is_none());
         assert_eq!(live.id, "q7txxvbsftgq");
         assert!(live.url.is_some());
+    }
+
+    /// 0.96.0: profiles ride beside the focused top level — the focused
+    /// section carries what the top level carries, the dormant one carries
+    /// identity facts and NO numbers, and only the awake profile has a cell.
+    #[test]
+    fn profiles_ride_beside_the_focused_top_level() {
+        let state = golden();
+        assert_eq!(state.focused_profile.as_deref(), Some("default"));
+        let profiles = state.profiles.as_ref().expect("profiles in golden");
+        assert_eq!(profiles.len(), 2);
+        let focused = &profiles[0];
+        assert_eq!(focused.id, "default");
+        assert!(focused.is_focused && !focused.dormant && focused.enabled);
+        assert_eq!(focused.label, "work@example.com");
+        assert_eq!(focused.monogram, "W");
+        assert_eq!(focused.home_display_path.as_deref(), Some("~/.claude"));
+        let engine = focused.engine.as_ref().expect("focused engine");
+        assert_eq!(engine.fetched_at, state.engine.fetched_at);
+        assert_eq!(
+            focused.meters.as_ref().map(|m| m.len()),
+            Some(state.meters.len())
+        );
+        let dormant = &profiles[1];
+        assert_eq!(dormant.id, "c982130e");
+        assert!(dormant.dormant && !dormant.is_focused);
+        assert_eq!(dormant.nickname.as_deref(), Some("Personal"));
+        assert!(dormant.engine.is_none(), "a dormant profile has no engine");
+        assert!(dormant.meters.is_none(), "nil numbers, never zeros");
+        assert!(dormant.last_activity_at.is_some());
+
+        let cells = state.menu_bar_cells.as_ref().expect("cells in golden");
+        assert_eq!(cells.len(), 1);
+        assert_eq!(cells[0].profile, "default");
+        assert_eq!(cells[0].monogram, "W");
+        assert_eq!(cells[0].segments.len(), state.menu_bar.len());
+        assert!(cells[0].indicator && !cells[0].stale);
+        assert_eq!(cells[0].worst_severity, Some(0.4));
+    }
+
+    /// A pre-0.96 digest has none of the three keys — `None`, never a
+    /// synthesized single-profile list.
+    #[test]
+    fn an_absent_profile_list_is_none_not_single() {
+        let mut value: serde_json::Value = serde_json::from_slice(&golden_bytes()).unwrap();
+        let object = value.as_object_mut().unwrap();
+        object.remove("focusedProfile");
+        object.remove("profiles");
+        object.remove("menuBarCells");
+        let state = LiveState::parse(&serde_json::to_vec(&value).unwrap()).unwrap();
+        assert!(state.focused_profile.is_none());
+        assert!(state.profiles.is_none());
+        assert!(state.menu_bar_cells.is_none());
+        // The card's profile is absent for legacy and account-wide rows.
+        let notices = state.notices.as_ref().unwrap();
+        assert!(notices.items.iter().all(|n| n.profile.is_none()));
     }
 }
