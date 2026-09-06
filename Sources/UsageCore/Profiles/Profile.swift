@@ -128,13 +128,32 @@ public enum ProfileFacts {
         return profile.id
     }
 
-    /// The person's monogram when set, else the label's first grapheme,
-    /// uppercased.
+    /// The person's monogram when set; else, for a custom home, the first
+    /// letter of the name they gave the directory (`.claude-personal` →
+    /// "P" — two accounts' emails routinely share an initial, the folder
+    /// names never do); else the label's first grapheme. Uppercased.
     public static func monogram(profile: Profile, label: String) -> String {
         if let monogram = profile.monogram?.trimmingCharacters(in: .whitespacesAndNewlines),
            let first = monogram.first {
             return String(first).uppercased()
         }
+        if !profile.isDefault, let suffix = homeSuffix(profile), let first = suffix.first {
+            return String(first).uppercased()
+        }
         return label.first.map { String($0).uppercased() } ?? "?"
+    }
+
+    /// "personal" from `~/.claude-personal`, "work" from `~/.claude_work`;
+    /// nil when the directory name carries no such suffix.
+    static func homeSuffix(_ profile: Profile) -> String? {
+        guard var name = profile.home?.lastPathComponent else { return nil }
+        while let first = name.first, first == "." { name.removeFirst() }
+        for separator in ["-", "_", "."] {
+            if let range = name.range(of: separator) {
+                let suffix = String(name[range.upperBound...])
+                return suffix.isEmpty ? nil : suffix
+            }
+        }
+        return nil
     }
 }

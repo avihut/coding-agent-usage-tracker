@@ -247,6 +247,27 @@ struct MeteringHostTests {
         #expect(!provider.ok)
     }
 
+    @Test("an enrolled home answers its own offer")
+    func enrolmentAnswersTheOffer() async throws {
+        let fixture = try Fixture()
+        defer { fixture.tearDown() }
+        let host = fixture.makeHost()
+        host.start()
+        defer { host.shutdown() }
+        // Discovery runs off-main at start: the personal home is used and
+        // signed in, so an offer lands in the ledger.
+        let offered = await eventually {
+            host.services.notices.pending.contains { $0.id == "profile|\(fixture.personalID)" }
+        }
+        #expect(offered)
+
+        fixture.enroll(fixture.personal)
+        let changed = await host.handle(.profilesChanged)
+        #expect(changed.ok)
+        #expect(!host.services.notices.pending.contains { $0.id == "profile|\(fixture.personalID)" })
+        #expect(host.services.notices.notices.first { $0.id == "profile|\(fixture.personalID)" }?.dismissedAt != nil)
+    }
+
     @Test("profilesChanged reconciles: a new profile starts, a disabled one stops")
     func profilesReconcile() async throws {
         let fixture = try Fixture()

@@ -146,5 +146,20 @@ struct ProfileStoreTests {
         profile.monogram = "w"
         #expect(ProfileFacts.monogram(profile: profile, label: "Personal") == "W")
         #expect(ProfileFacts.monogram(profile: homeless, label: "") == "?")
+
+        // No nickname, no monogram: a custom home's folder name beats the
+        // email's initial (two accounts' emails routinely share one).
+        let unnamed = Profile(
+            id: "c982130e", providerID: "claude", home: URL(filePath: "/Users/x/.claude-personal"),
+            addedAt: now)
+        #expect(ProfileFacts.monogram(profile: unnamed, label: "avihu@example.com") == "P")
+        let underscored = Profile(
+            id: "1a2b3c4d", providerID: "claude", home: URL(filePath: "/Users/x/.claude_work"),
+            addedAt: now)
+        #expect(ProfileFacts.monogram(profile: underscored, label: "avihu@example.com") == "W")
+        // The standard home has no such suffix: the label's initial.
+        let standard = Profile(
+            id: "default", providerID: "claude", home: URL(filePath: "/Users/x/.claude"), addedAt: now)
+        #expect(ProfileFacts.monogram(profile: standard, label: "avihu@example.com") == "A")
     }
 }

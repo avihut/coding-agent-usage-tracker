@@ -433,10 +433,20 @@ final class ProviderRegistry {
         } onChange: {
             Task { @MainActor [weak self] in
                 guard let self, generation == self.observationGeneration else { return }
-                if case .hosting(let host) = self.role {
+                switch self.role {
+                case .hosting(let host):
                     self.discoveredHomes = host.discovered
                     if host.profiles != self.profiles {
                         self.profiles = host.profiles
+                        self.syncStores()
+                    }
+                case .client(let feed):
+                    // The daemon's list is the truth in client mode: a
+                    // profile it publishes that has no face here (enrolled
+                    // elsewhere) gets one.
+                    let published = Set((feed.digest?.profiles ?? []).map(\.id))
+                    if !published.isEmpty, !published.isSubset(of: Set(self.stores.keys)) {
+                        self.loadProfiles()
                         self.syncStores()
                     }
                 }

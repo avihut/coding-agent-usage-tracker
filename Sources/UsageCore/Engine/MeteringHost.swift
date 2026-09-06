@@ -169,6 +169,7 @@ public final class MeteringHost {
         recomputeDormancy(now: Date())
         reconcileEngines(staggered: true)
         _ = recomputeFocus()
+        dismissAnsweredOffers()
         if configuration.bindsSocket { startSocket() }
         let monitor = NetworkMonitor()
         monitor.onRestored = { [weak self] in
@@ -229,7 +230,19 @@ public final class MeteringHost {
         recomputeDormancy(now: Date())
         reconcileEngines()
         _ = recomputeFocus()
+        dismissAnsweredOffers()
         republish()
+    }
+
+    /// An enrolled home answers its own offer — the row leaves the panel,
+    /// whichever process enrolled it and whenever the ledger learns.
+    private func dismissAnsweredOffers() {
+        let answered = enrolledProfiles.map { Notice.profileFoundID(profileID: $0.id) }
+        services.notices.mutate { ledger in
+            var changed = false
+            for id in answered { changed = ledger.dismiss(id: id) || changed }
+            return changed
+        }
     }
 
     /// Pin the focus (nil = follow activity again).
