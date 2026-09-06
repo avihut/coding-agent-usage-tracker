@@ -163,6 +163,15 @@ adds no network destination. It is also deliberately NOT the Keychain — no
 new credential reads, so no consent prompts, ever. This amends spec §10
 (2026-08-25).
 
+`usage-cli transcript <path>` (2026-09-06, v0.95.0) reads exactly the
+transcript named on its command line plus the `<id>/subagents/**` files
+beside it — the same read-only parse the scanner runs over
+`~/.claude/projects` — so a session Claude Code wrote under another
+`CLAUDE_CONFIG_DIR` (which the daemon never indexes) can be priced too, by
+the same parser and the same rates. Nothing is cached and nothing leaves
+the machine; this extends the transcript-read amendment to a user-named
+path, not to any new tree the app walks on its own.
+
 ## Known risk: undocumented endpoint
 
 `/api/oauth/usage` is not in the public API docs and may change shape or go away

@@ -722,3 +722,102 @@ struct DeepQuerySessionsCLITests {
         #expect(out.stdout.contains("kiri1"))
     }
 }
+
+// MARK: - usage-cli transcript <path>
+
+/// `transcript` is `session … --all`'s answer for one file named by path —
+/// the same parser, the same pricing, the same field vocabulary — so these
+/// tests pin it AGAINST the scan: whatever the corpus scan says about
+/// `aaaa1111`, parsing its transcript directly must say too.
+@Suite("usage-cli transcript")
+struct DeepQueryTranscriptTests {
+    private func parser(_ fixture: DeepSessionFixture) -> (URL) -> DeepQuerySessions.Entry? {
+        { url in
+            fixture.scanner.sessionSummary(at: url).map { DeepQuerySessions.entry($0, pricing: .bundled) }
+        }
+    }
+
+    @Test("a transcript parsed by path prices exactly as the scan prices it — subagent included")
+    func matchesTheScan() throws {
+        let (fixture, entries) = try buildFixtureEntries()
+        defer { fixture.tearDown() }
+        let scanned = try #require(entries.first { $0.summary.id == "aaaa1111" })
+        let direct = try #require(parser(fixture)(fixture.projectRoot.appending(path: "aaaa1111.jsonl")))
+        #expect(direct.summary == scanned.summary)
+        #expect(direct.cost == scanned.cost)
+        #expect(direct.modelCosts == scanned.modelCosts)
+        #expect(direct.summary.subagentCount == 1)
+        #expect(direct.summary.totalTokens == 165)
+    }
+
+    @Test("human line, raw row and a --fields row come out through the session formatter")
+    func rendersLikeSession() throws {
+        let (fixture, _) = try buildFixtureEntries()
+        defer { fixture.tearDown() }
+        let path = fixture.projectRoot.appending(path: "aaaa1111.jsonl").path
+        let parse = parser(fixture)
+
+        let human = DigestQuery.runTranscript(parsed: DigestQuery.parseArgs([path]), json: false, parse: parse)
+        #expect(human.exitCode == 0)
+        #expect(human.stdout.hasPrefix("Build the thing · proj1 main · "))
+        #expect(human.stdout.hasSuffix(" · 165 tokens · " + DigestQueryFormat.humanMoney(scannedCost(fixture))))
+
+        let raw = DigestQuery.runTranscript(
+            parsed: DigestQuery.parseArgs([path, "--raw"]), json: false, parse: parse)
+        #expect(raw.stdout.split(separator: "\t").first == "aaaa1111")
+
+        let row = DigestQuery.runTranscript(
+            parsed: DigestQuery.parseArgs([path, "--fields", "tokens,source,subagents", "--raw"]),
+            json: false, parse: parse)
+        #expect(row.stdout == "165\ttranscript\t1")
+
+        let epochs = DigestQuery.runTranscript(
+            parsed: DigestQuery.parseArgs([path, "--fields", "started,end", "--raw", "--unix"]),
+            json: false, parse: parse)
+        #expect(epochs.stdout == "\(Int(at("2026-08-10T09:00:00.000Z").timeIntervalSince1970))\t"
+            + "\(Int(at("2026-08-10T09:03:00.000Z").timeIntervalSince1970))")
+    }
+
+    private func scannedCost(_ fixture: DeepSessionFixture) -> Double? {
+        parser(fixture)(fixture.projectRoot.appending(path: "aaaa1111.jsonl"))?.cost
+    }
+
+    @Test("every catalogued transcript field resolves — the vocabulary is session's, and all of it is live")
+    func catalogueWalk() throws {
+        let (fixture, _) = try buildFixtureEntries()
+        defer { fixture.tearDown() }
+        let path = fixture.projectRoot.appending(path: "aaaa1111.jsonl").path
+        let parse = parser(fixture)
+        let fields = try #require(DigestQuery.fieldCatalog["transcript"])
+        for name in fields.keys.sorted() {
+            let out = DigestQuery.runTranscript(
+                parsed: DigestQuery.parseArgs([path, name]), json: false, parse: parse)
+            #expect(out.exitCode == 0, "transcript advertises '\(name)' but exited \(out.exitCode): \(out.note ?? "")")
+        }
+        let unknown = DigestQuery.runTranscript(
+            parsed: DigestQuery.parseArgs([path, "bogusfield"]), json: false, parse: parse)
+        #expect(unknown.exitCode == 19)
+        #expect(unknown.note?.hasPrefix("transcript has no field 'bogusfield'") == true)
+    }
+
+    @Test("a path that is no transcript is a no-match (20); the scan flags are unknown here (19)")
+    func refusals() throws {
+        let (fixture, _) = try buildFixtureEntries()
+        defer { fixture.tearDown() }
+        let parse = parser(fixture)
+        let missing = DigestQuery.runTranscript(
+            parsed: DigestQuery.parseArgs([fixture.projectRoot.appending(path: "nope.jsonl").path]),
+            json: false, parse: parse)
+        #expect(missing.exitCode == 20)
+        let directory = DigestQuery.runTranscript(
+            parsed: DigestQuery.parseArgs([fixture.projectRoot.path]), json: false, parse: parse)
+        #expect(directory.exitCode == 20)
+        let none = DigestQuery.runTranscript(parsed: DigestQuery.parseArgs([]), json: false, parse: parse)
+        #expect(none.exitCode == 19)
+        for flag in ["--all", "--no-scan", "--background", "--last"] {
+            let rejected = DigestQuery.rejectInapplicableFlags(
+                noun: "transcript", parsed: DigestQuery.parseArgs(["x", flag, "1"]))
+            #expect(rejected?.exitCode == 19, "\(flag) should be unknown on transcript")
+        }
+    }
+}

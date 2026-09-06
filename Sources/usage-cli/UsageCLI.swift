@@ -27,7 +27,10 @@ import UsageCore
 /// shortlist-miss both fall through to a bare `TranscriptScanner` pass
 /// (`DeepQuerySessionsCLI`, core `Digests/DeepQuerySessions.swift`) — the
 /// noun grammar's own replacement for the old ad hoc `runSessions` dump this
-/// file used to carry. Routing below is by ARGUMENT COUNT, not noun
+/// file used to carry. `transcript <path>` (v0.95.0) rides the same door
+/// and only ever parses the one file it is handed — a session written under
+/// another config dir, which the daemon never indexes. Routing below is by
+/// ARGUMENT COUNT, not noun
 /// recognition: anything past argv[0] is the grammar's noun position, typo
 /// or not, so `runQuery` itself returns the bad-query exit for an
 /// unrecognized one — a typo must never fall through to the credentialed
@@ -302,10 +305,11 @@ struct UsageCLI {
     /// one to exist first.
     private static func runQuery(arguments: [String], digestPath: String?) {
         let noun = arguments.first ?? ""
-        guard DigestQuery.nouns.contains(noun) || DeepQuery.nouns.contains(noun) else {
+        let known = DigestQuery.nouns.union(DeepQuery.nouns).union(DeepQuerySessionsCLI.nouns)
+        guard known.contains(noun) else {
             die(
                 "unknown noun '\(noun)' — usage-cli <noun> [selector] [field] [flags]; "
-                    + "nouns: \((DigestQuery.nouns.union(DeepQuery.nouns)).sorted().joined(separator: " "))",
+                    + "nouns: \(known.sorted().joined(separator: " "))",
                 code: 19)
         }
 
@@ -330,13 +334,14 @@ struct UsageCLI {
             return
         }
 
-        // `sessions`/`session` route through `DeepQuerySessionsCLI`, not
-        // `DigestQuery.run` — only there can a shortlist miss / `--all` fall
-        // through to a real transcript scan (`DigestQuery.run` itself stays
-        // pure, per its own doc contract). A digest that exists but fails to
-        // decode degrades the same way as one that's simply absent: corrupt
-        // state is no more answerable than no state.
-        if noun == "sessions" || noun == "session" {
+        // `sessions`/`session`/`transcript` route through
+        // `DeepQuerySessionsCLI`, not `DigestQuery.run` — only there can a
+        // shortlist miss / `--all` fall through to a real transcript scan,
+        // and `transcript` never does anything else (`DigestQuery.run`
+        // itself stays pure, per its own doc contract). A digest that exists
+        // but fails to decode degrades the same way as one that's simply
+        // absent: corrupt state is no more answerable than no state.
+        if DeepQuerySessionsCLI.nouns.contains(noun) {
             let digest = digestData.flatMap { try? LiveState.decoder().decode(LiveState.self, from: $0) }
             let output = DeepQuerySessionsCLI.run(
                 noun: noun, arguments: Array(arguments.dropFirst()), digest: digest, now: Date())

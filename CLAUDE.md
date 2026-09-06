@@ -607,6 +607,34 @@ the README rather than silently deviating.
   M2 verbs need injected fixtures the digest suite has no seam for.
   Sessions nouns now live in Digests/DigestQuerySessions.swift
   (DigestQueryNouns.swift had passed the ~600-line split rule).
+- USAGE-CLI TRANSCRIPT (2026-09-06, v0.95.0): `usage-cli transcript <path>
+  [field] [--fields …] [--raw|--json] [--unix] [--relative]` prices ONE
+  Claude Code transcript named by path — the main file plus the
+  `<id>/subagents/**` parts beside it — fresh through
+  `TranscriptScanner.sessionSummary(at:)` (sessionDetail's first half,
+  factored into `parseSession(at:id:collectRows:)` so the ownership rule
+  stays one code path) and `DeepQuerySessions.entry(_:pricing:)` (the pass
+  `index` runs per scanned session). WHY: the daemon indexes exactly one
+  `projects` tree (~/.claude), so a session Claude Code writes under
+  another config dir (`CLAUDE_CONFIG_DIR=~/.claude-personal` on this Mac)
+  has no shortlist row and no scan to fall back to — `session <id>` misses
+  it forever, and `usage-cli account` names the OTHER account. This verb is
+  the door that prices such a session with the app's own parser and rates;
+  the status line (~/.claude/statusline-command.sh, the two-row "Meters"
+  design) uses it for any transcript outside ~/.claude/projects,
+  backgrounded and cached like its PR lookup. Field vocabulary =
+  `session`'s in full (every deep field is live — never "add --all";
+  `source` reads "transcript"); `--all`/`--no-scan`/`--background` are
+  unknown flags here (19); a path that is no transcript, or holds no call
+  and no prompt, is a no-match (20); a non-claude provider is 11 ahead of
+  the body. Routed by `DeepQuerySessionsCLI.nouns`
+  (sessions/session/transcript) — NOT in `DigestQuery.nouns`, a digest
+  can't answer it; the catalog entry shares `session`'s (`sessionFields`),
+  walked by DeepQueryTranscriptTests (`coveredElsewhere`). §10: a read of
+  the one local file named on the command line and its subagent siblings;
+  nothing cached, nothing sent. NOT done here: making the daemon index
+  other config dirs — the account timeline (v0.89.0) is time-based, and
+  two dirs active at once would need root-based attribution first.
 - HOW A CALL IS COUNTED (2026-08-17, v0.85.0): measured against ccusage
   20.0.20 over the real 2,239-transcript corpus, our cost ran 7.4% LOW.
   The pricing arithmetic was never the problem — same rates, same 1h-TTL

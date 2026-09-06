@@ -566,14 +566,8 @@ public struct TranscriptScanner: Sendable {
     /// Synchronous and slow on multi-MB sessions — call off-main.
     public func sessionDetail(id: String) -> SessionDetail? {
         guard let url = findTranscript(id: id) else { return nil }
-        guard let parsed = parseFile(url, collectRows: true) else { return nil }
-        // The parent's copy of a call owns it; the echoes in its subagent
-        // transcripts are excluded as they're read, so the running ledger
-        // reaches the session's spend exactly once.
-        var claimed = Set(parsed.calls.map(\.hash))
-        let mainEntry = FileEntry(
-            mtime: 0, size: 0, days: parsed.days, slots: [], session: parsed.session,
-            calls: "", excluded: 0)
+        guard let session = parseSession(at: url, id: id, collectRows: true) else { return nil }
+        let mainEntry = Self.freshEntry(session.main)
 
         // (source, ordinal) breaks timestamp ties deterministically: main
         // rows first, then parts in stable path order, each in file order.
@@ -584,21 +578,13 @@ public struct TranscriptScanner: Sendable {
             let source: Int
             let ordinal: Int
         }
-        var pending = parsed.rows.map {
+        var pending = session.main.rows.map {
             PendingRow(t: $0.t, kind: $0.kind, subagent: false, source: 0, ordinal: $0.id)
         }
-        var truncated = parsed.truncated
+        var truncated = session.main.truncated
         var partEntries: [FileEntry] = []
-        for (index, partURL) in subagentFiles(of: url, id: id).enumerated() {
-            if Task.isCancelled { return nil }
-            guard let part = parseFile(partURL, collectRows: true, excluding: claimed) else {
-                if Task.isCancelled { return nil }
-                continue
-            }
-            claimed.formUnion(part.calls.map(\.hash))
-            partEntries.append(FileEntry(
-                mtime: 0, size: 0, days: part.days, slots: [], session: part.session,
-                calls: "", excluded: 0))
+        for (index, part) in session.parts.enumerated() {
+            partEntries.append(Self.freshEntry(part))
             truncated = truncated || part.truncated
             for row in part.rows {
                 pending.append(PendingRow(
@@ -623,6 +609,56 @@ public struct TranscriptScanner: Sendable {
                 kind: .command(name: "… breakdown truncated")))
         }
         return SessionDetail(summary: summary, rows: rows)
+    }
+
+    /// One session's whole spend, summarized fresh from a transcript at an
+    /// explicit path — `sessionDetail`'s first half without the row
+    /// collection and without the `findTranscript` walk. This is how a
+    /// transcript OUTSIDE this scanner's root (another config dir's
+    /// `projects` tree, which the daemon never indexes) gets priced with the
+    /// same parser and the same ownership rule as everything the app shows.
+    /// The id is the filename's stem; the subagent parts are looked up
+    /// beside it exactly as the scan does. Nil when the file isn't a
+    /// transcript that produced any call or prompt. Reads only; nothing is
+    /// cached.
+    public func sessionSummary(at url: URL) -> SessionSummary? {
+        guard url.pathExtension == "jsonl" else { return nil }
+        let id = url.deletingPathExtension().lastPathComponent
+        guard !id.isEmpty, FileManager.default.isReadableFile(atPath: url.path) else { return nil }
+        guard let session = parseSession(at: url, id: id, collectRows: false) else { return nil }
+        return Self.buildSummary(
+            id: id, main: Self.freshEntry(session.main), parts: session.parts.map(Self.freshEntry))
+    }
+
+    /// Main transcript plus every subagent part, parsed fresh from disk. The
+    /// parent's copy of a call owns it; the echoes in its subagent
+    /// transcripts are excluded as they're read, so a ledger over the result
+    /// reaches the session's spend exactly once. Nil on cancellation.
+    private func parseSession(
+        at url: URL, id: String, collectRows: Bool
+    ) -> (main: FileParse, parts: [FileParse])? {
+        guard let main = parseFile(url, collectRows: collectRows) else { return nil }
+        var claimed = Set(main.calls.map(\.hash))
+        var parts: [FileParse] = []
+        for partURL in subagentFiles(of: url, id: id) {
+            if Task.isCancelled { return nil }
+            guard let part = parseFile(partURL, collectRows: collectRows, excluding: claimed) else {
+                if Task.isCancelled { return nil }
+                continue
+            }
+            claimed.formUnion(part.calls.map(\.hash))
+            parts.append(part)
+        }
+        return (main, parts)
+    }
+
+    /// A cache-shaped entry for a parse that never touches the cache —
+    /// `buildSummary` reads entries, and a fresh parse has no mtime, size or
+    /// slots worth carrying.
+    private static func freshEntry(_ parse: FileParse) -> FileEntry {
+        FileEntry(
+            mtime: 0, size: 0, days: parse.days, slots: [], session: parse.session,
+            calls: "", excluded: 0)
     }
 
     /// The session's subagent transcripts on disk right now, in stable path

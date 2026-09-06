@@ -59,10 +59,10 @@ extension DigestQuery {
             "tokens.cache-write", "tokens.cache-write-1h", "tokens.uncached-input", "tokens.input-side",
             "tokens.cached-share",
         ]),
-        "session": scalars([
-            "id", "title", "project", "branch", "started", "end", "active", "cost", "tokens", "prompts",
-            "api-calls", "source", "kind", "tool-calls", "subagents", "compactions", "agent-version",
-        ]).merging(tables(["models"])) { lhs, _ in lhs },
+        "session": sessionFields,
+        // `transcript <path>` answers with the session vocabulary in full —
+        // it always parses, so every deep field is live, never "add --all".
+        "transcript": sessionFields,
         // M2 verbs answer field names too, and enumerate them the same way.
         "price": scalars([
             "input", "output", "cache-read", "cache-write", "cache-write-1h", "context", "source", "fetched",
@@ -70,6 +70,11 @@ extension DigestQuery {
         ]),
         "windows": scalars(["hit-rate"]),
     ]
+
+    private static let sessionFields: [String: FieldShape] = scalars([
+        "id", "title", "project", "branch", "started", "end", "active", "cost", "tokens", "prompts",
+        "api-calls", "source", "kind", "tool-calls", "subagents", "compactions", "agent-version",
+    ]).merging(tables(["models"])) { lhs, _ in lhs }
 
     /// Which nouns actually WIRE `--fields`. Not simply every catalogued
     /// noun: `windows` has exactly one field, so the flag there would parse

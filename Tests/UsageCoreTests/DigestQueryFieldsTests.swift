@@ -50,7 +50,7 @@ struct DigestQueryFieldsTests {
     /// (DeepQueryPricesTests), `windows` a ledger directory
     /// (DeepQueryWindowsTests). Named here so a NEW catalogued noun can't
     /// slip past the walk below by simply having no prefix.
-    static let coveredElsewhere: Set<String> = ["price", "windows"]
+    static let coveredElsewhere: Set<String> = ["price", "windows", "transcript"]
 
     // MARK: - The catalog is the vocabulary
 

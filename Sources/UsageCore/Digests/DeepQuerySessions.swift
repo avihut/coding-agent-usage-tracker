@@ -28,17 +28,21 @@ enum DeepQuerySessions {
     /// fixture directly, without going through `buildIndex`'s hardwired
     /// home directory.
     static func index(scan: TranscriptScan, pricing: PricingTable) -> [Entry] {
-        scan.sessions.map { summary in
-            var modelCosts: [String: Double] = [:]
-            var total = 0.0
-            for (model, tally) in summary.models {
-                guard let rates = pricing.rates(for: model) else { continue }
-                let dollars = rates.dollars(for: tally)
-                modelCosts[model] = dollars
-                total += dollars
-            }
-            return Entry(summary: summary, cost: modelCosts.isEmpty ? nil : total, modelCosts: modelCosts)
+        scan.sessions.map { entry($0, pricing: pricing) }
+    }
+
+    /// One session priced — the pass `index` runs per scanned session, and
+    /// the whole of what `transcript <path>` does once it has a summary.
+    static func entry(_ summary: SessionSummary, pricing: PricingTable) -> Entry {
+        var modelCosts: [String: Double] = [:]
+        var total = 0.0
+        for (model, tally) in summary.models {
+            guard let rates = pricing.rates(for: model) else { continue }
+            let dollars = rates.dollars(for: tally)
+            modelCosts[model] = dollars
+            total += dollars
         }
+        return Entry(summary: summary, cost: modelCosts.isEmpty ? nil : total, modelCosts: modelCosts)
     }
 
     /// Resolves the provider, scans `~/.claude/projects` fresh
@@ -51,17 +55,42 @@ enum DeepQuerySessions {
     static func buildIndex(providerFlag: String?, now: Date) -> [Entry]? {
         let providerID = DeepQuery.resolveProviderID(flag: providerFlag)
         guard providerID == "claude" else { return nil }
-        let bundleID = "com.avihu.ClaudeUsage"
-        let support = StorageScope.supportDirectory(bundleID: bundleID, providerID: providerID)
+        let support = supportDirectory(providerID: providerID)
         let root = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".claude/projects")
         let scan = TranscriptScanner(root: root, cacheDirectory: support).scan(now: now, persistCache: false)
+        return index(scan: scan, pricing: pricingTable(support: support))
+    }
 
+    /// `transcript <path>`'s data layer: ONE transcript (plus the subagent
+    /// parts beside it) parsed fresh and priced against the same disk-cached
+    /// table the scan uses. The daemon indexes exactly one `projects` tree,
+    /// so a session Claude Code wrote under another config dir has no
+    /// shortlist row and no scan to fall back to — this is the door that
+    /// prices it anyway, with the app's own parser and the app's own rates
+    /// (spec §10: a read of the one local file named on the command line
+    /// and its `<id>/subagents/**` siblings; no cache is read or written).
+    /// Nil when the path holds no transcript with a call or a prompt. The
+    /// scanner's `root` is the file's own projects tree, which
+    /// `sessionSummary(at:)` never consults — it's named for honesty.
+    static func transcriptEntry(at url: URL, providerID: String) -> Entry? {
+        let support = supportDirectory(providerID: providerID)
+        let root = url.deletingLastPathComponent().deletingLastPathComponent()
+        guard let summary = TranscriptScanner(root: root, cacheDirectory: support).sessionSummary(at: url)
+        else { return nil }
+        return entry(summary, pricing: pricingTable(support: support))
+    }
+
+    private static func supportDirectory(providerID: String) -> URL {
+        StorageScope.supportDirectory(bundleID: "com.avihu.ClaudeUsage", providerID: providerID)
+    }
+
+    /// The same disk-cached LiteLLM table the legacy dump used, bundled
+    /// floor underneath — `current()` never blocks on the network.
+    private static func pricingTable(support: URL) -> PricingTable {
         let provider = ClaudeProvider()
-        let pricing = PricingService(
+        return PricingService(
             cacheDirectory: support, fallback: provider.bundledRates, selector: provider.pricingSelector
         ).current()
-
-        return index(scan: scan, pricing: pricing)
     }
 
     /// `id` prefix only (case-insensitive) — the plan's own selector for the
@@ -111,6 +140,13 @@ enum DeepQuerySessions {
 /// going through `DigestQuery.run` directly — the only new behavior is what
 /// happens on a miss.
 public enum DeepQuerySessionsCLI {
+    /// The nouns that route here rather than through `DigestQuery.run`:
+    /// the two shortlist nouns that can fall through to a scan, and
+    /// `transcript`, which only ever parses. `transcript` is NOT in
+    /// `DigestQuery.nouns` — a digest can't answer it — so the CLI's
+    /// noun gate checks this set alongside the other two.
+    public static let nouns: Set<String> = ["sessions", "session", "transcript"]
+
     public static func run(noun: String, arguments: [String], digest: LiveState?, now: Date) -> QueryOutput {
         let parsed = DigestQuery.parseArgs(arguments)
         if let error = parsed.error { return DigestQuery.badQuery(error) }
@@ -131,7 +167,7 @@ public enum DeepQuerySessionsCLI {
         // windows/history/prices has no stale gate at all). A
         // shortlist-backed `sessions` or `session` answer, by contrast, IS
         // digest-backed and must still gate.
-        let isAllScan = noun == "sessions" && parsed.flags["all"] != nil
+        let isAllScan = (noun == "sessions" && parsed.flags["all"] != nil) || noun == "transcript"
         if let maxAgeText = parsed.flags["max-age"] {
             guard let maxAge = DigestQuery.parseDuration(maxAgeText) else {
                 return DigestQuery.badQuery("bad --max-age duration '\(maxAgeText)' — e.g. 90s, 5m, 2h, 7d")
@@ -164,6 +200,18 @@ public enum DeepQuerySessionsCLI {
         case "session":
             return DigestQuery.runSession(
                 parsed: parsed, digest: digest, now: now, calendar: calendar, json: json, scan: scan)
+        case "transcript":
+            // Exit 11 ahead of the verb body, like every other Claude-only
+            // path: the format this parser reads is Claude Code's.
+            let providerID = DeepQuery.resolveProviderID(flag: parsed.flags["provider"])
+            guard providerID == "claude" else {
+                return QueryOutput(
+                    stdout: "", note: "transcript reads Claude Code transcripts only; provider is '\(providerID)'",
+                    exitCode: DeepQuery.exitWrongProvider)
+            }
+            return DigestQuery.runTranscript(parsed: parsed, json: json) {
+                DeepQuerySessions.transcriptEntry(at: $0, providerID: providerID)
+            }
         default:
             return DigestQuery.badQuery("unknown noun '\(noun)'")
         }

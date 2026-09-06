@@ -197,6 +197,35 @@ extension DigestQuery {
         }
     }
 
+    /// `transcript <path> [field]` — `session <id> --all`'s answer for ONE
+    /// transcript named by path, parsed fresh through `parse` (the CLI
+    /// injects `DeepQuerySessions.transcriptEntry`; tests inject a fixture
+    /// scanner). The daemon indexes exactly one `projects` tree, so a
+    /// session written under another config dir (`CLAUDE_CONFIG_DIR`) has
+    /// no shortlist row and no scan to fall back to; this is the door that
+    /// prices it anyway, with the same parser and the same field vocabulary
+    /// (`source` reads "transcript"). A path that isn't a readable
+    /// transcript, or holds no call and no prompt, is a no-match — exit 20,
+    /// the selector named nothing — never a bad query: the grammar was fine.
+    static func runTranscript(
+        parsed: ParsedArgs, json: Bool, parse: (URL) -> DeepQuerySessions.Entry?
+    ) -> QueryOutput {
+        var positionals = parsed.positionals
+        guard !positionals.isEmpty else {
+            return badQuery("transcript needs a path — usage-cli transcript <path/to/session.jsonl> [field]")
+        }
+        let path = positionals.removeFirst()
+        guard positionals.count <= 1 else { return badQuery("too many arguments") }
+        let url = URL(fileURLWithPath: NSString(string: path).expandingTildeInPath)
+        guard let entry = parse(url) else {
+            return noMatch(
+                "no transcript at '\(path)' — expected a Claude Code session .jsonl holding at least one prompt or API call")
+        }
+        return renderSession(
+            DeepQuerySessions.card(entry), deep: entry, parsed: parsed, field: positionals.first, json: json,
+            stale: false, noun: "transcript", source: "transcript")
+    }
+
     /// `--no-scan` forbids the escalation; `--all` demands it. Neither is a
     /// modifier of the other, so asking for both is a bad query rather than
     /// a precedence rule nobody would remember.
@@ -217,18 +246,20 @@ extension DigestQuery {
     /// The "no field" vs "named field" fork, shared by both the shortlist
     /// hit and the scan hit — the only difference between the two sources is
     /// whether `deep` (the scan's extra fields) is present.
+    /// `noun`/`source` let `transcript` share this path verbatim while its
+    /// errors and its `source` field name IT, not `session`.
     private static func renderSession(
         _ session: SessionCard, deep: DeepQuerySessions.Entry?, parsed: ParsedArgs, field: String?, json: Bool,
-        stale: Bool
+        stale: Bool, noun: String = "session", source: String? = nil
     ) -> QueryOutput {
         let header = parsed.flags["header"] != nil
         func resolve(_ name: String, asJSON: Bool) -> QueryOutput {
             sessionField(
                 name, session: session, deep: deep, json: asJSON, unix: parsed.flags["unix"] != nil,
-                relative: parsed.flags["relative"] != nil, header: header)
+                relative: parsed.flags["relative"] != nil, header: header, noun: noun, source: source)
         }
         if let output = multiFieldOutput(
-            noun: "session", parsed: parsed, positionalField: field, json: json, header: header, resolve: resolve) {
+            noun: noun, parsed: parsed, positionalField: field, json: json, header: header, resolve: resolve) {
             return output
         }
         guard let field else {
@@ -318,7 +349,7 @@ extension DigestQuery {
     /// either.
     private static func sessionField(
         _ field: String, session: SessionCard, deep: DeepQuerySessions.Entry?, json: Bool, unix: Bool,
-        relative: Bool, header: Bool
+        relative: Bool, header: Bool, noun: String = "session", source: String? = nil
     ) -> QueryOutput {
         switch field {
         case "id": return DigestQueryFormat.textField(session.id, json: json)
@@ -333,7 +364,7 @@ extension DigestQuery {
             return DigestQueryFormat.dateField(
                 session.end ?? deep?.summary.end, json: json, unix: unix, relative: false)
         case "source":
-            return DigestQueryFormat.textField(deep == nil ? "digest" : "scan", json: json)
+            return DigestQueryFormat.textField(source ?? (deep == nil ? "digest" : "scan"), json: json)
         case "active": return DigestQueryFormat.secondsField(session.activeSeconds, json: json, relative: relative)
         case "cost": return DigestQueryFormat.numberField(session.cost, json: json)
         case "tokens": return DigestQueryFormat.intField(session.tokens, json: json)
@@ -345,16 +376,16 @@ extension DigestQuery {
                 // catalogued, it's the SOURCE that can't answer it. Sharing
                 // the unknown-name wording sent people looking for a typo.
                 return badQuery(
-                    "session field '\(field)' isn't in the shortlist — add --all to resolve it through the scan")
+                    "\(noun) field '\(field)' isn't in the shortlist — add --all to resolve it through the scan")
             }
-            return deepSessionField(field, deep: deep, json: json, header: header)
+            return deepSessionField(field, deep: deep, json: json, header: header, noun: noun)
         default:
-            return unknownField(noun: "session", field: field)
+            return unknownField(noun: noun, field: field)
         }
     }
 
     private static func deepSessionField(
-        _ field: String, deep: DeepQuerySessions.Entry, json: Bool, header: Bool
+        _ field: String, deep: DeepQuerySessions.Entry, json: Bool, header: Bool, noun: String = "session"
     ) -> QueryOutput {
         switch field {
         case "kind": return DigestQueryFormat.textField(deep.summary.kind.rawValue, json: json)
@@ -363,7 +394,7 @@ extension DigestQuery {
         case "compactions": return DigestQueryFormat.intField(deep.summary.compactions, json: json)
         case "agent-version": return DigestQueryFormat.textField(deep.summary.agentVersion, json: json)
         case "models": return sessionModelsOutput(deep, json: json, header: header)
-        default: return unknownField(noun: "session", field: field)
+        default: return unknownField(noun: noun, field: field)
         }
     }
 
