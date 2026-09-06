@@ -17,10 +17,9 @@ public struct PromptHistoryScanner: Sendable {
         self.calendar = calendar
     }
 
+    /// The standard home's log (`~/.claude/history.jsonl`).
     public static func standard() -> PromptHistoryScanner {
-        PromptHistoryScanner(
-            fileURL: FileManager.default.homeDirectoryForCurrentUser
-                .appending(path: ".claude/history.jsonl"))
+        PromptHistoryScanner(fileURL: ClaudeHome.standard.promptHistoryURL)
     }
 
     private struct Line: Decodable {

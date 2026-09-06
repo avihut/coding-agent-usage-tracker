@@ -145,8 +145,7 @@ struct UsageCLI {
         let caches = StorageScope.cachesDirectory(
             bundleID: bundleID, providerID: chosen, profileID: StorageScope.defaultProfileID)
 
-        let root = FileManager.default.homeDirectoryForCurrentUser
-            .appending(path: ".claude/projects")
+        let root = ClaudeHome.standard.projectsDirectory
         let scan = TranscriptScanner(root: root, cacheDirectory: support)
             .scan(persistCache: false)
         let daily = ActivityMerge.merge(

@@ -24,16 +24,49 @@ public struct ClaudeProvider: UsageProvider {
         base: URL(string: "https://status.claude.com")!,
         pageURL: URL(string: "https://status.claude.com")!)
     /// Claude Code's own identity record (spec §10 amendment 2026-08-25):
-    /// `oauthAccount` in ~/.claude.json, read-only. Never the Keychain.
+    /// `oauthAccount` in this home's `.claude.json`, read-only. Never the
+    /// Keychain.
     public var accountIdentity: (any AccountIdentitySource)? {
-        ClaudeAccountIdentitySource()
+        ClaudeAccountIdentitySource(
+            fileURL: home.identityFileURL, displayPath: home.displayPath(of: home.identityFileURL))
     }
+    /// The configuration directory this instance reads — `~/.claude` for
+    /// the default profile, a `CLAUDE_CONFIG_DIR` for any other. Every
+    /// path and the Keychain service name derive from it.
+    public let home: ClaudeHome
     public let credentials: CredentialChain
     private let client: UsageClient
 
-    public init(credentials: CredentialChain = .standard, client: UsageClient = UsageClient()) {
-        self.credentials = credentials
+    /// `credentials` nil = the home's own standard chain (its
+    /// `.credentials.json`, then its Keychain item).
+    public init(
+        home: ClaudeHome = .standard, credentials: CredentialChain? = nil,
+        client: UsageClient = UsageClient()
+    ) {
+        self.home = home
+        self.credentials = credentials ?? .standard(for: home)
         self.client = client
+    }
+
+    // MARK: - Homes (multi-account metering, spec §10 amendment 2026-09-06)
+
+    public var supportsMultipleHomes: Bool { true }
+
+    public var homeDirectory: URL? { home.directory }
+
+    /// The same vendor, another directory: fresh credential chain, identity
+    /// file, scanners and settings for THAT home; the HTTP client is shared
+    /// (it holds no per-account state).
+    public func withHome(_ directory: URL) -> any UsageProvider {
+        ClaudeProvider(home: ClaudeHome(directory: directory, userHome: home.userHome), client: client)
+    }
+
+    /// `~/.claude*` directories beside the standard home that Claude Code
+    /// has actually run in — the detect-and-offer input. The standard home
+    /// is never listed (it is the implicit default profile), and nothing
+    /// credentialed is read here.
+    public func discoverHomes() -> [URL] {
+        ClaudeHome.discoverSiblings(of: .standard(userHome: home.userHome)).map(\.directory)
     }
 
     /// Where a Claude notification leads. An outage opens its incident
@@ -68,10 +101,13 @@ public struct ClaudeProvider: UsageProvider {
     }
 
     public func makeLocalActivity(cacheDirectory: URL) -> (any LocalActivitySource)? {
-        ClaudeActivitySource(cacheDirectory: cacheDirectory)
+        ClaudeActivitySource(home: home, cacheDirectory: cacheDirectory)
     }
 
-    public var agentSettings: (any AgentSettingsStore)? { ClaudeCodeSettings.standard() }
+    public var agentSettings: (any AgentSettingsStore)? {
+        ClaudeCodeSettings(
+            fileURL: home.settingsFileURL, displayPath: home.displayPath(of: home.settingsFileURL))
+    }
 
     public var modelCatalog: ModelCatalog { .claude }
 
@@ -80,24 +116,29 @@ public struct ClaudeProvider: UsageProvider {
     public var pricingSelector: PricingFeedSelector { .claude }
 }
 
-/// Claude Code's on-disk traces: JSONL transcripts under ~/.claude/projects
+/// Claude Code's on-disk traces: JSONL transcripts under `<home>/projects`
 /// (tokens per model) and the prompt-history log that outlives transcript
 /// cleanup. Strictly read-only (spec §10).
 public struct ClaudeActivitySource: LocalActivitySource {
     private let transcripts: TranscriptScanner
     private let prompts: PromptHistoryScanner
     private let root: URL
+    public let displayPath: String
 
-    public init(cacheDirectory: URL) {
-        let root = FileManager.default.homeDirectoryForCurrentUser
-            .appending(path: ".claude/projects")
+    public init(home: ClaudeHome, cacheDirectory: URL) {
+        let root = home.projectsDirectory
         self.transcripts = TranscriptScanner(root: root, cacheDirectory: cacheDirectory)
-        self.prompts = .standard()
+        self.prompts = PromptHistoryScanner(fileURL: home.promptHistoryURL)
         self.root = root
+        self.displayPath = home.displayPath(of: root)
+    }
+
+    /// The standard home (`~/.claude/projects`).
+    public init(cacheDirectory: URL) {
+        self.init(home: .standard, cacheDirectory: cacheDirectory)
     }
 
     public var watchDirectories: [URL] { [root] }
-    public var displayPath: String { "~/.claude/projects" }
 
     public func scanTranscripts(now: Date) -> TranscriptScan {
         transcripts.scan(now: now)
@@ -123,9 +164,8 @@ public struct ClaudeActivitySource: LocalActivitySource {
 }
 
 /// The retention capability: Claude Code's `cleanupPeriodDays` — the one
-/// sanctioned write inside ~/.claude.
+/// sanctioned write inside a home.
 extension ClaudeCodeSettings: AgentSettingsStore {
-    public var displayPath: String { "~/.claude/settings.json" }
     public var retentionKeyName: String { "cleanupPeriodDays" }
     public var defaultRetentionDays: Int { Self.defaultDays }
     public func readRetentionDays() -> Int? { readCleanupPeriodDays() }

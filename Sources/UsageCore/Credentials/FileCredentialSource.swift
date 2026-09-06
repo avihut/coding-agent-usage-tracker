@@ -1,16 +1,15 @@
 import Foundation
 
-/// Reads `~/.claude/.credentials.json` (the non-Keychain storage path Claude
-/// Code uses on some setups).
+/// Reads a home's `.credentials.json` (the non-Keychain storage path Claude
+/// Code uses on some setups) — `~/.claude/.credentials.json` by default.
 public struct FileCredentialSource: CredentialSource {
     let fileURL: URL
 
-    public var name: String { "file (~/.claude/.credentials.json)" }
+    /// "file (~/.claude/.credentials.json)" — the path, never the contents.
+    public var name: String { "file (\(PathDisplay.abbreviated(fileURL)))" }
 
     public init(fileURL: URL? = nil) {
-        self.fileURL = fileURL
-            ?? FileManager.default.homeDirectoryForCurrentUser
-                .appending(path: ".claude/.credentials.json")
+        self.fileURL = fileURL ?? ClaudeHome.standard.credentialsFileURL
     }
 
     public func readCredential() throws -> Credential {

@@ -66,15 +66,14 @@ public protocol AccountIdentitySource: Sendable {
 /// transcript scans.
 public struct ClaudeAccountIdentitySource: AccountIdentitySource {
     let fileURL: URL
+    /// "~/.claude.json" for the standard home, "~/<home>/.claude.json" for
+    /// a custom one — the privacy card's row.
+    public let displayPath: String
 
-    public init(
-        fileURL: URL = FileManager.default.homeDirectoryForCurrentUser
-            .appending(path: ".claude.json")
-    ) {
+    public init(fileURL: URL = ClaudeHome.standard.identityFileURL, displayPath: String? = nil) {
         self.fileURL = fileURL
+        self.displayPath = displayPath ?? PathDisplay.abbreviated(fileURL)
     }
-
-    public var displayPath: String { "~/.claude.json" }
 
     private struct Shell: Decodable {
         let oauthAccount: OAuthAccount?

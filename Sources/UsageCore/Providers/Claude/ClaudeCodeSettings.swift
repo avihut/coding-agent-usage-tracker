@@ -9,15 +9,17 @@ import Foundation
 /// throwing through the UI.
 public struct ClaudeCodeSettings: Sendable {
     public let fileURL: URL
+    /// Shown beside the retention control ("~/.claude/settings.json").
+    public let displayPath: String
 
-    public init(fileURL: URL) {
+    public init(fileURL: URL, displayPath: String? = nil) {
         self.fileURL = fileURL
+        self.displayPath = displayPath ?? PathDisplay.abbreviated(fileURL)
     }
 
+    /// The standard home's file (`~/.claude/settings.json`).
     public static func standard() -> ClaudeCodeSettings {
-        ClaudeCodeSettings(
-            fileURL: FileManager.default.homeDirectoryForCurrentUser
-                .appending(path: ".claude/settings.json"))
+        ClaudeCodeSettings(fileURL: ClaudeHome.standard.settingsFileURL)
     }
 
     /// Claude Code's own default when the key is absent.

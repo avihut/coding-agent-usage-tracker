@@ -55,7 +55,7 @@ enum DeepQuerySessions {
     static func buildIndex(providerFlag: String?, now: Date) -> [Entry]? {
         let providerID = DeepQuery.resolveProviderID(flag: providerFlag)
         guard providerID == "claude" else { return nil }
-        let root = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".claude/projects")
+        let root = ClaudeHome.standard.projectsDirectory
         let scan = TranscriptScanner(root: root, cacheDirectory: profileDirectory(providerID: providerID))
             .scan(now: now, persistCache: false)
         return index(scan: scan, pricing: pricingTable(support: providerDirectory(providerID: providerID)))

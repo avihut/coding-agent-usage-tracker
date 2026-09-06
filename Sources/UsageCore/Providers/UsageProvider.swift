@@ -10,7 +10,10 @@ import Foundation
 /// names a vendor.
 ///
 /// Exactly one provider is active per app instance; this is a seam for
-/// adopting other agents, not for metering several at once.
+/// adopting other agents, not for metering several VENDORS at once. Several
+/// HOMES of the one active provider may be metered side by side (profiles,
+/// v0.96.0): `withHome` retargets an instance at another directory, and
+/// every path it reads follows.
 public protocol UsageProvider: Sendable {
     /// Stable machine id ("claude") — safe to embed in cache paths and keys.
     var id: String { get }
@@ -92,6 +95,25 @@ public protocol UsageProvider: Sendable {
     /// the event) the meter's own history with the moment lit. Nil = the
     /// row is inert. Default policy in `NoticeDestination.swift`.
     func noticeDestination(for notice: NoticeCard) -> NoticeDestination?
+
+    // MARK: Homes (multi-account metering, spec §10 amendment 2026-09-06)
+
+    /// Whether this agent can run from more than one configuration
+    /// directory at once (Claude Code's `CLAUDE_CONFIG_DIR`), each with its
+    /// own sign-in — the capability behind the Accounts settings card.
+    /// False = exactly one profile, the implicit `default`.
+    var supportsMultipleHomes: Bool { get }
+    /// The directory this instance reads; nil when the agent has no such
+    /// notion (fixed paths, one sign-in).
+    var homeDirectory: URL? { get }
+    /// This provider retargeted at another home — the same vendor facts,
+    /// every path and credential lookup following the new directory.
+    /// Providers without homes return themselves.
+    func withHome(_ directory: URL) -> any UsageProvider
+    /// Candidate homes on this machine beyond the standard one, found by a
+    /// directory listing plus read-only stats — nothing credentialed is
+    /// opened. Empty when unsupported.
+    func discoverHomes() -> [URL]
 }
 
 extension UsageProvider {
@@ -100,6 +122,11 @@ extension UsageProvider {
     public var statusFeed: StatusFeed? { nil }
     /// Opt-in: a provider without a declared source tracks no accounts.
     public var accountIdentity: (any AccountIdentitySource)? { nil }
+    /// Opt-in: one home, the implicit default profile.
+    public var supportsMultipleHomes: Bool { false }
+    public var homeDirectory: URL? { nil }
+    public func withHome(_ directory: URL) -> any UsageProvider { self }
+    public func discoverHomes() -> [URL] { [] }
 }
 
 /// Where a provider's service health can be read. One case today — the
