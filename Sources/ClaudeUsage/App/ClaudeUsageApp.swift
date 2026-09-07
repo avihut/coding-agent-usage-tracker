@@ -188,10 +188,78 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ("incident", .init(segments: clean, stale: false, glyph: "✳︎", incident: .major, indicator: true)),
             ("empty", .init(segments: nil, stale: true, glyph: "✳︎")),
         ]
+        // Two accounts, one per style: work quiet across all three meters,
+        // personal with its weekly meter under watch and NO scoped meter
+        // (the absent bar). Distinct numbers so a style's cells can be told
+        // apart by eye; `clean`/`alarmed` above stay as they are, since the
+        // single-cell PNGs are `cmp`-ed against the pre-0.96 baseline.
+        let work = StatusItemRenderer.Cell(
+            profileID: "default", monogram: "W",
+            segments: [
+                segment("S", 15, .normal, 0), segment("W", 19, .normal, 0),
+                segment("F", 25, .normal, 0),
+            ],
+            stale: false, focused: true)
+        let personal = StatusItemRenderer.Cell(
+            profileID: "c982130e", monogram: "P",
+            segments: [segment("S", 42, .normal, 0), segment("W", 80, .warning, 0.55)],
+            stale: false, focused: false)
+        let alarmedCell = StatusItemRenderer.Cell(
+            profileID: "c982130e", monogram: "P", segments: alarmed, stale: false, focused: false)
+        var everyCase = cases
+        for style in MenuBarStyle.allCases {
+            everyCase.append((
+                "style-\(style.rawValue)",
+                StatusItemRenderer.Model(glyph: "✳︎", cells: [work, personal], style: style)))
+        }
+        everyCase.append((
+            "cells-badge",
+            StatusItemRenderer.Model(glyph: "✳︎", cells: [work, alarmedCell], style: .bars)))
+        everyCase.append((
+            "cells-stale",
+            StatusItemRenderer.Model(glyph: "✳︎", cells: [
+                StatusItemRenderer.Cell(
+                    profileID: "default", monogram: "W", segments: clean, stale: true, focused: true),
+                StatusItemRenderer.Cell(
+                    profileID: "c982130e", monogram: "P", segments: nil, stale: true, focused: false),
+            ], style: .bars)))
+        everyCase.append((
+            "cells-incident",
+            StatusItemRenderer.Model(
+                glyph: "✳︎", incident: .major, indicator: true, cells: [work, personal],
+                style: .bars)))
+        // The one-item-per-account style draws N images, never a composed
+        // row — render each the way the controller will.
+        let perProfile = StatusItemRenderer.Model(
+            glyph: "✳︎", incident: .major, indicator: true, cells: [work, personal],
+            style: .itemPerProfile)
+        for (profileID, _) in StatusItemRenderer.itemImages(
+            for: perProfile, height: NSStatusBar.system.thickness)
+        {
+            everyCase.append((
+                "item-\(profileID)",
+                StatusItemRenderer.Model(
+                    glyph: "✳︎",
+                    incident: profileID == "default" ? .major : nil,
+                    indicator: profileID == "default",
+                    cells: [perProfile.cells.first { $0.profileID == profileID }!],
+                    style: .itemPerProfile)))
+        }
+
         let height = NSStatusBar.system.thickness
         let ground = NSColor(srgbRed: 0.11, green: 0.11, blue: 0.12, alpha: 1)
-        for (name, model) in cases {
+        // The hit rectangles beside the pixels: a sidecar naming which
+        // account each x-range belongs to, so a layout regression shows as
+        // a diff rather than as a hover landing on the wrong card.
+        var sidecar: [String] = []
+        for (name, model) in everyCase {
             let bar = StatusItemRenderer.image(for: model, height: height)
+            sidecar.append("\(name)  width \(Int(bar.size.width.rounded()))")
+            for rect in StatusItemRenderer.cellRects(for: model, height: height) {
+                sidecar.append(String(
+                    format: "  %-10@ x %6.1f … %6.1f", rect.profileID ?? "(glyph)",
+                    rect.rect.minX, rect.rect.maxX))
+            }
             let padded = NSSize(width: ceil(bar.size.width) + 16, height: height + 8)
             guard let rep = NSBitmapImageRep(
                 bitmapDataPlanes: nil, pixelsWide: Int(padded.width * 2), pixelsHigh: Int(padded.height * 2),
@@ -208,6 +276,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             try? rep.representation(using: .png, properties: [:])?
                 .write(to: directory.appending(path: "statusitem-\(name).png"))
         }
+        try? sidecar.joined(separator: "\n").appending("\n")
+            .write(to: directory.appending(path: "statusitem-cells.txt"), atomically: true, encoding: .utf8)
     }
 
     private static func launchProviderOverride() -> String? {

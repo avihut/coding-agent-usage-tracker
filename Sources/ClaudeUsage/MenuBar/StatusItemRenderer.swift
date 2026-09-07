@@ -16,11 +16,28 @@ import UsageCore
 /// a ramp-colored dot ahead of a number under watch, escalating to a
 /// filled capsule carrying the segment's tag and digits in bold white
 /// once the forecast firmly spends the limit.
+///
+/// Several accounts (0.96.0, decision D5): the item is a row of CELLS under
+/// ONE provider glyph — the glyph keeps every provider-level fact (the
+/// incident capsule, the pending-notice dot) — and `MenuBarStyle` decides
+/// how the cells draw. Identity is a letter (the monogram, in the tags'
+/// dim ink), never a color: color already means risk. The invariance
+/// guard: one cell composes exactly today's runs, whatever the style, so a
+/// single-account bar is byte-identical to the pre-0.96 one
+/// (`--snapshot`'s statusitem-*.png, `cmp`-ed across the change).
 enum StatusItemRenderer {
-    struct Model: Equatable {
+    /// One account's cell.
+    struct Cell: Equatable {
+        let profileID: String
+        let monogram: String
+        /// The S/W/scoped triple; nil when nothing has been fetched yet.
         let segments: [MenuBarSegment]?
         let stale: Bool
-        /// The provider's mark ahead of the digits.
+        let focused: Bool
+    }
+
+    struct Model: Equatable {
+        /// The provider's mark ahead of the cells.
         let glyph: String
         /// The service's own health, when an incident is running: the glyph
         /// then rides a capsule in this color instead of standing alone.
@@ -33,6 +50,36 @@ enum StatusItemRenderer {
         /// it — and the digest decides that (`NoticesCard.indicator`), so
         /// the TUI's header dot and this one can't disagree.
         var indicator = false
+        let cells: [Cell]
+        let style: MenuBarStyle
+
+        init(
+            glyph: String, incident: ServiceStatusCard.Indicator? = nil, indicator: Bool = false,
+            cells: [Cell], style: MenuBarStyle
+        ) {
+            self.glyph = glyph
+            self.incident = incident
+            self.indicator = indicator
+            self.cells = cells
+            self.style = style
+        }
+
+        /// The one-account shape — today's model, unchanged for every
+        /// caller that meters one thing.
+        init(
+            segments: [MenuBarSegment]?, stale: Bool, glyph: String,
+            incident: ServiceStatusCard.Indicator? = nil, indicator: Bool = false
+        ) {
+            self.init(
+                glyph: glyph, incident: incident, indicator: indicator,
+                cells: [Cell(profileID: Profile.defaultID, monogram: "", segments: segments, stale: stale, focused: true)],
+                style: .standard)
+        }
+
+        /// The first cell's triple — the one-account reading.
+        var segments: [MenuBarSegment]? { cells.first?.segments }
+        /// Every cell stale (or no cell at all): the glyph greys too.
+        var stale: Bool { cells.allSatisfy(\.stale) }
     }
 
     static func model(
@@ -59,6 +106,25 @@ enum StatusItemRenderer {
         )
     }
 
+    /// The several-accounts shape, from the digest's own cells (the WRITER
+    /// decides which accounts show, in what order, with which digits — so
+    /// the app's bar and the TUI's header can't disagree).
+    static func model(
+        cells: [MenuBarCell], focusedID: String?, glyph: String, style: MenuBarStyle,
+        serviceStatus: ServiceStatusCard? = nil, notices: NoticesCard? = nil
+    ) -> Model {
+        Model(
+            glyph: glyph, incident: serviceStatus?.alarmingImpact,
+            indicator: notices?.indicator ?? false,
+            cells: cells.map { cell in
+                Cell(
+                    profileID: cell.profile, monogram: cell.monogram,
+                    segments: cell.segments.isEmpty ? nil : cell.segments.map(MenuBarSegment.init),
+                    stale: cell.stale, focused: cell.profile == focusedID)
+            },
+            style: style)
+    }
+
     /// How a segment's number wears its risk.
     enum Ornament: Equatable {
         case plain(NSColor)
@@ -74,17 +140,17 @@ enum StatusItemRenderer {
     /// while Claude is metered) — tints the glyph; charts derive from it.
     static var accent: NSColor { ProviderStyle.accent }
 
-    private static let bright = NSColor.white
-    private static let dim = NSColor.white.withAlphaComponent(0.55)
-    private static let staleColor = NSColor.white.withAlphaComponent(0.45)
-    private static let warningColor = NSColor(srgbRed: 1.0, green: 0.624, blue: 0.039, alpha: 1)
+    static let bright = NSColor.white
+    static let dim = NSColor.white.withAlphaComponent(0.55)
+    static let staleColor = NSColor.white.withAlphaComponent(0.45)
+    static let warningColor = NSColor(srgbRed: 1.0, green: 0.624, blue: 0.039, alpha: 1)
     /// Dots are solid fills, so unlike digit strokes they can afford a
     /// deep red; the ramp blends from yellow toward this.
-    private static let criticalColor = NSColor(srgbRed: 1.0, green: 0.271, blue: 0.227, alpha: 1)
-    private static let riskYellow = NSColor(srgbRed: 1.0, green: 0.839, blue: 0.039, alpha: 1)
+    static let criticalColor = NSColor(srgbRed: 1.0, green: 0.271, blue: 0.227, alpha: 1)
+    static let riskYellow = NSColor(srgbRed: 1.0, green: 0.839, blue: 0.039, alpha: 1)
     /// The badge's fill — a step deeper than the ramp's red so bold white
     /// digits sit on it at real contrast (Apple-badge convention).
-    private static let badgeRed = NSColor(srgbRed: 0.92, green: 0.216, blue: 0.18, alpha: 1)
+    static let badgeRed = NSColor(srgbRed: 0.92, green: 0.216, blue: 0.18, alpha: 1)
 
     /// Exhaustion risk decides the dressing; with no prediction, the
     /// discrete percent-threshold levels stand in. Stale data never
@@ -105,7 +171,7 @@ enum StatusItemRenderer {
 
     // MARK: - Drawing
 
-    private enum Run {
+    enum Run: Equatable {
         case text(String, NSColor, NSFont)
         case dot(NSColor)
         case badge(String)
@@ -118,6 +184,36 @@ enum StatusItemRenderer {
         /// by a clear ring so it separates from the ✳︎ strokes and from a
         /// capsule fill alike. Zero width — it rides the previous run.
         case indicator
+        /// Empty width between cells (0.96.0).
+        case gap(CGFloat)
+        /// Three stacked bars, top to bottom S / W / scoped; a nil slot
+        /// draws nothing — absent, not zero.
+        case bars([BarSlot?], stale: Bool)
+        /// Two rings, outer weekly and inner session; a nil ring is absent.
+        case rings(outer: BarSlot?, inner: BarSlot?, stale: Bool)
+        /// A 7pt sentinel painted by an account's worst risk.
+        case sentinel(NSColor, filled: Bool)
+    }
+
+    /// One bar's or ring's fill: how full, in what color.
+    struct BarSlot: Equatable {
+        let fraction: CGFloat
+        let fill: NSColor
+    }
+
+    /// A run tagged with the cell it belongs to (nil = the glyph's).
+    struct Tagged: Equatable {
+        let run: Run
+        let cell: String?
+    }
+
+    /// A run at its laid-out x — the prefix-sum walk, kept so hit rects
+    /// and the image agree by construction.
+    struct Placed {
+        let run: Run
+        let x: CGFloat
+        let width: CGFloat
+        let cell: String?
     }
 
     /// Incident fills, a step deeper than the ramp's colors for the same
@@ -133,18 +229,30 @@ enum StatusItemRenderer {
 
     // Computed, not stored: NSFont isn't Sendable, and a stored static on a
     // non-isolated type trips strict concurrency.
-    private static var font: NSFont { .monospacedDigitSystemFont(ofSize: 12, weight: .semibold) }
-    private static var badgeFont: NSFont { .monospacedDigitSystemFont(ofSize: 11, weight: .bold) }
-    private static let dotDiameter: CGFloat = 5
-    private static let dotGap: CGFloat = 2
-    private static let badgePaddingX: CGFloat = 3.5
-    private static let badgeHeight: CGFloat = 15
-    private static let indicatorDiameter: CGFloat = 6
-    private static let indicatorRing: CGFloat = 1.5
+    static var font: NSFont { .monospacedDigitSystemFont(ofSize: 12, weight: .semibold) }
+    static var badgeFont: NSFont { .monospacedDigitSystemFont(ofSize: 11, weight: .bold) }
+    static let dotDiameter: CGFloat = 5
+    static let dotGap: CGFloat = 2
+    static let badgePaddingX: CGFloat = 3.5
+    static let badgeHeight: CGFloat = 15
+    static let indicatorDiameter: CGFloat = 6
+    static let indicatorRing: CGFloat = 1.5
+
+    /// The runs at their x positions, tagged by cell.
+    static func layout(_ model: Model) -> [Placed] {
+        var x: CGFloat = 0
+        var placed: [Placed] = []
+        for tagged in compose(model) {
+            let width = runWidth(tagged.run)
+            placed.append(Placed(run: tagged.run, x: x, width: width, cell: tagged.cell))
+            x += width
+        }
+        return placed
+    }
 
     static func image(for model: Model, height: CGFloat) -> NSImage {
-        let runs = compose(model)
-        let width = runs.reduce(0) { $0 + runWidth($1) }
+        let placed = layout(model)
+        let width = placed.reduce(0) { $0 + $1.width }
         let image = NSImage(
             size: NSSize(width: ceil(width), height: height), flipped: false
         ) { _ in
@@ -153,10 +261,11 @@ enum StatusItemRenderer {
             shadow.shadowBlurRadius = 1.5
             shadow.shadowOffset = .zero
 
-            var x: CGFloat = 0
             // The run the indicator hugs: its right edge and top.
             var previousRun: (x: CGFloat, width: CGFloat, top: CGFloat)?
-            for run in runs {
+            for item in placed {
+                let run = item.run
+                let x = item.x
                 switch run {
                 case .indicator:
                     guard let previousRun else { break }
@@ -229,10 +338,17 @@ enum StatusItemRenderer {
                     (string as NSString).draw(
                         at: NSPoint(x: x + badgePaddingX, y: (height - size.height) / 2),
                         withAttributes: attributes)
+                case .gap:
+                    break
+                case .bars(let slots, let stale):
+                    drawBars(slots, stale: stale, x: x, height: height)
+                case .rings(let outer, let inner, let stale):
+                    drawRings(outer: outer, inner: inner, stale: stale, x: x, height: height)
+                case .sentinel(let color, let filled):
+                    drawSentinel(color, filled: filled, x: x, height: height)
                 }
                 if case .indicator = run { continue }
                 previousRun = (x, inkWidth(run), inkTop(run, height: height))
-                x += runWidth(run)
             }
             return true
         }
@@ -240,23 +356,47 @@ enum StatusItemRenderer {
         return image
     }
 
-    private static func compose(_ model: Model) -> [Run] {
-        // An incident dresses the provider's own mark — the agent indicator
-        // itself goes colored, which is what makes it readable at a glance
-        // without stealing the digits' meaning. Staleness never suppresses
-        // it: a stale usage number says nothing about the service's health.
-        var runs: [Run] = model.incident.map {
-            [.glyphBadge(model.glyph, incidentFill($0))]
-        } ?? [.text(model.glyph, model.stale ? staleColor : accent, font)]
-        // The dot rides the glyph (or its capsule) — declared right after
-        // the run it hugs, before the spacer, so it never adds width.
-        if model.indicator { runs.append(.indicator) }
-        runs.append(.text(" ", dim, font))
-        guard let segments = model.segments, !segments.isEmpty else {
-            runs.append(.text("—", dim, font))
-            return runs
+    /// The invariance guard: one cell IS today's item, whatever the style.
+    static func compose(_ model: Model) -> [Tagged] {
+        guard model.cells.count > 1 else {
+            return composeSingle(model, cell: model.cells.first)
         }
-        let quiet = model.stale ? staleColor : dim
+        return composeCells(model)
+    }
+
+    /// The pre-0.96 item: the glyph, a space, the cell's triple.
+    static func composeSingle(_ model: Model, cell: Cell?) -> [Tagged] {
+        let stale = cell?.stale ?? true
+        var runs = glyphRuns(model, stale: stale)
+        runs.append(Tagged(run: .text(" ", dim, font), cell: nil))
+        runs.append(contentsOf: segmentRuns(cell?.segments, stale: stale).map {
+            Tagged(run: $0, cell: cell?.profileID)
+        })
+        return runs
+    }
+
+    /// An incident dresses the provider's own mark — the agent indicator
+    /// itself goes colored, which is what makes it readable at a glance
+    /// without stealing the digits' meaning. Staleness never suppresses
+    /// it: a stale usage number says nothing about the service's health.
+    /// The dot rides the glyph (or its capsule) — declared right after the
+    /// run it hugs, before any spacer, so it never adds width.
+    static func glyphRuns(_ model: Model, stale: Bool) -> [Tagged] {
+        var runs: [Tagged] = [Tagged(
+            run: model.incident.map { .glyphBadge(model.glyph, incidentFill($0)) }
+                ?? .text(model.glyph, stale ? staleColor : accent, font),
+            cell: nil)]
+        if model.indicator { runs.append(Tagged(run: .indicator, cell: nil)) }
+        return runs
+    }
+
+    /// Today's `S15·W19·F25%` — or `—` with nothing fetched.
+    static func segmentRuns(_ segments: [MenuBarSegment]?, stale: Bool) -> [Run] {
+        guard let segments, !segments.isEmpty else {
+            return [.text("—", dim, font)]
+        }
+        var runs: [Run] = []
+        let quiet = stale ? staleColor : dim
         for (index, segment) in segments.enumerated() {
             if index > 0 { runs.append(.text("·", quiet, font)) }
             guard let percent = segment.percent else {
@@ -264,7 +404,7 @@ enum StatusItemRenderer {
                 runs.append(.text("–", quiet, font))
                 continue
             }
-            switch ornament(for: segment, stale: model.stale) {
+            switch ornament(for: segment, stale: stale) {
             case .plain(let color):
                 runs.append(.text(segment.tag, quiet, font))
                 runs.append(.text("\(percent)", color, font))
@@ -299,12 +439,12 @@ enum StatusItemRenderer {
             return (height + (string as NSString).size(withAttributes: [.font: font]).height) / 2
         case .badge, .glyphBadge:
             return (height + badgeHeight) / 2
-        case .dot, .indicator:
+        case .dot, .indicator, .gap, .bars, .rings, .sentinel:
             return height
         }
     }
 
-    private static func runWidth(_ run: Run) -> CGFloat {
+    static func runWidth(_ run: Run) -> CGFloat {
         switch run {
         case .text(let string, _, let font):
             return (string as NSString).size(withAttributes: [.font: font]).width
@@ -318,6 +458,14 @@ enum StatusItemRenderer {
             return text + 2 * badgePaddingX
         case .indicator:
             return 0
+        case .gap(let width):
+            return width
+        case .bars:
+            return barWidth
+        case .rings:
+            return ringWidth
+        case .sentinel:
+            return sentinelWidth
         }
     }
 }
