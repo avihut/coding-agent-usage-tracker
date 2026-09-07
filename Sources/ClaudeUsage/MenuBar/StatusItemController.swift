@@ -60,6 +60,9 @@ final class StatusItemController: NSResponder {
     /// KVO doesn't read our own removals as the user hiding an account.
     private var isRebuildingItems = false
     private var prefs = MenuBarPreferences.current()
+    /// Armed while a cell shows a countdown (0.98.0): one shot to the next
+    /// minute boundary, when the text changes; idle otherwise.
+    private var clock: Timer?
 
     /// The account the panel, the windows and the ⋯ menu answer for.
     private var store: UsageStore { registry.focusedStore }
@@ -201,6 +204,23 @@ final class StatusItemController: NSResponder {
             item.rects = StatusItemRenderer.cellRects(for: drawn.model, height: height)
             draw(StatusItemRenderer.image(for: drawn.model, height: height), in: item)
         }
+        armClock(if: StatusItemRenderer.hasCountdown(model))
+    }
+
+    /// A countdown's text moves once a minute; so does the model, whose
+    /// `now` is floored to the minute — the tick re-renders, and the
+    /// identical-model skip above keeps everything else still.
+    private func armClock(if counting: Bool) {
+        clock?.invalidate()
+        clock = nil
+        guard counting else { return }
+        let next = StatusItemRenderer.Model.minute(Date()).addingTimeInterval(60.5)
+        let timer = Timer(fire: next, interval: 0, repeats: false) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.render() }
+        }
+        timer.tolerance = 2
+        RunLoop.main.add(timer, forMode: .common)
+        clock = timer
     }
 
     /// Drawn as literal pixels, not attributedTitle: the bars, dots and

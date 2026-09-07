@@ -601,6 +601,14 @@ pub struct SegmentStatus {
     pub level: String,
     pub severity: Option<f64>,
     pub risk: Option<Rgb>,
+    /// When the displayed forecast crosses the limit before its reset
+    /// (0.98.0) — what the app's "Runs out" element counts down to.
+    /// Absent while the forecast is clean or yellow.
+    #[serde(default, with = "time::serde::rfc3339::option")]
+    pub exhausts_at: Option<OffsetDateTime>,
+    /// The meter's reset (0.98.0): the countdown once the limit is spent.
+    #[serde(default, with = "time::serde::rfc3339::option")]
+    pub resets_at: Option<OffsetDateTime>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

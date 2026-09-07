@@ -16,6 +16,10 @@ enum MenuBarPreferences {
     /// each account's own form draws. On by default.
     static let uniformKey = "menuBarUniformForm"
     static let uniformFormKey = "menuBarUniformFormValue"
+    /// The bar-wide element list (0.98.0) — what every cell holds while
+    /// "Same form for every account" is on, stored as tokens. Absent =
+    /// the meters alone, the pre-0.98 bar.
+    static let uniformElementsKey = "menuBarUniformElements"
     /// 0.96.0's whole-bar style, read once by `migrateLegacyStyle` and
     /// removed — nobody's bar changes on update.
     static let legacyStyleKey = "menuBarStyle"
@@ -26,10 +30,18 @@ enum MenuBarPreferences {
         var expandsFocus = true
         var uniform = true
         var uniformForm: MenuBarForm = .standard
+        var uniformElements: [MenuBarElement] = MenuBarLayout.standard
 
         /// The form an account draws in under these values.
         func form(for profile: Profile?) -> MenuBarForm {
             uniform ? uniformForm : (profile?.menuBarForm ?? .standard)
+        }
+
+        /// The elements an account's cell holds under these values — the
+        /// same switch decides: one arrangement for every account, or each
+        /// account's own.
+        func elements(for profile: Profile?) -> [MenuBarElement] {
+            uniform ? uniformElements : (profile?.menuBarElements ?? MenuBarLayout.standard)
         }
     }
 
@@ -38,7 +50,18 @@ enum MenuBarPreferences {
             expandsFocus: defaults.object(forKey: expandsFocusKey) as? Bool ?? true,
             uniform: defaults.object(forKey: uniformKey) as? Bool ?? true,
             uniformForm: defaults.string(forKey: uniformFormKey)
-                .flatMap(MenuBarForm.init(rawValue:)) ?? .standard)
+                .flatMap(MenuBarForm.init(rawValue:)) ?? .standard,
+            uniformElements: defaults.stringArray(forKey: uniformElementsKey)
+                .map(MenuBarLayout.decode(tokens:)) ?? MenuBarLayout.standard)
+    }
+
+    static func setUniformElements(_ elements: [MenuBarElement], in defaults: UserDefaults = .standard) {
+        let normalized = MenuBarLayout.normalized(elements)
+        if normalized == MenuBarLayout.standard {
+            defaults.removeObject(forKey: uniformElementsKey)
+        } else {
+            defaults.set(MenuBarLayout.encode(normalized), forKey: uniformElementsKey)
+        }
     }
 
     static func expandsFocus(in defaults: UserDefaults = .standard) -> Bool {

@@ -205,6 +205,21 @@ with the focused account optionally expanded to its full numbers whatever
 its form, and any account can take a menu bar item of its own. Settings →
 Accounts shows the bar as it will draw, live, with every option pictured
 in your own numbers; drag the accounts across the preview to order them.
+
+The bar can also carry more than the meters. Settings → Accounts → Menu
+bar has a palette of elements to drag onto the preview (or click to add):
+today's one element is **Runs out**, the expected time until a limit is
+reached — `S 31m` in the same red capsule the digits alarm with, or once a
+limit is spent `S↺ 2h 10m`, counting down to its reset. It is conditional
+by design: while no limit is forecast to run out before it resets it draws
+nothing at all, and the bar is exactly what it was without it. One element,
+scoped — the earliest limit by default (any crossing cuts you off, so the
+first one is the answer), or every limit, or one meter — placed before or
+after the meters, per account or for all of them under the same "Same form
+for every account" switch. Because a quiet day would make the drop look
+like it failed, the preview draws a dashed placeholder where the element
+will appear, and "Preview as if a limit were running out" dresses the whole
+preview with a half-hour countdown so you can see the real rendering.
 The panel gains an account strip that doubles as the selector — rows,
 chips, or every account stacked. An account whose transcripts go quiet
 for 30 days goes dormant and stops polling entirely until it is used

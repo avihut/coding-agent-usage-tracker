@@ -115,9 +115,14 @@ private struct AccountRow: View {
                             cell: MenuBarModelBuilder.sampleCell(for: profile, registry: registry),
                             selection: profile.menuBarForm,
                             onSelect: { registry.setMenuBarForm(id: profile.id, form: $0) })
-                            .opacity(inBar ? 1 : 0.45)
-                            .disabled(!inBar)
+                        // Its own elements, too (0.98.0): the arrangement
+                        // follows the same switch as the form.
+                        MenuBarElementPalette(
+                            registry: registry, profile: profile, elements: profile.menuBarElements,
+                            onChange: { registry.setMenuBarElements(id: profile.id, elements: $0) })
                     }
+                    .opacity(inBar ? 1 : 0.45)
+                    .disabled(!inBar)
                 }
             }
             HStack(spacing: 16) {
@@ -259,25 +264,64 @@ struct MenuBarSettingsCard: View {
     @AppStorage(MenuBarPreferences.expandsFocusKey) private var expandsFocus = true
     @AppStorage(MenuBarPreferences.uniformKey) private var uniform = true
     @AppStorage(MenuBarPreferences.uniformFormKey) private var uniformFormRaw = MenuBarForm.standard.rawValue
+    /// The bar-wide element list (a string array, which @AppStorage can't
+    /// bind): mirrored from the defaults on every defaults change so the
+    /// card re-renders the instant a drop lands.
+    @State private var uniformElements = MenuBarPreferences.current().uniformElements
+    /// Dress the preview as if a limit were running out — the only way to
+    /// see the conditional element on a quiet day. Never persisted.
+    @State private var simulateCrossing = false
 
     private var prefs: MenuBarPreferences.Values {
         MenuBarPreferences.Values(
             expandsFocus: expandsFocus, uniform: uniform,
-            uniformForm: MenuBarForm(rawValue: uniformFormRaw) ?? .standard)
+            uniformForm: MenuBarForm(rawValue: uniformFormRaw) ?? .standard,
+            uniformElements: uniformElements)
     }
     private var several: Bool { registry.barProfiles.count > 1 }
 
     var body: some View {
+        card.onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
+            let current = MenuBarPreferences.current().uniformElements
+            if current != uniformElements { uniformElements = current }
+        }
+    }
+
+    private var card: some View {
         SettingsCard("Menu bar", footer: footer) {
             VStack(alignment: .leading, spacing: 6) {
-                MenuBarPreview(registry: registry, prefs: prefs)
-                if several {
-                    Text("Drag an account to reorder.")
+                MenuBarPreview(registry: registry, prefs: prefs, simulate: simulateCrossing)
+                HStack(alignment: .firstTextBaseline) {
+                    Text(several
+                        ? "Drag an account to reorder; drag an element across its meters, or off the bar to remove it."
+                        : "Drag an element across the meters, or off the bar to remove it.")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
+                    Spacer()
+                    Toggle("Preview as if a limit were running out", isOn: $simulateCrossing)
+                        .toggleStyle(.checkbox)
+                        .controlSize(.small)
+                        .font(.caption)
+                        .help("Dresses the preview as if the session limit were half an hour from running out, so a conditional element shows")
                 }
             }
             Divider()
+            if uniform || !several {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Add to the bar")
+                    MenuBarElementPalette(
+                        registry: registry, profile: registry.focusedProfile,
+                        elements: prefs.elements(for: registry.focusedProfile),
+                        onChange: { elements in
+                            if uniform {
+                                MenuBarPreferences.setUniformElements(elements)
+                            } else if let id = registry.focusedProfile?.id {
+                                registry.setMenuBarElements(id: id, elements: elements)
+                            }
+                        })
+                }
+                Divider()
+            }
             if several {
                 Toggle("Same form for every account", isOn: $uniform)
                     .toggleStyle(.switch)
@@ -299,7 +343,7 @@ struct MenuBarSettingsCard: View {
                         })
                 }
             } else {
-                note("Each account draws in the form set on its own row under Accounts.")
+                note("Each account draws in the form set on its own row under Accounts, with the elements added there.")
             }
             if several {
                 Toggle("Expand the focused account", isOn: $expandsFocus)

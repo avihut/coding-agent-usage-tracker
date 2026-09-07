@@ -31,6 +31,11 @@ public struct Profile: Codable, Sendable, Equatable, Identifiable {
     public var menuBarForm: MenuBarForm
     /// Its own `NSStatusItem` rather than a cell in the shared one.
     public var ownMenuBarItem: Bool
+    /// What its cell holds and in what order (0.98.0): the meters, and
+    /// whatever was dragged in beside them. `MenuBarLayout.standard` for a
+    /// record that never arranged anything — the daemon carries it and
+    /// ignores it, like the form.
+    public var menuBarElements: [MenuBarElement]
     /// The person's order in the strip and the bar; ties by `addedAt`.
     public var order: Int
     public let addedAt: Date
@@ -42,13 +47,14 @@ public struct Profile: Codable, Sendable, Equatable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case id, providerID, homePath, nickname, monogram, enabled, showInMenuBar, menuBarForm,
-            ownMenuBarItem, order, addedAt, ignoredIdentityKey
+            ownMenuBarItem, menuBarElements, order, addedAt, ignoredIdentityKey
     }
 
     public init(
         id: String, providerID: String, home: URL?, nickname: String? = nil,
         monogram: String? = nil, enabled: Bool = true, showInMenuBar: Bool = true,
         menuBarForm: MenuBarForm = .standard, ownMenuBarItem: Bool = false,
+        menuBarElements: [MenuBarElement] = MenuBarLayout.standard,
         order: Int = 0, addedAt: Date, ignoredIdentityKey: String? = nil
     ) {
         self.id = id
@@ -60,6 +66,7 @@ public struct Profile: Codable, Sendable, Equatable, Identifiable {
         self.showInMenuBar = showInMenuBar
         self.menuBarForm = menuBarForm
         self.ownMenuBarItem = ownMenuBarItem
+        self.menuBarElements = MenuBarLayout.normalized(menuBarElements)
         self.order = order
         self.addedAt = addedAt
         self.ignoredIdentityKey = ignoredIdentityKey
@@ -79,6 +86,10 @@ public struct Profile: Codable, Sendable, Equatable, Identifiable {
         menuBarForm = try container.decodeIfPresent(String.self, forKey: .menuBarForm)
             .flatMap(MenuBarForm.init(rawValue:)) ?? .standard
         ownMenuBarItem = try container.decodeIfPresent(Bool.self, forKey: .ownMenuBarItem) ?? false
+        // Tokens, so an element a newer writer added drops out alone
+        // rather than failing the record.
+        menuBarElements = try container.decodeIfPresent([String].self, forKey: .menuBarElements)
+            .map(MenuBarLayout.decode(tokens:)) ?? MenuBarLayout.standard
         order = try container.decodeIfPresent(Int.self, forKey: .order) ?? 0
         addedAt = try container.decode(Date.self, forKey: .addedAt)
         ignoredIdentityKey = try container.decodeIfPresent(String.self, forKey: .ignoredIdentityKey)
@@ -95,6 +106,7 @@ public struct Profile: Codable, Sendable, Equatable, Identifiable {
         try container.encode(showInMenuBar, forKey: .showInMenuBar)
         try container.encode(menuBarForm.rawValue, forKey: .menuBarForm)
         try container.encode(ownMenuBarItem, forKey: .ownMenuBarItem)
+        try container.encode(MenuBarLayout.encode(menuBarElements), forKey: .menuBarElements)
         try container.encode(order, forKey: .order)
         try container.encode(addedAt, forKey: .addedAt)
         try container.encodeIfPresent(ignoredIdentityKey, forKey: .ignoredIdentityKey)

@@ -335,6 +335,12 @@ final class ProviderRegistry {
         edit(id) { $0.menuBarForm = form }
     }
 
+    /// The account's own element list (0.98.0) — what its cell holds when
+    /// the bar draws each account its own way.
+    func setMenuBarElements(id: String, elements: [MenuBarElement]) {
+        edit(id) { $0.menuBarElements = MenuBarLayout.normalized(elements) }
+    }
+
     func setOwnMenuBarItem(id: String, own: Bool) {
         edit(id) { $0.ownMenuBarItem = own }
     }

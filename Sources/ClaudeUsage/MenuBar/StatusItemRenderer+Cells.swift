@@ -34,6 +34,12 @@ extension StatusItemRenderer {
     /// After an expanded (digits) cell, before the next one — a touch wider
     /// than `cellGap`, since digits end flush against their `%`.
     static let expandedGap: CGFloat = 7
+    /// Between two elements of one cell (0.98.0) — the meters and a
+    /// countdown beside them: closer than another account, farther than a
+    /// monogram from its shape.
+    static let elementGap: CGFloat = 5
+    /// Between two countdowns of one element (`.each`).
+    static let countdownGap: CGFloat = 4
     static let trackColor = NSColor.white.withAlphaComponent(0.22)
     static let staleTrackColor = NSColor.white.withAlphaComponent(0.14)
     static let barFillColor = NSColor.white.withAlphaComponent(0.88)
@@ -59,7 +65,7 @@ extension StatusItemRenderer {
                 ? (expanded ? glyphSpaceWidth : glyphGap)
                 : (wide ? expandedGap : cellGap)
             runs.append(Tagged(run: .gap(gap), cell: cell.profileID))
-            runs.append(contentsOf: cellRuns(cell, expanded: expanded))
+            runs.append(contentsOf: cellRuns(cell, expanded: expanded, now: model.now, ghosts: model.ghosts))
         }
         return runs
     }
@@ -70,39 +76,116 @@ extension StatusItemRenderer {
         (" " as NSString).size(withAttributes: [.font: font]).width
     }
 
-    /// One cell's runs, in its form. The expanded cell is today's item,
+    /// One cell's runs: its letter (never on the expanded cell), then its
+    /// elements in order. The expanded cell's meters are today's item,
     /// verbatim — the whole point of expanding focus is that the number you
     /// check most stays exact; a cell whose OWN form is digits carries its
     /// letter like every other form, since it is not "the" account.
-    static func cellRuns(_ cell: Cell, expanded: Bool) -> [Tagged] {
-        func tag(_ runs: [Run]) -> [Tagged] {
-            runs.map { Tagged(run: $0, cell: cell.profileID) }
+    static func cellRuns(_ cell: Cell, expanded: Bool, now: Date, ghosts: Bool) -> [Tagged] {
+        var runs: [Tagged] = []
+        // A dot has never carried a letter (its color is the whole
+        // reading); every other form does. The letter belongs to the
+        // meters for hit-testing: grabbing it in the preview moves the
+        // account, not an element.
+        if !expanded, cell.form != .dot {
+            runs.append(contentsOf: monogramRuns(cell).map {
+                Tagged(run: $0, cell: cell.profileID, element: .meters)
+            })
         }
-        if expanded { return tag(segmentRuns(cell.segments, stale: cell.stale)) }
+        runs.append(contentsOf: elementRuns(cell, expanded: expanded, now: now, ghosts: ghosts))
+        return runs
+    }
+
+    /// The cell's elements in their order, `elementGap` between two that
+    /// draw; an element with nothing to say contributes nothing — not even
+    /// its gap — unless the preview asked for ghosts.
+    static func elementRuns(_ cell: Cell, expanded: Bool, now: Date, ghosts: Bool) -> [Tagged] {
+        var runs: [Tagged] = []
+        var drawn = false
+        for element in MenuBarLayout.normalized(cell.elements) {
+            let body: [Run] = switch element {
+            case .meters: expanded ? segmentRuns(cell.segments, stale: cell.stale) : metersRuns(cell)
+            case .runsOut(let scope): runsOutRuns(cell, scope: scope, now: now, ghosts: ghosts)
+            }
+            guard !body.isEmpty else { continue }
+            if drawn { runs.append(Tagged(run: .gap(elementGap), cell: cell.profileID, element: element)) }
+            drawn = true
+            runs.append(contentsOf: body.map { Tagged(run: $0, cell: cell.profileID, element: element) })
+        }
+        return runs
+    }
+
+    /// The meters in the cell's form.
+    static func metersRuns(_ cell: Cell) -> [Run] {
         switch cell.form {
         case .digits:
-            return tag(monogramRuns(cell) + segmentRuns(cell.segments, stale: cell.stale))
+            return segmentRuns(cell.segments, stale: cell.stale)
         case .dot:
-            return tag([.sentinel(
-                sentinelColor(cell), filled: (worstSeverity(cell) ?? 0) >= badgeSeverity)])
+            return [.sentinel(
+                sentinelColor(cell), filled: (worstSeverity(cell) ?? 0) >= badgeSeverity)]
         case .rings:
-            return tag(monogramRuns(cell) + [.rings(
+            return [.rings(
                 outer: slot(cell.segments, rank: 1, stale: cell.stale),
                 inner: slot(cell.segments, rank: 0, stale: cell.stale),
-                stale: cell.stale)])
+                stale: cell.stale)]
         case .compactDigits:
-            return tag(monogramRuns(cell) + compactRuns(cell))
+            return compactRuns(cell)
         case .bars:
-            guard cell.segments != nil else { return tag(monogramRuns(cell) + [.text("–", quiet(cell), font)]) }
-            return tag(monogramRuns(cell) + [.bars(
-                (0...2).map { slot(cell.segments, rank: $0, stale: cell.stale) }, stale: cell.stale)])
+            guard cell.segments != nil else { return [.text("–", quiet(cell), font)] }
+            return [.bars(
+                (0...2).map { slot(cell.segments, rank: $0, stale: cell.stale) }, stale: cell.stale)]
+        }
+    }
+
+    /// The "Runs out" element (0.98.0): a red capsule per countdown to a
+    /// forecast crossing — the tag and the time, the digits' own alarm
+    /// idiom — or, once a limit is spent, its tag with ↺ and the time to
+    /// its reset, quiet. NOTHING while every forecast is clean: the
+    /// element exists to say when, and has nothing to say otherwise. A
+    /// stale cell says nothing either (stale never alarms). The preview's
+    /// ghost stands in for the nothing.
+    static func runsOutRuns(_ cell: Cell, scope: RunsOutScope, now: Date, ghosts: Bool) -> [Run] {
+        let countdowns = cell.stale
+            ? [] : UsageFormatting.menuBarCountdowns(cell.segments ?? [], scope: scope, now: now)
+        guard !countdowns.isEmpty else { return ghosts ? [.ghost("runs out")] : [] }
+        var runs: [Run] = []
+        for (index, countdown) in countdowns.enumerated() {
+            if index > 0 { runs.append(.gap(countdownGap)) }
+            if countdown.spent {
+                runs.append(.text("\(countdown.tag)↺", dim, font))
+                runs.append(.gap(monogramGap))
+                runs.append(.text(countdown.text, bright, font))
+            } else {
+                runs.append(.badge("\(countdown.tag) \(countdown.text)"))
+            }
+        }
+        return runs
+    }
+
+    /// Whether any cell shows a countdown — the controller's cue to tick
+    /// once a minute.
+    static func hasCountdown(_ model: Model) -> Bool {
+        model.cells.contains { cell in
+            guard !cell.stale, let scope = MenuBarLayout.runsOutScope(in: cell.elements) else { return false }
+            return !UsageFormatting.menuBarCountdowns(cell.segments ?? [], scope: scope, now: model.now).isEmpty
         }
     }
 
     /// One cell alone, no glyph — the Settings thumbnails: an account's
     /// own numbers in a candidate form.
-    static func cellImage(_ cell: Cell, height: CGFloat) -> NSImage {
-        image(runs: cellRuns(cell, expanded: false), height: height)
+    static func cellImage(_ cell: Cell, height: CGFloat, now: Date = Date(), ghosts: Bool = false) -> NSImage {
+        image(runs: cellRuns(cell, expanded: false, now: Model.minute(now), ghosts: ghosts), height: height)
+    }
+
+    /// One element alone — the palette's tile: what the element itself
+    /// would draw, with the cell's numbers, and nothing of the cell's
+    /// meters around it.
+    static func elementImage(_ element: MenuBarElement, in cell: Cell, height: CGFloat, now: Date = Date()) -> NSImage {
+        let runs: [Run] = switch element {
+        case .meters: metersRuns(cell)
+        case .runsOut(let scope): runsOutRuns(cell, scope: scope, now: Model.minute(now), ghosts: true)
+        }
+        return image(runs: runs.map { Tagged(run: $0, cell: cell.profileID, element: element) }, height: height)
     }
 
     /// Identity is a letter, in the tags' own dim ink — never a color,
@@ -268,6 +351,32 @@ extension StatusItemRenderer {
         }
     }
 
+    /// One rect per (cell, element) group, contiguous like `cellRects` —
+    /// what the preview resolves a grab or a drop against. The glyph and
+    /// the space after it carry nil for both.
+    struct ElementRect: Equatable {
+        let profileID: String?
+        let element: MenuBarElement?
+        let rect: NSRect
+    }
+
+    static func elementRects(for model: Model, height: CGFloat) -> [ElementRect] {
+        let placed = layout(model)
+        guard !placed.isEmpty else { return [] }
+        let width = placed.reduce(0) { $0 + $1.width }
+        var starts: [(id: String?, element: MenuBarElement?, x: CGFloat)] = []
+        for item in placed {
+            if let last = starts.last, last.id == item.cell, last.element == item.element { continue }
+            starts.append((item.cell, item.element, item.x))
+        }
+        return starts.enumerated().map { index, group in
+            let end = index + 1 < starts.count ? starts[index + 1].x : width
+            return ElementRect(
+                profileID: group.id, element: group.element,
+                rect: NSRect(x: group.x, y: 0, width: max(0, end - group.x), height: height))
+        }
+    }
+
     /// One model per `NSStatusItem`: the shared item (nil id) holding every
     /// cell that has not asked for its own, then an item per account that
     /// has — in the accounts' order, so the bar reads left to right the way
@@ -287,7 +396,7 @@ extension StatusItemRenderer {
         if !shared.isEmpty || model.cells.isEmpty {
             items.append(ItemModel(profileID: nil, model: Model(
                 glyph: model.glyph, incident: model.incident, indicator: model.indicator,
-                cells: shared, expandsFocus: model.expandsFocus)))
+                cells: shared, expandsFocus: model.expandsFocus, now: model.now, ghosts: model.ghosts)))
         }
         for cell in model.cells where cell.ownItem {
             let first = items.isEmpty
@@ -295,7 +404,7 @@ extension StatusItemRenderer {
                 glyph: model.glyph,
                 incident: first ? model.incident : nil,
                 indicator: first ? model.indicator : false,
-                cells: [cell], expandsFocus: model.expandsFocus)))
+                cells: [cell], expandsFocus: model.expandsFocus, now: model.now, ghosts: model.ghosts)))
         }
         return items
     }

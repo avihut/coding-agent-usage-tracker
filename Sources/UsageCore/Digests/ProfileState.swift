@@ -335,6 +335,7 @@ extension MenuBarSegment {
     public init(_ status: SegmentStatus) {
         self.init(
             tag: status.tag, percent: status.percent,
-            level: DisplayLevel(digestName: status.level), severity: status.severity)
+            level: DisplayLevel(digestName: status.level), severity: status.severity,
+            exhaustsAt: status.exhaustsAt, resetsAt: status.resetsAt)
     }
 }

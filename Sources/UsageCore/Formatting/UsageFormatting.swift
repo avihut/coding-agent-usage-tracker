@@ -10,12 +10,25 @@ public struct MenuBarSegment: Sendable, Equatable {
     /// the renderer blends yellow→red by it, same as the panel's meter bar.
     /// Nil falls back to the discrete `level` palette.
     public let severity: Double?
+    /// When the DISPLAYED forecast crosses the limit before the reset
+    /// (0.98.0) — the smoothed verdict's red, never the raw one, so the
+    /// bar's "Runs out" element can't pop in and out between two polls.
+    /// Nil while the forecast is clean or merely yellow.
+    public let exhaustsAt: Date?
+    /// The meter's reset, for the spent case: once the limit is gone the
+    /// countdown turns to when it comes back.
+    public let resetsAt: Date?
 
-    public init(tag: String, percent: Int?, level: DisplayLevel, severity: Double? = nil) {
+    public init(
+        tag: String, percent: Int?, level: DisplayLevel, severity: Double? = nil,
+        exhaustsAt: Date? = nil, resetsAt: Date? = nil
+    ) {
         self.tag = tag
         self.percent = percent
         self.level = level
         self.severity = severity
+        self.exhaustsAt = exhaustsAt
+        self.resetsAt = resetsAt
     }
 }
 
@@ -31,6 +44,15 @@ public enum UsageFormatting {
         func severity(_ meter: Meter?) -> Double? {
             meter.flatMap { predictions[$0.label]?.severity }
         }
+        // The crossing only under the smoothed red verdict: a red verdict
+        // always carries its date, and the two-refresh hysteresis is what
+        // keeps a bar element from flickering.
+        func exhaustsAt(_ meter: Meter?) -> Date? {
+            guard let meter, let prediction = predictions[meter.label],
+                  prediction.verdict == .red
+            else { return nil }
+            return prediction.exhaustsAt
+        }
         let session = meters.first { $0.rank == 0 }
         let weekly = meters.first { $0.rank == 1 }
         let scoped = meters.filter { $0.rank == 2 }
@@ -38,15 +60,19 @@ public enum UsageFormatting {
         return [
             MenuBarSegment(
                 tag: "S", percent: session?.percent, level: session?.level ?? .normal,
-                severity: severity(session)),
+                severity: severity(session), exhaustsAt: exhaustsAt(session),
+                resetsAt: session?.resetsAt),
             MenuBarSegment(
                 tag: "W", percent: weekly?.percent, level: weekly?.level ?? .normal,
-                severity: severity(weekly)),
+                severity: severity(weekly), exhaustsAt: exhaustsAt(weekly),
+                resetsAt: weekly?.resetsAt),
             MenuBarSegment(
                 tag: scopedTag(for: topScoped),
                 percent: scoped.compactMap(\.percent).max(),
                 level: scoped.map(\.level).max() ?? .normal,
-                severity: scoped.compactMap { severity($0) }.max()
+                severity: scoped.compactMap { severity($0) }.max(),
+                exhaustsAt: scoped.compactMap { exhaustsAt($0) }.min(),
+                resetsAt: topScoped?.resetsAt
             ),
         ]
     }

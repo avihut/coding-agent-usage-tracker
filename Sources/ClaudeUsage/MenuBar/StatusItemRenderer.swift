@@ -42,6 +42,10 @@ enum StatusItemRenderer {
         var form: MenuBarForm = .standard
         /// Drawn in its own `NSStatusItem` rather than the shared one.
         var ownItem = false
+        /// What the cell holds, in order (0.98.0): the meters in `form`,
+        /// plus whatever was dragged in beside them. The standard list is
+        /// the meters alone — the pre-0.98 cell exactly.
+        var elements: [MenuBarElement] = MenuBarLayout.standard
     }
 
     struct Model: Equatable {
@@ -61,16 +65,33 @@ enum StatusItemRenderer {
         let cells: [Cell]
         /// The focused cell draws as today's digits whatever its form.
         let expandsFocus: Bool
+        /// The clock a countdown is phrased against, FLOORED TO THE MINUTE
+        /// (0.98.0): the text changes once a minute, so the model — which
+        /// the controller compares to skip a redraw — changes once a minute
+        /// too, on the tick that redraws it.
+        var now: Date = Model.minute(Date())
+        /// Preview only: an element that would compose nothing right now
+        /// (a runs-out element while every forecast is clean) draws as a
+        /// dashed placeholder, so a drop never looks like it failed. The
+        /// bar itself NEVER sets this.
+        var ghosts = false
 
         init(
             glyph: String, incident: ServiceStatusCard.Indicator? = nil, indicator: Bool = false,
-            cells: [Cell], expandsFocus: Bool = true
+            cells: [Cell], expandsFocus: Bool = true, now: Date = Model.minute(Date()),
+            ghosts: Bool = false
         ) {
             self.glyph = glyph
             self.incident = incident
             self.indicator = indicator
             self.cells = cells
             self.expandsFocus = expandsFocus
+            self.now = Model.minute(now)
+            self.ghosts = ghosts
+        }
+
+        static func minute(_ date: Date) -> Date {
+            Date(timeIntervalSinceReferenceDate: floor(date.timeIntervalSinceReferenceDate / 60) * 60)
         }
 
         /// The one-account shape — today's model, unchanged for every
@@ -80,14 +101,15 @@ enum StatusItemRenderer {
         init(
             segments: [MenuBarSegment]?, stale: Bool, glyph: String,
             incident: ServiceStatusCard.Indicator? = nil, indicator: Bool = false,
-            form: MenuBarForm = .standard, expandsFocus: Bool = true
+            form: MenuBarForm = .standard, expandsFocus: Bool = true,
+            elements: [MenuBarElement] = MenuBarLayout.standard, now: Date = Model.minute(Date())
         ) {
             self.init(
                 glyph: glyph, incident: incident, indicator: indicator,
                 cells: [Cell(
                     profileID: Profile.defaultID, monogram: "", segments: segments, stale: stale,
-                    focused: true, form: form)],
-                expandsFocus: expandsFocus)
+                    focused: true, form: form, elements: elements)],
+                expandsFocus: expandsFocus, now: now)
         }
 
         /// The first cell's triple — the one-account reading.
@@ -99,7 +121,8 @@ enum StatusItemRenderer {
     static func model(
         for state: DisplayState, predictions: [String: UsagePrediction] = [:],
         glyph: String = "✳︎", serviceStatus: ServiceStatusCard? = nil,
-        notices: NoticesCard? = nil, form: MenuBarForm = .standard, expandsFocus: Bool = true
+        notices: NoticesCard? = nil, form: MenuBarForm = .standard, expandsFocus: Bool = true,
+        elements: [MenuBarElement] = MenuBarLayout.standard, now: Date = Date()
     ) -> Model {
         // Which impacts are loud enough to badge is decision D2, and it lives
         // on the card so the TUI's rungs and this badge can't drift apart.
@@ -108,7 +131,8 @@ enum StatusItemRenderer {
         guard let snapshot = state.snapshot else {
             return Model(
                 segments: nil, stale: true, glyph: glyph, incident: alarming,
-                indicator: indicator, form: form, expandsFocus: expandsFocus)
+                indicator: indicator, form: form, expandsFocus: expandsFocus,
+                elements: elements, now: now)
         }
         return Model(
             segments: UsageFormatting.menuBarSegments(
@@ -118,14 +142,18 @@ enum StatusItemRenderer {
             incident: alarming,
             indicator: indicator,
             form: form,
-            expandsFocus: expandsFocus
+            expandsFocus: expandsFocus,
+            elements: elements,
+            now: now
         )
     }
 
-    /// How one account draws: its form and whether it takes its own item.
+    /// How one account draws: its form, its elements, and whether it takes
+    /// its own item.
     struct CellStyle: Equatable {
         var form: MenuBarForm = .standard
         var ownItem = false
+        var elements: [MenuBarElement] = MenuBarLayout.standard
     }
 
     /// The several-accounts shape, from the digest's own cells (the WRITER
@@ -134,7 +162,8 @@ enum StatusItemRenderer {
     /// by each account's own style (the app's record, not the digest's).
     static func model(
         cells: [MenuBarCell], focusedID: String?, styles: [String: CellStyle], glyph: String,
-        expandsFocus: Bool, serviceStatus: ServiceStatusCard? = nil, notices: NoticesCard? = nil
+        expandsFocus: Bool, serviceStatus: ServiceStatusCard? = nil, notices: NoticesCard? = nil,
+        now: Date = Date()
     ) -> Model {
         Model(
             glyph: glyph, incident: serviceStatus?.alarmingImpact,
@@ -145,9 +174,9 @@ enum StatusItemRenderer {
                     profileID: cell.profile, monogram: cell.monogram,
                     segments: cell.segments.isEmpty ? nil : cell.segments.map(MenuBarSegment.init),
                     stale: cell.stale, focused: cell.profile == focusedID,
-                    form: style.form, ownItem: style.ownItem)
+                    form: style.form, ownItem: style.ownItem, elements: style.elements)
             },
-            expandsFocus: expandsFocus)
+            expandsFocus: expandsFocus, now: now)
     }
 
     /// How a segment's number wears its risk.
@@ -218,6 +247,9 @@ enum StatusItemRenderer {
         case rings(outer: BarSlot?, inner: BarSlot?, stale: Bool)
         /// A 7pt sentinel painted by an account's worst risk.
         case sentinel(NSColor, filled: Bool)
+        /// The preview's placeholder for an element with nothing to say
+        /// right now: a dashed capsule of the badge's geometry, dim label.
+        case ghost(String)
     }
 
     /// One bar's or ring's fill: how full, in what color.
@@ -226,10 +258,12 @@ enum StatusItemRenderer {
         let fill: NSColor
     }
 
-    /// A run tagged with the cell it belongs to (nil = the glyph's).
+    /// A run tagged with the cell it belongs to (nil = the glyph's) and
+    /// the element within it (nil = the glyph's, or the space after it).
     struct Tagged: Equatable {
         let run: Run
         let cell: String?
+        var element: MenuBarElement? = nil
     }
 
     /// A run at its laid-out x — the prefix-sum walk, kept so hit rects
@@ -239,6 +273,7 @@ enum StatusItemRenderer {
         let x: CGFloat
         let width: CGFloat
         let cell: String?
+        let element: MenuBarElement?
     }
 
     /// Incident fills, a step deeper than the ramp's colors for the same
@@ -273,7 +308,8 @@ enum StatusItemRenderer {
         var placed: [Placed] = []
         for tagged in runs {
             let width = runWidth(tagged.run)
-            placed.append(Placed(run: tagged.run, x: x, width: width, cell: tagged.cell))
+            placed.append(Placed(
+                run: tagged.run, x: x, width: width, cell: tagged.cell, element: tagged.element))
             x += width
         }
         return placed
@@ -380,6 +416,23 @@ enum StatusItemRenderer {
                     drawRings(outer: outer, inner: inner, stale: stale, x: x, height: height)
                 case .sentinel(let color, let filled):
                     drawSentinel(color, filled: filled, x: x, height: height)
+                case .ghost(let string):
+                    let attributes: [NSAttributedString.Key: Any] = [
+                        .font: badgeFont, .foregroundColor: dim,
+                    ]
+                    let size = (string as NSString).size(withAttributes: attributes)
+                    let rect = NSRect(
+                        x: x + 0.5, y: (height - badgeHeight) / 2 + 0.5,
+                        width: size.width + 2 * badgePaddingX - 1, height: badgeHeight - 1)
+                    let outline = NSBezierPath(
+                        roundedRect: rect, xRadius: badgeHeight / 2, yRadius: badgeHeight / 2)
+                    outline.lineWidth = 1
+                    outline.setLineDash([3, 2], count: 2, phase: 0)
+                    dim.setStroke()
+                    outline.stroke()
+                    (string as NSString).draw(
+                        at: NSPoint(x: x + badgePaddingX, y: (height - size.height) / 2),
+                        withAttributes: attributes)
                 }
                 if case .indicator = run { continue }
                 previousRun = (x, inkWidth(run), inkTop(run, height: height))
@@ -411,14 +464,20 @@ enum StatusItemRenderer {
         model.expandsFocus && cell.focused
     }
 
-    /// The pre-0.96 item: the glyph, a space, the cell's triple.
+    /// The pre-0.96 item: the glyph, a space, the cell's triple — and, since
+    /// 0.98.0, the cell's other elements around the triple in their order,
+    /// each composing nothing while it has nothing to say, so a bar that
+    /// holds the meters alone (or a quiet runs-out element) is byte-
+    /// identical to the pre-0.98 one.
     static func composeSingle(_ model: Model, cell: Cell?) -> [Tagged] {
         let stale = cell?.stale ?? true
         var runs = glyphRuns(model, stale: stale)
         runs.append(Tagged(run: .text(" ", dim, font), cell: nil))
-        runs.append(contentsOf: segmentRuns(cell?.segments, stale: stale).map {
-            Tagged(run: $0, cell: cell?.profileID)
-        })
+        guard let cell else {
+            runs.append(contentsOf: segmentRuns(nil, stale: stale).map { Tagged(run: $0, cell: nil) })
+            return runs
+        }
+        runs.append(contentsOf: elementRuns(cell, expanded: true, now: model.now, ghosts: model.ghosts))
         return runs
     }
 
@@ -486,6 +545,8 @@ enum StatusItemRenderer {
             return (height + (string as NSString).size(withAttributes: [.font: font]).height) / 2
         case .badge, .glyphBadge:
             return (height + badgeHeight) / 2
+        case .ghost:
+            return (height + badgeHeight) / 2
         case .dot, .indicator, .gap, .bars, .rings, .sentinel:
             return height
         }
@@ -497,7 +558,7 @@ enum StatusItemRenderer {
             return (string as NSString).size(withAttributes: [.font: font]).width
         case .dot:
             return dotDiameter + 2 * dotGap
-        case .badge(let string):
+        case .badge(let string), .ghost(let string):
             let text = (string as NSString).size(withAttributes: [.font: badgeFont]).width
             return text + 2 * badgePaddingX
         case .glyphBadge(let string, _):

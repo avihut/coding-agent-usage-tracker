@@ -258,6 +258,50 @@ the README rather than silently deviating.
   "Settings…" item could not be made to survive SwiftUI's menu rebuilds
   and was dropped. `log show` never surfaced this app's OSLog info lines
   here — diagnose with `sample`, System Events, and `--snapshot`.
+- MENU BAR ELEMENTS + "RUNS OUT" (2026-09-07 v0.98.0, user-directed
+  "add things to the menu bar by dragging and dropping"): a cell is an
+  ORDERED ELEMENT LIST (`MenuBarElement`, Profiles/MenuBarElement.swift —
+  `.meters` drawn in the cell's form, exactly once, plus `.runsOut(scope)`
+  at most once; `MenuBarLayout.normalized` is the invariant at every
+  edge; tokens "meters"/"runsOut:earliest" on the `Profile` record
+  (`menuBarElements`, additive, unknown token dropped alone) and bar-wide
+  under `MenuBarPreferences.uniformElementsKey`, following the SAME
+  "Same form for every account" switch as the form — `Values.elements
+  (for:)` resolves). THE ELEMENT IS CONDITIONAL: it composes NOTHING
+  unless a limit is forecast to run out before its reset (a red capsule
+  `S 31m`, the digits' alarm idiom) or is spent (`S↺ 2h 10m`, quiet,
+  counting to the reset); a quiet bar is byte-identical to the pre-0.98
+  one (`statusitem-runsout-quiet.png` == `statusitem-clean.png`, and all
+  seventeen 0.97.2 status item PNGs `cmp` equal). ONE element with a SCOPE
+  (`RunsOutScope` earliest/each/session/weekly/scoped — "when do I get
+  cut off" is the earliest crossing; the rest is a setting), never several
+  copies. Phrasing is core: `UsageFormatting.menuBarCountdowns` (Formatting/
+  MenuBarCountdown.swift — `resetText`'s tiers minus the verb, minutes
+  zero-padded after an hour so the monospaced width holds), gated on the
+  SMOOTHED verdict: `MenuBarSegment`/digest `SegmentStatus` carry
+  `exhaustsAt` (red verdict only — the two-refresh hysteresis is what
+  keeps a bar element from flickering) and `resetsAt`, additive, Rust
+  mirror updated, golden regenerated (+3 `resetsAt`). The countdown ticks:
+  `Model.now` is FLOORED TO THE MINUTE so the model changes once a minute
+  and the controller's identical-model skip still holds; `armClock` fires
+  one shot at the next boundary while `hasCountdown`. SETTINGS: the
+  preview is a DROP TARGET (`MenuBarElementDrag` pasteboard type + plain-
+  text token; drop lands before/after the nearest meters by the pointer's
+  side of their midpoint) and a placed element drags across its meters or
+  OFF the strip to remove (`elementRects` — `Tagged`/`Placed` carry
+  `element`; a dot form still carries no letter); `MenuBarElementPalette`
+  = the tile (`StatusItemRenderer.elementImage`, the element ALONE at the
+  account's numbers with the session half an hour out) + the condition in
+  words + scope picker + Remove; "Preview as if a limit were running out"
+  (`MenuBarModelBuilder.simulatingCrossing`, never persisted) and GHOSTS
+  (`Model.ghosts`, a dashed "runs out" capsule for an element with nothing
+  to say — the preview ONLY, the bar never) are the two answers to "the
+  drop looked like it failed". `--snapshot` writes `statusitem-runsout-
+  {,before,each,spent,quiet,ghost,cells}.png` (clock pinned so they cmp),
+  `menubar-preview-{ghost,forecast}.png`, `element-palette.png` (its
+  Picker is the ImageRenderer ⊘). Verified live: this Mac's real bar read
+  `S 23m` / `F 23h 22m` off the daemon's forecast. TUI mirrors the fields,
+  draws nothing new.
 - RUST TUI (2026-08-16 v0.67.0, phase T1; tui/ cargo crate, usage-tui):
   the dependency rule is SCOPED — UsageCore/app/usaged stay zero-dep
   Swift; the TUI carries exactly ratatui, serde, serde_json, time

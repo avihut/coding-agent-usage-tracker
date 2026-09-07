@@ -182,6 +182,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             cell: MenuBarModelBuilder.sampleCell(for: registry.focusedProfile, registry: registry),
             selection: prefs.form(for: registry.focusedProfile), onSelect: { _ in })
         write(ImageRenderer(content: picker.padding(14).background(Color(nsColor: .windowBackgroundColor))), "form-picker.png")
+        // The "Runs out" element (0.98.0) placed after the meters, three
+        // ways: as the preview ghosts it on a quiet day, as the "as if"
+        // switch dresses it, and the palette tile with its condition.
+        let arranged = [MenuBarElement.meters, .runsOut(.earliest)]
+        for (name, simulate) in [("menubar-preview-ghost.png", false), ("menubar-preview-forecast.png", true)] {
+            let staged = MenuBarPreviewView()
+            staged.items = StatusItemRenderer.itemModels(
+                for: MenuBarModelBuilder.model(
+                    registry: registry, prefs: prefs, elements: (nil, arranged),
+                    simulate: simulate, ghosts: true))
+            if let rep = staged.snapshot() {
+                try? rep.representation(using: .png, properties: [:])?
+                    .write(to: directory.appending(path: name))
+            }
+        }
+        let palette = MenuBarElementPalette(
+            registry: registry, profile: registry.focusedProfile, elements: arranged, onChange: { _ in })
+        write(
+            ImageRenderer(content: palette.padding(14).frame(width: 520).background(Color(nsColor: .windowBackgroundColor))),
+            "element-palette.png")
         // The weekly meter's card, lit at the first pending reset notice
         // exactly as a click on that notice would open it.
         if let meters = store.state.snapshot?.meters,
@@ -296,6 +316,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 StatusItemRenderer.Cell(
                     profileID: "c982130e", monogram: "P", segments: nil, stale: true, focused: false),
             ], expandsFocus: false)))
+        // The runs-out element (0.98.0): a crossing half an hour out, the
+        // scoped meter days out, a spent session counting to its reset —
+        // after the meters, before them, and every limit at once. The
+        // clock is pinned so the PNGs are `cmp`-able.
+        let clock = Date(timeIntervalSince1970: 1_800_000_000)
+        let crossing = [
+            MenuBarSegment(
+                tag: "S", percent: 82, level: .critical, severity: 1,
+                exhaustsAt: clock.addingTimeInterval(31 * 60), resetsAt: clock.addingTimeInterval(2 * 3600)),
+            segment("W", 80, .warning, 0.55),
+            MenuBarSegment(
+                tag: "F", percent: 61, level: .normal, severity: 1,
+                exhaustsAt: clock.addingTimeInterval(2 * 86400 + 3 * 3600), resetsAt: clock.addingTimeInterval(5 * 86400)),
+        ]
+        let spent = [
+            MenuBarSegment(
+                tag: "S", percent: 100, level: .critical, severity: 1,
+                exhaustsAt: clock.addingTimeInterval(-600), resetsAt: clock.addingTimeInterval(2 * 3600 + 10 * 60)),
+            segment("W", 80, .warning, 0.55), segment("F", 25, .normal, nil),
+        ]
+        for (name, segments, elements) in [
+            ("runsout", crossing, [MenuBarElement.meters, .runsOut(.earliest)]),
+            ("runsout-before", crossing, [.runsOut(.earliest), .meters]),
+            ("runsout-each", crossing, [.meters, .runsOut(.each)]),
+            ("runsout-spent", spent, [.meters, .runsOut(.earliest)]),
+            ("runsout-quiet", clean, [.meters, .runsOut(.earliest)]),
+        ] {
+            everyCase.append((name, StatusItemRenderer.Model(
+                segments: segments, stale: false, glyph: "✳︎", elements: elements, now: clock)))
+        }
+        // The preview's ghost for a quiet element — the bar itself never
+        // draws one, so a fixed case is the one way to see it.
+        var ghosted = StatusItemRenderer.Model(
+            segments: clean, stale: false, glyph: "✳︎", elements: [.meters, .runsOut(.earliest)], now: clock)
+        ghosted.ghosts = true
+        everyCase.append(("runsout-ghost", ghosted))
+        everyCase.append((
+            "runsout-cells",
+            StatusItemRenderer.Model(
+                glyph: "✳︎",
+                cells: [
+                    work,
+                    StatusItemRenderer.Cell(
+                        profileID: "c982130e", monogram: "P", segments: crossing, stale: false,
+                        focused: false, form: .bars, elements: [.meters, .runsOut(.earliest)]),
+                ],
+                expandsFocus: true, now: clock)))
         everyCase.append((
             "cells-incident",
             StatusItemRenderer.Model(

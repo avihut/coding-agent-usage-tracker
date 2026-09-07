@@ -511,13 +511,25 @@ public struct SegmentStatus: Codable, Sendable, Equatable {
     public let level: String
     public let severity: Double?
     public let risk: RGBColor?
+    /// When the displayed forecast crosses the limit before its reset
+    /// (0.98.0, additive) — what the bar's "Runs out" element counts down
+    /// to. Absent while the forecast is clean or yellow.
+    public let exhaustsAt: Date?
+    /// The meter's reset (0.98.0, additive): the countdown once the limit
+    /// is spent.
+    public let resetsAt: Date?
 
-    public init(tag: String, percent: Int?, level: String, severity: Double?, risk: RGBColor?) {
+    public init(
+        tag: String, percent: Int?, level: String, severity: Double?, risk: RGBColor?,
+        exhaustsAt: Date? = nil, resetsAt: Date? = nil
+    ) {
         self.tag = tag
         self.percent = percent
         self.level = level
         self.severity = severity
         self.risk = risk
+        self.exhaustsAt = exhaustsAt
+        self.resetsAt = resetsAt
     }
 }
 
@@ -768,7 +780,8 @@ public enum LiveStateBuilder {
             SegmentStatus(
                 tag: $0.tag, percent: $0.percent, level: levelName($0.level),
                 severity: $0.severity,
-                risk: $0.severity.flatMap { RiskRamp.color(severity: $0) })
+                risk: $0.severity.flatMap { RiskRamp.color(severity: $0) },
+                exhaustsAt: $0.exhaustsAt, resetsAt: $0.resetsAt)
         }
 
         let today = calendar.startOfDay(for: now)

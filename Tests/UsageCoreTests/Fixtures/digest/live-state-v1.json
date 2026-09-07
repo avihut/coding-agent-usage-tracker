@@ -249,6 +249,7 @@
     {
       "level" : "normal",
       "percent" : 53,
+      "resetsAt" : "2026-08-16T14:00:00Z",
       "risk" : {
         "blue" : 0.1142,
         "green" : 0.6118,
@@ -277,6 +278,7 @@
         {
           "level" : "normal",
           "percent" : 53,
+          "resetsAt" : "2026-08-16T14:00:00Z",
           "risk" : {
             "blue" : 0.1142,
             "green" : 0.6118,
@@ -1367,6 +1369,7 @@
         {
           "level" : "normal",
           "percent" : 53,
+          "resetsAt" : "2026-08-16T14:00:00Z",
           "risk" : {
             "blue" : 0.1142,
             "green" : 0.6118,
