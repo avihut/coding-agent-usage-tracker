@@ -59,10 +59,10 @@ struct AccountsCard: View {
     }
 }
 
-/// One metered account: who it is first, then what you can change about
-/// it — name, form in the bar, the switches — then what it has been doing.
-/// The paths it is read from are inventory, not settings, and live in the
-/// privacy card.
+/// One metered account: who it is first, then its name and whether it is
+/// metered, then what it has been doing. How it draws in the bar is the
+/// Menu bar pane's; the paths it is read from are inventory, not settings,
+/// and live in the privacy card.
 private struct AccountRow: View {
     var registry: ProviderRegistry
     let profile: Profile
@@ -70,7 +70,6 @@ private struct AccountRow: View {
     @State private var nickname: String
     @State private var confirmingRemove = false
     @FocusState private var editingNickname: Bool
-    @AppStorage(MenuBarPreferences.uniformKey) private var uniformForm = true
 
     init(registry: ProviderRegistry, profile: Profile) {
         self.registry = registry
@@ -79,7 +78,6 @@ private struct AccountRow: View {
     }
 
     private var store: UsageStore? { registry.store(for: profile.id) }
-    private var inBar: Bool { profile.enabled && profile.showInMenuBar }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -98,49 +96,13 @@ private struct AccountRow: View {
                         if !focused { commitNickname() }
                     }
             }
-            // Its own form only once the bar is set to draw each account
-            // in its own (the Menu bar card's switch); under one form for
-            // all, the row says so rather than offering a picker that
-            // would not draw.
-            if registry.barProfiles.count > 1 {
-                if uniformForm {
-                    LabeledContent("Menu bar") {
-                        Text("Same form as every account — set under Menu bar")
-                            .foregroundStyle(.secondary)
-                    }
-                } else {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Menu bar")
-                        MenuBarFormPicker(
-                            cell: MenuBarModelBuilder.sampleCell(for: profile, registry: registry),
-                            selection: profile.menuBarForm,
-                            onSelect: { registry.setMenuBarForm(id: profile.id, form: $0) })
-                        // Its own elements, too (0.98.0): the arrangement
-                        // follows the same switch as the form.
-                        MenuBarElementPalette(
-                            registry: registry, profile: profile, elements: profile.menuBarElements,
-                            onChange: { registry.setMenuBarElements(id: profile.id, elements: $0) })
-                    }
-                    .opacity(inBar ? 1 : 0.45)
-                    .disabled(!inBar)
-                }
-            }
+            // How it draws in the bar lives under Settings → Menu bar
+            // (0.98.1, user-directed: styling among the accounts was
+            // confusing); here is only whether it is metered at all.
             HStack(spacing: 16) {
                 Toggle("Meter this account", isOn: Binding(
                     get: { profile.enabled },
                     set: { registry.setProfileEnabled(id: profile.id, enabled: $0) }))
-                Toggle("Show in menu bar", isOn: Binding(
-                    get: { profile.showInMenuBar },
-                    set: { registry.setShowInMenuBar(id: profile.id, shown: $0) }))
-                    .disabled(!profile.enabled)
-                // Its own item only means something beside a shared one.
-                if registry.barProfiles.count > 1 {
-                    Toggle("Own menu bar item", isOn: Binding(
-                        get: { profile.ownMenuBarItem },
-                        set: { registry.setOwnMenuBarItem(id: profile.id, own: $0) }))
-                        .disabled(!inBar)
-                        .help("A separate menu bar item for this account — ⌘-drag it anywhere along the bar")
-                }
                 Spacer()
             }
             .toggleStyle(.switch)
@@ -251,136 +213,6 @@ private struct DiscoveredAccountRow: View {
                 "Found on this Mac. Nothing has been read from it beyond the folder listing and its"
                     + " sign-in record — no credential, no usage.")
         }
-    }
-}
-
-/// The bar as a whole (0.97.0): the live preview first — drag the accounts
-/// into order — then the controls that are nobody's in particular. Which
-/// form wins is a SWITCH, not a precedence rule to remember (0.97.1,
-/// user-directed): "Same form for every account" on means the form here
-/// draws; off means each account's own, set on its row.
-struct MenuBarSettingsCard: View {
-    var registry: ProviderRegistry
-    @AppStorage(MenuBarPreferences.expandsFocusKey) private var expandsFocus = true
-    @AppStorage(MenuBarPreferences.uniformKey) private var uniform = true
-    @AppStorage(MenuBarPreferences.uniformFormKey) private var uniformFormRaw = MenuBarForm.standard.rawValue
-    /// The bar-wide element list (a string array, which @AppStorage can't
-    /// bind): mirrored from the defaults on every defaults change so the
-    /// card re-renders the instant a drop lands.
-    @State private var uniformElements = MenuBarPreferences.current().uniformElements
-    /// Dress the preview as if a limit were running out — the only way to
-    /// see the conditional element on a quiet day. Never persisted.
-    @State private var simulateCrossing = false
-
-    private var prefs: MenuBarPreferences.Values {
-        MenuBarPreferences.Values(
-            expandsFocus: expandsFocus, uniform: uniform,
-            uniformForm: MenuBarForm(rawValue: uniformFormRaw) ?? .standard,
-            uniformElements: uniformElements)
-    }
-    private var several: Bool { registry.barProfiles.count > 1 }
-
-    var body: some View {
-        card.onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
-            let current = MenuBarPreferences.current().uniformElements
-            if current != uniformElements { uniformElements = current }
-        }
-    }
-
-    private var card: some View {
-        SettingsCard("Menu bar", footer: footer) {
-            VStack(alignment: .leading, spacing: 6) {
-                MenuBarPreview(registry: registry, prefs: prefs, simulate: simulateCrossing)
-                HStack(alignment: .firstTextBaseline) {
-                    Text(several
-                        ? "Drag an account to reorder; drag an element across its meters, or off the bar to remove it."
-                        : "Drag an element across the meters, or off the bar to remove it.")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                    Spacer()
-                    Toggle("Preview as if a limit were running out", isOn: $simulateCrossing)
-                        .toggleStyle(.checkbox)
-                        .controlSize(.small)
-                        .font(.caption)
-                        .help("Dresses the preview as if the session limit were half an hour from running out, so a conditional element shows")
-                }
-            }
-            Divider()
-            if uniform || !several {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Add to the bar")
-                    MenuBarElementPalette(
-                        registry: registry, profile: registry.focusedProfile,
-                        elements: prefs.elements(for: registry.focusedProfile),
-                        onChange: { elements in
-                            if uniform {
-                                MenuBarPreferences.setUniformElements(elements)
-                            } else if let id = registry.focusedProfile?.id {
-                                registry.setMenuBarElements(id: id, elements: elements)
-                            }
-                        })
-                }
-                Divider()
-            }
-            if several {
-                Toggle("Same form for every account", isOn: $uniform)
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
-            }
-            if uniform || !several {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Form")
-                    MenuBarFormPicker(
-                        cell: MenuBarModelBuilder.sampleCell(
-                            for: registry.focusedProfile, registry: registry),
-                        selection: prefs.form(for: registry.focusedProfile),
-                        onSelect: { form in
-                            if uniform {
-                                uniformFormRaw = form.rawValue
-                            } else if let id = registry.focusedProfile?.id {
-                                registry.setMenuBarForm(id: id, form: form)
-                            }
-                        })
-                }
-            } else {
-                note("Each account draws in the form set on its own row under Accounts, with the elements added there.")
-            }
-            if several {
-                Toggle("Expand the focused account", isOn: $expandsFocus)
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
-                HStack(alignment: .firstTextBaseline) {
-                    Text("Focus")
-                    Spacer()
-                    Picker("Focus", selection: Binding(
-                        get: { registry.pinnedID ?? "" },
-                        set: { registry.pin($0.isEmpty ? nil : $0) })
-                    ) {
-                        Text("Follows activity").tag("")
-                        ForEach(registry.shownProfiles) { profile in
-                            Text(registry.label(for: profile)).tag(profile.id)
-                        }
-                    }
-                    .labelsHidden()
-                    .fixedSize()
-                }
-            } else {
-                Toggle("Spell out the numbers", isOn: $expandsFocus)
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
-            }
-        }
-    }
-
-    private var footer: String {
-        if several {
-            return "With the focused account expanded, its numbers are spelled out whatever its"
-                + " form — and focus decides which account the panel opens on. Following activity"
-                + " picks the account this Mac has worked in most over the last two weeks; picking"
-                + " an account in the panel pins it until Auto."
-        }
-        return "With the numbers spelled out the item is exactly what it has always been; turn that"
-            + " off to draw your account in the form chosen above."
     }
 }
 

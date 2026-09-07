@@ -301,7 +301,17 @@ the README rather than silently deviating.
   `menubar-preview-{ghost,forecast}.png`, `element-palette.png` (its
   Picker is the ImageRenderer ⊘). Verified live: this Mac's real bar read
   `S 23m` / `F 23h 22m` off the daemon's forecast. TUI mirrors the fields,
-  draws nothing new.
+  draws nothing new. v0.98.1 (user-reported "nothing happened"): the tile
+  is an APPKIT DRAG SOURCE (`ElementDragSourceView`, a real
+  `NSDraggingSession` with the token + the source account on the
+  pasteboard) — SwiftUI's `.onDrag` on a Button never started a session
+  the AppKit drop target could see; and (user-directed) the bar's styling
+  has its OWN SIDEBAR PANE, `SettingsSection.menuBar` (Settings/
+  MenuBarSettingsPane.swift, every provider, `--pane-menubar`): preview,
+  uniform switch, form, palette, focus, plus "Accounts in the bar" rows
+  (Show in menu bar / Own item / per-account form + elements while
+  uniform is off); Accounts keeps identity, nickname, "Meter this
+  account", activity, remove, discovery, and the Panel card.
 - RUST TUI (2026-08-16 v0.67.0, phase T1; tui/ cargo crate, usage-tui):
   the dependency rule is SCOPED — UsageCore/app/usaged stay zero-dep
   Swift; the TUI carries exactly ratatui, serde, serde_json, time

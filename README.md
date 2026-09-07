@@ -203,11 +203,12 @@ account draws in the menu bar in its own form — digits, bars, rings,
 compact digits, or a dot — set per account or for all of them at once,
 with the focused account optionally expanded to its full numbers whatever
 its form, and any account can take a menu bar item of its own. Settings →
-Accounts shows the bar as it will draw, live, with every option pictured
+Menu bar shows the bar as it will draw, live, with every option pictured
 in your own numbers; drag the accounts across the preview to order them.
+Settings → Accounts is only about which sign-ins are metered.
 
-The bar can also carry more than the meters. Settings → Accounts → Menu
-bar has a palette of elements to drag onto the preview (or click to add):
+The bar can also carry more than the meters. Settings → Menu bar has a
+palette of elements to drag onto the preview (or click to add):
 today's one element is **Runs out**, the expected time until a limit is
 reached — `S 31m` in the same red capsule the digits alarm with, or once a
 limit is spent `S↺ 2h 10m`, counting down to its reset. It is conditional

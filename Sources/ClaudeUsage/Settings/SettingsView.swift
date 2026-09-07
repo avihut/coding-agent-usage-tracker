@@ -2,12 +2,13 @@ import SwiftUI
 import UsageCore
 
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case general, accounts, usage, apiCost
+    case general, menuBar, accounts, usage, apiCost
 
     var id: String { rawValue }
     var title: String {
         switch self {
         case .general: "General"
+        case .menuBar: "Menu bar"
         case .accounts: "Accounts"
         case .usage: "Usage"
         case .apiCost: "API Cost"
@@ -16,6 +17,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .general: "gearshape"
+        case .menuBar: "menubar.rectangle"
         case .accounts: "person.2"
         case .usage: "chart.xyaxis.line"
         case .apiCost: "dollarsign.circle"
@@ -65,6 +67,7 @@ struct SettingsView: View {
         } detail: {
             switch section ?? .general {
             case .general: GeneralSettingsPane(store: store, registry: registry)
+            case .menuBar: MenuBarSettingsPane(registry: registry)
             case .accounts: AccountsSettingsPane(registry: registry, navigator: navigator)
             case .usage: UsageSettingsPane(store: store)
             case .apiCost: CostSettingsPane(store: store)

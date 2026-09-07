@@ -104,7 +104,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if CommandLine.arguments.contains("--settings") {
             controller?.showSettings(
                 pane: CommandLine.arguments.contains("--pane-cost") ? .apiCost
-                    : CommandLine.arguments.contains("--pane-accounts") ? .accounts : .general)
+                    : CommandLine.arguments.contains("--pane-accounts") ? .accounts
+                    : CommandLine.arguments.contains("--pane-menubar") ? .menuBar : .general)
         } else if CommandLine.arguments.contains("--panel") {
             controller?.showPanel()
         } else if CommandLine.arguments.contains("--sessions") {

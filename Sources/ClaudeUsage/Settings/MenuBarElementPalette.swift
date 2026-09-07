@@ -23,6 +23,7 @@ struct MenuBarElementPalette: View {
             RunsOutTile(
                 cell: MenuBarModelBuilder.runsOutSample(
                     for: profile, registry: registry, scope: scope ?? .earliest),
+                profileID: profile?.id,
                 placed: scope != nil,
                 onAdd: { onChange(MenuBarLayout.settingRunsOut(.earliest, in: elements)) })
                 .fixedSize()
@@ -73,10 +74,16 @@ struct MenuBarElementPalette: View {
 }
 
 /// The tile: the element drawn as it would look with the session limit
-/// half an hour out, on a swatch of bar. Drags as the element's token;
-/// a click adds it in the default place.
+/// half an hour out, on a swatch of bar. It is an AppKit DRAG SOURCE — a
+/// real `NSDraggingSession` carrying the element's token (SwiftUI's
+/// `.onDrag` on a Button never started one, and the preview is an AppKit
+/// drop target: v0.98.1, user-reported "nothing happened"); a click adds
+/// the element in the default place.
 private struct RunsOutTile: View {
     let cell: StatusItemRenderer.Cell
+    /// The account the tile belongs to, so its drop lands on that
+    /// account's cell wherever the pointer lets go.
+    let profileID: String?
     let placed: Bool
     let onAdd: () -> Void
 
@@ -89,24 +96,118 @@ private struct RunsOutTile: View {
     }
 
     var body: some View {
-        // Not `.disabled` once placed — that dims the picture, and the
-        // tile still has to drag; the click just has nothing left to add.
-        Button(action: { if !placed { onAdd() } }) {
-            VStack(spacing: 4) {
-                MenuBarSwatch(image: thumbnail, selected: placed, hovering: hovering)
-                Text(placed ? "Added" : "Add")
-                    .font(.caption2.weight(placed ? .semibold : .regular))
-                    .foregroundStyle(placed ? .primary : .secondary)
-                    .lineLimit(1)
-                    .fixedSize()
-            }
-            .contentShape(Rectangle())
+        let image = thumbnail
+        VStack(spacing: 4) {
+            MenuBarSwatch(image: image, selected: placed, hovering: hovering)
+                .overlay(
+                    ElementDragSource(
+                        element: .runsOut(.earliest), profileID: profileID, image: image,
+                        onClick: { if !placed { onAdd() } },
+                        onHover: { hovering = $0 }))
+            Text(placed ? "Added" : "Add")
+                .font(.caption2.weight(placed ? .semibold : .regular))
+                .foregroundStyle(placed ? .primary : .secondary)
+                .lineLimit(1)
+                .fixedSize()
         }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
         .pointerStyle(placed ? .grabIdle : .link)
-        .onDrag { MenuBarElementDrag.itemProvider(for: .runsOut(.earliest)) }
         .help("Runs out — drag onto the preview")
         .accessibilityLabel("Runs out")
+    }
+}
+
+/// A transparent view over the swatch that turns a press-and-move into an
+/// AppKit drag of the element and a plain click into `onClick`.
+private struct ElementDragSource: NSViewRepresentable {
+    let element: MenuBarElement
+    let profileID: String?
+    let image: NSImage
+    let onClick: () -> Void
+    let onHover: (Bool) -> Void
+
+    func makeNSView(context: Context) -> ElementDragSourceView {
+        let view = ElementDragSourceView()
+        apply(to: view)
+        return view
+    }
+
+    func updateNSView(_ view: ElementDragSourceView, context: Context) {
+        apply(to: view)
+    }
+
+    private func apply(to view: ElementDragSourceView) {
+        view.element = element
+        view.profileID = profileID
+        view.image = image
+        view.onClick = onClick
+        view.onHover = onHover
+    }
+}
+
+@MainActor
+final class ElementDragSourceView: NSView, NSDraggingSource {
+    var element: MenuBarElement = .runsOut(.earliest)
+    var profileID: String?
+    var image = NSImage()
+    var onClick: () -> Void = {}
+    var onHover: (Bool) -> Void = { _ in }
+
+    private var pressedAt: NSPoint?
+    private var trackingArea: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea { removeTrackingArea(trackingArea) }
+        let area = NSTrackingArea(
+            rect: bounds, options: [.mouseEnteredAndExited, .activeInKeyWindow], owner: self, userInfo: nil)
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) { onHover(true) }
+    override func mouseExited(with event: NSEvent) { onHover(false) }
+
+    override func mouseDown(with event: NSEvent) {
+        pressedAt = convert(event.locationInWindow, from: nil)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let pressedAt else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        guard hypot(point.x - pressedAt.x, point.y - pressedAt.y) > 4 else { return }
+        self.pressedAt = nil
+        let item = NSPasteboardItem()
+        item.setString(element.token, forType: MenuBarElementDrag.pasteboardType)
+        item.setString(element.token, forType: .string)
+        if let profileID { item.setString(profileID, forType: MenuBarElementDrag.profileType) }
+        let dragItem = NSDraggingItem(pasteboardWriter: item)
+        // The swatch as it looks here rides under the pointer, so what is
+        // dragged is what will land.
+        dragItem.setDraggingFrame(bounds, contents: dragImage())
+        beginDraggingSession(with: [dragItem], event: event, source: self)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        if pressedAt != nil { onClick() }
+        pressedAt = nil
+    }
+
+    private func dragImage() -> NSImage {
+        let size = bounds.size
+        let element = image
+        return NSImage(size: size, flipped: false) { rect in
+            NSColor(srgbRed: 0.12, green: 0.12, blue: 0.14, alpha: 0.95).setFill()
+            NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6).fill()
+            element.draw(
+                at: NSPoint(x: (rect.width - element.size.width) / 2, y: (rect.height - element.size.height) / 2),
+                from: .zero, operation: .sourceOver, fraction: 1)
+            return true
+        }
+    }
+
+    nonisolated func draggingSession(
+        _ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext
+    ) -> NSDragOperation {
+        context == .withinApplication ? .copy : []
     }
 }

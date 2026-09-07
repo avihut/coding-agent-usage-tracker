@@ -1,6 +1,5 @@
 import AppKit
 import SwiftUI
-import UniformTypeIdentifiers
 import UsageCore
 
 /// The bar as it will draw, live (0.97.0, user-directed: "a full preview
@@ -114,35 +113,24 @@ private struct MenuBarPreviewSurface: NSViewRepresentable {
 
 /// The palette's drag payload: the element's token under the app's own
 /// pasteboard type, and again as plain text so a receiver that only
-/// speaks text still gets the token.
+/// speaks text still gets the token; the account it was dragged from
+/// under a second type, so the drop lands on that account's cell.
 enum MenuBarElementDrag {
-    static let typeIdentifier = "com.avihu.ClaudeUsage.menubar-element"
-    static let pasteboardType = NSPasteboard.PasteboardType(typeIdentifier)
-
-    static func itemProvider(for element: MenuBarElement) -> NSItemProvider {
-        let provider = NSItemProvider()
-        let data = Data(element.token.utf8)
-        for identifier in [typeIdentifier, UTType.utf8PlainText.identifier] {
-            provider.registerDataRepresentation(forTypeIdentifier: identifier, visibility: .ownProcess) { completion in
-                completion(data, nil)
-                return nil
-            }
-        }
-        return provider
-    }
+    static let pasteboardType = NSPasteboard.PasteboardType("com.avihu.ClaudeUsage.menubar-element")
+    static let profileType = NSPasteboard.PasteboardType("com.avihu.ClaudeUsage.menubar-element-profile")
 
     /// The element a pasteboard carries, if it carries one of ours.
     static func element(on pasteboard: NSPasteboard) -> MenuBarElement? {
         for type in [pasteboardType, .string] {
-            if let data = pasteboard.data(forType: type),
-               let element = MenuBarElement(token: String(decoding: data, as: UTF8.self)) {
-                return element
-            }
             if let string = pasteboard.string(forType: type), let element = MenuBarElement(token: string) {
                 return element
             }
         }
         return nil
+    }
+
+    static func profileID(on pasteboard: NSPasteboard) -> String? {
+        pasteboard.string(forType: profileType)
     }
 }
 
@@ -509,27 +497,33 @@ final class MenuBarPreviewView: NSView {
 
     // MARK: - Drop target (the palette)
 
-    /// The account whose meters a point is nearest, and which side of them
-    /// it is on. With no cell drawn at all (nothing fetched yet) the drop
-    /// still lands — on whichever account the arrangement resolves to.
-    private func hint(at point: NSPoint) -> DropHint {
+    /// The account whose meters a point is nearest — or the account the
+    /// tile was dragged from, when that account has a cell — and which
+    /// side of them it is on. With no cell drawn at all (nothing fetched
+    /// yet) the drop still lands, on whichever account the arrangement
+    /// resolves to.
+    private func hint(at point: NSPoint, from pasteboard: NSPasteboard) -> DropHint {
         let (_, _, elementSlots) = layout(images())
-        let meters = elementSlots.filter { $0.profileID != nil && $0.element == .meters }
+        var meters = elementSlots.filter { $0.profileID != nil && $0.element == .meters }
+        if let source = MenuBarElementDrag.profileID(on: pasteboard),
+           meters.contains(where: { $0.profileID == source }) {
+            meters = meters.filter { $0.profileID == source }
+        }
         guard let nearest = meters.min(by: { abs($0.rect.midX - point.x) < abs($1.rect.midX - point.x) })
-        else { return DropHint(profileID: nil, beforeMeters: false) }
+        else { return DropHint(profileID: MenuBarElementDrag.profileID(on: pasteboard), beforeMeters: false) }
         return DropHint(profileID: nearest.profileID, beforeMeters: point.x < nearest.rect.midX)
     }
 
     override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
         guard MenuBarElementDrag.element(on: sender.draggingPasteboard) != nil else { return [] }
-        dropHint = hint(at: convert(sender.draggingLocation, from: nil))
+        dropHint = hint(at: convert(sender.draggingLocation, from: nil), from: sender.draggingPasteboard)
         needsDisplay = true
         return .copy
     }
 
     override func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
         guard MenuBarElementDrag.element(on: sender.draggingPasteboard) != nil else { return [] }
-        let next = hint(at: convert(sender.draggingLocation, from: nil))
+        let next = hint(at: convert(sender.draggingLocation, from: nil), from: sender.draggingPasteboard)
         if next != dropHint {
             dropHint = next
             needsDisplay = true
@@ -552,7 +546,7 @@ final class MenuBarPreviewView: NSView {
             needsDisplay = true
         }
         guard let element = MenuBarElementDrag.element(on: sender.draggingPasteboard) else { return false }
-        let landing = hint(at: convert(sender.draggingLocation, from: nil))
+        let landing = hint(at: convert(sender.draggingLocation, from: nil), from: sender.draggingPasteboard)
         onPlaceElement(landing.profileID, element, landing.beforeMeters)
         return true
     }
