@@ -72,4 +72,16 @@ struct MenuBarElementTests {
         let back = try decoder.decode(Profile.self, from: Data(text.utf8))
         #expect(back.menuBarElements == profile.menuBarElements)
     }
+
+    @Test("the default record keeps its elements through resolution (0.98.2: they were dropped on read)")
+    func defaultRecordResolves() {
+        let provider = ClaudeProvider()
+        let stored = Profile(
+            id: Profile.defaultID, providerID: provider.id, home: nil, menuBarForm: .rings,
+            menuBarElements: [.runsOut(.each), .meters], addedAt: Date(timeIntervalSince1970: 0))
+        let resolved = ProfileStore.resolved([stored], provider: provider, now: Date())
+        let standard = resolved.first { $0.isDefault }
+        #expect(standard?.menuBarElements == [.runsOut(.each), .meters])
+        #expect(standard?.menuBarForm == .rings)
+    }
 }

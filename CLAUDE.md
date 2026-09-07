@@ -311,7 +311,12 @@ the README rather than silently deviating.
   uniform switch, form, palette, focus, plus "Accounts in the bar" rows
   (Show in menu bar / Own item / per-account form + elements while
   uniform is off); Accounts keeps identity, nickname, "Meter this
-  account", activity, remove, discovery, and the Panel card.
+  account", activity, remove, discovery, and the Panel card. v0.98.2
+  (user-reported: Work's drop did nothing, Personal's worked):
+  `ProfileStore.resolved` REBUILDS the stored default record field by
+  field — a field added to `Profile` MUST be carried there too, or every
+  edit to the implicit `default` account is written and then dropped on
+  the next read (pinned by MenuBarElementTests.defaultRecordResolves).
 - RUST TUI (2026-08-16 v0.67.0, phase T1; tui/ cargo crate, usage-tui):
   the dependency rule is SCOPED — UsageCore/app/usaged stay zero-dep
   Swift; the TUI carries exactly ratatui, serde, serde_json, time

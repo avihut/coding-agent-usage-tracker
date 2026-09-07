@@ -51,6 +51,7 @@ public enum ProfileStore {
                 nickname: standard.nickname, monogram: standard.monogram,
                 enabled: standard.enabled, showInMenuBar: standard.showInMenuBar,
                 menuBarForm: standard.menuBarForm, ownMenuBarItem: standard.ownMenuBarItem,
+                menuBarElements: standard.menuBarElements,
                 order: standard.order, addedAt: standard.addedAt,
                 ignoredIdentityKey: nil)
             mine[index] = standard
