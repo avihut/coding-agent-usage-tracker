@@ -20,6 +20,12 @@ enum MenuBarPreferences {
     /// "Same form for every account" is on, stored as tokens. Absent =
     /// the meters alone, the pre-0.98 bar.
     static let uniformElementsKey = "menuBarUniformElements"
+    /// Whether added elements draw for the FOCUSED account only (0.99.0,
+    /// user-directed "for the currently selected account rather than for
+    /// each account"): on, the bar carries one countdown, the account the
+    /// panel opens on; off, every account's cell carries its own. On by
+    /// default.
+    static let focusedElementsOnlyKey = "menuBarFocusedElementsOnly"
     /// 0.96.0's whole-bar style, read once by `migrateLegacyStyle` and
     /// removed — nobody's bar changes on update.
     static let legacyStyleKey = "menuBarStyle"
@@ -31,6 +37,7 @@ enum MenuBarPreferences {
         var uniform = true
         var uniformForm: MenuBarForm = .standard
         var uniformElements: [MenuBarElement] = MenuBarLayout.standard
+        var focusedElementsOnly = true
 
         /// The form an account draws in under these values.
         func form(for profile: Profile?) -> MenuBarForm {
@@ -52,7 +59,8 @@ enum MenuBarPreferences {
             uniformForm: defaults.string(forKey: uniformFormKey)
                 .flatMap(MenuBarForm.init(rawValue:)) ?? .standard,
             uniformElements: defaults.stringArray(forKey: uniformElementsKey)
-                .map(MenuBarLayout.decode(tokens:)) ?? MenuBarLayout.standard)
+                .map(MenuBarLayout.decode(tokens:)) ?? MenuBarLayout.standard,
+            focusedElementsOnly: defaults.object(forKey: focusedElementsOnlyKey) as? Bool ?? true)
     }
 
     static func setUniformElements(_ elements: [MenuBarElement], in defaults: UserDefaults = .standard) {

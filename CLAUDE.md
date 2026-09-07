@@ -317,6 +317,12 @@ the README rather than silently deviating.
   field — a field added to `Profile` MUST be carried there too, or every
   edit to the implicit `default` account is written and then dropped on
   the next read (pinned by MenuBarElementTests.defaultRecordResolves).
+  v0.99.0 (user-directed "for the currently selected account rather than
+  for each account"): `MenuBarPreferences.focusedElementsOnlyKey` (default
+  ON) — `MenuBarModelBuilder.elements(for:…focused:)` strips the runs-out
+  element from every non-focused cell, drafts mid-drag included, so the bar carries ONE countdown, the
+  focused account's; the arrangement records are untouched (a drop still
+  lands where it lands, and draws when that account is focused).
 - RUST TUI (2026-08-16 v0.67.0, phase T1; tui/ cargo crate, usage-tui):
   the dependency rule is SCOPED — UsageCore/app/usaged stay zero-dep
   Swift; the TUI carries exactly ratatui, serde, serde_json, time

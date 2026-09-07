@@ -29,6 +29,7 @@ struct MenuBarSettingsCard: View {
     @AppStorage(MenuBarPreferences.expandsFocusKey) private var expandsFocus = true
     @AppStorage(MenuBarPreferences.uniformKey) private var uniform = true
     @AppStorage(MenuBarPreferences.uniformFormKey) private var uniformFormRaw = MenuBarForm.standard.rawValue
+    @AppStorage(MenuBarPreferences.focusedElementsOnlyKey) private var focusedElementsOnly = true
     /// The bar-wide element list (a string array, which @AppStorage can't
     /// bind): mirrored from the defaults on every defaults change so the
     /// card re-renders the instant a drop lands.
@@ -41,7 +42,7 @@ struct MenuBarSettingsCard: View {
         MenuBarPreferences.Values(
             expandsFocus: expandsFocus, uniform: uniform,
             uniformForm: MenuBarForm(rawValue: uniformFormRaw) ?? .standard,
-            uniformElements: uniformElements)
+            uniformElements: uniformElements, focusedElementsOnly: focusedElementsOnly)
     }
     private var several: Bool { registry.barProfiles.count > 1 }
 
@@ -111,6 +112,10 @@ struct MenuBarSettingsCard: View {
                 note("Each account draws in the form set on its own row below, with the elements added there.")
             }
             if several {
+                Toggle("Added elements for the focused account only", isOn: $focusedElementsOnly)
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .help("On: one \"Runs out\" in the bar, the focused account's. Off: every account's cell carries its own.")
                 Toggle("Expand the focused account", isOn: $expandsFocus)
                     .toggleStyle(.switch)
                     .controlSize(.small)
@@ -139,8 +144,10 @@ struct MenuBarSettingsCard: View {
 
     private var footer: String {
         if several {
-            return "With the focused account expanded, its numbers are spelled out whatever its"
-                + " form — and focus decides which account the panel opens on. Following activity"
+            return "Added elements such as Runs out draw for the focused account only unless every"
+                + " account is asked to carry its own. With the focused account expanded, its"
+                + " numbers are spelled out whatever its form — and focus decides which account the"
+                + " panel opens on. Following activity"
                 + " picks the account this Mac has worked in most over the last two weeks; picking"
                 + " an account in the panel pins it until Auto."
         }

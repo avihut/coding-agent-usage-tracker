@@ -217,7 +217,9 @@ nothing at all, and the bar is exactly what it was without it. One element,
 scoped — the earliest limit by default (any crossing cuts you off, so the
 first one is the answer), or every limit, or one meter — placed before or
 after the meters, per account or for all of them under the same "Same form
-for every account" switch. Because a quiet day would make the drop look
+for every account" switch. With several accounts it draws for the focused
+account only, so the bar carries one countdown; a switch gives every
+account its own. Because a quiet day would make the drop look
 like it failed, the preview draws a dashed placeholder where the element
 will appear, and "Preview as if a limit were running out" dresses the whole
 preview with a half-hour countdown so you can see the real rendering.

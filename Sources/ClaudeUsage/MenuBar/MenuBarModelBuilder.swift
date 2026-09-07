@@ -26,12 +26,16 @@ enum MenuBarModelBuilder {
         return model
     }
 
+    /// What a cell draws: a drag in flight over it, else its arrangement —
+    /// less the added elements when those follow focus and this account
+    /// isn't focused.
     private static func elements(
         for profile: Profile?, prefs: MenuBarPreferences.Values,
-        draft: (id: String?, elements: [MenuBarElement])?
+        draft: (id: String?, elements: [MenuBarElement])?, focused: Bool
     ) -> [MenuBarElement] {
-        if let draft, draft.id == nil || draft.id == profile?.id { return draft.elements }
-        return prefs.elements(for: profile)
+        let arranged = (draft != nil && (draft?.id == nil || draft?.id == profile?.id))
+            ? draft!.elements : prefs.elements(for: profile)
+        return prefs.focusedElementsOnly && !focused ? MenuBarLayout.removingRunsOut(from: arranged) : arranged
     }
 
     private static func build(
@@ -51,14 +55,15 @@ enum MenuBarModelBuilder {
                 serviceStatus: store.serviceStatus, notices: store.notices,
                 form: prefs.form(for: registry.focusedProfile),
                 expandsFocus: prefs.expandsFocus,
-                elements: elements(for: registry.focusedProfile, prefs: prefs, draft: draft),
+                elements: elements(for: registry.focusedProfile, prefs: prefs, draft: draft, focused: true),
                 now: now)
         }
         var styles: [String: StatusItemRenderer.CellStyle] = [:]
         for profile in registry.profiles {
             styles[profile.id] = StatusItemRenderer.CellStyle(
                 form: prefs.form(for: profile), ownItem: profile.ownMenuBarItem,
-                elements: elements(for: profile, prefs: prefs, draft: draft))
+                elements: elements(
+                    for: profile, prefs: prefs, draft: draft, focused: profile.id == registry.focusedID))
         }
         // The app's own order, applied here rather than waited for from the
         // digest, so a reorder shows the instant it is made.
