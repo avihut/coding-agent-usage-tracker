@@ -59,7 +59,7 @@ final class StatusItemController: NSResponder {
     /// Set while items are being torn down and rebuilt, so the visibility
     /// KVO doesn't read our own removals as the user hiding an account.
     private var isRebuildingItems = false
-    private var expandsFocus = MenuBarPreferences.expandsFocus()
+    private var prefs = MenuBarPreferences.current()
 
     /// The account the panel, the windows and the ⋯ menu answer for.
     private var store: UsageStore { registry.focusedStore }
@@ -86,14 +86,15 @@ final class StatusItemController: NSResponder {
         }
         registry.onProfilesChange = { [weak self] in self?.render() }
 
-        // Focus expansion is a plain @AppStorage in Settings; the bar has
-        // to notice it change. Cheap: `render` skips an identical model.
+        // The bar-wide preferences are plain @AppStorage in Settings; the
+        // bar has to notice them change. Cheap: `render` skips an identical
+        // model.
         defaultsObserver = NotificationCenter.default.addObserver(
             forName: UserDefaults.didChangeNotification, object: nil, queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
-                guard let self, self.expandsFocus != MenuBarPreferences.expandsFocus() else { return }
-                self.expandsFocus = MenuBarPreferences.expandsFocus()
+                guard let self, self.prefs != MenuBarPreferences.current() else { return }
+                self.prefs = MenuBarPreferences.current()
                 self.render()
             }
         }
@@ -189,7 +190,7 @@ final class StatusItemController: NSResponder {
     /// What the bar should show right now — built by the one builder the
     /// Settings preview also draws from, split into one model per item.
     private func render() {
-        let model = MenuBarModelBuilder.model(registry: registry, expandsFocus: expandsFocus)
+        let model = MenuBarModelBuilder.model(registry: registry, prefs: prefs)
         let height = NSStatusBar.system.thickness
         let itemModels = StatusItemRenderer.itemModels(for: model)
         let wanted = itemModels.map(\.profileID)

@@ -335,11 +335,6 @@ final class ProviderRegistry {
         edit(id) { $0.menuBarForm = form }
     }
 
-    /// The "all accounts" control: one form for every enrolled record.
-    func setMenuBarFormForAll(_ form: MenuBarForm) {
-        editAll { $0.menuBarForm = form }
-    }
-
     func setOwnMenuBarItem(id: String, own: Bool) {
         edit(id) { $0.ownMenuBarItem = own }
     }
@@ -352,13 +347,6 @@ final class ProviderRegistry {
         editAll { profile in
             if let index = order.firstIndex(of: profile.id) { profile.order = index }
         }
-    }
-
-    /// The common form when every account in the bar shares one; nil
-    /// while they differ ("Mixed").
-    var commonMenuBarForm: MenuBarForm? {
-        let forms = Set(barProfiles.map(\.menuBarForm))
-        return forms.count == 1 ? forms.first : nil
     }
 
     func rename(id: String, nickname: String?) {

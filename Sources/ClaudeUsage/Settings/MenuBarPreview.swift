@@ -11,14 +11,13 @@ import UsageCore
 /// left or right past its neighbors, and the order lands on release.
 struct MenuBarPreview: View {
     let registry: ProviderRegistry
-    let expandsFocus: Bool
+    let prefs: MenuBarPreferences.Values
 
     /// The order as it stands mid-drag; nil once landed.
     @State private var draftOrder: [String]?
 
     var body: some View {
-        let model = MenuBarModelBuilder.model(
-            registry: registry, expandsFocus: expandsFocus, order: draftOrder)
+        let model = MenuBarModelBuilder.model(registry: registry, prefs: prefs, order: draftOrder)
         MenuBarPreviewSurface(
             items: StatusItemRenderer.itemModels(for: model),
             canDrag: registry.barProfiles.count > 1,
@@ -290,11 +289,14 @@ struct MenuBarFormPicker: View {
     let onSelect: (MenuBarForm) -> Void
 
     var body: some View {
-        HStack(spacing: 8) {
+        // Each tile at its own width — the digits swatch is three times
+        // the dot's, and a squeezed row clipped it and wrapped its title.
+        HStack(alignment: .top, spacing: 8) {
             ForEach(MenuBarForm.allCases) { form in
                 FormTile(
                     cell: cell, form: form, selected: form == selection,
                     onSelect: { onSelect(form) })
+                    .fixedSize()
             }
         }
     }
@@ -333,6 +335,8 @@ private struct FormTile: View {
                 Text(form.title)
                     .font(.caption2.weight(selected ? .semibold : .regular))
                     .foregroundStyle(selected ? .primary : .secondary)
+                    .lineLimit(1)
+                    .fixedSize()
             }
             .contentShape(Rectangle())
         }

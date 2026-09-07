@@ -10,7 +10,7 @@ enum MenuBarModelBuilder {
     /// `order` is a draft order of profile ids — the preview's drag in
     /// progress — that stands in for the records' own until it lands.
     static func model(
-        registry: ProviderRegistry, expandsFocus: Bool, order: [String]? = nil
+        registry: ProviderRegistry, prefs: MenuBarPreferences.Values, order: [String]? = nil
     ) -> StatusItemRenderer.Model {
         let store = registry.focusedStore
         let cells = registry.menuBarCells
@@ -23,13 +23,13 @@ enum MenuBarModelBuilder {
                 for: store.state, predictions: store.predictions,
                 glyph: store.provider.menuBarGlyph,
                 serviceStatus: store.serviceStatus, notices: store.notices,
-                form: registry.focusedProfile?.menuBarForm ?? .standard,
-                expandsFocus: expandsFocus)
+                form: prefs.form(for: registry.focusedProfile),
+                expandsFocus: prefs.expandsFocus)
         }
         var styles: [String: StatusItemRenderer.CellStyle] = [:]
         for profile in registry.profiles {
             styles[profile.id] = StatusItemRenderer.CellStyle(
-                form: profile.menuBarForm, ownItem: profile.ownMenuBarItem)
+                form: prefs.form(for: profile), ownItem: profile.ownMenuBarItem)
         }
         // The app's own order, applied here rather than waited for from the
         // digest, so a reorder shows the instant it is made.
@@ -43,7 +43,7 @@ enum MenuBarModelBuilder {
         }.map(\.element)
         return StatusItemRenderer.model(
             cells: ordered, focusedID: registry.focusedID, styles: styles,
-            glyph: store.provider.menuBarGlyph, expandsFocus: expandsFocus,
+            glyph: store.provider.menuBarGlyph, expandsFocus: prefs.expandsFocus,
             serviceStatus: store.serviceStatus, notices: store.notices)
     }
 

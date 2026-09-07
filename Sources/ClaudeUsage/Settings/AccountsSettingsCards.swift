@@ -70,6 +70,7 @@ private struct AccountRow: View {
     @State private var nickname: String
     @State private var confirmingRemove = false
     @FocusState private var editingNickname: Bool
+    @AppStorage(MenuBarPreferences.uniformKey) private var uniformForm = true
 
     init(registry: ProviderRegistry, profile: Profile) {
         self.registry = registry
@@ -97,15 +98,27 @@ private struct AccountRow: View {
                         if !focused { commitNickname() }
                     }
             }
-            HStack(alignment: .top) {
-                Text("Menu bar")
-                Spacer(minLength: 16)
-                MenuBarFormPicker(
-                    cell: MenuBarModelBuilder.sampleCell(for: profile, registry: registry),
-                    selection: profile.menuBarForm,
-                    onSelect: { registry.setMenuBarForm(id: profile.id, form: $0) })
-                    .opacity(inBar ? 1 : 0.45)
-                    .disabled(!inBar)
+            // Its own form only once the bar is set to draw each account
+            // in its own (the Menu bar card's switch); under one form for
+            // all, the row says so rather than offering a picker that
+            // would not draw.
+            if registry.barProfiles.count > 1 {
+                if uniformForm {
+                    LabeledContent("Menu bar") {
+                        Text("Same form as every account — set under Menu bar")
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Menu bar")
+                        MenuBarFormPicker(
+                            cell: MenuBarModelBuilder.sampleCell(for: profile, registry: registry),
+                            selection: profile.menuBarForm,
+                            onSelect: { registry.setMenuBarForm(id: profile.id, form: $0) })
+                            .opacity(inBar ? 1 : 0.45)
+                            .disabled(!inBar)
+                    }
+                }
             }
             HStack(spacing: 16) {
                 Toggle("Meter this account", isOn: Binding(
@@ -237,34 +250,58 @@ private struct DiscoveredAccountRow: View {
 }
 
 /// The bar as a whole (0.97.0): the live preview first — drag the accounts
-/// into order — then the controls that are nobody's in particular: one
-/// form for every account, whether the focused account expands, which
-/// account that is.
+/// into order — then the controls that are nobody's in particular. Which
+/// form wins is a SWITCH, not a precedence rule to remember (0.97.1,
+/// user-directed): "Same form for every account" on means the form here
+/// draws; off means each account's own, set on its row.
 struct MenuBarSettingsCard: View {
     var registry: ProviderRegistry
     @AppStorage(MenuBarPreferences.expandsFocusKey) private var expandsFocus = true
+    @AppStorage(MenuBarPreferences.uniformKey) private var uniform = true
+    @AppStorage(MenuBarPreferences.uniformFormKey) private var uniformFormRaw = MenuBarForm.standard.rawValue
+
+    private var prefs: MenuBarPreferences.Values {
+        MenuBarPreferences.Values(
+            expandsFocus: expandsFocus, uniform: uniform,
+            uniformForm: MenuBarForm(rawValue: uniformFormRaw) ?? .standard)
+    }
+    private var several: Bool { registry.barProfiles.count > 1 }
 
     var body: some View {
         SettingsCard("Menu bar", footer: footer) {
             VStack(alignment: .leading, spacing: 6) {
-                MenuBarPreview(registry: registry, expandsFocus: expandsFocus)
-                if registry.barProfiles.count > 1 {
+                MenuBarPreview(registry: registry, prefs: prefs)
+                if several {
                     Text("Drag an account to reorder.")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }
             }
             Divider()
-            HStack(alignment: .top) {
-                Text(registry.barProfiles.count > 1 ? "All accounts" : "Form")
-                Spacer(minLength: 16)
-                MenuBarFormPicker(
-                    cell: MenuBarModelBuilder.sampleCell(
-                        for: registry.focusedProfile, registry: registry),
-                    selection: registry.commonMenuBarForm,
-                    onSelect: { registry.setMenuBarFormForAll($0) })
+            if several {
+                Toggle("Same form for every account", isOn: $uniform)
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
             }
-            if registry.barProfiles.count > 1 {
+            if uniform || !several {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Form")
+                    MenuBarFormPicker(
+                        cell: MenuBarModelBuilder.sampleCell(
+                            for: registry.focusedProfile, registry: registry),
+                        selection: prefs.form(for: registry.focusedProfile),
+                        onSelect: { form in
+                            if uniform {
+                                uniformFormRaw = form.rawValue
+                            } else if let id = registry.focusedProfile?.id {
+                                registry.setMenuBarForm(id: id, form: form)
+                            }
+                        })
+                }
+            } else {
+                note("Each account draws in the form set on its own row under Accounts.")
+            }
+            if several {
                 Toggle("Expand the focused account", isOn: $expandsFocus)
                     .toggleStyle(.switch)
                     .controlSize(.small)
@@ -292,12 +329,11 @@ struct MenuBarSettingsCard: View {
     }
 
     private var footer: String {
-        if registry.barProfiles.count > 1 {
-            return "Each account draws in the form set on its row; the control above sets them all"
-                + " at once. With the focused account expanded, its numbers are spelled out whatever"
-                + " its form — and focus decides which account the panel opens on. Following"
-                + " activity picks the account this Mac has worked in most over the last two weeks;"
-                + " picking an account in the panel pins it until Auto."
+        if several {
+            return "With the focused account expanded, its numbers are spelled out whatever its"
+                + " form — and focus decides which account the panel opens on. Following activity"
+                + " picks the account this Mac has worked in most over the last two weeks; picking"
+                + " an account in the panel pins it until Auto."
         }
         return "With the numbers spelled out the item is exactly what it has always been; turn that"
             + " off to draw your account in the form chosen above."

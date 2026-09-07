@@ -153,10 +153,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // The Menu bar card's live preview and one account's form picker —
         // the preview is an NSView (drawn by itself: ImageRenderer would
         // show a placeholder), the picker plain SwiftUI.
-        let expands = MenuBarPreferences.expandsFocus()
+        let prefs = MenuBarPreferences.current()
         let preview = MenuBarPreviewView()
         preview.items = StatusItemRenderer.itemModels(
-            for: MenuBarModelBuilder.model(registry: registry, expandsFocus: expands))
+            for: MenuBarModelBuilder.model(registry: registry, prefs: prefs))
         preview.canDrag = registry.barProfiles.count > 1
         if let rep = preview.snapshot() {
             try? rep.representation(using: .png, properties: [:])?
@@ -164,7 +164,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let picker = MenuBarFormPicker(
             cell: MenuBarModelBuilder.sampleCell(for: registry.focusedProfile, registry: registry),
-            selection: registry.focusedProfile?.menuBarForm, onSelect: { _ in })
+            selection: prefs.form(for: registry.focusedProfile), onSelect: { _ in })
         write(ImageRenderer(content: picker.padding(14).background(Color(nsColor: .windowBackgroundColor))), "form-picker.png")
         // The weekly meter's card, lit at the first pending reset notice
         // exactly as a click on that notice would open it.

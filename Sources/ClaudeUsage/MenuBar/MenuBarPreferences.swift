@@ -10,12 +10,39 @@ import UsageCore
 /// numbers spelled out — and a one-account bar byte-identical.
 enum MenuBarPreferences {
     static let expandsFocusKey = "menuBarExpandsFocus"
+    /// Whether ONE form applies to every account (0.97.1, user-directed:
+    /// which of the two wins has to be visible) — on, the bar-wide form
+    /// below is the one that draws and the per-account forms wait; off,
+    /// each account's own form draws. On by default.
+    static let uniformKey = "menuBarUniformForm"
+    static let uniformFormKey = "menuBarUniformFormValue"
     /// 0.96.0's whole-bar style, read once by `migrateLegacyStyle` and
     /// removed — nobody's bar changes on update.
     static let legacyStyleKey = "menuBarStyle"
 
+    /// Everything bar-wide, read once per render so the status item and
+    /// the preview see one consistent set.
+    struct Values: Equatable {
+        var expandsFocus = true
+        var uniform = true
+        var uniformForm: MenuBarForm = .standard
+
+        /// The form an account draws in under these values.
+        func form(for profile: Profile?) -> MenuBarForm {
+            uniform ? uniformForm : (profile?.menuBarForm ?? .standard)
+        }
+    }
+
+    static func current(in defaults: UserDefaults = .standard) -> Values {
+        Values(
+            expandsFocus: defaults.object(forKey: expandsFocusKey) as? Bool ?? true,
+            uniform: defaults.object(forKey: uniformKey) as? Bool ?? true,
+            uniformForm: defaults.string(forKey: uniformFormKey)
+                .flatMap(MenuBarForm.init(rawValue:)) ?? .standard)
+    }
+
     static func expandsFocus(in defaults: UserDefaults = .standard) -> Bool {
-        defaults.object(forKey: expandsFocusKey) as? Bool ?? true
+        current(in: defaults).expandsFocus
     }
 
     static func setExpandsFocus(_ expands: Bool, in defaults: UserDefaults = .standard) {
@@ -39,6 +66,8 @@ enum MenuBarPreferences {
         default: return
         }
         setExpandsFocus(expands, in: defaults)
+        defaults.set(true, forKey: uniformKey)
+        defaults.set(form.rawValue, forKey: uniformFormKey)
         var stored = ProfileStore.load(from: defaults)
         var sawDefault = false
         for index in stored.indices where stored[index].providerID == provider.id {

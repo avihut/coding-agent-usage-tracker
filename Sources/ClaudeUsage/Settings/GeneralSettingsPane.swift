@@ -87,13 +87,26 @@ final class DaemonItemState {
 /// invalidates SwiftUI — the ⋯ menu's pre-built NSMenu kept rendering its
 /// first read, so the checkmark never appeared. Only the mirror is new;
 /// registration still happens exclusively on the user's flip.
+///
+/// The read is OFF the main thread (0.97.1): `SMAppService.status` is an
+/// XPC round-trip to backgroundtaskmanagementd, and it has been seen to
+/// stall for minutes — on the main thread that was the whole settings
+/// window not painting. `known` is false until the first read lands, and
+/// the toggle waits disabled rather than showing a guess.
 @MainActor @Observable
 final class LoginItemState {
     static let shared = LoginItemState()
-    private(set) var enabled = SMAppService.mainApp.status == .enabled
+    private(set) var enabled = false
+    private(set) var known = false
 
     func refresh() {
-        enabled = SMAppService.mainApp.status == .enabled
+        Task.detached(priority: .userInitiated) {
+            let enabled = SMAppService.mainApp.status == .enabled
+            await MainActor.run {
+                self.enabled = enabled
+                self.known = true
+            }
+        }
     }
 }
 
@@ -335,6 +348,7 @@ struct GeneralSettingsPane: View {
                 Toggle("Launch at login", isOn: SettingsBindings.launchAtLogin())
                     .toggleStyle(.switch)
                     .controlSize(.small)
+                    .disabled(!LoginItemState.shared.known)
                 Divider()
                 Toggle("Background metering engine", isOn: SettingsBindings.backgroundDaemon())
                     .toggleStyle(.switch)
