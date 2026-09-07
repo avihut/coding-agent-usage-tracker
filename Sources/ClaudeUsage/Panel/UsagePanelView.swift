@@ -7,8 +7,10 @@ struct UsagePanelView: View {
     /// longer rebuilds it on every focus move. A provider switch still
     /// rebuilds — the catalog and accent statics change under it.
     var registry: ProviderRegistry
-    /// Wired by StatusItemController: closes the panel, opens the window.
-    let onOpenSettings: () -> Void
+    /// Wired by StatusItemController: closes the panel, opens the window —
+    /// optionally landed on one card (an account-found notice's
+    /// click-through goes straight to Accounts).
+    let onOpenSettings: (SettingsLanding?) -> Void
     /// Same shape for the Sessions window.
     let onOpenSessions: () -> Void
     /// The shortlist's click-through: opens the Sessions window landed on
@@ -344,7 +346,7 @@ struct UsagePanelView: View {
             litReset = (meter.id, at)
             openMeter = meter.id
         case .accounts:
-            onOpenSettings()
+            onOpenSettings(.accounts)
         }
     }
 
@@ -663,7 +665,7 @@ struct UsagePanelView: View {
                         // A checkout build can't swap itself; the Settings
                         // card carries the how.
                         Button("Version \(update.latestVersion) available…") {
-                            onOpenSettings()
+                            onOpenSettings(nil)
                         }
                     }
                 }
@@ -671,7 +673,7 @@ struct UsagePanelView: View {
                     Button("Sessions…") { onOpenSessions() }
                         .keyboardShortcut("1", modifiers: .command)
                 }
-                Button("Settings…") { onOpenSettings() }
+                Button("Settings…") { onOpenSettings(nil) }
                     .keyboardShortcut(",", modifiers: .command)
                 Button("Quit Claude Usage") { NSApp.terminate(nil) }
                     .keyboardShortcut("q", modifiers: .command)
@@ -720,7 +722,7 @@ struct UsagePanelView: View {
                 installUpdateControl(update)
             } else {
                 Button {
-                    onOpenSettings()
+                    onOpenSettings(nil)
                 } label: {
                     Image(systemName: "arrow.down.circle.fill")
                         .font(.caption)

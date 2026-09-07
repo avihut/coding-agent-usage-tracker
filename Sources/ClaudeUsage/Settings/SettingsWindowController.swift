@@ -7,13 +7,13 @@ import SwiftUI
 /// bring a background app's window forward on its own.
 @MainActor
 final class SettingsWindowController {
-    private let store: UsageStore
     private let registry: ProviderRegistry
+    private let navigator = SettingsNavigator()
     private var window: NSWindow?
 
     init(store: UsageStore, registry: ProviderRegistry) {
-        self.store = store
         self.registry = registry
+        _ = store
     }
 
     /// Closes and drops the window. Called when the registry retires this
@@ -24,10 +24,12 @@ final class SettingsWindowController {
         window = nil
     }
 
-    func show(pane: SettingsSection = .general) {
+    func show(pane: SettingsSection = .general, landing: SettingsLanding? = nil) {
+        navigator.request(section: pane, landing: landing)
         if window == nil {
             let host = NSHostingController(
-                rootView: SettingsView(store: store, registry: registry, initialSection: pane))
+                rootView: SettingsView(
+                    registry: registry, navigator: navigator, initialSection: pane))
             let window = NSWindow(contentViewController: host)
             window.title = "Claude Usage Settings"
             window.styleMask = [.titled, .closable, .miniaturizable, .resizable]

@@ -119,8 +119,8 @@ final class StatusItemController: NSResponder {
         let host = NSHostingController(
             rootView: UsagePanelView(
                 registry: registry,
-                onOpenSettings: { [weak self] in
-                    self?.showSettings()
+                onOpenSettings: { [weak self] landing in
+                    self?.showSettings(landing: landing)
                 },
                 onOpenSessions: { [weak self] in
                     self?.showSessions()
@@ -465,7 +465,7 @@ final class StatusItemController: NSResponder {
     /// Opens the settings window; also the `--settings` launch hatch, since
     /// the ⋯ menu itself can't be scripted for verification. `pane` only
     /// matters on the first show (the hatch always launches fresh).
-    func showSettings(pane: SettingsSection = .general) {
+    func showSettings(pane: SettingsSection = .general, landing: SettingsLanding? = nil) {
         if popover.isShown { popover.performClose(nil) }
         let store = registry.focusedStore
         if settingsController == nil || settingsStore !== store {
@@ -473,7 +473,7 @@ final class StatusItemController: NSResponder {
             settingsController = SettingsWindowController(store: store, registry: registry)
             settingsStore = store
         }
-        settingsController?.show(pane: pane)
+        settingsController?.show(pane: pane, landing: landing)
     }
 
     /// Opens the Sessions window; also the `--sessions` launch hatch. A

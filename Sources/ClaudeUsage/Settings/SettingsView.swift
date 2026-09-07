@@ -25,17 +25,21 @@ enum SettingsSection: String, CaseIterable, Identifiable {
 /// right — general behavior, and the API-cost page (where the pricing data
 /// comes from, how the estimate is computed, and a what-if playground).
 struct SettingsView: View {
-    var store: UsageStore
     var registry: ProviderRegistry
+    var navigator: SettingsNavigator
 
     @State private var section: SettingsSection?
 
+    /// The focused account's face — the panes read one account at a time,
+    /// the way the panel does.
+    private var store: UsageStore { registry.focusedStore }
+
     init(
-        store: UsageStore, registry: ProviderRegistry,
+        registry: ProviderRegistry, navigator: SettingsNavigator,
         initialSection: SettingsSection = .general
     ) {
-        self.store = store
         self.registry = registry
+        self.navigator = navigator
         _section = State(initialValue: initialSection)
     }
 
@@ -50,10 +54,16 @@ struct SettingsView: View {
             .navigationSplitViewColumnWidth(min: 150, ideal: 170, max: 220)
         } detail: {
             switch section ?? .general {
-            case .general: GeneralSettingsPane(store: store, registry: registry)
+            case .general: GeneralSettingsPane(store: store, registry: registry, navigator: navigator)
             case .usage: UsageSettingsPane(store: store)
             case .apiCost: CostSettingsPane(store: store)
             }
+        }
+        // A request landing while the window is already open retargets it
+        // (the consume-once idiom: the pane takes the landing from here).
+        .onChange(of: navigator.requestedSection) { _, requested in
+            if let requested = navigator.consumeSection() { section = requested }
+            _ = requested
         }
         // A settings window's sidebar is permanent — no collapse toggle.
         .toolbar(removing: .sidebarToggle)

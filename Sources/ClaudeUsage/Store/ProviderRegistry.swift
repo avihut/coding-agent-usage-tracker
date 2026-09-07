@@ -293,6 +293,20 @@ final class ProviderRegistry {
         profilesChanged()
     }
 
+    /// "Not now" on a discovered home: remembered as a record carrying the
+    /// sign-in it holds TODAY, so the offer stays silent until that
+    /// changes — never a permanent silence (D2).
+    func dismissDiscovered(_ home: DiscoveredHome) {
+        var stored = ProfileStore.load(from: .standard)
+        stored.removeAll { $0.id == home.profileID && $0.providerID == activeID }
+        stored.append(Profile(
+            id: home.profileID, providerID: activeID, home: home.home, enabled: false,
+            addedAt: Date(), ignoredIdentityKey: home.identity?.key ?? ""))
+        ProfileStore.save(stored, to: .standard)
+        discoveredHomes.removeAll { $0.profileID == home.profileID }
+        profilesChanged()
+    }
+
     func setProfileEnabled(id: String, enabled: Bool) {
         edit(id) { $0.enabled = enabled }
     }
@@ -405,7 +419,9 @@ final class ProviderRegistry {
         }
     }
 
-    private func provider(for profile: Profile) -> any UsageProvider {
+    /// The active provider retargeted at one profile's home — what the
+    /// Settings rows read a home's credential chain and identity path from.
+    func provider(for profile: Profile) -> any UsageProvider {
         let base = activeProvider
         if profile.isDefault { return base }
         return profile.home.map { base.withHome($0) } ?? base
