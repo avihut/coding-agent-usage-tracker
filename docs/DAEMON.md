@@ -1,8 +1,9 @@
 # The engine, its hosts, and consumer interfaces
 
-Status: **SHIPPED through v0.70.0** — digest (v0.65.0), then usaged +
+Status: **SHIPPED through v0.96.0** — digest (v0.65.0), then usaged +
 lease + control socket + app host/client modes (v0.66.0), the TUI
-(v0.67–0.69), then automatic installation (v0.70.0). The spec §10
+(v0.67–0.69), automatic installation (v0.70.0), and several agent homes
+metered by one host (v0.96.0). The spec §10
 amendment is IN FORCE (docs/SPEC.md). Design decided 2026-08-16
 (user-directed). Install is automatic from the UI entry points; the
 sticky `daemonAutoInstall` opt-out (Settings toggle,
@@ -19,32 +20,44 @@ became an embeddable core engine with thin faces in front of it.
 
 - **`UsageEngine`** (UsageCore/Engine/) — THE engine: refresh gate,
   429 backoff, adaptive cadence, FSEvents watcher, transcript scans,
-  predictions, pricing, color-ledger seeding. One instance per host
-  process. Hosts inject a `UserDefaults` domain and forward their wake
-  signal to `noteWake()`.
-- **Hosts.** Today: the menu bar app (façade `UsageStore`). Next: `usaged`,
-  a launchd user agent that runs the engine headless so the TUI works with
-  the app closed. Whoever hosts the engine runs ALL of engine + publisher
-  (+ socket + lease once they exist). The app keeps an embedded fallback:
-  no daemon → the app hosts; daemon appears → the app yields (daemon wins).
+  predictions, pricing, color-ledger seeding. Since v0.96.0 one instance
+  per METERED HOME rather than per process, and everything a home does not
+  own by itself — the status poller, the pricing service, the notice
+  ledger, the update checker — moved out into a shared `ProviderServices`.
+  Hosts inject a `UserDefaults` domain and forward their wake signal to
+  `noteWake()`.
+- **`MeteringHost`** (UsageCore/Engine/, v0.96.0) — what a host actually
+  runs: the lease, the socket, the publisher, the network monitor, one
+  `ProviderServices` per provider and one `UsageEngine` per enabled home,
+  launches staggered by the gate floor so N homes never poll in one burst.
+  It owns focus, dormancy (a home quiet for 30 days stops its engine and
+  revives on the first write under its own tree), and the compose step that
+  turns N sections into one digest.
+- **Hosts.** `usaged`, a launchd user agent that runs the metering host
+  headless so the TUI works with the app closed, and the menu bar app
+  (`ProviderRegistry` + a per-home `UsageStore` façade). Whoever hosts runs
+  ALL of it — host, publisher, socket, lease. The app keeps an embedded
+  fallback: no daemon → the app hosts; daemon appears → the app yields
+  (daemon wins).
 - **`live-state.json`** — the state fan-out. The engine's publisher rewrites
   it atomically (temp + rename) at every landing point: fetch completion
   (the heartbeat), prediction pass, transcript scan, pricing refresh,
   settings changes. Consumers stat the mtime and re-render; freshness of
   the file IS the engine's liveness signal.
-- **Control socket** (next phase) — a hand-rolled unix-domain socket beside
-  the digest for the few commands a consumer can issue (manual refresh,
-  interval, provider switch, settings nudge). Local-only, 0600, NDJSON.
+- **Control socket** — a hand-rolled unix-domain socket beside the digest
+  for the commands a consumer can issue. Local-only, 0600, NDJSON, one
+  request per connection.
 - **Clients.** The TUI is a digest client ONLY: it computes nothing,
   fetches nothing, writes nothing, holds no credential. The app in client
-  mode (once the daemon exists) additionally reads core artifacts
+  mode additionally reads core artifacts
   (history.json, window-ledger.json) read-only — the `usage-cli
   persistCache: false` precedent.
 
 ## The digest (`live-state.json`)
 
 Path: `~/Library/Application Support/com.avihu.ClaudeUsage/live-state.json`
-— the bundle root, above the provider scopes: one engine, one file.
+— the bundle root, above the provider and per-home scopes: one host, one
+file, however many homes are metered.
 
 Schema: `LiveState` (UsageCore/Digests/LiveState.swift), pinned by
 `LiveStateTests` and by golden fixtures in
@@ -76,11 +89,23 @@ Contents, by section:
   (null = unpriced).
 - `activity` — today's hourly buckets (tokens + cost), trailing ~12 months
   of day totals + prompts, per-model day tallies for ~35 days, per-day
-  hourly buckets inside timeline retention (~8 days). Beyond each horizon
-  a drill degrades to what exists, labeled.
+  hourly buckets inside timeline retention. Beyond each horizon a drill
+  degrades to what exists, labeled.
+- `focusedProfile` / `profiles[]` / `menuBarCells[]` (v0.96.0, additive) —
+  one section per metered home (id, label, monogram, tilde-abbreviated
+  home path, enabled/dormant/focused, and its own engine/meters/menuBar/
+  models/activity/sessions/accountPresence), plus the per-home menu bar
+  triples the app draws as cells. The FOCUSED section is also projected
+  onto the top level, so every field above keeps answering for the home in
+  focus and a pre-0.96 consumer reads it unchanged. Absent lists mean a
+  writer that meters one home — absent ≠ empty. A dormant or disabled home
+  carries nil numbers, never zeros. The TUI mirrors both fields in its
+  digest structs (the golden must decode) but does not draw them yet.
 
 Privacy: the digest never contains tokens/credentials, full filesystem
-paths, prompt text, or session titles. It stays on this machine — nothing
+paths, or prompt text — home paths appear tilde-abbreviated only. (Session
+titles it does carry, under the v0.80.0 re-amendment: the same ones the
+session index already materializes, nothing newly derived.) It stays on this machine — nothing
 transports it; it is unrelated to the CloudKit sync digest (docs/SYNC.md).
 
 Inspection: `usage-cli state` prints the file verbatim (and warns if it no
@@ -101,8 +126,13 @@ longer decodes). `usage-cli state | jq .menuBar` etc.
   refresh gate from the digest's fetch stamp (never double-poll inside
   the floor); a takeover inside the floor presents the cached snapshot
   immediately instead of a loading shell.
-- Control socket commands: status, refresh (gate-enforced), setInterval,
-  setProvider, settingsChanged, refreshPricing, scanNow, shutdown.
+- Control socket commands, current as of v0.96.0: status, refresh
+  (gate-enforced, targets the focused home), setInterval, setProvider,
+  settingsChanged, refreshPricing, scanNow, refreshStatus, checkUpdates,
+  markNoticesSeen, dismissNotice, dismissAllNotices, focusProfile (nil id
+  clears the pin), refreshProfile, setProfileEnabled, profilesChanged,
+  shutdown. One socket per host however many homes it meters; an app-hosted
+  socket still refuses setProvider and shutdown.
 - `usaged` (Sources/usaged/, embedded at ClaudeUsage.app/Contents/MacOS/):
   RunAtLoad + KeepAlive + ThrottleInterval 10, signed with the app's
   identity, IOKit sleep/wake (sleep acknowledged immediately), daily

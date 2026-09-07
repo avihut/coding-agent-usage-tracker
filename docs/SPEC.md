@@ -305,7 +305,9 @@ Non-negotiable; flag rather than work around:
   a user-assumed daily cap — Google serves no readable usage numbers.
 - Sessions browser (amendment 2026-08-15, v0.30.0): `~/.claude/projects`
   is read strictly read-only (codifying a read the app has performed since
-  v0.2.0, predating this amendment convention). The session index
+  v0.2.0, predating this amendment convention) — and, since v0.96.0, the
+  same `projects/` tree inside every metered home under the
+  additional-agent-homes amendment below. The session index
   MATERIALIZES new categories from those transcripts: session titles
   (Claude Code's own `aiTitle` records), a first-prompt preview (≤120
   characters, scrubbed of ANSI/data blobs — when no aiTitle exists, the
@@ -380,7 +382,9 @@ Non-negotiable; flag rather than work around:
   account presence timeline that can be used for account usage
   attribution"): the engine may read the active provider's agent's OWN
   identity record, strictly read-only — for Claude, exactly one key
-  (`oauthAccount`) of `~/.claude.json`, the file `/login` itself rewrites.
+  (`oauthAccount`) of `.claude.json`, the file `/login` itself rewrites
+  (`~/.claude.json` for the default home; since v0.96.0 each metered home's
+  own copy, under the additional-agent-homes amendment below).
   Observations coalesce into epochs in the app's own provider-scoped
   `account-presence.json`; the digest carries the attribution: inside an
   epoch exact, unobserved gaps owned only when both edges agree, ambiguous
@@ -398,6 +402,60 @@ Non-negotiable; flag rather than work around:
   amendments above); rendered on the settings privacy card on its own
   line. Each future provider's identity source is its own amendment
   naming its file.
+- Additional agent homes (amendment 2026-09-06, v0.96.0, user-directed —
+  "meter my personal account beside the work one"): Claude Code keeps one
+  config home per `CLAUDE_CONFIG_DIR`, and this Mac runs two at once. The
+  app may therefore meter SEVERAL homes of the same provider side by side.
+  Each home is a profile ("Account" in the UI) identified by the first 8
+  hex of SHA-256 over its path — Claude Code's own rule, which is also how
+  it names that home's Keychain item.
+
+  Discovery is passive and uncredentialed. The app lists `~/.claude*`
+  DIRECTORIES that look like homes (a `projects/` tree, a `history.jsonl`,
+  or their own `.claude.json`) and reads from each exactly the one identity
+  key the account-presence amendment already governs — enough to name the
+  offer, and to keep a dismissed offer silent until that home is signed in
+  as somebody else (the dismissal persists that accountUuid/organizationUuid
+  pair, nothing else). For a home that is merely discovered, NOTHING
+  credentialed is read: no `.credentials.json`, no Keychain probe, no
+  request on its behalf. That begins only when the user enables the home in
+  Settings.
+
+  An ENABLED home is then read under exactly the rules `~/.claude` already
+  has, home-scoped: its `projects/` transcripts and its `history.jsonl`
+  strictly read-only under the Sessions-browser amendment, its
+  `<home>/.claude.json` identity key under the account-presence amendment,
+  and its `.credentials.json` else the Keychain item
+  `Claude Code-credentials-<sha256(path)[0..<8]>` through the same
+  promptless `/usr/bin/security` path — access token only, never cached,
+  never logged, never in any error surface. The transcript-retention
+  control (`cleanupPeriodDays` in that home's `settings.json`, read-modify-
+  write preserving every other key) is per home now, and remains the ONLY
+  write this app makes anywhere inside any agent tree.
+
+  ZERO new network destinations. Each enabled home polls the usage endpoint
+  on its own schedule with its own token, every poll through the same 180s
+  floor and the same 429 backoff; the pricing feed, the status feed and the
+  release feed stay one poll per provider, never one per home. Nothing
+  about one home is attached to another's request, and no request says how
+  many homes exist.
+
+  A home the user has not enabled is never metered. An enabled home whose
+  own tree has not changed in 30 days goes dormant — its engine stops, and
+  nothing is polled or read for it until a write appears there again. Focus
+  (which home the menu bar leads with) follows the volume of session files
+  over the trailing fortnight, tie-broken by the newest write and
+  overridable by a pin: a display choice over data already collected, never
+  a reason to read more.
+
+  Storage stays inside this app's own scope, one directory per home
+  (`<bundle>/<provider>/<profile>/`, scope v3; the pricing cache and the
+  notice ledger stay provider-level above them). One engine per home, but
+  still exactly ONE process holding `engine.lock`, ONE control socket, ONE
+  `live-state.json` — which carries every profile's section with the
+  focused one projected onto its top level, and the same single-writer rule
+  below governs all of them. Home paths appear in the digest and the UI
+  tilde-abbreviated only; the full-path ban is untouched.
 - The token is never logged, persisted, or included in an error surface.
 - No sandbox entitlement, and no request for entitlements we don't need.
 - Don't install or register anything (login items, launch agents) without asking me
@@ -411,7 +469,11 @@ Non-negotiable; flag rather than work around:
     the per-provider scopes: `live-state.json` at the scoped Application
     Support root (render-ready meters, forecasts, captions, activity
     rollups, resolved colors). Local-only; never transported; no
-    credentials, full filesystem paths, or prompt text.
+    credentials, full filesystem paths, or prompt text. Still exactly one
+    file with several profiles metered (v0.96.0): each carries its own
+    section under the same terms, the focused one is projected onto the
+    top level so every existing consumer keeps reading it unchanged, and a
+    home's path appears only tilde-abbreviated.
     Re-amendment 2026-08-17 (user-directed, v0.80.0; supersedes the
     original clause's blanket ban on "session titles"): the digest may
     also carry a SESSIONS section — per session, its title, start,
@@ -436,7 +498,10 @@ Non-negotiable; flag rather than work around:
   - One unix-domain control socket (`control.sock`, mode 0600, same root)
     accepting only the enumerated `ControlCommand` verbs; every mutating
     command passes the same TriggerGate/backoff discipline as in-app
-    actions. Plus two tiny host-arbitration artifacts beside it:
+    actions. One socket for the whole host, however many profiles it
+    meters: the verbs that name one (`focusProfile`, `refreshProfile`,
+    `setProfileEnabled`, `profilesChanged`) carry its id, and the rest
+    address the focused profile or fan out to all of them. Plus two tiny host-arbitration artifacts beside it:
     `engine.lock` (flock) and `daemon.alive` (liveness marker).
   - Exactly one launch agent, `com.avihu.usaged`, running the same engine
     code under every rule in this section (read-only trees, the two
@@ -455,6 +520,9 @@ Non-negotiable; flag rather than work around:
     writer of usage caches, history, ledgers, and the digest. Every other
     process — usage-cli, the TUI, the app in client mode — reads only
     (transcript scans by non-holders never persist their parse caches).
+    Unchanged by v0.96.0's several homes: N profiles, ONE lease, ONE
+    writer — the lease covers every profile's scoped directory, so a
+    non-holder reading one home's history persists nothing for any of them.
 - App must produce *some* readable state in every failure mode. An empty or crashed
   menu bar item is a bug.
 

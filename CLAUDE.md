@@ -40,9 +40,11 @@ the README rather than silently deviating.
   feeds. The privacy card renders it on its own line.
 - The account-identity source is declared by `UsageProvider.accountIdentity`
   (§10 amendment 2026-08-25, v0.89.0): a LOCAL read-only file read — for
-  Claude, one key of `~/.claude.json` — never a credential store, never a
-  network request, never attached to anything transported. Zero network
-  destinations added; the privacy card renders the path on its own line.
+  Claude, one key of `.claude.json` (`~/.claude.json` for the default home,
+  each metered home's own copy since v0.96.0) — never a credential store,
+  never a network request, never attached to anything transported. Zero
+  network destinations added; the privacy card renders every path it reads,
+  one line each.
 - No App Sandbox. No entitlements we don't need.
 - Never install or register anything (login items, launch agents) without
   asking the user in-session. Launch-at-login is a user-clicked toggle only.
@@ -145,6 +147,57 @@ the README rather than silently deviating.
   TUI works identically against either host; app-side socket refuses
   setProvider/shutdown (registry owns switching; nobody kills an app
   over a socket).
+- MULTI-ACCOUNT METERING (2026-09-06 v0.96.0, user-directed "meter my
+  personal account beside the work one"; §10 amendment in force): several
+  Claude Code CONFIG HOMES are metered side by side, one `Profile` each
+  (Profiles/ — "Account" in every UI string; `ProfileID.derive` = SHA-256
+  of the home path, first 8 hex — Claude Code's own rule, and ALSO its
+  Keychain item suffix, so id and credential name can't drift).
+  `ClaudeHome` (Providers/Claude/) owns every per-home path and the
+  keychain service, and `ClaudeProvider(home:)` is a provider per home; the
+  DEFAULT provider stays byte-for-byte what it was (pinned by test).
+  Profiles persist as ONE JSON blob in the app's defaults
+  (`meteringProfiles` + `focusedProfilePin`) — the channel the daemon
+  already reads, not a new §10 artifact. Storage v3 =
+  `<bundle>/<provider>/<profile>/` with `scopeKey` = today's key for
+  `default` and `<provider>.<id>` otherwise, so a one-account Mac's files
+  AND defaults keys are unchanged; the migration takes a BLOCKING flock
+  (app and daemon start in the same second after an update).
+  HOST: `MeteringHost` (Engine/) is what a host runs — lease, socket,
+  publisher, network monitor, one `ProviderServices` per provider (status
+  poller, pricing, notice ledger, update checker: everything a single home
+  doesn't own) and one `UsageEngine` per enabled home, launches staggered
+  by the gate floor. usaged and the app's `ProviderRegistry` both drive it;
+  the registry now does the arbitration `UsageStore.init` used to, and
+  `UsageStore` is a per-home façade. FOCUS (D9 AS BUILT, superseding the
+  design artifact's last-write rule): the most session files over the
+  trailing 14 days (`MTimeProbe`, `HarnessDetector.window`), newest write
+  breaks ties, pin wins, switch held while the panel is open. DORMANCY
+  stays last-write at 30 days — engine stopped, an `AgentActivityWatcher`
+  kept to revive it. DIGEST: still ONE file; `focusedProfile`/`profiles[]`/
+  `menuBarCells[]` are additive and the focused section is PROJECTED onto
+  the top level (`LiveState.viewing(profile:)`), which is why every
+  pre-0.96 consumer and every CLI noun answers per account with no per-noun
+  code. CLI precedence: `--account <id|nickname|label|home>` >
+  `$CLAUDE_CONFIG_DIR` > focused > default; an unknown selector is exit 20
+  listing the accounts, NEVER a fallback to another one (a statusline under
+  one config dir must never report the other's limits); `accounts` noun;
+  deep verbs root their scan at the selected home. UI: six `MenuBarStyle`s
+  (default bars + expanded focus) through ONE renderer whose `compose`
+  returns the old single-cell runs on its FIRST LINE when `cells.count <=
+  1` — that guard is why the one-account bar is byte-identical, and `cmp`
+  against the `--snapshot` PNGs is its regression test; `AccountStrip`
+  (rows/chips/stacked) is the panel's selector; Settings → General leads
+  with Accounts/Menu bar/Panel cards reached through `SettingsNavigator`.
+  GUARANTEE for this phase: every enrolled profile shares ONE provider, so
+  the `ProviderStyle`/`ModelNames` statics stay valid untouched. Hatches:
+  `--fake-profiles` (a synthetic second account); `--snapshot` also writes
+  the six style PNGs + a hit-rect sidecar + `strip.png`. VERIFY GOTCHA:
+  `mise run axdump` no longer sees NSPopover content on this macOS (the
+  panel DOES open — verified by logging `popover.isShown`), so panel work
+  is checked with `--snapshot` PNGs; `strip-chips.png` comes out an
+  ImageRenderer placeholder (NSControl-backed picker). TUI parity deferred
+  (v0.97.0): it mirrors the new digest fields and draws neither.
 - RUST TUI (2026-08-16 v0.67.0, phase T1; tui/ cargo crate, usage-tui):
   the dependency rule is SCOPED — UsageCore/app/usaged stay zero-dep
   Swift; the TUI carries exactly ratatui, serde, serde_json, time
@@ -1051,13 +1104,14 @@ the README rather than silently deviating.
   `~/.claude/history.jsonl` via `PromptHistoryScanner` (epoch-ms, no token
   counts, survives Claude Code's `cleanupPeriodDays` sweep): days with
   prompts but no surviving transcripts render faint as "no token data".
-  Never write inside `~/.claude`, never go near `.credentials.json` from
+  Never write inside an agent home, never go near `.credentials.json` from
   the scanners, nothing leaves the machine — with ONE user-authorized
   exception (2026-08-14): the Settings → General transcript-retention
-  control writes exactly `cleanupPeriodDays` in `~/.claude/settings.json`
+  control writes exactly `cleanupPeriodDays` in that home's `settings.json`
   through `ClaudeCodeSettings` (read-modify-write preserving every other
-  key, atomic, refuses to touch a file whose content doesn't parse).
-  Nothing else ever writes there. The same scan also attributes
+  key, atomic, refuses to touch a file whose content doesn't parse; per
+  home since v0.96.0, the focused one from Settings). Nothing else ever
+  writes there. The same scan also attributes
   tokens per model (`TokenTally`: in/out/cache-write incl. the 1h-TTL
   split/cache-read): per day forever (`DailyActivity.models`, feeding the
   per-period summary via `HeatmapLayout.modelTotals`) and per minute for a

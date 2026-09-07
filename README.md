@@ -35,8 +35,8 @@ double as a legend — hovering one filters the chart above to that model in its
 color. A sidebar-navigated settings window (⋯ menu → Settings…) holds the
 general knobs — the refresh-pace slider, the session grace period, and
 Claude Code's own transcript retention (`cleanupPeriodDays`, the app's one
-sanctioned write into `~/.claude/settings.json`, preserving every other
-key) — plus an API-cost page:
+sanctioned write into the metered home's `settings.json`, preserving every
+other key) — plus an API-cost page:
 pricing-feed status with a manual refresh, the list rates in use, a Claude
 Code-specific explainer of how transcripts turn into cost estimates (four
 token classes, the agentic loop, quadratic cache reads), and a
@@ -152,9 +152,10 @@ its update path stays `git pull` and a rebuild, and the app swaps nothing
 
 Claude Code's transcripts carry no account identity, so switching accounts
 would silently blend two budgets into one history. The app therefore reads
-one key (`oauthAccount`) of `~/.claude.json` — the file `/login` itself
-maintains — strictly read-only, and keeps a small local ledger of which
-account was signed in when. Usage is attributed against that timeline
+one key (`oauthAccount`) of `.claude.json` — the file `/login` itself
+maintains, `~/.claude.json` for the default home and its own copy inside
+every other metered home — strictly read-only, and keeps a small local
+ledger of which account was signed in when. Usage is attributed against that timeline
 honestly: exactly inside observed stretches, only by agreement across
 unobserved gaps, and never at all for history from before the ledger
 existed — ambiguity is shown as ambiguity, not guessed away. The identity
@@ -172,6 +173,54 @@ the same parser and the same rates. Nothing is cached and nothing leaves
 the machine; this extends the transcript-read amendment to a user-named
 path, not to any new tree the app walks on its own.
 
+### Several agent homes, one meter each
+
+Claude Code keeps one config home per `CLAUDE_CONFIG_DIR`, and this Mac
+runs two at once — work in `~/.claude`, personal in `~/.claude-personal`.
+Since v0.96.0 the app meters each of them as its own **account**: its own
+token, its own limits, its own history, its own directory under the app's
+scope. There is no blending — two accounts are two meters, never one sum.
+
+This adds **no network destination**. Each enabled home polls the same
+usage endpoint with its own token, through the same 180-second floor and
+the same backoff; the pricing feed, the status page and the release feed
+stay one poll per provider, not one per home. Discovery is passive: the
+app lists `~/.claude*` directories that look like homes, reads the one
+identity key it already reads to name the offer, and reads nothing
+credentialed — no `.credentials.json`, no Keychain — until you enable that
+home in Settings → General → Accounts. Dismiss an offer and it stays quiet
+until that home is signed in as somebody else. Each enabled home's
+Keychain item is `Claude Code-credentials-<first 8 hex of SHA-256 over the
+home's path>` — Claude Code's own naming rule — read through the same
+promptless `security` path, so a second account is still no consent
+dialog. Spec §10 amended 2026-09-06.
+
+The menu bar leads with whichever account you have actually been using:
+focus follows the volume of session files over the trailing fortnight
+(newest write breaks ties), or pin one in Settings. Six menu bar styles
+(bars with the focused account expanded, plain bars, rings, digits,
+sentinels, or a separate menu bar item per account); the panel gains an
+account strip that doubles as the selector — rows, chips, or every account
+stacked. An account whose transcripts go quiet for 30 days goes dormant
+and stops polling entirely until it is used again.
+
+On the command line, an account is a selector rather than a mode:
+
+```sh
+usage-cli accounts                       # id, label, home, state, focus, limits
+usage-cli limits --account personal      # by id, nickname, label, or home path
+CLAUDE_CONFIG_DIR=~/.claude-personal usage-cli limits   # the same answer
+usage-cli state | jq '.profiles[] | {id, label, dormant, isFocused}'
+```
+
+`--account` wins over `$CLAUDE_CONFIG_DIR`, which wins over whichever
+account is focused. Every existing noun answers for the selected account —
+`limits`, `spend`, `sessions`, `history`, `windows`, `session` all read
+that home's own files. An unknown selector exits 20 and lists the accounts
+it knows; it never quietly answers for a different one, which is the whole
+point when a status line renders under one config dir and the daemon is
+metering another.
+
 ## Known risk: undocumented endpoint
 
 `/api/oauth/usage` is not in the public API docs and may change shape or go away
@@ -183,8 +232,10 @@ change.
 
 ## Credential rules (non-negotiable)
 
-- Read `~/.claude/.credentials.json` first, fall back to the login Keychain item
-  `Claude Code-credentials` — read via `/usr/bin/security find-generic-password`,
+- Read the home's own `.credentials.json` first, fall back to its login
+  Keychain item — `Claude Code-credentials` for `~/.claude`, suffixed with
+  the first 8 hex of SHA-256 over the home's path for any other (Claude
+  Code's own rule) — read via `/usr/bin/security find-generic-password`,
   the same Apple tool Claude Code writes it with, so the read never trips the
   Keychain consent dialog (Claude Code rewrites the item on every token refresh,
   which resets any per-app "Always Allow" a native read had earned).
@@ -297,7 +348,7 @@ approve: the daemon reads the Claude Code token through Apple's own
 Keychain consent dialog ever appears.
 
 ```sh
-mise run daemon -- status     # launchd state, digest age, socket ping
+mise run daemon -- status     # launchd state, digest age, socket ping, accounts
 mise run daemon -- stop       # boot it out (plist kept)
 mise run daemon -- uninstall  # remove it AND disarm auto-install (sticky)
 mise run daemon -- install    # re-arm + reinstall by hand

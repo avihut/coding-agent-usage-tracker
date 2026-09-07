@@ -11,10 +11,11 @@ import Observation
 ///
 /// Profiles come from `ProfileStore` (the app's defaults domain, which the
 /// daemon reads too). D9 rules run here: a reprobe every ten minutes reads
-/// each profile's last session write, declares dormant ones (no engine,
-/// hidden from bar and strip, an FSEvents watcher kept so the first write
-/// revives it), and focus follows the newest write unless pinned — held
-/// while the panel is open. The host stamps the digest's heartbeat and its
+/// each profile's session-file volume over the trailing fortnight and its
+/// last write, declares dormant ones (no engine, hidden from bar and
+/// strip, an FSEvents watcher kept so the first write revives it), and
+/// focus follows that volume unless pinned — the newest write only breaks
+/// ties, and a switch is held while the panel is open. The host stamps the digest's heartbeat and its
 /// next-poll horizon, so an all-dormant machine never reads as a dead
 /// host to a client.
 @MainActor
