@@ -19,6 +19,25 @@ struct ModelCurvesTests {
         #expect(anchor == 0.1)
     }
 
+    /// A window's anchor enters at zero and reads gains, never end-to-end
+    /// change: 1,000 tokens bought 60 before a grant
+    /// and 40 after — 100 percent's worth. End-minus-start would say 40 and
+    /// draw the one model at 40% of its true height before the grant (the
+    /// user-reported 2026-09-07 Fable curve).
+    @Test func aWindowAnchorCountsWhatAGrantForgave() {
+        let granted = [10, 60, 0, 40]
+        #expect(ModelCurves.windowPercentPerToken(percents: granted, tokens: 1_000) == 0.1)
+        // Without a grant it is the window's own height over its tokens —
+        // the first sample's height included, since the window began at 0.
+        #expect(ModelCurves.windowPercentPerToken(percents: [10, 30, 50], tokens: 500) == 0.1)
+        #expect(ModelCurves.windowPercentPerToken(percents: [], tokens: 500) == nil)
+        #expect(ModelCurves.holdsGrant(percents: granted))
+        #expect(!ModelCurves.holdsGrant(percents: [10, 30, 50]))
+        // A correction is not a grant, and a window that starts at zero
+        // has not fallen to it.
+        #expect(!ModelCurves.holdsGrant(percents: [0, 30, 29, 50]))
+    }
+
     /// No growth, or no tokens, means no honest rate — the caller falls back
     /// to a shape-only scale rather than inventing one.
     @Test func aSpanWithoutGrowthHasNoAnchor() {

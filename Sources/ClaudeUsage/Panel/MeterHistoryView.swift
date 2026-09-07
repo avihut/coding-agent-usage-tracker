@@ -1546,39 +1546,42 @@ struct MeterHistoryView: View {
     }
 
     /// The chart's one tokens→percent conversion: the percent the meter
-    /// gained over the visible window, divided by the tokens spent in it.
-    /// Under this scale the models' combined spend meets the percent
-    /// curve's growth exactly, so every token curve stays perceptually
-    /// contained inside the usage it fed — and the Y axis can speak tokens
-    /// by dividing back. Nil when percent data is missing, flat, or dipped
-    /// through a reset — curves then fall back to busiest-model scaling
-    /// and the axis stays percent.
+    /// GAINED over the visible window (`ModelCurves.windowPercentPerToken`
+    /// — the window entered at zero; drops excluded, so a vendor grant
+    /// inside it counts what was bought before AND after), divided by the
+    /// tokens spent in it. Under this scale the models' combined spend
+    /// meets the percent curve's growth exactly, so a scoped meter's one
+    /// model rides ON its percent line up to a grant — and the Y axis can
+    /// speak tokens by dividing back. Nil when percent data is missing or
+    /// flat — curves then fall back to busiest-model scaling and the axis
+    /// stays percent.
     private func percentPerToken(rows: [ModelTokenUsage]) -> Double? {
         if effectiveSpan == .history {
             return historyPercentPerToken ?? frameGainsPercentPerToken(rows: rows)
         }
-        let total = WindowTokens.total(rows).total
-        guard total > 0, let first = points.first, let last = points.last else { return nil }
-        let delta = Double(last.percent - first.percent)
-        guard delta >= 1 else { return nil }
-        return delta / Double(total)
+        return ModelCurves.windowPercentPerToken(
+            percents: points.map(\.percent), tokens: WindowTokens.total(rows).total)
     }
 
     /// The History span's anchor. Its frame can straddle resets, where
     /// percent deltas lie, so one limit's worth of tokens is measured on
-    /// the CURRENT live window instead: the live percent over the tokens
-    /// spent since that window began. Curves normalized by it read as
-    /// fractions of a single limit — and may honestly exceed it across a
-    /// frame longer than one window.
+    /// the CURRENT live window instead: the percent that window has gained
+    /// over the tokens spent since it began — the same window rule as the
+    /// Current span, so a grant inside the live window prices tokens the
+    /// same on both spans. Curves normalized by it read as fractions of a
+    /// single limit — and may honestly exceed it across a frame longer
+    /// than one window.
     private var historyPercentPerToken: Double? {
-        guard let reset = liveReset, let percent = meter.percent, percent >= 1
-        else { return nil }
+        guard let reset = liveReset else { return nil }
+        let now = Date()
         let windowStart = reset.addingTimeInterval(-window)
-        let all = WindowTokens.breakdown(timeline: timeline, from: windowStart, to: Date())
+        let all = WindowTokens.breakdown(timeline: timeline, from: windowStart, to: now)
         let scoped = scopeName.map { WindowTokens.scoped(all, name: $0) } ?? all
-        let total = WindowTokens.total(scoped).total
-        guard total > 0 else { return nil }
-        return Double(percent) / Double(total)
+        let percents = samples
+            .filter { $0.t >= windowStart && $0.t <= now }
+            .compactMap { $0.percents[meter.label] }
+        return ModelCurves.windowPercentPerToken(
+            percents: percents, tokens: WindowTokens.total(scoped).total)
     }
 
     /// Fallback anchor for frames the live window can't price: a young 5h
@@ -1616,18 +1619,23 @@ struct MeterHistoryView: View {
     /// Colours the curves core built. The Current span is one window —
     /// nothing can honestly exceed one limit there, so the cap is a safety
     /// net; a History frame can span several windows and the overshoot IS
-    /// the information.
+    /// the information. So is a vendor grant inside the window: the spend
+    /// it forgave still happened, the curve climbs on past the percent
+    /// that no longer contains it, and its tip stays the window's token
+    /// total — capped, it would flatten at 100 and lie.
     private func modelCurves(
         rows: [ModelTokenUsage], colors: [String: Color], percentPerToken: Double?
     ) -> [ModelCurve] {
         let end = min(domain.end, Date())
+        let cap = effectiveSpan == .current
+            && !ModelCurves.holdsGrant(percents: points.map(\.percent))
         return ModelCurves.build(
             models: rows.map(\.model),
             moments: timeline.map {
                 ModelCurves.Moment(model: $0.model, t: $0.t, amount: $0.tally.total)
             },
             start: domain.start, end: end,
-            percentPerToken: percentPerToken, cap: effectiveSpan == .current
+            percentPerToken: percentPerToken, cap: cap
         ).map { curve in
             ModelCurve(
                 model: curve.model,
@@ -1637,7 +1645,8 @@ struct MeterHistoryView: View {
     }
 
     /// The tallest drawn value: 100 in the Current span (curves cap there),
-    /// beyond it when a History frame holds more than one limit's worth.
+    /// beyond it when a History frame — or a window the vendor granted a
+    /// reset inside — holds more than one limit's worth.
     /// The plot top and the label headroom band scale from it.
     private func dataCeiling(_ curves: [ModelCurve]) -> Double {
         max(100, curves.flatMap { $0.points }.map { $0.normalized }.max() ?? 100)

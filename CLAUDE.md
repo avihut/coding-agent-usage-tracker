@@ -1275,10 +1275,17 @@ the README rather than silently deviating.
   class, 5m/1h cache-write split, `*` on fallback rates). The
   popover chart overlays the meter's percent line with EVERY model's
   cumulative token curve, all through ONE shared conversion
-  (percentPerToken = the window's percent gain / its total tokens) so
-  the models' combined spend meets the percent growth exactly and no
-  token curve towers over the usage that contains it (fallback:
-  busiest-model spans the plot, only when percent data is missing/flat);
+  (percentPerToken = the window's percent GAINS / its total tokens —
+  `ModelCurves.windowPercentPerToken`, the window entering at zero, drops
+  excluded; v0.99.1, user-reported: end-minus-start under-priced every
+  token by the share spent before a vendor grant, so a scoped meter's one
+  model drew below its own percent line until the window's end) so the
+  models' combined spend meets the percent growth exactly and no token
+  curve towers over the usage that contains it — except across a grant,
+  where the forgiven spend still happened: `ModelCurves.holdsGrant` lifts
+  the Current span's cap and the curve tip stays the window's token total
+  (fallback: busiest-model spans the plot, only when percent data is
+  missing/flat);
   one `focusedModel` state drives both the chart (focused curve full
   opacity + area, rest dimmed) and the legend rows — hover either surface
   and both light, since they render from the same binding. While focused,

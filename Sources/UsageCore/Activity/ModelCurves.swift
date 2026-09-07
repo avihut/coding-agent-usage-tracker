@@ -57,6 +57,27 @@ public enum ModelCurves {
         return Double(gains) / Double(tokens)
     }
 
+    /// The anchor for a span that IS one limit window, live or past: the
+    /// window entered at zero, so the first sample's own height is a gain
+    /// too (the tokens behind it were spent from the window's start). Reads
+    /// the window's GAINS, never its end-to-end change — a vendor grant
+    /// inside the window (v0.92.0) drops the percent to zero without ending
+    /// it, and end-minus-start then under-prices every token by the share
+    /// spent before the grant: a scoped meter's one model drew visibly below
+    /// the percent it had bought, and the two only met at the window's end
+    /// (user-reported 2026-09-07).
+    public static func windowPercentPerToken(percents: [Int], tokens: Int) -> Double? {
+        gainsPercentPerToken(percents: [0] + percents, tokens: tokens)
+    }
+
+    /// True when the percent fell to zero between two samples of a window
+    /// that did not end — the vendor's grant (`ResetCliffs`' mid-window
+    /// rule). Such a window has honestly gained more than one limit's
+    /// worth, so its curves may exceed 100 and must not be capped.
+    public static func holdsGrant(percents: [Int]) -> Bool {
+        zip(percents, percents.dropFirst()).contains { $0.0 > 0 && $0.1 == 0 }
+    }
+
     /// One cumulative curve per model over `start...end`. Each curve starts
     /// at the zero just before its model's first tokens (`CumulativeSeries`);
     /// a model idle across the whole span keeps its entry with NO points, so
