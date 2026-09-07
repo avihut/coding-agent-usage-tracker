@@ -174,11 +174,15 @@ struct MeteringHostTests {
         host.holdFocus(false)
         #expect(host.focusedProfileID == fixture.personalID)
 
-        // A pin beats volume while it is eligible.
+        // A pin beats volume while it is eligible — and lands even while
+        // the panel holds focus: the hold defers activity, never a click.
+        host.holdFocus(true)
         let pinned = await host.handle(.focusProfile(id: "default"))
         #expect(pinned.ok)
         #expect(host.focusedProfileID == "default")
         #expect(ProfileStore.pin(from: fixture.defaults) == "default")
+        host.holdFocus(false)
+        #expect(host.focusedProfileID == "default")
         let cleared = await host.handle(.focusProfile(id: nil))
         #expect(cleared.ok)
         #expect(host.focusedProfileID == fixture.personalID)

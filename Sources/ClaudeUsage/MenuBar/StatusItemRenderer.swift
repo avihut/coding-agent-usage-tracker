@@ -19,21 +19,29 @@ import UsageCore
 ///
 /// Several accounts (0.96.0, decision D5): the item is a row of CELLS under
 /// ONE provider glyph — the glyph keeps every provider-level fact (the
-/// incident capsule, the pending-notice dot) — and `MenuBarStyle` decides
-/// how the cells draw. Identity is a letter (the monogram, in the tags'
-/// dim ink), never a color: color already means risk. The invariance
-/// guard: one cell composes exactly today's runs, whatever the style, so a
-/// single-account bar is byte-identical to the pre-0.96 one
+/// incident capsule, the pending-notice dot). Each cell draws in its
+/// account's own `MenuBarForm` (0.97.0, user-directed: per account, with
+/// one control for all), except that the FOCUSED cell expands to today's
+/// digits while `expandsFocus` is on. Identity is a letter (the monogram,
+/// in the tags' dim ink), never a color: color already means risk. The
+/// invariance guard: a lone expanded cell composes exactly today's runs,
+/// so a single-account bar is byte-identical to the pre-0.96 one
 /// (`--snapshot`'s statusitem-*.png, `cmp`-ed across the change).
 enum StatusItemRenderer {
     /// One account's cell.
     struct Cell: Equatable {
         let profileID: String
+        /// Empty when the bar holds one account — a letter would label
+        /// nothing.
         let monogram: String
         /// The S/W/scoped triple; nil when nothing has been fetched yet.
         let segments: [MenuBarSegment]?
         let stale: Bool
         let focused: Bool
+        /// How the cell draws when it is not the expanded one.
+        var form: MenuBarForm = .standard
+        /// Drawn in its own `NSStatusItem` rather than the shared one.
+        var ownItem = false
     }
 
     struct Model: Equatable {
@@ -51,29 +59,35 @@ enum StatusItemRenderer {
         /// the TUI's header dot and this one can't disagree.
         var indicator = false
         let cells: [Cell]
-        let style: MenuBarStyle
+        /// The focused cell draws as today's digits whatever its form.
+        let expandsFocus: Bool
 
         init(
             glyph: String, incident: ServiceStatusCard.Indicator? = nil, indicator: Bool = false,
-            cells: [Cell], style: MenuBarStyle
+            cells: [Cell], expandsFocus: Bool = true
         ) {
             self.glyph = glyph
             self.incident = incident
             self.indicator = indicator
             self.cells = cells
-            self.style = style
+            self.expandsFocus = expandsFocus
         }
 
         /// The one-account shape — today's model, unchanged for every
-        /// caller that meters one thing.
+        /// caller that meters one thing. A form other than the standard
+        /// one, or focus not expanded, is the person's own choice for
+        /// their one account and draws as such.
         init(
             segments: [MenuBarSegment]?, stale: Bool, glyph: String,
-            incident: ServiceStatusCard.Indicator? = nil, indicator: Bool = false
+            incident: ServiceStatusCard.Indicator? = nil, indicator: Bool = false,
+            form: MenuBarForm = .standard, expandsFocus: Bool = true
         ) {
             self.init(
                 glyph: glyph, incident: incident, indicator: indicator,
-                cells: [Cell(profileID: Profile.defaultID, monogram: "", segments: segments, stale: stale, focused: true)],
-                style: .standard)
+                cells: [Cell(
+                    profileID: Profile.defaultID, monogram: "", segments: segments, stale: stale,
+                    focused: true, form: form)],
+                expandsFocus: expandsFocus)
         }
 
         /// The first cell's triple — the one-account reading.
@@ -85,7 +99,7 @@ enum StatusItemRenderer {
     static func model(
         for state: DisplayState, predictions: [String: UsagePrediction] = [:],
         glyph: String = "✳︎", serviceStatus: ServiceStatusCard? = nil,
-        notices: NoticesCard? = nil
+        notices: NoticesCard? = nil, form: MenuBarForm = .standard, expandsFocus: Bool = true
     ) -> Model {
         // Which impacts are loud enough to badge is decision D2, and it lives
         // on the card so the TUI's rungs and this badge can't drift apart.
@@ -94,7 +108,7 @@ enum StatusItemRenderer {
         guard let snapshot = state.snapshot else {
             return Model(
                 segments: nil, stale: true, glyph: glyph, incident: alarming,
-                indicator: indicator)
+                indicator: indicator, form: form, expandsFocus: expandsFocus)
         }
         return Model(
             segments: UsageFormatting.menuBarSegments(
@@ -102,27 +116,38 @@ enum StatusItemRenderer {
             stale: state.isStale,
             glyph: glyph,
             incident: alarming,
-            indicator: indicator
+            indicator: indicator,
+            form: form,
+            expandsFocus: expandsFocus
         )
     }
 
+    /// How one account draws: its form and whether it takes its own item.
+    struct CellStyle: Equatable {
+        var form: MenuBarForm = .standard
+        var ownItem = false
+    }
+
     /// The several-accounts shape, from the digest's own cells (the WRITER
-    /// decides which accounts show, in what order, with which digits — so
-    /// the app's bar and the TUI's header can't disagree).
+    /// decides which accounts show and with which digits — so the app's
+    /// bar and the TUI's header can't disagree) in the order given, dressed
+    /// by each account's own style (the app's record, not the digest's).
     static func model(
-        cells: [MenuBarCell], focusedID: String?, glyph: String, style: MenuBarStyle,
-        serviceStatus: ServiceStatusCard? = nil, notices: NoticesCard? = nil
+        cells: [MenuBarCell], focusedID: String?, styles: [String: CellStyle], glyph: String,
+        expandsFocus: Bool, serviceStatus: ServiceStatusCard? = nil, notices: NoticesCard? = nil
     ) -> Model {
         Model(
             glyph: glyph, incident: serviceStatus?.alarmingImpact,
             indicator: notices?.indicator ?? false,
             cells: cells.map { cell in
-                Cell(
+                let style = styles[cell.profile] ?? CellStyle()
+                return Cell(
                     profileID: cell.profile, monogram: cell.monogram,
                     segments: cell.segments.isEmpty ? nil : cell.segments.map(MenuBarSegment.init),
-                    stale: cell.stale, focused: cell.profile == focusedID)
+                    stale: cell.stale, focused: cell.profile == focusedID,
+                    form: style.form, ownItem: style.ownItem)
             },
-            style: style)
+            expandsFocus: expandsFocus)
     }
 
     /// How a segment's number wears its risk.
@@ -240,9 +265,13 @@ enum StatusItemRenderer {
 
     /// The runs at their x positions, tagged by cell.
     static func layout(_ model: Model) -> [Placed] {
+        place(compose(model))
+    }
+
+    static func place(_ runs: [Tagged]) -> [Placed] {
         var x: CGFloat = 0
         var placed: [Placed] = []
-        for tagged in compose(model) {
+        for tagged in runs {
             let width = runWidth(tagged.run)
             placed.append(Placed(run: tagged.run, x: x, width: width, cell: tagged.cell))
             x += width
@@ -251,7 +280,12 @@ enum StatusItemRenderer {
     }
 
     static func image(for model: Model, height: CGFloat) -> NSImage {
-        let placed = layout(model)
+        image(runs: compose(model), height: height)
+    }
+
+    /// The drawing proper, over any run list — the item's, or one cell's.
+    static func image(runs: [Tagged], height: CGFloat) -> NSImage {
+        let placed = place(runs)
         let width = placed.reduce(0) { $0 + $1.width }
         let image = NSImage(
             size: NSSize(width: ceil(width), height: height), flipped: false
@@ -356,12 +390,25 @@ enum StatusItemRenderer {
         return image
     }
 
-    /// The invariance guard: one cell IS today's item, whatever the style.
+    /// The invariance guard: a lone cell drawn as unlabeled digits IS
+    /// today's item — the one-account Mac's bar, and an expanded account in
+    /// an item of its own. A lone cell in any other dress (rings for one's
+    /// only account; an own item beside the shared one) composes like a
+    /// row of one.
     static func compose(_ model: Model) -> [Tagged] {
         guard model.cells.count > 1 else {
-            return composeSingle(model, cell: model.cells.first)
+            guard let cell = model.cells.first else { return composeSingle(model, cell: nil) }
+            if isExpanded(cell, in: model) || cell.form == .digits && cell.monogram.isEmpty {
+                return composeSingle(model, cell: cell)
+            }
+            return composeCells(model)
         }
         return composeCells(model)
+    }
+
+    /// The focused cell, while focus is expanded: today's digits, no letter.
+    static func isExpanded(_ cell: Cell, in model: Model) -> Bool {
+        model.expandsFocus && cell.focused
     }
 
     /// The pre-0.96 item: the glyph, a space, the cell's triple.

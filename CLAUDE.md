@@ -182,22 +182,56 @@ the README rather than silently deviating.
   `$CLAUDE_CONFIG_DIR` > focused > default; an unknown selector is exit 20
   listing the accounts, NEVER a fallback to another one (a statusline under
   one config dir must never report the other's limits); `accounts` noun;
-  deep verbs root their scan at the selected home. UI: six `MenuBarStyle`s
-  (default bars + expanded focus) through ONE renderer whose `compose`
-  returns the old single-cell runs on its FIRST LINE when `cells.count <=
-  1` — that guard is why the one-account bar is byte-identical, and `cmp`
-  against the `--snapshot` PNGs is its regression test; `AccountStrip`
-  (rows/chips/stacked) is the panel's selector; Settings → General leads
-  with Accounts/Menu bar/Panel cards reached through `SettingsNavigator`.
-  GUARANTEE for this phase: every enrolled profile shares ONE provider, so
-  the `ProviderStyle`/`ModelNames` statics stay valid untouched. Hatches:
+  deep verbs root their scan at the selected home. UI: ONE renderer whose
+  `compose` returns the old single-cell runs for a lone UNLABELED EXPANDED
+  cell — that guard is why the one-account bar is byte-identical, and
+  `cmp` against the `--snapshot` PNGs is its regression test;
+  `AccountStrip` (rows/chips/stacked) is the panel's selector. GUARANTEE
+  for this phase: every enrolled profile shares ONE provider, so the
+  `ProviderStyle`/`ModelNames` statics stay valid untouched. Hatches:
   `--fake-profiles` (a synthetic second account); `--snapshot` also writes
-  the six style PNGs + a hit-rect sidecar + `strip.png`. VERIFY GOTCHA:
-  `mise run axdump` no longer sees NSPopover content on this macOS (the
-  panel DOES open — verified by logging `popover.isShown`), so panel work
-  is checked with `--snapshot` PNGs; `strip-chips.png` comes out an
+  a PNG per form/arrangement + a hit-rect sidecar + `strip.png`. VERIFY
+  GOTCHA: `mise run axdump` no longer sees NSPopover content on this macOS
+  (the panel DOES open — verified by logging `popover.isShown`), so panel
+  work is checked with `--snapshot` PNGs; `strip-chips.png` comes out an
   ImageRenderer placeholder (NSControl-backed picker). TUI parity deferred
-  (v0.97.0): it mirrors the new digest fields and draws neither.
+  (v0.98.0): it mirrors the new digest fields and draws neither.
+- MENU BAR PER ACCOUNT (2026-09-07 v0.97.0, user-directed, replacing
+  0.96.0's six whole-bar `MenuBarStyle`s): three orthogonal choices. PER
+  ACCOUNT, on the `Profile` record (`menuBarForm: MenuBarForm` digits/bars/
+  rings/compactDigits/dot, `ownMenuBarItem`; additive CodingKeys, the
+  daemon carries and ignores them, the digest's `MenuBarCell` has no
+  form): the renderer's `Cell.form`/`Cell.ownItem`. BAR-WIDE, app defaults
+  (`MenuBarPreferences.expandsFocusKey`, default true): the FOCUSED cell
+  draws as today's unlabeled digits whatever its form — that default is
+  what keeps a fresh install's bar and a one-account bar exactly as they
+  were; `MenuBarPreferences.migrateLegacyStyle` spells a stored
+  `menuBarStyle` into forms once and deletes the key. A cell whose OWN
+  form is digits carries its monogram (it is not "the" account); the
+  monogram is "" whenever the bar holds one account. `StatusItemRenderer
+  .itemModels` splits one model into the shared item (nil id) + one per
+  own-item account, provider dressing on the FIRST; the controller draws
+  those. `MenuBarModelBuilder` is the ONE answer to "what does the bar
+  show" — the status item AND Settings → Accounts' live `MenuBarPreview`
+  (an NSView drawing the real renderer's images on a bar-like ground;
+  dragging a cell past a neighbor's midpoint re-orders live through a
+  draft order and `registry.reorder` lands it on release) both draw it,
+  so the preview can't lie. `MenuBarFormPicker` tiles = `StatusItemRenderer
+  .cellImage` of the account's LIVE numbers per form (pick by picture);
+  "All accounts" writes every record (`setMenuBarFormForAll`,
+  `commonMenuBarForm` nil = Mixed). FOCUS: a strip/cell click PINS
+  (`registry.focus` = overlay `manualFocusID` shown at once + `pin`,
+  overlay lifted when the host agrees; `MeteringHost.setPin` overrides the
+  panel hold — the hold defers ACTIVITY, never a click); the strip header's
+  "Auto" (visible only while pinned) hands focus back. SETTINGS: an
+  `Accounts` sidebar section (`SettingsSection.accounts`, only for a
+  provider with `supportsMultipleHomes`; `--settings --pane-accounts`)
+  holding Menu bar (preview, All accounts, Expand the focused account,
+  Focus) / Accounts (identity → nickname → form tiles → switches →
+  activity; credential + identity paths moved to General → About's
+  privacy inventory, per account) / Panel; General is back to what it
+  was. `--snapshot` writes `menubar-preview.png` (the NSView's own
+  `snapshot()`) and `form-picker.png`.
 - RUST TUI (2026-08-16 v0.67.0, phase T1; tui/ cargo crate, usage-tui):
   the dependency rule is SCOPED — UsageCore/app/usaged stay zero-dep
   Swift; the TUI carries exactly ratatui, serde, serde_json, time

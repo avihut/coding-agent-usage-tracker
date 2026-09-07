@@ -87,7 +87,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // forces a harness for this launch without persisting the choice.
         if CommandLine.arguments.contains("--settings") {
             controller?.showSettings(
-                pane: CommandLine.arguments.contains("--pane-cost") ? .apiCost : .general)
+                pane: CommandLine.arguments.contains("--pane-cost") ? .apiCost
+                    : CommandLine.arguments.contains("--pane-accounts") ? .accounts : .general)
         } else if CommandLine.arguments.contains("--panel") {
             controller?.showPanel()
         } else if CommandLine.arguments.contains("--sessions") {
@@ -149,6 +150,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     form == .chips ? "strip-chips.png" : "strip.png")
             }
         }
+        // The Menu bar card's live preview and one account's form picker —
+        // the preview is an NSView (drawn by itself: ImageRenderer would
+        // show a placeholder), the picker plain SwiftUI.
+        let expands = MenuBarPreferences.expandsFocus()
+        let preview = MenuBarPreviewView()
+        preview.items = StatusItemRenderer.itemModels(
+            for: MenuBarModelBuilder.model(registry: registry, expandsFocus: expands))
+        preview.canDrag = registry.barProfiles.count > 1
+        if let rep = preview.snapshot() {
+            try? rep.representation(using: .png, properties: [:])?
+                .write(to: directory.appending(path: "menubar-preview.png"))
+        }
+        let picker = MenuBarFormPicker(
+            cell: MenuBarModelBuilder.sampleCell(for: registry.focusedProfile, registry: registry),
+            selection: registry.focusedProfile?.menuBarForm, onSelect: { _ in })
+        write(ImageRenderer(content: picker.padding(14).background(Color(nsColor: .windowBackgroundColor))), "form-picker.png")
         // The weekly meter's card, lit at the first pending reset notice
         // exactly as a click on that notice would open it.
         if let meters = store.state.snapshot?.meters,
@@ -229,15 +246,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             stale: false, focused: false)
         let alarmedCell = StatusItemRenderer.Cell(
             profileID: "c982130e", monogram: "P", segments: alarmed, stale: false, focused: false)
+        func dressed(_ cell: StatusItemRenderer.Cell, _ form: MenuBarForm, own: Bool = false) -> StatusItemRenderer.Cell {
+            var copy = cell
+            copy.form = form
+            copy.ownItem = own
+            return copy
+        }
         var everyCase = cases
-        for style in MenuBarStyle.allCases {
+        // Every form on both cells with focus not expanded, then the
+        // default arrangement (bars, focus expanded) and a mixed one.
+        for form in MenuBarForm.allCases {
             everyCase.append((
-                "style-\(style.rawValue)",
-                StatusItemRenderer.Model(glyph: "✳︎", cells: [work, personal], style: style)))
+                "form-\(form.rawValue)",
+                StatusItemRenderer.Model(
+                    glyph: "✳︎", cells: [dressed(work, form), dressed(personal, form)],
+                    expandsFocus: false)))
         }
         everyCase.append((
+            "expanded-focus", StatusItemRenderer.Model(glyph: "✳︎", cells: [work, personal])))
+        everyCase.append((
+            "mixed",
+            StatusItemRenderer.Model(
+                glyph: "✳︎", cells: [dressed(work, .digits), dressed(personal, .rings)],
+                expandsFocus: false)))
+        everyCase.append((
             "cells-badge",
-            StatusItemRenderer.Model(glyph: "✳︎", cells: [work, alarmedCell], style: .bars)))
+            StatusItemRenderer.Model(glyph: "✳︎", cells: [work, alarmedCell], expandsFocus: false)))
         everyCase.append((
             "cells-stale",
             StatusItemRenderer.Model(glyph: "✳︎", cells: [
@@ -245,28 +279,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     profileID: "default", monogram: "W", segments: clean, stale: true, focused: true),
                 StatusItemRenderer.Cell(
                     profileID: "c982130e", monogram: "P", segments: nil, stale: true, focused: false),
-            ], style: .bars)))
+            ], expandsFocus: false)))
         everyCase.append((
             "cells-incident",
             StatusItemRenderer.Model(
                 glyph: "✳︎", incident: .major, indicator: true, cells: [work, personal],
-                style: .bars)))
-        // The one-item-per-account style draws N images, never a composed
-        // row — render each the way the controller will.
-        let perProfile = StatusItemRenderer.Model(
-            glyph: "✳︎", incident: .major, indicator: true, cells: [work, personal],
-            style: .itemPerProfile)
-        for (profileID, _) in StatusItemRenderer.itemImages(
-            for: perProfile, height: NSStatusBar.system.thickness)
-        {
-            everyCase.append((
-                "item-\(profileID)",
-                StatusItemRenderer.Model(
-                    glyph: "✳︎",
-                    incident: profileID == "default" ? .major : nil,
-                    indicator: profileID == "default",
-                    cells: [perProfile.cells.first { $0.profileID == profileID }!],
-                    style: .itemPerProfile)))
+                expandsFocus: false)))
+        // An account in its own item draws apart from the shared one —
+        // render each item the way the controller will.
+        let split = StatusItemRenderer.Model(
+            glyph: "✳︎", incident: .major, indicator: true,
+            cells: [work, dressed(personal, .rings, own: true)])
+        for item in StatusItemRenderer.itemModels(for: split) {
+            everyCase.append(("item-\(item.profileID ?? "shared")", item.model))
         }
 
         let height = NSStatusBar.system.thickness

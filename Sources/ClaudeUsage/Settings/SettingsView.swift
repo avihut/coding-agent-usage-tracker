@@ -2,12 +2,13 @@ import SwiftUI
 import UsageCore
 
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case general, usage, apiCost
+    case general, accounts, usage, apiCost
 
     var id: String { rawValue }
     var title: String {
         switch self {
         case .general: "General"
+        case .accounts: "Accounts"
         case .usage: "Usage"
         case .apiCost: "API Cost"
         }
@@ -15,6 +16,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .general: "gearshape"
+        case .accounts: "person.2"
         case .usage: "chart.xyaxis.line"
         case .apiCost: "dollarsign.circle"
         }
@@ -34,6 +36,14 @@ struct SettingsView: View {
     /// the way the panel does.
     private var store: UsageStore { registry.focusedStore }
 
+    /// Accounts only where the agent can have several homes (0.97.0): a
+    /// one-home harness (Codex, Gemini) has nothing to put there.
+    private var sections: [SettingsSection] {
+        SettingsSection.allCases.filter {
+            $0 != .accounts || registry.activeProvider.supportsMultipleHomes
+        }
+    }
+
     init(
         registry: ProviderRegistry, navigator: SettingsNavigator,
         initialSection: SettingsSection = .general
@@ -46,7 +56,7 @@ struct SettingsView: View {
     var body: some View {
         NavigationSplitView {
             List(selection: $section) {
-                ForEach(SettingsSection.allCases) { item in
+                ForEach(sections) { item in
                     Label(item.title, systemImage: item.icon).tag(item)
                 }
             }
@@ -54,7 +64,8 @@ struct SettingsView: View {
             .navigationSplitViewColumnWidth(min: 150, ideal: 170, max: 220)
         } detail: {
             switch section ?? .general {
-            case .general: GeneralSettingsPane(store: store, registry: registry, navigator: navigator)
+            case .general: GeneralSettingsPane(store: store, registry: registry)
+            case .accounts: AccountsSettingsPane(registry: registry, navigator: navigator)
             case .usage: UsageSettingsPane(store: store)
             case .apiCost: CostSettingsPane(store: store)
             }

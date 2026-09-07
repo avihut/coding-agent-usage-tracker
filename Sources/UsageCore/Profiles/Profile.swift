@@ -26,6 +26,11 @@ public struct Profile: Codable, Sendable, Equatable, Identifiable {
     public var enabled: Bool
     /// Whether the menu bar shows a cell for it (the strip still lists it).
     public var showInMenuBar: Bool
+    /// How its cell draws (0.97.0) — the app's renderer reads this; the
+    /// daemon carries it and ignores it.
+    public var menuBarForm: MenuBarForm
+    /// Its own `NSStatusItem` rather than a cell in the shared one.
+    public var ownMenuBarItem: Bool
     /// The person's order in the strip and the bar; ties by `addedAt`.
     public var order: Int
     public let addedAt: Date
@@ -36,13 +41,14 @@ public struct Profile: Codable, Sendable, Equatable, Identifiable {
     public var ignoredIdentityKey: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, providerID, homePath, nickname, monogram, enabled, showInMenuBar, order,
-            addedAt, ignoredIdentityKey
+        case id, providerID, homePath, nickname, monogram, enabled, showInMenuBar, menuBarForm,
+            ownMenuBarItem, order, addedAt, ignoredIdentityKey
     }
 
     public init(
         id: String, providerID: String, home: URL?, nickname: String? = nil,
         monogram: String? = nil, enabled: Bool = true, showInMenuBar: Bool = true,
+        menuBarForm: MenuBarForm = .standard, ownMenuBarItem: Bool = false,
         order: Int = 0, addedAt: Date, ignoredIdentityKey: String? = nil
     ) {
         self.id = id
@@ -52,6 +58,8 @@ public struct Profile: Codable, Sendable, Equatable, Identifiable {
         self.monogram = monogram
         self.enabled = enabled
         self.showInMenuBar = showInMenuBar
+        self.menuBarForm = menuBarForm
+        self.ownMenuBarItem = ownMenuBarItem
         self.order = order
         self.addedAt = addedAt
         self.ignoredIdentityKey = ignoredIdentityKey
@@ -66,6 +74,11 @@ public struct Profile: Codable, Sendable, Equatable, Identifiable {
         monogram = try container.decodeIfPresent(String.self, forKey: .monogram)
         enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
         showInMenuBar = try container.decodeIfPresent(Bool.self, forKey: .showInMenuBar) ?? true
+        // An unknown form (a newer writer's) reads as the standard one
+        // rather than failing the whole list.
+        menuBarForm = try container.decodeIfPresent(String.self, forKey: .menuBarForm)
+            .flatMap(MenuBarForm.init(rawValue:)) ?? .standard
+        ownMenuBarItem = try container.decodeIfPresent(Bool.self, forKey: .ownMenuBarItem) ?? false
         order = try container.decodeIfPresent(Int.self, forKey: .order) ?? 0
         addedAt = try container.decode(Date.self, forKey: .addedAt)
         ignoredIdentityKey = try container.decodeIfPresent(String.self, forKey: .ignoredIdentityKey)
@@ -80,6 +93,8 @@ public struct Profile: Codable, Sendable, Equatable, Identifiable {
         try container.encodeIfPresent(monogram, forKey: .monogram)
         try container.encode(enabled, forKey: .enabled)
         try container.encode(showInMenuBar, forKey: .showInMenuBar)
+        try container.encode(menuBarForm.rawValue, forKey: .menuBarForm)
+        try container.encode(ownMenuBarItem, forKey: .ownMenuBarItem)
         try container.encode(order, forKey: .order)
         try container.encode(addedAt, forKey: .addedAt)
         try container.encodeIfPresent(ignoredIdentityKey, forKey: .ignoredIdentityKey)

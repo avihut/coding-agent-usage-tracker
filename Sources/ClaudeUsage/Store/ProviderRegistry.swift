@@ -48,8 +48,9 @@ final class ProviderRegistry {
     private(set) var stores: [String: UsageStore] = [:]
     /// Homes found beside the standard one that nobody decided about.
     private(set) var discoveredHomes: [DiscoveredHome] = []
-    /// A cell click's focus: shown until the panel closes, never persisted
-    /// (the pin is the persistent form).
+    /// A click's choice, shown the instant it is made: the pin it also set
+    /// arrives from the host (or the daemon's next digest) a beat later,
+    /// and the overlay lifts once they agree.
     private var manualFocusID: String?
     /// Re-binds the status item to a new active store. The Bool says the
     /// switch may wait for the panel to close (daily auto re-detection
@@ -86,6 +87,7 @@ final class ProviderRegistry {
         let active = providers.first { $0.id == activeID } ?? providers[0]
         ModelNames.catalog = active.modelCatalog
         ProviderStyle.install(active)
+        MenuBarPreferences.migrateLegacyStyle(provider: active)
 
         self.lease = EngineLease(lockURL: EngineHostBroker.lockURL(bundleID: bundleID))
         let daemonAlive = Self.daemonMarkerAge(bundleID: bundleID)
@@ -154,9 +156,9 @@ final class ProviderRegistry {
     }
     var activeProvider: any UsageProvider { provider(for: activeID) }
 
-    /// Which profile the panel and the expanded cell show: a cell click's
-    /// choice while the panel is open, else the host's (or the digest's)
-    /// activity-following focus.
+    /// Which profile the panel and the expanded cell show: a click's
+    /// choice until the host confirms it, else the host's (or the
+    /// digest's) focus — pinned, or following activity.
     var focusedID: String {
         if let manualFocusID, stores[manualFocusID] != nil { return manualFocusID }
         switch role {
@@ -165,6 +167,13 @@ final class ProviderRegistry {
         }
     }
     var focusedProfile: Profile? { profiles.first { $0.id == focusedID } }
+    /// The host's (or the digest's) own word on focus, overlay aside.
+    private var roleFocusedID: String {
+        switch role {
+        case .hosting(let host): host.focusedProfileID ?? Profile.defaultID
+        case .client(let feed): feed.digest?.focusedProfile ?? Profile.defaultID
+        }
+    }
     var isClient: Bool {
         if case .client = role { return true }
         return false
@@ -183,7 +192,12 @@ final class ProviderRegistry {
     }
     /// The bar: shown ∧ wanted in the bar.
     var barProfiles: [Profile] { shownProfiles.filter(\.showInMenuBar) }
-    var pinnedID: String? {
+    /// The persistent focus choice as the faces should show it (nil =
+    /// follows activity) — stored so the strip's "Auto" control tracks it
+    /// in client mode too, where the source is a defaults key nobody
+    /// observes.
+    private(set) var pinnedID: String?
+    private var storedPin: String? {
         switch role {
         case .hosting(let host): host.pin
         case .client: ProfileStore.pin(from: .standard)
@@ -223,25 +237,27 @@ final class ProviderRegistry {
             ?? ProfileFacts.monogram(profile: profile, label: label(for: profile))
     }
 
-    /// A cell or strip click: focus this profile until the panel closes.
+    /// A cell or strip click chooses the account — for good, bar and
+    /// panel, until "Auto" hands focus back to activity (0.97.0,
+    /// user-reported: the earlier open-panel-only focus reverted the moment
+    /// the panel closed). The pick shows immediately; the pin it sets is
+    /// what persists.
     func focus(_ id: String) {
         guard stores[id] != nil else { return }
         manualFocusID = id
-        syncFacts()
+        pin(id)
     }
 
-    /// While the panel is open focus stays put; on release the click's
-    /// choice is forgotten and activity rules again.
+    /// While the panel is open ACTIVITY can't move focus (an account
+    /// starting to write must not swap the panel out from under the
+    /// pointer); the person's own picks land regardless.
     func holdFocus(_ held: Bool) {
         if case .hosting(let host) = role { host.holdFocus(held) }
-        if !held {
-            manualFocusID = nil
-            syncFacts()
-        }
     }
 
     /// The persistent focus choice (nil = follows activity).
     func pin(_ id: String?) {
+        if id == nil { manualFocusID = nil }
         switch role {
         case .hosting(let host): host.setPin(id)
         case .client(let feed):
@@ -315,6 +331,36 @@ final class ProviderRegistry {
         edit(id) { $0.showInMenuBar = shown }
     }
 
+    func setMenuBarForm(id: String, form: MenuBarForm) {
+        edit(id) { $0.menuBarForm = form }
+    }
+
+    /// The "all accounts" control: one form for every enrolled record.
+    func setMenuBarFormForAll(_ form: MenuBarForm) {
+        editAll { $0.menuBarForm = form }
+    }
+
+    func setOwnMenuBarItem(id: String, own: Bool) {
+        edit(id) { $0.ownMenuBarItem = own }
+    }
+
+    /// The bar's (and the strip's) order: `ids` in the order wanted; any
+    /// enrolled profile not named keeps its place after them.
+    func reorder(_ ids: [String]) {
+        let rest = profiles.filter { $0.isEnrolled && !ids.contains($0.id) }.map(\.id)
+        let order = ids + rest
+        editAll { profile in
+            if let index = order.firstIndex(of: profile.id) { profile.order = index }
+        }
+    }
+
+    /// The common form when every account in the bar shares one; nil
+    /// while they differ ("Mixed").
+    var commonMenuBarForm: MenuBarForm? {
+        let forms = Set(barProfiles.map(\.menuBarForm))
+        return forms.count == 1 ? forms.first : nil
+    }
+
     func rename(id: String, nickname: String?) {
         let trimmed = nickname?.trimmingCharacters(in: .whitespacesAndNewlines)
         edit(id) { $0.nickname = (trimmed?.isEmpty ?? true) ? nil : trimmed }
@@ -330,6 +376,23 @@ final class ProviderRegistry {
             stored.append(copy)
         } else {
             return
+        }
+        ProfileStore.save(stored, to: .standard)
+        profilesChanged()
+    }
+
+    /// One edit over every enrolled record of the active provider — the
+    /// implicit default gets a stored record the moment it differs.
+    private func editAll(_ body: (inout Profile) -> Void) {
+        var stored = ProfileStore.load(from: .standard)
+        for record in profiles where record.isEnrolled {
+            if let index = stored.firstIndex(where: { $0.id == record.id && $0.providerID == activeID }) {
+                body(&stored[index])
+            } else {
+                var copy = record
+                body(&copy)
+                stored.append(copy)
+            }
         }
         ProfileStore.save(stored, to: .standard)
         profilesChanged()
@@ -430,6 +493,10 @@ final class ProviderRegistry {
     /// Pushes focus/dormancy/last-write facts into every face, and tells
     /// the status item when the focused face changed.
     private func syncFacts() {
+        // The click's overlay lifts once the host (or the digest) says the
+        // same — from here on the persistent pin carries it.
+        if let manualFocusID, manualFocusID == roleFocusedID { self.manualFocusID = nil }
+        if pinnedID != storedPin { pinnedID = storedPin }
         let focused = focusedID
         let dormant = dormantIDs
         let lastWrites: [String: Date]

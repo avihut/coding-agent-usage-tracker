@@ -143,9 +143,6 @@ private struct ProviderPreferenceRow: View {
 struct GeneralSettingsPane: View {
     var store: UsageStore
     var registry: ProviderRegistry
-    /// A landing request (a "account found" notice's click-through) —
-    /// consumed once, then the pane scrolls to the Accounts card.
-    var navigator: SettingsNavigator?
     /// Idle tolerance for the popover activity strips.
     @AppStorage(ActivityGrace.storageKey)
     private var graceSeconds = ActivityGrace.defaultSeconds
@@ -197,6 +194,14 @@ struct GeneralSettingsPane: View {
         }
     }
 
+    /// The chain in order, in the sources' own words — the file it looks
+    /// for and the keychain item it falls back to (read-only, access token
+    /// only, promptless through /usr/bin/security).
+    private func credentialLine(for profile: Profile) -> String? {
+        let names = registry.provider(for: profile).credentials.sources.map(\.name)
+        return names.isEmpty ? nil : names.joined(separator: " → ") + " (read-only)"
+    }
+
     private func signalText(_ signal: HarnessSignal) -> String {
         if signal.recentFiles > 0 {
             return "\(signal.recentFiles) session files in the last 14 days"
@@ -208,31 +213,7 @@ struct GeneralSettingsPane: View {
     }
 
     var body: some View {
-        ScrollViewReader { proxy in
-            paneBody
-                .onAppear { applyLanding(proxy) }
-                .onChange(of: navigator?.landing) { _, _ in applyLanding(proxy) }
-        }
-    }
-
-    /// The consume-once landing: a request puts the Accounts card in front
-    /// of the person, whether the window was already open or not.
-    private func applyLanding(_ proxy: ScrollViewProxy) {
-        guard let landing = navigator?.consumeLanding() else { return }
-        // One turn late: the card has to exist before it can be scrolled to.
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(80))
-            withAnimation { proxy.scrollTo(landing.rawValue, anchor: .top) }
-        }
-    }
-
-    private var paneBody: some View {
         SettingsPaneScroll {
-            // Accounts first: which sign-ins this Mac meters is the frame
-            // every setting below sits in.
-            AccountsCard(registry: registry).id(SettingsLanding.accounts.rawValue)
-            MenuBarSettingsCard(registry: registry)
-            PanelSettingsCard(registry: registry)
             SettingsCard("Metering") {
                 HStack(alignment: .firstTextBaseline) {
                     Text("Harness")
@@ -409,22 +390,35 @@ struct GeneralSettingsPane: View {
                 // With several accounts metered the inventory is per
                 // account (amendment 2026-09-06): every home this app
                 // reads is named, or the card would be incomplete.
+                // The credential chain per account too (0.97.0; it used to
+                // sit on the account's own row, where it read as a setting
+                // — it is inventory): the file looked for, then the
+                // keychain item it falls back to.
                 if meteredProfiles.count > 1 {
-                    Divider()
                     ForEach(meteredProfiles) { profile in
+                        Divider()
                         if let identity = registry.provider(for: profile).accountIdentity {
                             infoRow(
-                                registry.label(for: profile),
+                                "\(registry.label(for: profile)) identity",
                                 "\(identity.displayPath) (read-only)")
+                        }
+                        if let chain = credentialLine(for: profile) {
+                            infoRow("\(registry.label(for: profile)) credential", chain)
                         }
                     }
                     if !transcriptPaths.isEmpty {
                         Divider()
                         infoRow("Transcripts", transcriptPaths.joined(separator: " · ") + " (read-only)")
                     }
-                } else if let identity = store.provider.accountIdentity {
-                    Divider()
-                    infoRow("Account identity", "\(identity.displayPath) (read-only)")
+                } else {
+                    if let identity = store.provider.accountIdentity {
+                        Divider()
+                        infoRow("Account identity", "\(identity.displayPath) (read-only)")
+                    }
+                    if let profile = meteredProfiles.first, let chain = credentialLine(for: profile) {
+                        Divider()
+                        infoRow("Credential", chain)
+                    }
                 }
                 note(
                     (store.isLocalProvider

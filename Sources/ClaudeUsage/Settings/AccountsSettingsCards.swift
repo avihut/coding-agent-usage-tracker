@@ -2,10 +2,12 @@ import AppKit
 import SwiftUI
 import UsageCore
 
-/// The Accounts card (0.96.0): every home this app meters for the active
-/// agent, what each one is signed in as, and the two switches that decide
-/// whether it is metered at all and whether it takes a menu bar cell. Plus
-/// the homes discovery found and nobody has decided about.
+/// The Accounts card (0.96.0, rows restructured 0.97.0): every home this
+/// app meters for the active agent, what each one is signed in as, how its
+/// cell draws in the menu bar, and the switches that decide whether it is
+/// metered at all, whether it takes a cell, and whether that cell is an
+/// item of its own. Plus the homes discovery found and nobody has decided
+/// about.
 ///
 /// "Profile" in code, "Account" here: what a person sees is which sign-in a
 /// home carries (decision D1). The card renders for a provider that can
@@ -20,7 +22,7 @@ struct AccountsCard: View {
                 footer: "Each account is one \(registry.activeProvider.agentName) configuration"
                     + " directory with its own sign-in. Everything is read from that directory the"
                     + " same way the default one is read, and nothing is read from an account until"
-                    + " you meter it."
+                    + " you meter it. What is read from where is listed under General → About."
             ) {
                 ForEach(Array(registry.profiles.filter(\.isEnrolled).enumerated()), id: \.element.id) { index, profile in
                     if index > 0 { Divider() }
@@ -57,8 +59,10 @@ struct AccountsCard: View {
     }
 }
 
-/// One metered account: identity, home, where its credential is read from,
-/// its state — and the switches.
+/// One metered account: who it is first, then what you can change about
+/// it — name, form in the bar, the switches — then what it has been doing.
+/// The paths it is read from are inventory, not settings, and live in the
+/// privacy card.
 private struct AccountRow: View {
     var registry: ProviderRegistry
     let profile: Profile
@@ -74,69 +78,118 @@ private struct AccountRow: View {
     }
 
     private var store: UsageStore? { registry.store(for: profile.id) }
+    private var inBar: Bool { profile.enabled && profile.showInMenuBar }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                MonogramTile(
-                    monogram: registry.monogram(for: profile),
-                    focused: profile.id == registry.focusedID)
+        VStack(alignment: .leading, spacing: 10) {
+            identity
+            LabeledContent("Nickname") {
                 // Seeded in init, committed on Return or when the field
                 // gives up focus — never per keystroke: every commit
                 // rewrites the profile list, tells the engine, and rebuilds
                 // the faces, which is not a thing to do once per letter.
-                TextField("Nickname", text: $nickname)
+                TextField("Optional", text: $nickname)
                     .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 180)
+                    .frame(width: 180)
                     .focused($editingNickname)
                     .onSubmit { commitNickname() }
                     .onChange(of: editingNickname) { _, focused in
                         if !focused { commitNickname() }
                     }
-                Text(registry.label(for: profile))
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Spacer()
+            }
+            HStack(alignment: .top) {
+                Text("Menu bar")
+                Spacer(minLength: 16)
+                MenuBarFormPicker(
+                    cell: MenuBarModelBuilder.sampleCell(for: profile, registry: registry),
+                    selection: profile.menuBarForm,
+                    onSelect: { registry.setMenuBarForm(id: profile.id, form: $0) })
+                    .opacity(inBar ? 1 : 0.45)
+                    .disabled(!inBar)
             }
             HStack(spacing: 16) {
-                Toggle("Metered", isOn: Binding(
+                Toggle("Meter this account", isOn: Binding(
                     get: { profile.enabled },
                     set: { registry.setProfileEnabled(id: profile.id, enabled: $0) }))
                 Toggle("Show in menu bar", isOn: Binding(
                     get: { profile.showInMenuBar },
                     set: { registry.setShowInMenuBar(id: profile.id, shown: $0) }))
                     .disabled(!profile.enabled)
-                Spacer()
-                if !profile.isDefault {
-                    Button("Remove…") { confirmingRemove = true }
-                        .confirmationDialog(
-                            "Stop metering \(registry.label(for: profile))?",
-                            isPresented: $confirmingRemove, titleVisibility: .visible
-                        ) {
-                            Button("Stop metering") { registry.remove(id: profile.id, deletingData: false) }
-                            Button("Stop metering and delete its data", role: .destructive) {
-                                registry.remove(id: profile.id, deletingData: true)
-                            }
-                            Button("Cancel", role: .cancel) {}
-                        } message: {
-                            Text(
-                                "Removing forgets the account here. Its history and caches stay"
-                                    + " unless you delete them, and nothing inside"
-                                    + " \(profile.displayHome() ?? "the folder") is ever touched.")
-                        }
+                // Its own item only means something beside a shared one.
+                if registry.barProfiles.count > 1 {
+                    Toggle("Own menu bar item", isOn: Binding(
+                        get: { profile.ownMenuBarItem },
+                        set: { registry.setOwnMenuBarItem(id: profile.id, own: $0) }))
+                        .disabled(!inBar)
+                        .help("A separate menu bar item for this account — ⌘-drag it anywhere along the bar")
                 }
+                Spacer()
             }
             .toggleStyle(.switch)
             .controlSize(.small)
-            infoRow("Home", profile.displayHome() ?? "—")
-            if let credentials = credentialLine { infoRow("Credential", credentials) }
-            if let identity = registry.provider(for: profile).accountIdentity {
-                infoRow("Account identity", "\(identity.displayPath) (read-only)")
-            }
-            infoRow("State", stateLine)
+            infoRow("Activity", stateLine)
         }
+    }
+
+    /// The account, named the way the strip names it, with what that name
+    /// stands for beneath: the sign-in when a nickname covers it, the home
+    /// otherwise.
+    private var identity: some View {
+        HStack(alignment: .center, spacing: 10) {
+            MonogramTile(
+                monogram: registry.monogram(for: profile),
+                focused: profile.id == registry.focusedID, size: 28)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(registry.label(for: profile))
+                        .font(.body.weight(.semibold))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    if profile.id == registry.focusedID {
+                        Text("Focused")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Color.primary.opacity(0.07), in: Capsule())
+                    }
+                }
+                Text(secondaryLine)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer()
+            if !profile.isDefault {
+                Button("Remove…") { confirmingRemove = true }
+                    .controlSize(.small)
+                    .confirmationDialog(
+                        "Stop metering \(registry.label(for: profile))?",
+                        isPresented: $confirmingRemove, titleVisibility: .visible
+                    ) {
+                        Button("Stop metering") { registry.remove(id: profile.id, deletingData: false) }
+                        Button("Stop metering and delete its data", role: .destructive) {
+                            registry.remove(id: profile.id, deletingData: true)
+                        }
+                        Button("Cancel", role: .cancel) {}
+                    } message: {
+                        Text(
+                            "Removing forgets the account here. Its history and caches stay"
+                                + " unless you delete them, and nothing inside"
+                                + " \(profile.displayHome() ?? "the folder") is ever touched.")
+                    }
+            }
+        }
+    }
+
+    /// The sign-in when a nickname stands in for it, then the home.
+    private var secondaryLine: String {
+        let home = profile.displayHome() ?? "—"
+        if let email = store?.accountPresence?.current?.email, email != registry.label(for: profile) {
+            return "\(email) · \(home)"
+        }
+        return home
     }
 
     private func commitNickname() {
@@ -144,14 +197,6 @@ private struct AccountRow: View {
         let stored = profile.nickname?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard trimmed != stored else { return }
         registry.rename(id: profile.id, nickname: trimmed.isEmpty ? nil : trimmed)
-    }
-
-    /// The chain in order, in the sources' own words — the file it looks
-    /// for and the keychain item it falls back to. Named here so the
-    /// privacy inventory stays complete per account.
-    private var credentialLine: String? {
-        let names = registry.provider(for: profile).credentials.sources.map(\.name)
-        return names.isEmpty ? nil : names.joined(separator: " → ")
     }
 
     private var stateLine: String {
@@ -191,27 +236,38 @@ private struct DiscoveredAccountRow: View {
     }
 }
 
-/// How the menu bar presents several accounts, and which one it expands.
+/// The bar as a whole (0.97.0): the live preview first — drag the accounts
+/// into order — then the controls that are nobody's in particular: one
+/// form for every account, whether the focused account expands, which
+/// account that is.
 struct MenuBarSettingsCard: View {
     var registry: ProviderRegistry
-    @AppStorage(MenuBarStyle.key) private var styleRaw = MenuBarStyle.standard.rawValue
-
-    private var style: MenuBarStyle { MenuBarStyle(rawValue: styleRaw) ?? .standard }
+    @AppStorage(MenuBarPreferences.expandsFocusKey) private var expandsFocus = true
 
     var body: some View {
-        if registry.shownProfiles.count > 1 {
-            SettingsCard("Menu bar", footer: style.caption) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text("Style")
-                    Spacer()
-                    Picker("Style", selection: $styleRaw) {
-                        ForEach(MenuBarStyle.allCases) { option in
-                            Text(option.title).tag(option.rawValue)
-                        }
-                    }
-                    .labelsHidden()
-                    .fixedSize()
+        SettingsCard("Menu bar", footer: footer) {
+            VStack(alignment: .leading, spacing: 6) {
+                MenuBarPreview(registry: registry, expandsFocus: expandsFocus)
+                if registry.barProfiles.count > 1 {
+                    Text("Drag an account to reorder.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
                 }
+            }
+            Divider()
+            HStack(alignment: .top) {
+                Text(registry.barProfiles.count > 1 ? "All accounts" : "Form")
+                Spacer(minLength: 16)
+                MenuBarFormPicker(
+                    cell: MenuBarModelBuilder.sampleCell(
+                        for: registry.focusedProfile, registry: registry),
+                    selection: registry.commonMenuBarForm,
+                    onSelect: { registry.setMenuBarFormForAll($0) })
+            }
+            if registry.barProfiles.count > 1 {
+                Toggle("Expand the focused account", isOn: $expandsFocus)
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
                 HStack(alignment: .firstTextBaseline) {
                     Text("Focus")
                     Spacer()
@@ -227,12 +283,24 @@ struct MenuBarSettingsCard: View {
                     .labelsHidden()
                     .fixedSize()
                 }
-                note(
-                    "Focus decides whose numbers the bar spells out and which account the panel"
-                        + " opens on. Following activity picks the account this Mac has worked in"
-                        + " most over the last two weeks.")
+            } else {
+                Toggle("Spell out the numbers", isOn: $expandsFocus)
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
             }
         }
+    }
+
+    private var footer: String {
+        if registry.barProfiles.count > 1 {
+            return "Each account draws in the form set on its row; the control above sets them all"
+                + " at once. With the focused account expanded, its numbers are spelled out whatever"
+                + " its form — and focus decides which account the panel opens on. Following"
+                + " activity picks the account this Mac has worked in most over the last two weeks;"
+                + " picking an account in the panel pins it until Auto."
+        }
+        return "With the numbers spelled out the item is exactly what it has always been; turn that"
+            + " off to draw your account in the form chosen above."
     }
 }
 

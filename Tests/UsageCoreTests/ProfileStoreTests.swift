@@ -21,8 +21,8 @@ struct ProfileStoreTests {
         let added = Date(timeIntervalSince1970: 1_757_000_000)
         let personal = Profile(
             id: "c982130e", providerID: "claude", home: URL(filePath: "/Users/avihu/.claude-personal"),
-            nickname: "Personal", monogram: "P", enabled: true, showInMenuBar: false, order: 2,
-            addedAt: added)
+            nickname: "Personal", monogram: "P", enabled: true, showInMenuBar: false,
+            menuBarForm: .rings, ownMenuBarItem: true, order: 2, addedAt: added)
         let dismissed = Profile(
             id: "1a2b3c4d", providerID: "claude", home: URL(filePath: "/Users/avihu/.claude-old"),
             enabled: false, order: 3, addedAt: added, ignoredIdentityKey: "u|o")
@@ -39,6 +39,21 @@ struct ProfileStoreTests {
         let json = String(decoding: defaults.data(forKey: "meteringProfiles")!, as: UTF8.self)
         #expect(json.contains("\"homePath\":\"/Users/avihu/.claude-personal\""))
         #expect(!json.contains("\"home\":"))
+        #expect(json.contains("\"menuBarForm\":\"rings\""))
+    }
+
+    @Test("a 0.96 record reads as bars in the shared item; an unknown form reads as the standard one")
+    func menuBarFormDefaults() throws {
+        let json = """
+        [{"id":"default","providerID":"claude","addedAt":"2026-09-06T10:00:00Z"},
+         {"id":"c982130e","providerID":"claude","homePath":"/h","addedAt":"2026-09-06T10:00:00Z",
+          "menuBarForm":"hologram","ownMenuBarItem":true}]
+        """
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let profiles = try decoder.decode([Profile].self, from: Data(json.utf8))
+        #expect(profiles[0].menuBarForm == .bars && !profiles[0].ownMenuBarItem)
+        #expect(profiles[1].menuBarForm == .bars && profiles[1].ownMenuBarItem)
     }
 
     @Test("a record missing newer keys decodes with defaults")

@@ -97,7 +97,8 @@ struct UsagePanelView: View {
                         registry: registry, form: accountForm,
                         onToggleForm: { accountFormRaw = accountForm == .chips
                             ? PanelAccountForm.stripRows.rawValue : PanelAccountForm.chips.rawValue },
-                        onFocus: { registry.focus($0) })
+                        onFocus: { registry.focus($0) },
+                        onAuto: { registry.pin(nil) })
                         // Two fingers across the strip step through the
                         // accounts — the heatmap pager's gesture and its
                         // sign convention (fingers left = the next one).

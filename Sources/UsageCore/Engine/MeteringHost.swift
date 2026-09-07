@@ -249,11 +249,15 @@ public final class MeteringHost {
         }
     }
 
-    /// Pin the focus (nil = follow activity again).
+    /// Pin the focus (nil = follow activity again). A pin is the person's
+    /// own choice, so it lands even while the panel holds focus — the hold
+    /// exists to keep ACTIVITY from swapping the panel out from under the
+    /// pointer, never to defer a click (0.97.0, user-reported: the strip's
+    /// pick reverted the moment the panel closed).
     public func setPin(_ id: String?) {
         ProfileStore.setPin(id, in: defaults)
         pin = id
-        if recomputeFocus() { republish() }
+        if recomputeFocus(overridingHold: true) { republish() }
     }
 
     public func setProfileEnabled(id: String, enabled: Bool) {
@@ -369,7 +373,7 @@ public final class MeteringHost {
     // MARK: - Focus and dormancy (D9)
 
     @discardableResult
-    private func recomputeFocus() -> Bool {
+    private func recomputeFocus(overridingHold: Bool = false) -> Bool {
         let candidates = enrolledProfiles.map { profile in
             FocusCandidate(
                 id: profile.id, order: profile.order,
@@ -379,7 +383,7 @@ public final class MeteringHost {
                 shown: profile.showInMenuBar)
         }
         let next = FocusRule.focused(candidates, pin: pin)
-        guard next != focusedProfileID, !focusHeld else { return false }
+        guard next != focusedProfileID, !focusHeld || overridingHold else { return false }
         focusedProfileID = next
         let counts = candidates.map { "\($0.id) \($0.recentActivity)" }.joined(separator: ", ")
         log("focus → \(next ?? "none") (files in \(Int(ProfileActivity.window / 86400))d: \(counts))")

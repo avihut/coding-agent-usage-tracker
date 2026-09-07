@@ -50,6 +50,8 @@ struct AccountStrip: View {
     /// since a third segmented control does not fit 360pt).
     let onToggleForm: () -> Void
     let onFocus: (String) -> Void
+    /// Hands focus back to activity.
+    var onAuto: () -> Void = {}
 
     private var profiles: [Profile] { registry.shownProfiles }
 
@@ -79,6 +81,23 @@ struct AccountStrip: View {
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(.secondary)
             Spacer()
+            // A pick in the strip is for keeps (0.97.0); this is the way
+            // back to focus following activity, present only while a pick
+            // stands.
+            if registry.pinnedID != nil {
+                Button(action: onAuto) {
+                    Text("Auto")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Color.primary.opacity(0.07), in: Capsule())
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .pointerStyle(.link)
+                .help("Follow activity again — the account this Mac has worked in most over the last two weeks")
+            }
             Button(action: onToggleForm) {
                 Image(systemName: form == .chips ? "list.bullet" : "square.grid.3x1.below.line.grid.1x2")
                     .font(.system(size: 11, weight: .semibold))

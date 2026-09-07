@@ -2,9 +2,9 @@ import AppKit
 import UsageCore
 
 /// The several-accounts half of the renderer (0.96.0): how a cell draws
-/// under each `MenuBarStyle`, the geometry of bars/rings/sentinels, the hit
-/// rectangles the controller resolves a hover against, and the one image
-/// per account the `itemPerProfile` style needs. Split from
+/// in each `MenuBarForm`, the geometry of bars/rings/sentinels, the hit
+/// rectangles the controller resolves a hover against, and the split into
+/// one model per `NSStatusItem` for accounts that take their own. Split from
 /// StatusItemRenderer.swift along the house rule (a file past ~600 lines
 /// splits at a whole-type seam) — the drawing vocabulary and the single-cell
 /// path stay there, this file only knows about cells.
@@ -41,24 +41,25 @@ extension StatusItemRenderer {
 
     // MARK: - Composition
 
-    /// Several cells under one glyph. Every style lays out the same way —
-    /// glyph, then a cell per account — and differs only in what a cell
-    /// draws. `itemPerProfile` composes here too (as `bars`) but is never
-    /// drawn: the controller asks for `itemImages` instead.
+    /// Several cells under one glyph: glyph, then a cell per account, each
+    /// in its own form — the expanded one (focus, while focus expands) as
+    /// today's unlabeled digits.
     static func composeCells(_ model: Model) -> [Tagged] {
         var runs = glyphRuns(model, stale: model.stale)
         for (index, cell) in model.cells.enumerated() {
-            let expanded = model.style == .barsExpandedFocus && cell.focused
-                || model.style == .focusedSentinels && cell.focused
+            let expanded = isExpanded(cell, in: model)
+            // Digits end flush against their `%`, so a digits cell of
+            // either kind wants the wider spacing around it.
+            let wide = expanded || cell.form == .digits
             // The gap BEFORE a cell belongs to that cell, so the hit
             // regions stay contiguous with exactly one glyph region at the
             // left — a pointer in the space between two accounts lands on
             // the one it is moving toward, never back on the glyph.
             let gap: CGFloat = index == 0
                 ? (expanded ? glyphSpaceWidth : glyphGap)
-                : (expanded ? expandedGap : cellGap)
+                : (wide ? expandedGap : cellGap)
             runs.append(Tagged(run: .gap(gap), cell: cell.profileID))
-            runs.append(contentsOf: cellRuns(cell, model: model, expanded: expanded))
+            runs.append(contentsOf: cellRuns(cell, expanded: expanded))
         }
         return runs
     }
@@ -69,15 +70,19 @@ extension StatusItemRenderer {
         (" " as NSString).size(withAttributes: [.font: font]).width
     }
 
-    private static func cellRuns(_ cell: Cell, model: Model, expanded: Bool) -> [Tagged] {
+    /// One cell's runs, in its form. The expanded cell is today's item,
+    /// verbatim — the whole point of expanding focus is that the number you
+    /// check most stays exact; a cell whose OWN form is digits carries its
+    /// letter like every other form, since it is not "the" account.
+    static func cellRuns(_ cell: Cell, expanded: Bool) -> [Tagged] {
         func tag(_ runs: [Run]) -> [Tagged] {
             runs.map { Tagged(run: $0, cell: cell.profileID) }
         }
-        // The expanded cell is today's item, verbatim — the whole point of
-        // the default style is that the number you check most stays exact.
         if expanded { return tag(segmentRuns(cell.segments, stale: cell.stale)) }
-        switch model.style {
-        case .focusedSentinels:
+        switch cell.form {
+        case .digits:
+            return tag(monogramRuns(cell) + segmentRuns(cell.segments, stale: cell.stale))
+        case .dot:
             return tag([.sentinel(
                 sentinelColor(cell), filled: (worstSeverity(cell) ?? 0) >= badgeSeverity)])
         case .rings:
@@ -87,11 +92,17 @@ extension StatusItemRenderer {
                 stale: cell.stale)])
         case .compactDigits:
             return tag(monogramRuns(cell) + compactRuns(cell))
-        case .bars, .barsExpandedFocus, .itemPerProfile:
+        case .bars:
             guard cell.segments != nil else { return tag(monogramRuns(cell) + [.text("–", quiet(cell), font)]) }
             return tag(monogramRuns(cell) + [.bars(
                 (0...2).map { slot(cell.segments, rank: $0, stale: cell.stale) }, stale: cell.stale)])
         }
+    }
+
+    /// One cell alone, no glyph — the Settings thumbnails: an account's
+    /// own numbers in a candidate form.
+    static func cellImage(_ cell: Cell, height: CGFloat) -> NSImage {
+        image(runs: cellRuns(cell, expanded: false), height: height)
     }
 
     /// Identity is a letter, in the tags' own dim ink — never a color,
@@ -257,18 +268,35 @@ extension StatusItemRenderer {
         }
     }
 
-    /// The `itemPerProfile` style: one image per account, each today's
-    /// item. Only the FIRST carries the provider-level dressing (the
-    /// incident capsule, the pending-notice dot) — an alarm repeated once
-    /// per account would read as several outages.
-    static func itemImages(for model: Model, height: CGFloat) -> [(profileID: String, image: NSImage)] {
-        model.cells.enumerated().map { index, cell in
-            let single = Model(
-                glyph: model.glyph,
-                incident: index == 0 ? model.incident : nil,
-                indicator: index == 0 ? model.indicator : false,
-                cells: [cell], style: model.style)
-            return (cell.profileID, image(for: single, height: height))
+    /// One model per `NSStatusItem`: the shared item (nil id) holding every
+    /// cell that has not asked for its own, then an item per account that
+    /// has — in the accounts' order, so the bar reads left to right the way
+    /// the strip reads top to bottom. Only the FIRST item carries the
+    /// provider-level dressing (the incident capsule, the pending-notice
+    /// dot) — an alarm repeated once per account would read as several
+    /// outages.
+    struct ItemModel: Equatable {
+        /// Nil = the shared item.
+        let profileID: String?
+        let model: Model
+    }
+
+    static func itemModels(for model: Model) -> [ItemModel] {
+        var items: [ItemModel] = []
+        let shared = model.cells.filter { !$0.ownItem }
+        if !shared.isEmpty || model.cells.isEmpty {
+            items.append(ItemModel(profileID: nil, model: Model(
+                glyph: model.glyph, incident: model.incident, indicator: model.indicator,
+                cells: shared, expandsFocus: model.expandsFocus)))
         }
+        for cell in model.cells where cell.ownItem {
+            let first = items.isEmpty
+            items.append(ItemModel(profileID: cell.profileID, model: Model(
+                glyph: model.glyph,
+                incident: first ? model.incident : nil,
+                indicator: first ? model.indicator : false,
+                cells: [cell], expandsFocus: model.expandsFocus)))
+        }
+        return items
     }
 }

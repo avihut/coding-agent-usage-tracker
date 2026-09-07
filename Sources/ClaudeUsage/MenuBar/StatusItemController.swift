@@ -12,7 +12,7 @@ import UsageCore
 /// clicking a cell focuses that account and toggles the main panel.
 ///
 /// Several accounts (0.96.0): ONE grouped item carries every cell under one
-/// provider glyph — except in the `itemPerProfile` style, where each account
+/// provider glyph — and an account that asked for its own item (0.97.0)
 /// gets its own `NSStatusItem` (its own `autosaveName`, so ⌘-drag ordering
 /// and removal work per account, and removal persists as "don't show this
 /// one in the bar"). With one account the model, the item and the drawing
@@ -59,7 +59,7 @@ final class StatusItemController: NSResponder {
     /// Set while items are being torn down and rebuilt, so the visibility
     /// KVO doesn't read our own removals as the user hiding an account.
     private var isRebuildingItems = false
-    private var style: MenuBarStyle = .stored()
+    private var expandsFocus = MenuBarPreferences.expandsFocus()
 
     /// The account the panel, the windows and the ⋯ menu answer for.
     private var store: UsageStore { registry.focusedStore }
@@ -86,14 +86,14 @@ final class StatusItemController: NSResponder {
         }
         registry.onProfilesChange = { [weak self] in self?.render() }
 
-        // The menu bar style is a plain @AppStorage in Settings; the bar
-        // has to notice it change. Cheap: `render` skips an identical model.
+        // Focus expansion is a plain @AppStorage in Settings; the bar has
+        // to notice it change. Cheap: `render` skips an identical model.
         defaultsObserver = NotificationCenter.default.addObserver(
             forName: UserDefaults.didChangeNotification, object: nil, queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
-                guard let self, self.style != .stored() else { return }
-                self.style = .stored()
+                guard let self, self.expandsFocus != MenuBarPreferences.expandsFocus() else { return }
+                self.expandsFocus = MenuBarPreferences.expandsFocus()
                 self.render()
             }
         }
@@ -120,7 +120,7 @@ final class StatusItemController: NSResponder {
             rootView: UsagePanelView(
                 registry: registry,
                 onOpenSettings: { [weak self] landing in
-                    self?.showSettings(landing: landing)
+                    self?.showSettings(pane: .accounts, landing: landing)
                 },
                 onOpenSessions: { [weak self] in
                     self?.showSessions()
@@ -186,53 +186,20 @@ final class StatusItemController: NSResponder {
 
     // MARK: - Items
 
-    /// What the bar should show right now: the digest's cells when more
-    /// than one account is metered, else today's model straight off the
-    /// focused store — a one-account Mac keeps its exact pre-0.96 data path,
-    /// not just its pixels.
-    private func makeModel() -> StatusItemRenderer.Model {
-        let store = registry.focusedStore
-        let cells = registry.menuBarCells
-        guard cells.count > 1 else {
-            return StatusItemRenderer.model(
-                for: store.state, predictions: store.predictions,
-                glyph: store.provider.menuBarGlyph,
-                serviceStatus: store.serviceStatus, notices: store.notices)
-        }
-        return StatusItemRenderer.model(
-            cells: cells, focusedID: registry.focusedID,
-            glyph: store.provider.menuBarGlyph, style: style,
-            serviceStatus: store.serviceStatus, notices: store.notices)
-    }
-
+    /// What the bar should show right now — built by the one builder the
+    /// Settings preview also draws from, split into one model per item.
     private func render() {
-        let model = makeModel()
+        let model = MenuBarModelBuilder.model(registry: registry, expandsFocus: expandsFocus)
         let height = NSStatusBar.system.thickness
-        let perProfile = model.style.isItemPerProfile && model.cells.count > 1
-        let wanted: [String?] = perProfile ? model.cells.map(\.profileID) : [nil]
+        let itemModels = StatusItemRenderer.itemModels(for: model)
+        let wanted = itemModels.map(\.profileID)
         if items.map(\.profileID) != wanted { rebuildItems(for: wanted) }
-
-        if perProfile {
-            let images = StatusItemRenderer.itemImages(for: model, height: height)
-            for (item, drawn) in zip(items, images) {
-                let single = StatusItemRenderer.Model(
-                    glyph: model.glyph,
-                    incident: item.profileID == model.cells.first?.profileID ? model.incident : nil,
-                    indicator: item.profileID == model.cells.first?.profileID ? model.indicator : false,
-                    cells: model.cells.filter { $0.profileID == item.profileID },
-                    style: model.style)
-                guard item.model != single else { continue }
-                item.model = single
-                item.rects = StatusItemRenderer.cellRects(for: single, height: height)
-                draw(drawn.image, in: item)
-            }
-            return
+        for (item, drawn) in zip(items, itemModels) {
+            guard item.model != drawn.model else { continue }
+            item.model = drawn.model
+            item.rects = StatusItemRenderer.cellRects(for: drawn.model, height: height)
+            draw(StatusItemRenderer.image(for: drawn.model, height: height), in: item)
         }
-        guard let item = items.first else { return }
-        guard item.model != model else { return }
-        item.model = model
-        item.rects = StatusItemRenderer.cellRects(for: model, height: height)
-        draw(StatusItemRenderer.image(for: model, height: height), in: item)
     }
 
     /// Drawn as literal pixels, not attributedTitle: the bars, dots and

@@ -197,12 +197,18 @@ dialog. Spec §10 amended 2026-09-06.
 
 The menu bar leads with whichever account you have actually been using:
 focus follows the volume of session files over the trailing fortnight
-(newest write breaks ties), or pin one in Settings. Six menu bar styles
-(bars with the focused account expanded, plain bars, rings, digits,
-sentinels, or a separate menu bar item per account); the panel gains an
-account strip that doubles as the selector — rows, chips, or every account
-stacked. An account whose transcripts go quiet for 30 days goes dormant
-and stops polling entirely until it is used again.
+(newest write breaks ties) — until you pick one, in the panel's account
+strip or in Settings, which pins it until you ask for Auto again. Each
+account draws in the menu bar in its own form — digits, bars, rings,
+compact digits, or a dot — set per account or for all of them at once,
+with the focused account optionally expanded to its full numbers whatever
+its form, and any account can take a menu bar item of its own. Settings →
+Accounts shows the bar as it will draw, live, with every option pictured
+in your own numbers; drag the accounts across the preview to order them.
+The panel gains an account strip that doubles as the selector — rows,
+chips, or every account stacked. An account whose transcripts go quiet
+for 30 days goes dormant and stops polling entirely until it is used
+again.
 
 On the command line, an account is a selector rather than a mode:
 
