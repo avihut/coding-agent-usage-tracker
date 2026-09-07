@@ -194,7 +194,7 @@ final class StatusItemController: NSResponder {
         let height = NSStatusBar.system.thickness
         let itemModels = StatusItemRenderer.itemModels(for: model)
         let wanted = itemModels.map(\.profileID)
-        if items.map(\.profileID) != wanted { rebuildItems(for: wanted) }
+        if items.map(\.profileID) != wanted { reconcileItems(for: wanted) }
         for (item, drawn) in zip(items, itemModels) {
             guard item.model != drawn.model else { continue }
             item.model = drawn.model
@@ -214,15 +214,32 @@ final class StatusItemController: NSResponder {
         button.imagePosition = .imageOnly
     }
 
-    private func rebuildItems(for wanted: [String?]) {
+    /// Adds and removes items to match `wanted` WITHOUT touching the ones
+    /// that stay — above all the shared item, which is created once per
+    /// process and never again (v0.97.2, user-reported blank bar): a
+    /// status item's identity is its autosave name, and the shared one
+    /// carries AppKit's auto-generated first name that every launch since
+    /// 0.1 has used. Tearing it down and creating it afresh handed the bar
+    /// a NEW item, which a menu bar manager (Bartender) filed under its
+    /// policy for new items — hidden — and remembered.
+    private func reconcileItems(for wanted: [String?]) {
         isRebuildingItems = true
         defer { isRebuildingItems = false }
+        var kept: [String?: Item] = [:]
         for item in items {
-            item.visibility = nil
-            NSStatusBar.system.removeStatusItem(item.statusItem)
+            if wanted.contains(item.profileID) {
+                kept[item.profileID] = item
+            } else {
+                item.visibility = nil
+                NSStatusBar.system.removeStatusItem(item.statusItem)
+            }
         }
         items = wanted.map { profileID in
+            if let existing = kept[profileID] { return existing }
             let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+            // A persisted "removed" state (a ⌘-drag off the bar) must not
+            // keep an account the person just asked to show off the bar.
+            statusItem.isVisible = true
             let item = Item(profileID: profileID, statusItem: statusItem)
             if let profileID {
                 // Per-account items are the user's to arrange and to remove;

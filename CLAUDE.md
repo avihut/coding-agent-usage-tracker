@@ -241,6 +241,23 @@ the README rather than silently deviating.
   round-trip that can hang; `LoginItemState.refresh()` reads it OFF the
   main thread and the Launch-at-login toggle waits disabled until `known`
   — never call it synchronously from a view again.
+  STATUS ITEM IDENTITY (v0.97.2, user-reported "nothing in the menu
+  bar"): an `NSStatusItem`'s identity is its autosave name, and the
+  shared item's is AppKit's auto-generated first name — every launch
+  since 0.1 has used it. `StatusItemController.reconcileItems` therefore
+  NEVER removes the shared item: it adds/removes own-item entries around
+  it. Tearing it down and creating it afresh (0.97.0's rebuild) handed the
+  bar a NEW item, which Bartender 6 filed under its new-item policy —
+  hidden — and remembered; System Events (`menu bar item of menu bar 2 of
+  process "ClaudeUsage"`) still listed the item, at Bartender's hidden x.
+  Every created item gets `isVisible = true` (a persisted ⌘-drag removal
+  must not keep a re-shown account off the bar). ⌘, (v0.97.2): the SwiftUI
+  `Settings { EmptyView() }` scene bound ⌘, to an EMPTY window — it is
+  gone (`MenuBarExtra(isInserted: false)` is the inert scene); a LOCAL
+  keyDown monitor in AppDelegate opens the real window; an app-menu
+  "Settings…" item could not be made to survive SwiftUI's menu rebuilds
+  and was dropped. `log show` never surfaced this app's OSLog info lines
+  here — diagnose with `sample`, System Events, and `--snapshot`.
 - RUST TUI (2026-08-16 v0.67.0, phase T1; tui/ cargo crate, usage-tui):
   the dependency rule is SCOPED — UsageCore/app/usaged stay zero-dep
   Swift; the TUI carries exactly ratatui, serde, serde_json, time

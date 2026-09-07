@@ -7,14 +7,18 @@ struct ClaudeUsageApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
     var body: some Scene {
-        // No windows — StatusItemController owns all UI.
-        Settings { EmptyView() }
+        // No windows — StatusItemController owns all UI. No Settings scene
+        // either (v0.97.2, user-reported): SwiftUI bound ⌘, to it, and an
+        // empty scene is an empty, dead window. ⌘, is a local key monitor
+        // in the delegate and opens the real window.
+        MenuBarExtra("", isInserted: .constant(false)) { EmptyView() }
     }
 }
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var controller: StatusItemController?
+    private var settingsKeyMonitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let bundleID = Bundle.main.bundleIdentifier ?? "com.avihu.ClaudeUsage"
@@ -29,6 +33,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let registry = ProviderRegistry(
             bundleID: bundleID, launchOverride: Self.launchProviderOverride())
         controller = StatusItemController(registry: registry)
+        // ⌘, wherever this app is key — the panel, a hosted window. A
+        // LOCAL monitor rather than a main-menu item: SwiftUI owns that
+        // menu and rebuilds it on its own schedule (an item inserted at
+        // launch or on activation never survived to be seen), and the
+        // monitor sees the key equivalent before the menu would anyway.
+        settingsKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+                  event.charactersIgnoringModifiers == ","
+            else { return event }
+            self?.controller?.showSettings()
+            return nil
+        }
         // Touch the updater so its init sweeps a previous update's aside
         // bundle — lazily it would only wake when the NEXT release's chip
         // renders, leaving a hidden stale app copy beside this one.
