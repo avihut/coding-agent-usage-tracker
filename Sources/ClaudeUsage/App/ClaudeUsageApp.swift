@@ -72,6 +72,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let fake = Self.launchFakeNotices() {
             registry.activeStore.installFakeNotices(fake.card, outages: fake.outages)
         }
+        // `--fake-profiles` installs a second, synthetic account ("Work",
+        // S 42% and a watched W 80%, no scoped meter) as a fixed-digest
+        // face, so the account strip, the menu bar cells and the Accounts
+        // settings card can be verified on a machine with one real
+        // account. It borrows the live digest for everything else, so the
+        // charts and sessions below the meters stay realistic.
+        if CommandLine.arguments.contains("--fake-profiles") {
+            Self.installFakeProfile(into: registry)
+        }
         // Verification hatches: `ClaudeUsage --settings [--pane-cost]` /
         // `--panel` open UI straight away (the ⋯ menu can't be scripted,
         // and AX row selection can't drive the sidebar); `--provider <id>`
@@ -93,7 +102,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor in
                 // Let the digest, the scan and the first layout land.
                 try? await Task.sleep(for: .seconds(3))
-                Self.writeSnapshots(store: registry.activeStore, to: directory)
+                Self.writeSnapshots(registry: registry, to: directory)
                 NSApp.terminate(nil)
             }
         }
@@ -107,7 +116,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return URL(fileURLWithPath: arguments[flag + 1], isDirectory: true)
     }
 
-    private static func writeSnapshots(store: UsageStore, to directory: URL) {
+    private static func writeSnapshots(registry: ProviderRegistry, to directory: URL) {
+        let store = registry.focusedStore
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         writeStatusItemSnapshots(to: directory)
         func write(_ renderer: ImageRenderer<some View>, _ name: String) {
@@ -125,6 +135,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 card: notices, onDismiss: { _ in }, onDismissAll: {},
                 canOpen: { store.provider.noticeDestination(for: $0) != nil }, onOpen: { _ in })
             write(ImageRenderer(content: section.padding(14).frame(width: 360)), "notices.png")
+        }
+        // The account strip, both selector forms — the panel can't be
+        // rendered whole (ImageRenderer leaves a ScrollView's content
+        // blank), and with `--fake-profiles` this is the only way to see
+        // the multi-account panel head on a one-account Mac.
+        if registry.shownProfiles.count > 1 {
+            for form in [PanelAccountForm.stripRows, .chips] {
+                let strip = AccountStrip(
+                    registry: registry, form: form, onToggleForm: {}, onFocus: { _ in })
+                write(
+                    ImageRenderer(content: strip.padding(14).frame(width: 360)),
+                    form == .chips ? "strip-chips.png" : "strip.png")
+            }
         }
         // The weekly meter's card, lit at the first pending reset notice
         // exactly as a click on that notice would open it.
@@ -278,6 +301,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         try? sidecar.joined(separator: "\n").appending("\n")
             .write(to: directory.appending(path: "statusitem-cells.txt"), atomically: true, encoding: .utf8)
+    }
+
+    /// The synthetic second account. Its digest is the live one with two
+    /// meters rewritten and the third dropped — the absent scoped bar is
+    /// exactly the case a one-account Mac can't otherwise produce.
+    private static func installFakeProfile(into registry: ProviderRegistry) {
+        let url = LiveState.fileURL(bundleID: Bundle.main.bundleIdentifier ?? "com.avihu.ClaudeUsage")
+        guard let data = try? Data(contentsOf: url),
+              let live = try? LiveState.decoder().decode(LiveState.self, from: data)
+        else { return }
+        func rewrite(_ meter: LiveMeter, percent: Int, level: String, severity: Double?) -> LiveMeter {
+            LiveMeter(
+                id: meter.id, label: meter.label, tag: meter.tag, percent: percent, level: level,
+                rank: meter.rank, rateWindowSeconds: meter.rateWindowSeconds,
+                forcesWarning: meter.forcesWarning,
+                risk: severity.flatMap { RiskRamp.color(severity: $0) },
+                resetsAt: meter.resetsAt, limitWindow: meter.limitWindow,
+                scopedModelName: meter.scopedModelName, resetCaption: meter.resetCaption,
+                forecast: meter.forecast, series: meter.series, stretches: meter.stretches,
+                modelSeries: meter.modelSeries)
+        }
+        var meters: [LiveMeter] = []
+        if let session = live.meters.first(where: { $0.rank == 0 }) {
+            meters.append(rewrite(session, percent: 42, level: "normal", severity: nil))
+        }
+        if let weekly = live.meters.first(where: { $0.rank == 1 }) {
+            meters.append(rewrite(weekly, percent: 80, level: "warning", severity: 0.55))
+        }
+        let menuBar = meters.map { meter in
+            SegmentStatus(
+                tag: meter.tag, percent: meter.percent, level: meter.level,
+                severity: meter.forecast?.severity, risk: meter.risk)
+        }
+        // The face reads its own SECTION out of the digest, so the fake
+        // has to name itself — a digest with no profiles answers only for
+        // `default`, and the fake would render as "no data yet".
+        let section = ProfileState(
+            id: "fake-work", providerID: live.engine.providerID, label: "Work", nickname: "Work",
+            monogram: "W", enabled: true, isFocused: false, dormant: false,
+            lastActivityAt: Date(), homeDisplayPath: "~/.claude-work",
+            engine: live.engine, meters: meters, menuBar: menuBar, models: live.models,
+            activity: live.activity, sessions: live.sessions, accountPresence: nil)
+        let fake = LiveState(
+            schemaVersion: live.schemaVersion, sessionsCap: live.sessionsCap,
+            engine: live.engine, meters: meters,
+            menuBar: menuBar,
+            models: live.models, activity: live.activity, sessions: live.sessions,
+            serviceStatus: live.serviceStatus, appUpdate: live.appUpdate,
+            accountPresence: nil, notices: live.notices, outages: live.outages,
+            focusedProfile: "fake-work", profiles: [section])
+        let profile = Profile(
+            id: "fake-work", providerID: registry.activeProvider.id,
+            home: FileManager.default.homeDirectoryForCurrentUser.appending(path: ".claude-work"),
+            nickname: "Work", addedAt: Date())
+        registry.installFakeProfile(
+            profile,
+            store: UsageStore(
+                profile: profile, provider: registry.activeProvider,
+                bundleID: Bundle.main.bundleIdentifier ?? "com.avihu.ClaudeUsage", fixed: fake))
     }
 
     private static func launchProviderOverride() -> String? {

@@ -2,9 +2,10 @@ import SwiftUI
 import UsageCore
 
 struct UsagePanelView: View {
-    var store: UsageStore
-    /// Drives the ⋯ menu's Metering picker; the panel itself is rebuilt by
-    /// the status item whenever the active provider changes.
+    /// The one thing handed in (0.96.0): the panel shows whichever account
+    /// is focused and re-renders when that changes, so the status item no
+    /// longer rebuilds it on every focus move. A provider switch still
+    /// rebuilds — the catalog and accent statics change under it.
     var registry: ProviderRegistry
     /// Wired by StatusItemController: closes the panel, opens the window.
     let onOpenSettings: () -> Void
@@ -50,16 +51,66 @@ struct UsagePanelView: View {
     /// and menu item for exactly that version; the next one speaks.
     @AppStorage("updateSkippedVersion") private var skippedUpdateVersion = ""
 
+    /// How several accounts are presented (decision D6). Absent from the
+    /// panel entirely while one account shows.
+    @AppStorage(PanelAccountForm.key) private var accountFormRaw = PanelAccountForm.standard.rawValue
+
     /// The status popover's two entry points (surfaces S1 and S4).
     enum StatusAnchor: String, Identifiable {
         case footer, banner
         var id: String { rawValue }
     }
 
+    /// The focused account's face — every existing call site reads it.
+    private var store: UsageStore { registry.focusedStore }
+
+    private var accountForm: PanelAccountForm {
+        PanelAccountForm(rawValue: accountFormRaw) ?? .standard
+    }
+
+    /// Meters listed per account, so the strip's selector steps aside.
+    private var isStacked: Bool {
+        accountForm == .stacked && registry.shownProfiles.count > 1
+    }
+
+    /// One row's identity in `openMeter` / `hoveredMeter` / the frame
+    /// preferences. The focused-account forms keep the bare meter id — the
+    /// pre-0.96 spelling — so nothing about a one-account panel changes.
+    private func meterKey(_ meterID: String, profileID: String?) -> String {
+        guard let profileID else { return meterID }
+        return "\(profileID)|\(meterID)"
+    }
+
+    /// Which account and meter a key names.
+    private func meterKeyParts(_ key: String) -> (profileID: String, meterID: String) {
+        guard let separator = key.firstIndex(of: "|") else { return (registry.focusedID, key) }
+        return (String(key[key.startIndex..<separator]), String(key[key.index(after: separator)...]))
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
+                    AccountStrip(
+                        registry: registry, form: accountForm,
+                        onToggleForm: { accountFormRaw = accountForm == .chips
+                            ? PanelAccountForm.stripRows.rawValue : PanelAccountForm.chips.rawValue },
+                        onFocus: { registry.focus($0) })
+                        // Two fingers across the strip step through the
+                        // accounts — the heatmap pager's gesture and its
+                        // sign convention (fingers left = the next one).
+                        // Attached here, not inside the strip: an
+                        // NSViewRepresentable in that view would render as
+                        // a placeholder in every headless snapshot.
+                        .background(HorizontalSwipeCatcher(
+                            enabled: registry.shownProfiles.count > 1 && accountForm != .stacked
+                        ) { direction in
+                            if let next = AccountStrip.step(
+                                direction, in: registry.shownProfiles, focusedID: registry.focusedID)
+                            {
+                                registry.focus(next)
+                            }
+                        })
                     noticesSection
                     serviceStatusSection
                     errorBlock
@@ -81,6 +132,12 @@ struct UsagePanelView: View {
                         weeklyAuditMeter: auditMeter(rank: 1))
                     sessionsSection
                 }
+                // Switching accounts crossfades everything below the strip
+                // (the drill idiom) — a fresh subtree, so nothing of the
+                // previous account's chart or hover state lingers.
+                .id(isStacked ? "stacked" : registry.focusedID)
+                .transition(.opacity)
+                .animation(.easeInOut(duration: 0.16), value: registry.focusedID)
                 .padding(.horizontal, 14)
                 .padding(.top, 14)
                 .padding(.bottom, 10)
@@ -105,19 +162,21 @@ struct UsagePanelView: View {
         .onPreferenceChange(MeterFramePreference.self) { meterFrames = $0 }
         .popover(
             item: openSelection, attachmentAnchor: openAnchor, arrowEdge: .trailing
-        ) { meter in
+) { selection in
+            let owner = registry.store(for: selection.profileID) ?? store
             MeterHistoryView(
-                meter: meter, samples: store.samples,
-                timeline: store.tokenTimeline, pricing: store.pricing,
-                prediction: store.predictions[meter.label],
-                outcomes: store.windowOutcomes,
-                agentName: store.provider.agentName,
+                meter: selection.meter, samples: owner.samples,
+                timeline: owner.tokenTimeline, pricing: owner.pricing,
+                prediction: owner.predictions[selection.meter.label],
+                outcomes: owner.windowOutcomes,
+                agentName: owner.provider.agentName,
                 // Per ACCOUNT, not per provider: two accounts' popovers
                 // remember their own span and frame (identical to the old
                 // key for the default profile, so nothing resets).
-                providerID: store.profile.scopeKey,
-                highlightReset: litReset?.meter == meter.id ? litReset?.at : nil,
-                outages: store.outages,
+                providerID: owner.profile.scopeKey,
+                accountTitle: accountTitle(for: owner),
+                highlightReset: litReset?.meter == selection.key ? litReset?.at : nil,
+                outages: owner.outages,
                 onOpenOutage: openOutage)
                 .onHover { inside in
                     hoveringPopover = inside
@@ -137,6 +196,19 @@ struct UsagePanelView: View {
             }
         }
         .onAppear { store.scanActivity() }
+        // The panel's own state names rows and moments of ONE account;
+        // none of it survives a switch (`.id` resets the subtree, not the
+        // state declared here).
+        .onChange(of: registry.focusedID) { _, _ in
+            openMeter = nil
+            hoveredMeter = nil
+            statusAnchor = nil
+            litReset = nil
+            activityFocus = nil
+            hoveredSession = nil
+            meterFrames = [:]
+            store.scanActivity()
+        }
         // Re-sync the login-item mirror between panel sessions: the user
         // can flip registration in Settings or System Settings while the
         // panel sits closed-but-alive (onAppear won't fire again).
@@ -156,22 +228,36 @@ struct UsagePanelView: View {
     /// The shared popover's item. Resolving through the live snapshot keeps
     /// the content current across refreshes (Meter.id is positional and
     /// stable), and a meter vanishing from the API dismisses cleanly.
-    private var openSelection: Binding<Meter?> {
+    private var openSelection: Binding<MeterSelection?> {
         Binding(
             get: {
                 guard let openMeter else { return nil }
-                return store.state.snapshot?.meters.first { $0.id == openMeter }
+                let parts = meterKeyParts(openMeter)
+                guard let owner = registry.store(for: parts.profileID) ?? registry.store(for: registry.focusedID),
+                      let meter = owner.state.snapshot?.meters.first(where: { $0.id == parts.meterID })
+                else { return nil }
+                return MeterSelection(key: openMeter, profileID: parts.profileID, meter: meter)
             },
-            set: { meter in
+            set: { selection in
                 // Two popovers hosted on one view race each other exactly as
                 // the per-row modifiers did (see this view's opening note) —
                 // presenting one while the other is up loses, and SwiftUI
                 // writes the failure back through the binding. They are
                 // mutually exclusive here so the second one always wins.
-                if meter != nil { statusAnchor = nil }
-                if meter == nil { litReset = nil }
-                openMeter = meter?.id
+                if selection != nil { statusAnchor = nil }
+                if selection == nil { litReset = nil }
+                openMeter = selection?.key
             })
+    }
+
+    /// Which account's meter the shared popover is showing. Keyed by the
+    /// row key, so the stacked form's two "Session (5h)" rows are distinct
+    /// items and switching between them re-presents rather than no-ops.
+    struct MeterSelection: Identifiable, Equatable {
+        let key: String
+        let profileID: String
+        let meter: Meter
+        var id: String { key }
     }
 
     private var openAnchor: PopoverAttachmentAnchor {
@@ -179,6 +265,15 @@ struct UsagePanelView: View {
             return .rect(.rect(frame))
         }
         return .rect(.bounds)
+    }
+
+    /// Whose card the popover is — shown only once more than one account
+    /// shows, so a one-account popover is unchanged.
+    private func accountTitle(for owner: UsageStore) -> MeterHistoryView.AccountTitle? {
+        guard registry.shownProfiles.count > 1 else { return nil }
+        return MeterHistoryView.AccountTitle(
+            monogram: registry.monogram(for: owner.profile),
+            label: registry.label(for: owner.profile))
     }
 
     /// The leave grace: close only once the cursor has settled on neither a
@@ -425,7 +520,36 @@ struct UsagePanelView: View {
     }
 
     @ViewBuilder private var content: some View {
-        switch store.state {
+        if isStacked {
+            ForEach(registry.shownProfiles) { profile in
+                if let owner = registry.store(for: profile.id) {
+                    accountHeader(profile, focused: profile.id == registry.focusedID)
+                    meterList(owner, profileID: profile.id)
+                }
+            }
+        } else {
+            meterList(store, profileID: nil)
+        }
+    }
+
+    /// The stacked form's per-account heading: whose meters follow.
+    private func accountHeader(_ profile: Profile, focused: Bool) -> some View {
+        HStack(spacing: 6) {
+            MonogramTile(monogram: registry.monogram(for: profile), focused: focused, size: 15)
+            Text(registry.label(for: profile))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(focused ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer()
+        }
+        .contentShape(Rectangle())
+        .pointerStyle(.link)
+        .onTapGesture { registry.focus(profile.id) }
+    }
+
+    @ViewBuilder private func meterList(_ owner: UsageStore, profileID: String?) -> some View {
+        switch owner.state {
         case .loading:
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
@@ -435,8 +559,9 @@ struct UsagePanelView: View {
             ForEach(snapshot.meters) { meter in
                 MeterRow(
                     meter: meter,
-                    stale: store.state.isStale,
-                    prediction: store.predictions[meter.label],
+                    stale: owner.state.isStale,
+                    prediction: owner.predictions[meter.label],
+                    key: meterKey(meter.id, profileID: profileID),
                     openMeter: $openMeter,
                     hoveredMeter: $hoveredMeter,
                     onLeave: scheduleHideIfLeft)

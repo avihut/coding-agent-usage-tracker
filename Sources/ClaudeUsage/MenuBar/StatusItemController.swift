@@ -112,11 +112,13 @@ final class StatusItemController: NSResponder {
     // nonisolated deinit can't touch main-actor state under strict
     // concurrency anyway.
 
+    /// The panel follows the registry's focus on its own, so this is built
+    /// once per PROVIDER, not per focus change.
     private func makePanelHost() -> NSHostingController<UsagePanelView> {
         panelStore = registry.focusedStore
         let host = NSHostingController(
             rootView: UsagePanelView(
-                store: panelStore, registry: registry,
+                registry: registry,
                 onOpenSettings: { [weak self] in
                     self?.showSettings()
                 },
@@ -140,6 +142,7 @@ final class StatusItemController: NSResponder {
     private func adopt(_ newStore: UsageStore) {
         guard newStore !== panelStore else { return }
         let providerChanged = newStore.provider.id != panelStore.provider.id
+        panelStore = newStore
         hoverTask?.cancel()
         if hoverPopover.isShown { hoverPopover.performClose(nil) }
         if providerChanged {
@@ -151,8 +154,8 @@ final class StatusItemController: NSResponder {
             sessionsController?.close()
             sessionsController = nil
             sessionsStore = nil
+            popover.contentViewController = makePanelHost()
         }
-        popover.contentViewController = makePanelHost()
         observeState()
         render()
     }
@@ -440,7 +443,6 @@ final class StatusItemController: NSResponder {
         // write must not swap the panel out from under the pointer.
         registry.holdFocus(true)
         NSApp.activate()
-        if panelStore !== store { popover.contentViewController = makePanelHost() }
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         markNoticesSeen(onlyMenuBarSurfaces: false)
         // Cooperative activation usually leaves this app inactive, and a

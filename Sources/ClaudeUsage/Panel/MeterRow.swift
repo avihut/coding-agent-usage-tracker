@@ -5,6 +5,11 @@ struct MeterRow: View {
     let meter: Meter
     let stale: Bool
     let prediction: UsagePrediction?
+    /// What the panel's popover authority calls this row. Defaults to the
+    /// meter's own id — the pre-0.96 spelling, and still what a
+    /// one-account panel uses; the stacked account form passes
+    /// "<profile>|<meter>" so two accounts' rows can't collide.
+    var key: String?
 
     /// Panel-wide single-popover authority and hover tracker, owned by
     /// UsagePanelView — which also hosts the one shared popover.
@@ -12,6 +17,9 @@ struct MeterRow: View {
     @Binding var hoveredMeter: String?
     /// Panel-owned leave grace (cursor on neither a row nor the popover).
     let onLeave: () -> Void
+
+    /// This row's identity in `openMeter`/`hoveredMeter`.
+    private var rowKey: String { key ?? meter.id }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -46,7 +54,7 @@ struct MeterRow: View {
         .background(GeometryReader { geo in
             Color.clear.preference(
                 key: MeterFramePreference.self,
-                value: [meter.id: geo.frame(in: .named(UsagePanelView.panelSpace))])
+                value: [rowKey: geo.frame(in: .named(UsagePanelView.panelSpace))])
         })
         .padding(.vertical, -5)
         .padding(.horizontal, -7)
@@ -55,30 +63,31 @@ struct MeterRow: View {
         // the dwell), but while any popover is up, hovering a sibling row
         // switches to it instantly. Hiding is the panel's leave grace.
         .onHover { inside in
+            let key = rowKey
             if inside {
-                hoveredMeter = meter.id
+                hoveredMeter = key
                 if openMeter != nil {
-                    openMeter = meter.id
+                    openMeter = key
                 } else {
                     Task { @MainActor in
                         try? await Task.sleep(for: .milliseconds(120))
-                        if hoveredMeter == meter.id && openMeter == nil {
-                            openMeter = meter.id
+                        if hoveredMeter == key && openMeter == nil {
+                            openMeter = key
                         }
                     }
                 }
             } else {
-                if hoveredMeter == meter.id { hoveredMeter = nil }
+                if hoveredMeter == key { hoveredMeter = nil }
                 onLeave()
             }
         }
-        .onTapGesture { openMeter = meter.id }
+        .onTapGesture { openMeter = rowKey }
     }
 
     /// Hover indicator — also stays lit while this row's popover is up, so
     /// the open popover visibly belongs to its row.
     private var lit: Bool {
-        hoveredMeter == meter.id || openMeter == meter.id
+        hoveredMeter == rowKey || openMeter == rowKey
     }
 
     /// "resets in 3h 20m" — joined by "runs out in 1h 05m" ONLY when the
