@@ -218,8 +218,13 @@ the README rather than silently deviating.
   draft order and `registry.reorder` lands it on release) both draw it,
   so the preview can't lie. `MenuBarFormPicker` tiles = `StatusItemRenderer
   .cellImage` of the account's LIVE numbers per form (pick by picture);
-  "All accounts" writes every record (`setMenuBarFormForAll`,
-  `commonMenuBarForm` nil = Mixed). FOCUS: a strip/cell click PINS
+  tiles are `fixedSize` under their own label row — squeezed beside a
+  label the digits swatch clipped, v0.97.1). WHICH FORM WINS IS A SWITCH
+  (v0.97.1, user-directed): `MenuBarPreferences.uniformKey` ("Same form
+  for every account", default ON) + `uniformFormKey`; `Values.form(for:)`
+  is the one resolver, per-account rows show a caption instead of a
+  picker while it is on. `MenuBarPreferences.Values` is read once per
+  render (status item observer diff, preview, hatch). FOCUS: a strip/cell click PINS
   (`registry.focus` = overlay `manualFocusID` shown at once + `pin`,
   overlay lifted when the host agrees; `MeteringHost.setPin` overrides the
   panel hold — the hold defers ACTIVITY, never a click); the strip header's
@@ -231,7 +236,11 @@ the README rather than silently deviating.
   activity; credential + identity paths moved to General → About's
   privacy inventory, per account) / Panel; General is back to what it
   was. `--snapshot` writes `menubar-preview.png` (the NSView's own
-  `snapshot()`) and `form-picker.png`.
+  `snapshot()`) and `form-picker.png`. SETTINGS STALL (v0.97.1,
+  user-reported "minutes"): `SMAppService.mainApp.status` is an XPC
+  round-trip that can hang; `LoginItemState.refresh()` reads it OFF the
+  main thread and the Launch-at-login toggle waits disabled until `known`
+  — never call it synchronously from a view again.
 - RUST TUI (2026-08-16 v0.67.0, phase T1; tui/ cargo crate, usage-tui):
   the dependency rule is SCOPED — UsageCore/app/usaged stay zero-dep
   Swift; the TUI carries exactly ratatui, serde, serde_json, time
