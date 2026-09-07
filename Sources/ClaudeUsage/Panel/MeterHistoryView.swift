@@ -128,15 +128,27 @@ struct MeterHistoryView: View {
     /// The outage nub under the cursor, on the second floor.
     @State private var hoveredOutage: WindowPlot.OutageNub?
 
+    /// Whose card this is, when more than one account is metered — a
+    /// monogram chip and the account's label above the header. Nil on a
+    /// one-account Mac, where the card is exactly what it always was.
+    struct AccountTitle: Equatable {
+        let monogram: String
+        let label: String
+    }
+
+    let accountTitle: AccountTitle?
+
     init(
         meter: Meter, samples: [UsageSample], timeline: [TokenSlot],
         pricing: PricingTable, prediction: UsagePrediction?,
         outcomes: [WindowOutcome] = [],
         agentName: String, providerID: String,
+        accountTitle: AccountTitle? = nil,
         highlightReset: Date? = nil,
         outages: [OutageSpan] = [],
         onOpenOutage: ((OutageSpan) -> Void)? = nil
     ) {
+        self.accountTitle = accountTitle
         self.highlightReset = highlightReset
         self.outages = outages
         self.onOpenOutage = onOpenOutage
@@ -582,6 +594,16 @@ struct MeterHistoryView: View {
         let scale = percentPerToken(rows: rows)
         let curves = modelCurves(rows: rows, colors: colors, percentPerToken: scale)
         VStack(alignment: .leading, spacing: 6) {
+            if let accountTitle {
+                HStack(spacing: 5) {
+                    MonogramTile(monogram: accountTitle.monogram, focused: true, size: 14)
+                    Text(accountTitle.label)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
             HStack(alignment: .firstTextBaseline) {
                 Text(meter.label).font(.caption.bold())
                 Spacer()

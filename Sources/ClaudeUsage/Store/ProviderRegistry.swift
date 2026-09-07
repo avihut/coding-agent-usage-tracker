@@ -199,6 +199,30 @@ final class ProviderRegistry {
 
     func store(for id: String) -> UsageStore? { stores[id] }
 
+    /// The WRITER's resolved facts for one profile — label, monogram,
+    /// dormancy, last write — decided once in the digest so every face
+    /// agrees. Nil before the host has published (or from a pre-0.96
+    /// daemon), where a face falls back to the record it holds.
+    func section(for id: String) -> ProfileState? {
+        let profiles: [ProfileState]?
+        switch role {
+        case .hosting(let host): profiles = host.digest?.profiles
+        case .client(let feed): profiles = feed.digest?.profiles
+        }
+        return profiles?.first { $0.id == id }
+    }
+
+    /// What a face calls a profile: the digest's word when it has one,
+    /// else the record's own.
+    func label(for profile: Profile) -> String {
+        section(for: profile.id)?.label ?? ProfileFacts.label(profile: profile, identity: nil)
+    }
+
+    func monogram(for profile: Profile) -> String {
+        section(for: profile.id)?.monogram
+            ?? ProfileFacts.monogram(profile: profile, label: label(for: profile))
+    }
+
     /// A cell or strip click: focus this profile until the panel closes.
     func focus(_ id: String) {
         guard stores[id] != nil else { return }

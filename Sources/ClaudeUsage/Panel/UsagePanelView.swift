@@ -112,7 +112,10 @@ struct UsagePanelView: View {
                 prediction: store.predictions[meter.label],
                 outcomes: store.windowOutcomes,
                 agentName: store.provider.agentName,
-                providerID: store.provider.id,
+                // Per ACCOUNT, not per provider: two accounts' popovers
+                // remember their own span and frame (identical to the old
+                // key for the default profile, so nothing resets).
+                providerID: store.profile.scopeKey,
                 highlightReset: litReset?.meter == meter.id ? litReset?.at : nil,
                 outages: store.outages,
                 onOpenOutage: openOutage)
