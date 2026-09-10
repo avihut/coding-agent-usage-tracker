@@ -168,13 +168,15 @@ enum CodexRollouts {
 
         struct TokenInfo: Decodable {
             let lastTokenUsage: TokenUsage?
+            let totalTokenUsage: TokenUsage?
 
             enum CodingKeys: String, CodingKey {
                 case lastTokenUsage = "last_token_usage"
+                case totalTokenUsage = "total_token_usage"
             }
         }
 
-        struct TokenUsage: Decodable {
+        struct TokenUsage: Decodable, Equatable {
             let inputTokens: Int?
             let cachedInputTokens: Int?
             let outputTokens: Int?
