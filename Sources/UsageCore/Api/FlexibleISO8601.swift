@@ -110,11 +110,13 @@ enum FlexibleISO8601 {
         return plainFormatter.date(from: string)
     }
 
-    // nonisolated(unsafe): DateFormatter and ISO8601DateFormatter are
-    // documented thread-safe for formatting and parsing once configured
-    // (Foundation release notes, macOS 10.9+), and nothing mutates these
-    // after construction. Sharing them is the point — see the header.
-    nonisolated(unsafe) private static let microsecondsFormatter: DateFormatter = {
+    // All three are documented thread-safe for formatting and parsing once
+    // configured (Foundation release notes, macOS 10.9+), and nothing mutates
+    // them after construction. Sharing them is the point — see the header.
+    // The asymmetry below is the SDK's, not ours: DateFormatter is Sendable
+    // (so annotating it is an "unnecessary" warning), ISO8601DateFormatter
+    // still isn't, so those two keep nonisolated(unsafe).
+    private static let microsecondsFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
