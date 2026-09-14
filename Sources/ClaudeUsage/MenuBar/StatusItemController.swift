@@ -550,7 +550,12 @@ extension StatusItemController: NSPopoverDelegate {
 /// stacked above it while something is wrong (surface S5). A tiny wrapper
 /// type rather than an inline `AnyView` so the hosting controller keeps a
 /// concrete root view and its `preferredContentSize` sizing still works.
-private struct HoverPopoverContent: View {
+///
+/// The CARD sets the width; the banner is pinned to the plot's and wraps
+/// inside it. That sizing takes the content's ideal size, and a Text's ideal
+/// width is its whole string on one line — unpinned, a 400-character incident
+/// update stretched the card across the screen (v0.99.2, user-reported).
+struct HoverPopoverContent: View {
     let card: ServiceStatusCard?
     let history: MeterHistoryView
 
@@ -558,6 +563,7 @@ private struct HoverPopoverContent: View {
         VStack(alignment: .leading, spacing: 0) {
             if let card {
                 ServiceStatusBanner(card: card, compact: true)
+                    .frame(width: MeterHistoryView.chartWidth)
                     .padding(.horizontal, 10)
                     .padding(.top, 10)
                     .padding(.bottom, 2)

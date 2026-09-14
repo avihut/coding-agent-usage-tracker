@@ -111,8 +111,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else if CommandLine.arguments.contains("--sessions") {
             controller?.showSessions()
         }
-        // `--snapshot <dir>` renders the Notifications section and the
-        // weekly meter card headlessly to PNGs and quits — the harness's eyes when the live
+        // `--snapshot <dir>` renders the Notifications section, the weekly
+        // meter card and (while an incident is open) the menu bar's hover
+        // card headlessly to PNGs and quits — the harness's eyes when the live
         // popover can't be caught (any real click dismisses it, and a user
         // at the machine is always clicking). NSViewRepresentable pieces
         // (swipe catchers) render blank; everything SwiftUI renders as is.
@@ -215,6 +216,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 providerID: store.provider.id, highlightReset: reset,
                 outages: store.outages)
             write(ImageRenderer(content: card), "meter.png")
+        }
+        // The menu bar's hover card while an incident is open: the session
+        // meter's card under the banner, at its NATURAL size — no frame, the
+        // same measure the hover popover's `.preferredContentSize` sizing
+        // takes, so text that widens the card shows as a wide PNG. Needs an
+        // open incident: the live one, or `--fake-status major`.
+        if let incident = store.serviceStatus, incident.hasIncident,
+           let meters = store.state.snapshot?.meters,
+           let meter = meters.first(where: { $0.rank == 0 }) ?? meters.first {
+            let card = MeterHistoryView(
+                meter: meter, samples: store.samples, timeline: store.tokenTimeline,
+                pricing: store.pricing, prediction: store.predictions[meter.label],
+                outcomes: store.windowOutcomes, agentName: store.provider.agentName,
+                providerID: store.profile.scopeKey, outages: store.outages)
+            write(ImageRenderer(content: HoverPopoverContent(card: incident, history: card)), "hover.png")
         }
         // The weekly meter's week-span audit chart — the other face of the
         // outage floor. This span rather than today's drill because a

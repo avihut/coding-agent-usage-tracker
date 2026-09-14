@@ -1605,6 +1605,17 @@ the README rather than silently deviating.
   ladder (`ui.rs status_rungs`: footer cell → footer text → banner row →
   banner + message; `layout.rs plan_with_status` yields the banner rather
   than the meters).
+- WIDTH (v0.99.2, user-reported: a 400-character incident update stretched
+  the hover card across the screen): a popover sized by its content
+  (`.preferredContentSize`, SwiftUI `.popover`) takes each Text's IDEAL
+  width — its whole string on one line; `lineLimit` caps lines, not that.
+  The banner sets no width of its own, each host bounds it (panel column;
+  hover card: `MeterHistoryView.chartWidth`). Inside `MeterHistoryView`
+  every variable one-line text (stats line, readout, account label) is
+  pinned to `chartWidth` — only the breakdown grid may widen the card, its
+  names never truncate (Sonnet 4.5's row is 307pt), so never pin the card
+  itself. `--snapshot` writes `hover.png` at natural size while an incident
+  is open (live, or `--fake-status major`): its width must be the card's.
 - `usage-cli health` is the scriptable face — `--check` exits **22** while
   something is open. Named `health` because `status` already answers about
   the engine.

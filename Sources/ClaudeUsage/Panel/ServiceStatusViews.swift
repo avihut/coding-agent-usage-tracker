@@ -57,10 +57,12 @@ struct ServiceStatusDot: View {
 /// The incident summary (surfaces S4 and S5): color rail, name, phase, how
 /// long it has been going, the latest message, and which components it
 /// touches. One view, two hosts — the panel's top section and the menu bar's
-/// hover popover — so the copy can never drift between them.
+/// hover popover — so the copy can never drift between them. It sets no width
+/// of its own: each host bounds it (the message's ideal width is its whole
+/// text on one line).
 struct ServiceStatusBanner: View {
     let card: ServiceStatusCard
-    /// The hover popover's tighter form: no component chips, one message line.
+    /// The hover popover's tighter form: no component chips, two message lines.
     var compact = false
     /// Set by the panel so clicking the banner opens the full popover (D5).
     var onTap: (() -> Void)?

@@ -177,7 +177,11 @@ struct MeterHistoryView: View {
         return .d7
     }
 
-    private static let chartWidth: CGFloat = 300
+    /// The card's width: the plot, its bounds row and every one-line text
+    /// are exactly this wide, and only the breakdown grid may widen the card
+    /// (its model names never truncate). The hover popover pins its incident
+    /// banner to it.
+    static let chartWidth: CGFloat = 300
     private static let baseChartHeight: CGFloat = 124
     /// One floor's worth of height (≈1pt per domain unit at this size), so
     /// adding the outage floor never squeezes the plot.
@@ -603,6 +607,7 @@ struct MeterHistoryView: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
+                .frame(width: Self.chartWidth, alignment: .leading)
             }
             HStack(alignment: .firstTextBaseline) {
                 Text(meter.label).font(.caption.bold())
@@ -621,8 +626,10 @@ struct MeterHistoryView: View {
                     Text(spanLabel).font(.caption2).foregroundStyle(.secondary)
                 }
             }
-            // Fixed-height stats line: window totals normally, the focused
-            // model's share while a curve/row pair is lit. Never reflows.
+            // Fixed-size stats line: window totals normally, the focused
+            // model's share while a curve/row pair is lit. Never reflows,
+            // and never widens the popover — a one-line Text's ideal width
+            // is its whole string, so a long line truncates at the plot's.
             // On a past page this line is the window's TITLE — "Sun Aug 23 ·
             // 13:30–18:30 · 10 sessions ago" — in primary weight, so which
             // window is on screen is the first thing read; the header above
@@ -639,7 +646,7 @@ struct MeterHistoryView: View {
                     .lineLimit(1)
                 Spacer(minLength: 0)
             }
-            .frame(height: 14)
+            .frame(width: Self.chartWidth, height: 14)
             if points.count < 2 && curves.isEmpty {
                 Text(isLive || effectiveSpan == .history
                     ? "Collecting samples — this fills in as refreshes accumulate."
@@ -679,6 +686,9 @@ struct MeterHistoryView: View {
                 })
             }
             domainLabels
+            // As wide as the plot it reads, like the bounds row above: an
+            // outage's readout runs past 500pt, and unbounded it would widen
+            // the popover while the nub is hovered. It truncates instead.
             Text(resetReadout ?? grantReadout ?? pinnedReadout ?? segmentReadout
                 ?? outageReadout ?? readout.map(readoutText) ?? hoverHint)
                 .font(.caption2.monospacedDigit())
@@ -686,7 +696,7 @@ struct MeterHistoryView: View {
                     && grantReadout == nil && pinnedReadout == nil && outageReadout == nil
                     ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.secondary))
                 .lineLimit(1)
-                .frame(height: 14, alignment: .leading)
+                .frame(width: Self.chartWidth, height: 14, alignment: .leading)
             Divider()
             if rows.isEmpty {
                 Text("No local token data in this window.")
