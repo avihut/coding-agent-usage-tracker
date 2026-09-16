@@ -1474,7 +1474,37 @@ the README rather than silently deviating.
   as the burst: a hot Tuesday steepens Wednesday's forecast, not next
   Monday's; the flat multiplier compressed the whole week's rhythm into the
   days before the crossing)), else the
-  window's own average pace (percent ÷ elapsed, needs ≥30 min). Each
+  window's own average pace (percent ÷ elapsed, needs ≥30 min). LOCKOUTS
+  (v0.100.0, user-directed): a meter whose `limitWindow` is STRICTLY
+  shorter defines a hard zero on every wider meter — spent now → [now,
+  its reset]; forecast to cross → [its crossing, its reset]; equal windows
+  never lock out (the scoped weekly leaves other models free), nil windows
+  neither issue nor receive — and inside a lockout the wider meter gains
+  nothing (rhythm and burst alike), so its curve draws a flat plateau with
+  a point at each boundary. `PredictionEngine.lockouts(on:from:
+  predictions:now:)` is the pure rule; `predictAll` predicts shortest
+  window first so each wider meter reads the fresh narrower forecasts,
+  and it is the engine's ONE call — never predict a meter alone in the
+  engine again. OVERSHOOT (v0.100.0, user-directed "how much extra usage
+  will I need"): `UsagePrediction.projectedUnclamped` keeps the raw
+  projection at reset (what the window would reach if its own limit did
+  not bind; narrower lockouts still respected) beside the clamped
+  `projectedAtReset`; `ForecastOvershoot.estimate` (Prediction/) turns the
+  points over 100 into tokens through the popover's own conversion
+  (`ModelCurves.windowPercentPerToken` over the window's gains) and into
+  dollars through the window's priced rows only (Anthropic bills extra
+  usage at API list rates, which is what the app prices at) — tokens and
+  cost are nil, never 0/$0, without token data or a priced model. Phrased
+  ONCE in `UsageFormatting.overshootCaption` ("~$38 extra (≈11% over)",
+  percent alone when unpriced) and appended by `forecastCaption(overshoot:)`
+  to the reset line; the engine keeps `forecastOvershoots` beside
+  `predictions`, the digest carries `MeterForecast.projectedUnclamped` +
+  `.overshoot` (additive), `UsageStore.forecastOvershoots` is the app
+  seam for both modes. Faces: panel caption, popover readout right of the
+  crossing + stats line, Settings → Usage "Projected at reset", CLI
+  `forecast.projected-raw|overshoot|overshoot-tokens|overshoot-cost`.
+  Never drawn past 100 on a chart (the headroom is 15%; an overshoot can
+  be 50%). Each
   `UsagePrediction` carries rate, baseline rate, pace factor, `basis`
   (recentOnly/windowAverage/weeklyProfile), projected-at-reset, exhaustion
   date (bisected on the curved trajectory), verdict + `rawVerdict`
