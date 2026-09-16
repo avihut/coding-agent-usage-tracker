@@ -582,16 +582,17 @@ public final class UsageEngine {
         let meters = snapshot.meters
         Task.detached(priority: .utility) { [weak self] in
             var profiles: [String: WeeklyProfile] = [:]
-            var fresh: [String: UsagePrediction] = [:]
             for meter in meters {
-                let profile = WeeklyProfile.build(samples: samples, label: meter.label)
-                if let profile { profiles[meter.label] = profile }
-                if let prediction = PredictionEngine.predict(
-                    meter: meter, samples: samples, profile: profile,
-                    previous: previous[meter.label], now: now) {
-                    fresh[meter.label] = prediction
+                if let profile = WeeklyProfile.build(samples: samples, label: meter.label) {
+                    profiles[meter.label] = profile
                 }
             }
+            // One pass, narrowest limit window first: a meter's forecast
+            // reads its shorter-window siblings, so a spent 5h session
+            // stops the weeklies climbing until it resets.
+            let fresh = PredictionEngine.predictAll(
+                meters: meters, samples: samples, profiles: profiles,
+                previous: previous, now: now)
             await MainActor.run { [profiles, fresh] in
                 guard let self else { return }
                 self.profiles = profiles

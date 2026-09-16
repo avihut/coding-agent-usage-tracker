@@ -486,6 +486,304 @@ struct PredictionEngineTests {
             "the crossing must come from the current window, not the last one")
     }
 
+    // MARK: - Lockouts
+
+    /// A meter shaped like the ones the Claude provider builds.
+    private func meter(
+        _ label: String, percent: Int?, resetsAt: Date?, window: TimeInterval?,
+        rank: Int = 1
+    ) -> Meter {
+        Meter(
+            id: label, label: label, percent: percent, resetsAt: resetsAt,
+            level: .normal, rank: rank, limitWindow: window)
+    }
+
+    /// The invariant the whole change exists to hold: a crossing is never
+    /// reported at an instant the account could not have spent in.
+    private func assertOutsideLockouts(
+        _ t: Date?, _ lockouts: [DateInterval],
+        sourceLocation: SourceLocation = #_sourceLocation
+    ) {
+        guard let t else { return }
+        #expect(
+            !lockouts.contains { $0.start < t && t < $0.end },
+            "the crossing landed inside a lockout",
+            sourceLocation: sourceLocation)
+    }
+
+    @Test("a spent shorter window gates the wider one until it resets")
+    func lockoutFromSpentSibling() {
+        let sessionReset = now.addingTimeInterval(2 * 3600)
+        let session = meter(
+            "Session (5h)", percent: 100, resetsAt: sessionReset,
+            window: 5 * 3600, rank: 0)
+        let weekly = meter(
+            "Weekly · all models", percent: 30,
+            resetsAt: now.addingTimeInterval(3 * 86400), window: 7 * 86400)
+        let gates = PredictionEngine.lockouts(
+            on: weekly, from: [session, weekly], predictions: [:], now: now)
+        #expect(gates == [DateInterval(start: now, end: sessionReset)])
+        // The shortest window receives nothing — it gates, it isn't gated.
+        #expect(PredictionEngine.lockouts(
+            on: session, from: [session, weekly], predictions: [:], now: now).isEmpty)
+    }
+
+    @Test("a sibling's forecast crossing opens the gate at the crossing")
+    func lockoutFromForecastCrossing() {
+        let sessionReset = now.addingTimeInterval(4 * 3600)
+        let crossing = now.addingTimeInterval(3600)
+        let session = meter(
+            "Session (5h)", percent: 70, resetsAt: sessionReset,
+            window: 5 * 3600, rank: 0)
+        let weekly = meter(
+            "Weekly · all models", percent: 30,
+            resetsAt: now.addingTimeInterval(3 * 86400), window: 7 * 86400)
+        let forecast = PredictionEngine.prediction(
+            percent: 70, resetsAt: sessionReset, ratePerHour: 30, now: now)
+        #expect(forecast.exhaustsAt == crossing)
+        let gates = PredictionEngine.lockouts(
+            on: weekly, from: [session, weekly],
+            predictions: ["Session (5h)": forecast], now: now)
+        #expect(gates == [DateInterval(start: crossing, end: sessionReset)])
+    }
+
+    @Test("a stale, equal or unknown sibling window gates nothing")
+    func lockoutsThatDoNotApply() {
+        let weekly = meter(
+            "Weekly · all models", percent: 30,
+            resetsAt: now.addingTimeInterval(3 * 86400), window: 7 * 86400)
+        // Spent, but its window already rolled: nothing is gated.
+        let stale = meter(
+            "Session (5h)", percent: 100, resetsAt: now.addingTimeInterval(-60),
+            window: 5 * 3600, rank: 0)
+        #expect(PredictionEngine.lockouts(
+            on: weekly, from: [stale, weekly], predictions: [:], now: now).isEmpty)
+        // The scoped weekly is spent, but other models can still spend.
+        let scoped = meter(
+            "Weekly · Fable", percent: 100, resetsAt: now.addingTimeInterval(2 * 86400),
+            window: 7 * 86400, rank: 2)
+        #expect(PredictionEngine.lockouts(
+            on: weekly, from: [scoped, weekly], predictions: [:], now: now).isEmpty)
+        // A window the provider doesn't know: it neither issues…
+        let unknown = meter(
+            "Mystery", percent: 100, resetsAt: now.addingTimeInterval(3600), window: nil)
+        #expect(PredictionEngine.lockouts(
+            on: weekly, from: [unknown, weekly], predictions: [:], now: now).isEmpty)
+        // …nor receives.
+        let session = meter(
+            "Session (5h)", percent: 100, resetsAt: now.addingTimeInterval(2 * 3600),
+            window: 5 * 3600, rank: 0)
+        #expect(PredictionEngine.lockouts(
+            on: unknown, from: [session, unknown], predictions: [:], now: now).isEmpty)
+    }
+
+    @Test("two overlapping gates merge into one stretch")
+    func lockoutsMerge() {
+        let weekly = meter(
+            "Weekly · all models", percent: 30,
+            resetsAt: now.addingTimeInterval(3 * 86400), window: 7 * 86400)
+        let session = meter(
+            "Session (5h)", percent: 100, resetsAt: now.addingTimeInterval(2 * 3600),
+            window: 5 * 3600, rank: 0)
+        let daily = meter(
+            "Daily", percent: 100, resetsAt: now.addingTimeInterval(5 * 3600),
+            window: 24 * 3600, rank: 2)
+        let gates = PredictionEngine.lockouts(
+            on: weekly, from: [session, daily, weekly], predictions: [:], now: now)
+        #expect(gates == [
+            DateInterval(start: now, end: now.addingTimeInterval(5 * 3600)),
+        ])
+    }
+
+    @Test("a lockout flattens the blended forecast by exactly its own span")
+    func blendedPlateau() throws {
+        // 20% spent, 3 days into a 7-day window: the average pace baseline
+        // is 20/72 %/h, and the measured 4%/h is the burst above it.
+        let reset = now.addingTimeInterval(96 * 3600)
+        let lockStart = now.addingTimeInterval(3600)
+        let lockEnd = now.addingTimeInterval(4 * 3600)
+        let gate = DateInterval(start: lockStart, end: lockEnd)
+        func read(_ lockouts: [DateInterval]) -> UsagePrediction {
+            PredictionEngine.prediction(
+                percent: 20, resetsAt: reset, ratePerHour: 4,
+                windowLength: 7 * 86400, lockouts: lockouts, now: now)
+        }
+        let plain = read([])
+        let locked = read([gate])
+        #expect(locked.basis == .windowAverage)
+
+        // Flat across the gate: the account cannot spend in there.
+        let atStart = try #require(
+            PredictionEngine.percent(onCurve: locked.curve, at: lockStart))
+        let atEnd = try #require(
+            PredictionEngine.percent(onCurve: locked.curve, at: lockEnd))
+        #expect(abs(atStart - atEnd) < 1e-9)
+        // …and the plain forecast really does climb over the same hours,
+        // so the assertion above is about the gate, not about a flat curve.
+        let plainStart = try #require(
+            PredictionEngine.percent(onCurve: plain.curve, at: lockStart))
+        let plainEnd = try #require(
+            PredictionEngine.percent(onCurve: plain.curve, at: lockEnd))
+        #expect(plainEnd - plainStart > 1)
+
+        // The corners are exact, not smeared over a 2h uniform step.
+        #expect(locked.curve.contains { $0.t == lockStart })
+        #expect(locked.curve.contains { $0.t == lockEnd })
+
+        // Neither forecast crosses, so the last curve point is the
+        // unclamped projection at reset — the closed form to assert against.
+        #expect(locked.exhaustsAt == nil)
+        let baseRate = 20.0 / 72.0
+        let excess = 4.0 - baseRate
+        let tau = PredictionEngine.burstDecayHours
+        let withheld = baseRate * 3
+            + excess * tau * (exp(-1 / tau) - exp(-4 / tau))
+        #expect(withheld > 1)
+        let plainAtReset = try #require(plain.curve.last?.percent)
+        let lockedAtReset = try #require(locked.curve.last?.percent)
+        #expect(abs(lockedAtReset - (plainAtReset - withheld)) < 1e-9)
+    }
+
+    @Test("a gate covering the rest of the window freezes the forecast")
+    func lockoutCoversWholeWindow() {
+        let reset = now.addingTimeInterval(96 * 3600)
+        let prediction = PredictionEngine.prediction(
+            percent: 40, resetsAt: reset, ratePerHour: 4,
+            windowLength: 7 * 86400,
+            lockouts: [DateInterval(start: now, end: reset)], now: now)
+        #expect(prediction.projectedAtReset == 40)
+        #expect(prediction.exhaustsAt == nil)
+        #expect(prediction.verdict == .green)
+        #expect(prediction.severity == 0)
+        #expect(prediction.text == "steady — not burning")
+    }
+
+    @Test("the linear crossing slides past a gate by the gate's own length")
+    func linearPlateau() throws {
+        // 80% at 10%/h: two hours of spending left. A gate from +1h to +3h
+        // pushes the crossing to +4h — not to +2h, where nothing is burning.
+        let reset = now.addingTimeInterval(10 * 3600)
+        let lockStart = now.addingTimeInterval(3600)
+        let lockEnd = now.addingTimeInterval(3 * 3600)
+        let gate = DateInterval(start: lockStart, end: lockEnd)
+        let prediction = PredictionEngine.prediction(
+            percent: 80, resetsAt: reset, ratePerHour: 10,
+            lockouts: [gate], now: now)
+        #expect(prediction.basis == .recentOnly)
+        #expect(prediction.rawVerdict == .red)
+        #expect(prediction.exhaustsAt == now.addingTimeInterval(4 * 3600))
+        assertOutsideLockouts(prediction.exhaustsAt, [gate])
+        // Flat across the gate, rising on both sides of it.
+        #expect(prediction.curve == [
+            .init(t: now, percent: 80),
+            .init(t: lockStart, percent: 90),
+            .init(t: lockEnd, percent: 90),
+            .init(t: now.addingTimeInterval(4 * 3600), percent: 100),
+            .init(t: reset, percent: 100),
+        ])
+        #expect(PredictionEngine.percent(
+            onCurve: prediction.curve, at: now.addingTimeInterval(2 * 3600)) == 90)
+        // Without the gate it would have crossed at +2h.
+        #expect(PredictionEngine.prediction(
+            percent: 80, resetsAt: reset, ratePerHour: 10, now: now)
+            .exhaustsAt == now.addingTimeInterval(2 * 3600))
+        // With no live reset there is no curve, but the crossing still
+        // walks the gate — and the caption speaks wall-clock time.
+        let openEnded = PredictionEngine.prediction(
+            percent: 80, resetsAt: nil, ratePerHour: 10, lockouts: [gate], now: now)
+        #expect(openEnded.exhaustsAt == now.addingTimeInterval(4 * 3600))
+        #expect(openEnded.text == "≈4h to limit")
+    }
+
+    @Test("a crossing that happens as the gate opens reports the gate's end")
+    func crossingAtTheGatesEnd() throws {
+        // A window-average baseline of 1.25%/h with no excess over it: the
+        // remaining 10% goes in exactly 8 hours. The gate opens ONE SECOND
+        // before that, so the un-gated crossing falls strictly inside it and
+        // all that is left to spend when the gate lifts is that one second.
+        // The crossing therefore happens as the gate ends — and the flat
+        // 13-hour stretch is where a plateau-blind search would put it.
+        let reset = now.addingTimeInterval(96 * 3600)
+        let lockStart = now.addingTimeInterval(8 * 3600 - 1)
+        let lockEnd = now.addingTimeInterval(20 * 3600)
+        let gate = DateInterval(start: lockStart, end: lockEnd)
+        func read(_ lockouts: [DateInterval]) -> UsagePrediction {
+            PredictionEngine.prediction(
+                percent: 90, resetsAt: reset, ratePerHour: 1.25,
+                windowLength: 7 * 86400, lockouts: lockouts, now: now)
+        }
+        let plainCrossing = try #require(read([]).exhaustsAt)
+        #expect(plainCrossing > lockStart && plainCrossing < lockEnd)
+
+        let crossing = try #require(read([gate]).exhaustsAt)
+        assertOutsideLockouts(crossing, [gate])
+        // The gate's end, to the second — bisection converges from above.
+        #expect(crossing >= lockEnd)
+        #expect(crossing.timeIntervalSince(lockEnd) <= 2.001)
+    }
+
+    @Test("predictAll gates the weeklies on a spent session")
+    func predictAllGates() throws {
+        let sessionLabel = "Session (5h)"
+        let weeklyLabel = "Weekly · all models"
+        func combined(_ minutesAgo: Double, session: Int, weekly: Int) -> UsageSample {
+            UsageSample(
+                t: now.addingTimeInterval(-minutesAgo * 60),
+                percents: [sessionLabel: session, weeklyLabel: weekly])
+        }
+        let sessionReset = now.addingTimeInterval(2 * 3600)
+        let weekly = meter(
+            weeklyLabel, percent: 20, resetsAt: now.addingTimeInterval(96 * 3600),
+            window: 7 * 86400)
+
+        // A spent session: no measurable rate of its own (flat 100 tail),
+        // so the gate has to come off the METER, not off its prediction.
+        let spentSession = meter(
+            sessionLabel, percent: 100, resetsAt: sessionReset,
+            window: 5 * 3600, rank: 0)
+        let spentSamples = [
+            combined(240, session: 100, weekly: 10),
+            combined(120, session: 100, weekly: 15),
+            combined(0, session: 100, weekly: 20),
+        ]
+        let gated = PredictionEngine.predictAll(
+            meters: [spentSession, weekly], samples: spentSamples,
+            profiles: [:], previous: [:], now: now)
+        let weeklyForecast = try #require(gated[weeklyLabel])
+        #expect(weeklyForecast.basis == .windowAverage)
+        // Flat until the session resets, climbing after.
+        let atReset = try #require(
+            PredictionEngine.percent(onCurve: weeklyForecast.curve, at: sessionReset))
+        #expect(abs(atReset - 20) < 1e-9)
+        #expect(PredictionEngine.percent(
+            onCurve: weeklyForecast.curve, at: now.addingTimeInterval(3600)) == atReset)
+        #expect(weeklyForecast.curve.contains { $0.t == sessionReset })
+        let later = try #require(PredictionEngine.percent(
+            onCurve: weeklyForecast.curve, at: now.addingTimeInterval(24 * 3600)))
+        #expect(later > 20.5)
+
+        // An unspent session on track gates nothing, so predictAll must
+        // agree with predicting each meter on its own.
+        let liveSession = meter(
+            sessionLabel, percent: 30, resetsAt: sessionReset,
+            window: 5 * 3600, rank: 0)
+        let liveSamples = [
+            combined(240, session: 10, weekly: 10),
+            combined(120, session: 20, weekly: 15),
+            combined(0, session: 30, weekly: 20),
+        ]
+        let free = PredictionEngine.predictAll(
+            meters: [liveSession, weekly], samples: liveSamples,
+            profiles: [:], previous: [:], now: now)
+        #expect(free[sessionLabel]?.exhaustsAt == nil)
+        var perMeter: [String: UsagePrediction] = [:]
+        for one in [liveSession, weekly] {
+            perMeter[one.label] = PredictionEngine.predict(
+                meter: one, samples: liveSamples, now: now)
+        }
+        #expect(free == perMeter)
+    }
+
     @Test("spent limits speak in the past tense")
     func spentPhrasing() {
         let now = Date()

@@ -101,6 +101,29 @@ public struct UsagePrediction: Sendable, Equatable {
 /// baseline — the window's own average pace, or the learned weekly rhythm
 /// once enough history exists — instead of assuming the last hour repeats
 /// for the rest of the window.
+///
+/// LOCKOUTS — one meter's forecast reads its siblings. A limit window
+/// strictly SHORTER than this meter's is a gate on it: while the 5-hour
+/// session limit is spent, the account cannot spend anything at all, so the
+/// weekly meters gain exactly nothing until that session window resets. The
+/// forecast used to climb straight through those hours at the learned
+/// rhythm and announce a weekly crossing that the account had no way to
+/// reach (the user's report). `lockouts(on:from:predictions:now:)` derives
+/// those stretches — from a sibling already at 100, or from a sibling's own
+/// fresh forecast crossing before its reset — and `predictAll` feeds them
+/// in by predicting narrow windows first. Inside a lockout the wider meter
+/// gains nothing: baseline rhythm and burst excess both stop, and both
+/// resume where the clock has got to when it ends. Equal or longer windows
+/// never gate (the scoped weekly does not lock out the all-models weekly —
+/// other models can still spend), and a meter with no known window neither
+/// issues nor receives a lockout.
+///
+/// `exhaustsAt` stays "the FIRST instant the value reaches 100". On the
+/// linear path that means accrual finishing exactly at a lockout's start
+/// reports the start (no hours accrue inside, so every instant of the
+/// lockout carries that same value); on the blended path a trajectory that
+/// only reaches 100 after the plateau reports the lockout's END. Neither
+/// path ever reports an instant strictly inside a lockout.
 public enum PredictionEngine {
     /// Projected-at-reset percentage above which the verdict turns yellow.
     public static let yellowProjectionThreshold = 85.0
@@ -137,9 +160,13 @@ public enum PredictionEngine {
     /// smoothing; `profile` supplies the weekly-rhythm baseline when ready.
     /// Window shapes come from the meter itself — provider data, not rank
     /// heuristics; an unknown limit window keeps the meter pure-linear.
+    /// `lockouts` are the stretches in which a shorter-window sibling has
+    /// the account gated (see `lockouts(on:from:predictions:now:)`); none
+    /// is the forecast exactly as it was before they existed.
     public static func predict(
         meter: Meter, samples: [UsageSample], profile: WeeklyProfile? = nil,
-        previous: UsagePrediction? = nil, now: Date
+        previous: UsagePrediction? = nil, lockouts: [DateInterval] = [],
+        now: Date
     ) -> UsagePrediction? {
         guard let percent = meter.percent else { return nil }
         // A spent limit is a measurement, not a forecast — and it must not
@@ -166,7 +193,162 @@ public enum PredictionEngine {
         return prediction(
             percent: percent, resetsAt: meter.resetsAt, ratePerHour: rate,
             windowLength: meter.limitWindow ?? 0,
-            profile: profile, previous: previous, now: now)
+            profile: profile, previous: previous, lockouts: lockouts, now: now)
+    }
+
+    // MARK: - Lockouts
+
+    /// The stretches of future time in which `meter` cannot gain anything,
+    /// because a sibling on a STRICTLY shorter limit window has the account
+    /// gated until that sibling resets.
+    ///
+    /// A sibling gates when (1) it reads 100% now and its reset is still
+    /// ahead — a measured hard stop — or (2) its own fresh forecast crosses
+    /// (`exhaustsAt`) before its reset, in which case the gate opens at the
+    /// crossing. Rule (1) reads the METER, not the prediction map, so a
+    /// spent session still gates the weeklies even when it produced no
+    /// prediction of its own (a flat all-100 tail has no measurable rate).
+    ///
+    /// Equal or longer windows never gate: the scoped weekly running out
+    /// leaves the all-models weekly free to spend on other models. A meter
+    /// with no known window neither issues nor receives a lockout — its
+    /// shape is unknown, and guessing is worse than the old behavior.
+    ///
+    /// `predictions` is keyed by meter label, the way the engine keeps them.
+    /// The result is clipped to the future, sorted and merged.
+    public static func lockouts(
+        on meter: Meter, from meters: [Meter],
+        predictions: [String: UsagePrediction], now: Date
+    ) -> [DateInterval] {
+        guard let window = meter.limitWindow else { return [] }
+        var raw: [DateInterval] = []
+        for other in meters {
+            // Strictly shorter, which also rules the meter out against
+            // itself — nothing is shorter than its own window.
+            guard let otherWindow = other.limitWindow, otherWindow < window else { continue }
+            guard let reset = other.resetsAt, reset > now else { continue }
+            let start: Date
+            if let percent = other.percent, percent >= 100 {
+                start = now
+            } else if let crossing = predictions[other.label]?.exhaustsAt, crossing < reset {
+                start = max(crossing, now)
+            } else {
+                continue
+            }
+            guard start < reset else { continue }
+            raw.append(DateInterval(start: start, end: reset))
+        }
+        return mergedLockouts(raw, now: now)
+    }
+
+    /// Clips lockouts to the future, sorts them and merges the ones that
+    /// overlap OR touch — a 5-hour gate ending exactly where a 6-hour one
+    /// begins is one continuous stretch of not being able to spend.
+    static func mergedLockouts(_ raw: [DateInterval], now: Date) -> [DateInterval] {
+        var clipped: [(start: Date, end: Date)] = []
+        for interval in raw where interval.end > now {
+            let start = max(interval.start, now)
+            if interval.end > start { clipped.append((start, interval.end)) }
+        }
+        clipped.sort { $0.start < $1.start }
+        var merged: [DateInterval] = []
+        for span in clipped {
+            if let last = merged.last, span.start <= last.end {
+                guard span.end > last.end else { continue }
+                merged[merged.count - 1] = DateInterval(start: last.start, end: span.end)
+            } else {
+                merged.append(DateInterval(start: span.start, end: span.end))
+            }
+        }
+        return merged
+    }
+
+    /// `[start, end]` minus the lockouts: the sub-spans in which this meter
+    /// can actually spend. Expects `lockouts` merged and sorted (what
+    /// `mergedLockouts` returns); empty lockouts hand back the whole span.
+    static func availableSpans(
+        from start: Date, to end: Date, lockouts: [DateInterval]
+    ) -> [(start: Date, end: Date)] {
+        guard end > start else { return [] }
+        guard !lockouts.isEmpty else { return [(start, end)] }
+        var spans: [(start: Date, end: Date)] = []
+        var cursor = start
+        for lock in lockouts {
+            if lock.end <= cursor { continue }
+            if lock.start >= end { break }
+            if lock.start > cursor { spans.append((cursor, lock.start)) }
+            cursor = max(cursor, lock.end)
+            if cursor >= end { return spans }
+        }
+        if cursor < end { spans.append((cursor, end)) }
+        return spans
+    }
+
+    /// Hours of the span in which spending is possible.
+    static func availableHours(
+        from start: Date, to end: Date, lockouts: [DateInterval]
+    ) -> Double {
+        guard end > start else { return 0 }
+        guard !lockouts.isEmpty else { return end.timeIntervalSince(start) / 3600 }
+        return availableSpans(from: start, to: end, lockouts: lockouts)
+            .reduce(0) { $0 + $1.end.timeIntervalSince($1.start) / 3600 }
+    }
+
+    /// The instant at which `needed` AVAILABLE hours have accrued from
+    /// `start` — walking the lockouts and extrapolating past the last one.
+    /// Accrual completing exactly at a lockout's start lands on the start:
+    /// no hours pass inside, so that is the first instant the total is met.
+    static func date(
+        afterAvailableHours needed: Double, from start: Date, lockouts: [DateInterval]
+    ) -> Date {
+        guard !lockouts.isEmpty else { return start.addingTimeInterval(needed * 3600) }
+        var remaining = needed * 3600
+        var cursor = start
+        for lock in lockouts {
+            if lock.end <= cursor { continue }
+            let free = lock.start.timeIntervalSince(cursor)
+            if free > 0 {
+                if remaining <= free { return cursor.addingTimeInterval(remaining) }
+                remaining -= free
+            }
+            cursor = max(cursor, lock.end)
+        }
+        return cursor.addingTimeInterval(remaining)
+    }
+
+    /// Every meter's forecast in one pass, narrowest limit window first so
+    /// each meter can be told what its shorter siblings have already locked
+    /// out (nil windows last, in their original order — they neither issue
+    /// nor receive lockouts). Keyed by label, like the engine's own map.
+    public static func predictAll(
+        meters: [Meter], samples: [UsageSample],
+        profiles: [String: WeeklyProfile], previous: [String: UsagePrediction],
+        now: Date
+    ) -> [String: UsagePrediction] {
+        let ordered = meters.enumerated().sorted { lhs, rhs in
+            switch (lhs.element.limitWindow, rhs.element.limitWindow) {
+            case let (left?, right?):
+                return left == right ? lhs.offset < rhs.offset : left < right
+            case (nil, .some):
+                return false
+            case (.some, nil):
+                return true
+            case (nil, nil):
+                return lhs.offset < rhs.offset
+            }
+        }.map(\.element)
+
+        var fresh: [String: UsagePrediction] = [:]
+        for meter in ordered {
+            let gates = lockouts(
+                on: meter, from: meters, predictions: fresh, now: now)
+            if let prediction = predict(
+                meter: meter, samples: samples, profile: profiles[meter.label],
+                previous: previous[meter.label], lockouts: gates, now: now) {
+                fresh[meter.label] = prediction
+            }
+        }
+        return fresh
     }
 
     /// When this window's limit was actually spent: the first sample to
@@ -344,13 +526,18 @@ public enum PredictionEngine {
     public static func prediction(
         percent: Int, resetsAt: Date?, ratePerHour rate: Double,
         windowLength: TimeInterval = 0, profile: WeeklyProfile? = nil,
-        previous: UsagePrediction? = nil, spentAt: Date? = nil, now: Date
+        previous: UsagePrediction? = nil, spentAt: Date? = nil,
+        lockouts: [DateInterval] = [], now: Date
     ) -> UsagePrediction {
         // Nothing left to forecast once the limit is gone; the crossing
-        // comes from the record, not from extrapolating zero headroom.
+        // comes from the record, not from extrapolating zero headroom. A
+        // spent meter ignores its lockouts — there is nothing left to gate.
         if percent >= 100 {
             return spent(resetsAt: resetsAt, at: spentAt, now: now)
         }
+        // Normalized here, once, so every path below can assume merged,
+        // sorted, future-clipped gates — callers may hand over anything.
+        let gates = mergedLockouts(lockouts, now: now)
         let liveReset = resetsAt.flatMap { $0 > now ? $0 : nil }
         if let reset = liveReset,
            let baseline = baseline(
@@ -358,18 +545,24 @@ public enum PredictionEngine {
                profile: profile, now: now) {
             return blended(
                 percent: percent, reset: reset, rate: rate,
-                baseline: baseline, previous: previous, now: now)
+                baseline: baseline, lockouts: gates, previous: previous, now: now)
         }
         return linear(
             percent: percent, liveReset: liveReset, rate: rate,
-            previous: previous, now: now)
+            lockouts: gates, previous: previous, now: now)
     }
 
     // MARK: - Pure linear (no baseline)
 
+    /// Pure extrapolation of the recent rate — over AVAILABLE hours only:
+    /// a lockout stops the clock, so the projection at reset counts the
+    /// hours the account can actually spend in, the crossing is the instant
+    /// those hours reach `(100 − percent) / rate`, and the curve carries a
+    /// point at every lockout boundary so the plateau is drawn flat instead
+    /// of being interpolated straight through.
     private static func linear(
         percent: Int, liveReset: Date?, rate: Double,
-        previous: UsagePrediction?, now: Date
+        lockouts: [DateInterval], previous: UsagePrediction?, now: Date
     ) -> UsagePrediction {
         guard rate > flatRateThreshold else {
             return UsagePrediction(
@@ -389,8 +582,29 @@ public enum PredictionEngine {
                 } ?? [])
         }
 
+        // The hours of SPENDING it takes, then the wall clock they land on.
         let hoursToExhaust = Double(100 - percent) / rate
-        let exhaustDate = now.addingTimeInterval(hoursToExhaust * 3600)
+        let exhaustDate = date(
+            afterAvailableHours: hoursToExhaust, from: now, lockouts: lockouts)
+        // Captions speak wall-clock time — identical to `hoursToExhaust`
+        // when nothing gates, longer when a lockout sits in between.
+        let hoursUntilExhaust = exhaustDate.timeIntervalSince(now) / 3600
+
+        /// The straight-line value at an instant, over available hours.
+        func value(at t: Date) -> Double {
+            Double(percent) + rate * availableHours(from: now, to: t, lockouts: lockouts)
+        }
+        /// A point at every lockout boundary strictly between now and
+        /// `limit`, so the curve's plateaus have exact corners. Empty
+        /// without lockouts — the curve is then exactly what it always was.
+        func boundaryPoints(before limit: Date) -> [UsagePrediction.Point] {
+            guard !lockouts.isEmpty else { return [] }
+            return lockouts
+                .flatMap { [$0.start, $0.end] }
+                .filter { $0 > now && $0 < limit }
+                .sorted()
+                .map { .init(t: $0, percent: value(at: $0)) }
+        }
 
         guard let reset = liveReset else {
             return UsagePrediction(
@@ -403,12 +617,12 @@ public enum PredictionEngine {
                 verdict: smoothed(.green, previous: previous),
                 rawVerdict: .green,
                 severity: 0,
-                text: "≈\(durationText(hours: hoursToExhaust)) to limit",
+                text: "≈\(durationText(hours: hoursUntilExhaust)) to limit",
                 curve: [])
         }
 
-        let hoursToReset = reset.timeIntervalSince(now) / 3600
-        let projected = Double(percent) + rate * hoursToReset
+        let projected = Double(percent)
+            + rate * availableHours(from: now, to: reset, lockouts: lockouts)
         // The unclamped projection placed on the yellow-threshold→limit ramp.
         let severity = max(0, min(1,
             (projected - yellowProjectionThreshold) / (100 - yellowProjectionThreshold)))
@@ -425,12 +639,14 @@ public enum PredictionEngine {
                 verdict: smoothed(.red, previous: previous),
                 rawVerdict: .red,
                 severity: severity,
-                text: "≈\(durationText(hours: hoursToExhaust)) until limit",
-                curve: [start,
-                        .init(t: exhaustDate, percent: 100),
-                        .init(t: reset, percent: 100)])
+                text: "≈\(durationText(hours: hoursUntilExhaust)) until limit",
+                curve: [start]
+                    + boundaryPoints(before: exhaustDate)
+                    + [.init(t: exhaustDate, percent: 100),
+                       .init(t: reset, percent: 100)])
         }
         let endpoint = UsagePrediction.Point(t: reset, percent: projected)
+        let rising = boundaryPoints(before: reset)
         if projected >= yellowProjectionThreshold {
             return UsagePrediction(
                 ratePerHour: rate,
@@ -443,7 +659,7 @@ public enum PredictionEngine {
                 rawVerdict: .yellow,
                 severity: severity,
                 text: "tight — proj. \(Int(projected.rounded()))% at reset",
-                curve: [start, endpoint])
+                curve: [start] + rising + [endpoint])
         }
         return UsagePrediction(
             ratePerHour: rate,
@@ -456,7 +672,7 @@ public enum PredictionEngine {
             rawVerdict: .green,
             severity: 0,
             text: "on track — proj. \(Int(projected.rounded()))% at reset",
-            curve: [start, endpoint])
+            curve: [start] + rising + [endpoint])
     }
 
     // MARK: - Damped blend
@@ -476,17 +692,43 @@ public enum PredictionEngine {
     /// profile it read an ordinary Tuesday as ~1.3× hot and then charged
     /// every remaining day that much, which is what put a red "runs out
     /// Monday" on a week that ends quiet.
+    ///
+    /// LOCKOUTS make `gained` a sum over the AVAILABLE sub-spans of
+    /// [now, t] — the span minus the stretches a shorter-window sibling has
+    /// gated (a spent 5-hour session is a hard zero for the weeklies until
+    /// it resets; the forecast used to climb straight through those hours at
+    /// the learned rhythm). Over each available [a, b], in hours from `now`:
+    ///
+    ///     baseline.gained(a, b) + excess × τ × (e^(−a/τ) − e^(−b/τ))
+    ///
+    /// which is the exact integral of the decaying excess over that piece —
+    /// the decay is still measured from `now` throughout, so the burst
+    /// simply contributes nothing during a lockout and its remainder
+    /// resumes at whatever it has decayed to when the gate opens. The
+    /// baseline term telescopes the same way. With no lockouts the sum is
+    /// the single span [now, t] and this is the original expression.
     private static func blended(
-        percent: Int, reset: Date, rate: Double,
-        baseline: Baseline, previous: UsagePrediction?, now: Date
+        percent: Int, reset: Date, rate: Double, baseline: Baseline,
+        lockouts: [DateInterval], previous: UsagePrediction?, now: Date
     ) -> UsagePrediction {
         let percentD = Double(percent)
         let baseRateNow = baseline.rate(now)
         let excess = rate - baseRateNow
         func gained(by t: Date) -> Double {
-            let hours = t.timeIntervalSince(now) / 3600
-            let damped = burstDecayHours * (1 - exp(-hours / burstDecayHours))
-            return baseline.gained(now, t) + excess * damped
+            guard !lockouts.isEmpty else {
+                let hours = t.timeIntervalSince(now) / 3600
+                let damped = burstDecayHours * (1 - exp(-hours / burstDecayHours))
+                return baseline.gained(now, t) + excess * damped
+            }
+            var total = 0.0
+            for span in availableSpans(from: now, to: t, lockouts: lockouts) {
+                let a = span.start.timeIntervalSince(now) / 3600
+                let b = span.end.timeIntervalSince(now) / 3600
+                total += baseline.gained(span.start, span.end)
+                    + excess * burstDecayHours
+                        * (exp(-a / burstDecayHours) - exp(-b / burstDecayHours))
+            }
+            return total
         }
 
         let projectedRaw = percentD + gained(by: reset)
@@ -517,8 +759,22 @@ public enum PredictionEngine {
         var exhaustDate: Date?
         let horizon = reset.timeIntervalSince(now)
         var previousT = now
-        for step in 1...curveSampleCount {
-            let t = now.addingTimeInterval(horizon * Double(step) / Double(curveSampleCount))
+        // The uniform samples, plus a sample at each lockout boundary inside
+        // the horizon: a plateau smeared over a 3.5-hour step would read as
+        // a gentle slope instead of the flat stretch it is.
+        var times = (1...curveSampleCount).map {
+            now.addingTimeInterval(horizon * Double($0) / Double(curveSampleCount))
+        }
+        if !lockouts.isEmpty {
+            times += lockouts
+                .flatMap { [$0.start, $0.end] }
+                .filter { $0 > now && $0 < reset }
+            times.sort()
+            times = times.reduce(into: [Date]()) { unique, t in
+                if unique.last != t { unique.append(t) }
+            }
+        }
+        for t in times {
             let value = percentD + gained(by: t)
             if value >= 100 {
                 let crossing = crossingDate(
@@ -563,7 +819,13 @@ public enum PredictionEngine {
     }
 
     /// Bisects the crossing of the 100% line to the second. The trajectory
-    /// is monotonic, so the bracket is sound by construction.
+    /// is monotonic non-decreasing, so the bracket is sound by construction
+    /// — a lockout only ever flattens it (derivative exactly 0 there).
+    /// The bracket may now sit on such a plateau; the search converges on
+    /// the FIRST instant the value reaches 100, and since `upper` is only
+    /// ever moved to an instant that tested `>= 100`, it can never come to
+    /// rest strictly inside a flat sub-100 stretch. A crossing that happens
+    /// as the gate opens is reported at the lockout's end, not inside it.
     private static func crossingDate(
         between lower: Date, and upper: Date,
         percent: Double, gained: (Date) -> Double
