@@ -23,6 +23,28 @@ struct WeeklyProfileTests {
             resets: reset.map { [label: $0] })
     }
 
+    /// This repo's own user: Sun–Thu, 08:00–20:00, nothing on Friday or
+    /// Saturday and nothing between 20:00 and 08:00. A sample on every
+    /// 4-hour block boundary for `weeks` whole Sun→Sat weeks, so every one of
+    /// the 42 buckets is observed 4h per week and the quiet ones are observed
+    /// quiet rather than merely unseen.
+    static func workWeekSamples(weeks: Int = 3, gainPerBlock: Int = 8) -> [UsageSample] {
+        var samples: [UsageSample] = []
+        var percent = 0
+        // `at(0, _)` is a Monday, so day −1 starts the first week on a Sunday.
+        for day in -1..<(weeks * 7 - 1) {
+            let weekday = ((day % 7) + 7) % 7 // 0 = Monday … 6 = Sunday
+            let works = weekday != 4 && weekday != 5 // not Friday, not Saturday
+            for block in 0..<WeeklyProfile.blocksPerDay {
+                samples.append(sample(at(day, Double(block) * 4), percent))
+                if works, (2...4).contains(block) { percent += gainPerBlock }
+            }
+        }
+        // Closes the last Saturday's final block.
+        samples.append(sample(at(weeks * 7 - 1, 0), percent))
+        return samples
+    }
+
     /// A uniform 2%/h profile for exercising the pure math paths.
     static func uniformProfile(spanDays: Double = 15) -> WeeklyProfile {
         WeeklyProfile(
@@ -56,7 +78,15 @@ struct WeeklyProfileTests {
         // Burning blocks sit above the global mean, quiet ones below.
         #expect(profile.rates[8] > profile.globalRatePerHour)
         #expect(profile.rates[27] < profile.globalRatePerHour)
-        #expect(abs(profile.rates[8] - (5 + 8 * 10.0 / 6) / 10) < 0.0001)
+        // Shrunk toward the STRUCTURED estimate, not the flat mean:
+        // dayRate[Mon] = 10/4 = 2.5, blockRate[08–12] = 5/2 = 2.5,
+        // global = 10/6, so structured = 2.5 × 2.5 ÷ (10/6) = 3.75 and
+        // rates[8] = (5 + 8 × 3.75) / (2 + 8) = 3.5.
+        #expect(abs(profile.rates[8] - 3.5) < 0.0001)
+        // Thursday gained nothing at all, so its whole weekday margin is
+        // zero and every Thursday bucket forecasts an exact zero — the flat
+        // prior used to hand this one 8/9 of the global mean.
+        #expect(profile.rates[27] == 0)
         #expect(!profile.isReady)
         #expect(profile.remainingUntilReady > 0)
     }
@@ -126,11 +156,12 @@ struct WeeklyProfileTests {
         let now = Self.at(0, 10)
         let windowStart = now.addingTimeInterval(-10 * 3600) // expected 20%
         #expect(abs(profile.paceFactor(percent: 10, windowStart: windowStart, now: now) - 0.6) < 0.0001)
-        #expect(abs(profile.paceFactor(percent: 60, windowStart: windowStart, now: now) - 2.6) < 0.0001)
+        // Raw (60 + 5) / (20 + 5) = 2.6, clamped to the 0.5...2.0 ceiling.
+        #expect(profile.paceFactor(percent: 60, windowStart: windowStart, now: now) == 2)
         // A window that just reset divides shrink by shrink — pace 1.
         #expect(profile.paceFactor(percent: 0, windowStart: now, now: now) == 1)
         // And an absurd ratio clamps rather than exploding the forecast.
-        #expect(profile.paceFactor(percent: 100, windowStart: now, now: now) == 4)
+        #expect(profile.paceFactor(percent: 100, windowStart: now, now: now) == 2)
     }
 
     @Test("weekday shares sum to one and follow the burn")
@@ -148,6 +179,112 @@ struct WeeklyProfileTests {
         #expect(abs(shares[1] - 1) < 0.0001)
         #expect(shares[0] == 0)
         #expect(shares[6] == 0)
+    }
+
+    @Test("a weekday never burned on forecasts zero in all six of its blocks")
+    func unusedWeekdayIsZero() {
+        let profile = WeeklyProfile.build(
+            samples: Self.workWeekSamples(), label: "W", calendar: Self.gmt)
+        #expect(profile != nil)
+        guard let profile else { return }
+        #expect(profile.globalRatePerHour > 0)
+
+        for day in [5, 6] { // Friday and Saturday, Sunday-absolute indices
+            for block in 0..<WeeklyProfile.blocksPerDay {
+                let index = day * WeeklyProfile.blocksPerDay + block
+                // Observed, and observed QUIET — three weeks of 4-hour reads
+                // each. Without this the zero below could just mean the
+                // fixture never covered the day.
+                #expect(profile.observedHours[index] == 12)
+                #expect(profile.rates[index] == 0)
+            }
+        }
+        // And a separable rhythm is a FIXED POINT of the shrinkage: a busy
+        // bucket returns its own observed rate (24 gained over 12 h = 2),
+        // never a suppressed one. The flat prior handed this same bucket
+        // (24 + 8 × 0.714) / 20 = 1.486 — the 26% haircut on every busy
+        // block that made a perfectly normal workday read as 1.28× hot.
+        for day in 0..<5 { // Sunday through Thursday, Sunday-absolute
+            for block in 2...4 {
+                #expect(abs(profile.rates[day * WeeklyProfile.blocksPerDay + block] - 2)
+                    < 0.000000001)
+            }
+        }
+    }
+
+    @Test("a block-of-day never used forecasts zero on every weekday")
+    func unusedBlockIsZero() {
+        let profile = WeeklyProfile.build(
+            samples: Self.workWeekSamples(), label: "W", calendar: Self.gmt)
+        #expect(profile != nil)
+        guard let profile else { return }
+
+        for block in [0, 1, 5] { // 00–04, 04–08 and 20–24: never burned in
+            for day in 0..<7 {
+                let index = day * WeeklyProfile.blocksPerDay + block
+                #expect(profile.observedHours[index] == 12)
+                #expect(profile.rates[index] == 0)
+            }
+        }
+        // 11.4% of this user's modeled week used to live in those night
+        // blocks; the working blocks now carry the whole rhythm.
+        let working = (0..<7).flatMap { day in
+            (2...4).map { profile.rates[day * WeeklyProfile.blocksPerDay + $0] }
+        }
+        #expect(working.contains { $0 > 0 })
+    }
+
+    @Test("a thin bucket is pulled toward its structured estimate, not the mean")
+    func thinBucketFollowsStructure() {
+        // Sunday is the busy weekday and 08–12 the busy block, but Sunday
+        // 08–12 itself was only observed for one hour. Monday a week later
+        // (the >48h gap drops the pair between them) supplies the other
+        // margin.
+        let samples = [
+            Self.sample(Self.at(-1, 11), 0), Self.sample(Self.at(-1, 12), 2),
+            Self.sample(Self.at(-1, 16), 8),
+            Self.sample(Self.at(7, 8), 8), Self.sample(Self.at(7, 12), 14),
+            Self.sample(Self.at(7, 16), 14),
+        ]
+        let profile = WeeklyProfile.build(samples: samples, label: "W", calendar: Self.gmt)
+        #expect(profile != nil)
+        guard let profile else { return }
+
+        // Sun 08–12 = bucket 2, Sun 12–16 = 3, Mon 08–12 = 8, Mon 12–16 = 9.
+        #expect(profile.pairCount == 4)
+        #expect(profile.observedHours[2] == 1)
+        #expect(profile.observedHours[3] == 4)
+        #expect(profile.observedHours[8] == 4)
+        #expect(profile.observedHours[9] == 4)
+
+        // dayRate[Sun] = 8/5 = 1.6, blockRate[08–12] = 8/5 = 1.6,
+        // global = 14/13, so structured = 1.6 × 1.6 ÷ (14/13) ≈ 2.3771 and
+        // rates[2] = (2 + 8 × 2.3771) / 9 ≈ 2.3352.
+        #expect(abs(profile.globalRatePerHour - 14.0 / 13) < 0.0001)
+        #expect(abs(profile.rates[2] - 2.3352380952) < 0.0001)
+        // What the flat prior would have produced, computed here so the
+        // claim is "structured side of the old formula", not the weaker
+        // "above the mean".
+        let flat = (2 + WeeklyProfile.priorHours * profile.globalRatePerHour)
+            / (1 + WeeklyProfile.priorHours)
+        #expect(profile.rates[2] > flat)
+        #expect(profile.rates[2] > profile.globalRatePerHour)
+    }
+
+    @Test("weekday shares give a Sun–Thu user exactly zero on Fri and Sat")
+    func weekdaySharesOfAWorkWeek() {
+        let profile = WeeklyProfile.build(
+            samples: Self.workWeekSamples(), label: "W", calendar: Self.gmt)
+        #expect(profile != nil)
+        guard let profile else { return }
+
+        let shares = profile.weekdayShares()
+        #expect(abs(shares.reduce(0, +) - 1) < 0.0001)
+        #expect(shares[5] == 0) // Friday
+        #expect(shares[6] == 0) // Saturday
+        // The five worked days are identical weeks over weeks, so each takes
+        // a fifth of the typical week's burn.
+        for day in 0..<5 { #expect(abs(shares[day] - 0.2) < 0.0001) }
     }
 
     @Test("readiness gates on two weeks of history span")

@@ -8,15 +8,29 @@ import Foundation
 /// Buckets are 4-hour blocks × 7 weekdays (42), in the calendar's local time:
 /// fine enough to separate "weekday evenings" from "weekend mornings", coarse
 /// enough that two weeks of history observes every bucket a few times. Each
-/// bucket's rate is shrunk toward the whole-history mean by `priorHours` of
-/// pseudo-observation, so a block seen once doesn't overreact.
+/// bucket's rate is shrunk by `priorHours` of pseudo-observation toward a
+/// STRUCTURED estimate — this weekday's own rate × this block-of-day's own
+/// rate ÷ the global rate, the independence model over the two margins — so a
+/// block seen once doesn't overreact, and a weekday or an hour-of-day the
+/// person never uses forecasts zero BY CONSTRUCTION.
+///
+/// It used to shrink toward the flat whole-history mean, and that was wrong in
+/// a way that reached the menu bar (v0.99.3): for a Sun–Thu user with five
+/// quiet weeks, the prior still weighed 30–40% of a bucket with 12–20 observed
+/// hours, so Fri+Sat carried ~10% and every 00:00–08:00 block another ~11% of
+/// the modeled week despite ~0% observed — while the busy blocks were pulled
+/// down to pay for it. A flattened expectation also inflates
+/// `paceFactor`, so a perfectly normal Tuesday read as 1.28× hot and the
+/// forecast steepened every remaining day into a false crossing.
 public struct WeeklyProfile: Sendable, Equatable {
     public static let blocksPerDay = 6
     public static let bucketCount = 7 * blocksPerDay
     /// History span needed before the profile drives forecasts and charts —
     /// two full weekly cycles, so every hour-of-week was seen twice.
     public static let activationSpan: TimeInterval = 14 * 86400
-    /// Pseudo-observation hours pulling each bucket toward the global mean.
+    /// Pseudo-observation hours pulling each bucket toward its structured
+    /// estimate (weekday rate × block rate ÷ global rate), never toward a flat
+    /// mean — an unused weekday or hour-of-day must stay at zero.
     public static let priorHours = 8.0
     /// Sample gaps beyond this are dropped: smearing one delta across days
     /// says nothing about hour-of-week structure.
@@ -24,13 +38,17 @@ public struct WeeklyProfile: Sendable, Equatable {
     /// Additive shrink (percentage points) keeping the pace factor tame
     /// early in a window, when "expected so far" is still near zero.
     public static let paceShrink = 5.0
-    public static let paceFactorRange = 0.25...4.0
+    /// Clamped tight (v0.99.3): the factor is a nudge on the typical week, not
+    /// a re-estimate of it — a 4× ceiling let two hot days quadruple the
+    /// remaining five.
+    public static let paceFactorRange = 0.5...2.0
 
     /// Typical %/hour per bucket, weekday-major: Sunday's six blocks first.
     public let rates: [Double]
     /// Actually observed hours per bucket (diagnostics + settings readout).
     public let observedHours: [Double]
-    /// Whole-history mean burn in %/hour — the shrinkage prior.
+    /// Whole-history mean burn in %/hour — the normalizer of the structured
+    /// prior (and the settings readout's headline number).
     public let globalRatePerHour: Double
     /// Oldest-to-newest span of the samples that fed the profile.
     public let historySpan: TimeInterval
@@ -53,6 +71,24 @@ public struct WeeklyProfile: Sendable, Equatable {
     /// `ResetStamp` jitter (the window rolled over between reads, so the
     /// delta doesn't describe consumption) and when the gap exceeds
     /// `maximumGap`.
+    ///
+    /// Each bucket is then shrunk toward its STRUCTURED estimate rather than
+    /// toward the flat global mean. With `d` the weekday and `b` the
+    /// block-of-day:
+    ///
+    ///     dayRate[d]   = Σ gained over that weekday's 6 buckets ÷ Σ hours
+    ///     blockRate[b] = Σ gained over that block across the 7 weekdays ÷ Σ hours
+    ///     global       = Σ gained ÷ Σ hours
+    ///     structured   = dayRate[d] × blockRate[b] ÷ global   (0 when global is 0)
+    ///     rate         = (gained + priorHours × structured) ÷ (hours + priorHours)
+    ///
+    /// The multiplicative form is the independence model: a bucket with thin
+    /// coverage is guessed from "how busy is this weekday" × "how busy is this
+    /// hour-of-day", so a never-used Saturday and a never-used 04:00 both
+    /// carry a zero factor and the bucket forecasts zero no matter how little
+    /// it was observed. A margin with no observed hours at all counts as zero
+    /// too — past `activationSpan` every weekday and block has been seen, so
+    /// that only ever concerns a profile too young to drive a forecast.
     public static func build(
         samples: [UsageSample], label: String, calendar: Calendar = .current
     ) -> WeeklyProfile? {
@@ -92,8 +128,30 @@ public struct WeeklyProfile: Sendable, Equatable {
         let totalHours = hoursByBucket.reduce(0, +)
         guard totalHours > 0 else { return nil }
         let global = gainedByBucket.reduce(0, +) / totalHours
-        let rates = zip(gainedByBucket, hoursByBucket).map { gained, observed in
-            (gained + priorHours * global) / (observed + priorHours)
+
+        // The two margins of the 7 × 6 table, each a plain rate over its own
+        // observed hours; a margin nobody burned in (or nobody was observed
+        // in) is zero, which is what carries a never-used weekday or
+        // hour-of-day through the prior as an exact zero.
+        var dayGained = [Double](repeating: 0, count: 7)
+        var dayHours = [Double](repeating: 0, count: 7)
+        var blockGained = [Double](repeating: 0, count: blocksPerDay)
+        var blockHours = [Double](repeating: 0, count: blocksPerDay)
+        for index in 0..<bucketCount {
+            dayGained[index / blocksPerDay] += gainedByBucket[index]
+            dayHours[index / blocksPerDay] += hoursByBucket[index]
+            blockGained[index % blocksPerDay] += gainedByBucket[index]
+            blockHours[index % blocksPerDay] += hoursByBucket[index]
+        }
+        let dayRate = zip(dayGained, dayHours).map { $1 > 0 ? $0 / $1 : 0 }
+        let blockRate = zip(blockGained, blockHours).map { $1 > 0 ? $0 / $1 : 0 }
+
+        let rates = (0..<bucketCount).map { index -> Double in
+            let structured = global > 0
+                ? dayRate[index / blocksPerDay] * blockRate[index % blocksPerDay] / global
+                : 0
+            return (gainedByBucket[index] + priorHours * structured)
+                / (hoursByBucket[index] + priorHours)
         }
         return WeeklyProfile(
             rates: rates, observedHours: hoursByBucket, globalRatePerHour: global,
