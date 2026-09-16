@@ -1462,9 +1462,18 @@ the README rather than silently deviating.
   once ≥14 days of history exist (42 buckets = 7 weekdays × 4-hour blocks,
   local time, Sunday-absolute indexing; consumption between sample pairs
   attributed uniformly across spanned blocks; pairs skipped on percent
-  drop, moved reset, or gaps >48 h; bucket rates shrunk toward the global
-  mean by `priorHours` = 8 of pseudo-observation; scaled at predict time
-  by a pace factor (actual+5)/(expected+5) clamped 0.25–4), else the
+  drop, moved reset, or gaps >48 h; bucket rates shrunk by `priorHours` = 8
+  of pseudo-observation toward a STRUCTURED estimate — that weekday's mean
+  rate × that block-of-day's mean rate ÷ the global mean (v0.99.3,
+  user-reported: the flat global-mean prior put ~20% of a Sun–Thu user's
+  modeled week into Fri/Sat and 00–08h blocks that had never spent a
+  point, and flattened the busy blocks, which read a normal Tuesday as
+  1.28× hot) — a day or hour never used forecasts zero by construction;
+  scaled at predict time by a pace factor (actual+5)/(expected+5) clamped
+  0.5–2 that DECAYS toward 1 with `paceDecayHours` = 24 (same closed form
+  as the burst: a hot Tuesday steepens Wednesday's forecast, not next
+  Monday's; the flat multiplier compressed the whole week's rhythm into the
+  days before the crossing)), else the
   window's own average pace (percent ÷ elapsed, needs ≥30 min). Each
   `UsagePrediction` carries rate, baseline rate, pace factor, `basis`
   (recentOnly/windowAverage/weeklyProfile), projected-at-reset, exhaustion
