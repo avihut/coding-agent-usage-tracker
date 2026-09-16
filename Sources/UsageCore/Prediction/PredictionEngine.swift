@@ -42,7 +42,11 @@ public struct UsagePrediction: Sendable, Equatable {
     /// the forecast had only the recent rate to go on.
     public let baselineRatePerHour: Double?
     /// How this window compares to the typical one so far (weekly-profile
-    /// basis only): >1 running hot, <1 running cool.
+    /// basis only): >1 running hot, <1 running cool. This is the
+    /// INSTANTANEOUS reading — the forecast does not carry it flat across
+    /// the whole remaining window. A pace deviation is assumed to fade over
+    /// about a day (`PredictionEngine.paceDecayHours`), so a hot Tuesday
+    /// steepens Wednesday's forecast, not next Monday's.
     public let paceFactor: Double?
     public let basis: Basis
     /// Projected percent at the window reset (clamped to 100); nil without a
@@ -108,6 +112,14 @@ public enum PredictionEngine {
     /// baseline decays with this time constant, so a hot session contributes
     /// about one hour of itself to the forecast — not the whole window.
     public static let burstDecayHours = 1.0
+    /// How long a pace deviation is assumed to persist, in hours: the
+    /// weekly-profile baseline's pace factor decays toward 1 with this time
+    /// constant instead of scaling the whole remaining window flat. Running
+    /// hot today says something about tomorrow and almost nothing about the
+    /// same weekday next week — a flat multiplier compressed the learned
+    /// week's rhythm into the days before the crossing, steepening every
+    /// remaining day at once and pulling a forecast crossing forward.
+    public static let paceDecayHours = 24.0
     /// Youngest window age that can carry an average-pace baseline; before
     /// this, percent ÷ elapsed is mostly noise.
     public static let minimumBaselineElapsed: TimeInterval = 1800
@@ -278,10 +290,43 @@ public enum PredictionEngine {
         if let profile, profile.isReady {
             let windowStart = reset.addingTimeInterval(-windowLength)
             let pace = profile.paceFactor(percent: percent, windowStart: windowStart, now: now)
+            // The pace deviation fades: multiplier(t) = 1 + (pace − 1)·e^(−h/τ),
+            // h = hours from `now` to t, τ = paceDecayHours. At `now` it is
+            // the full pace factor (so `baselineRatePerHour` still reports
+            // what this window is actually doing); a week out it is the
+            // learned rhythm untouched.
+            func multiplier(_ t: Date) -> Double {
+                let hours = t.timeIntervalSince(now) / 3600
+                return 1 + (pace - 1) * exp(-hours / paceDecayHours)
+            }
             return Baseline(
                 basis: .weeklyProfile, paceFactor: pace,
-                rate: { profile.rate(at: $0) * pace },
-                gained: { profile.expectedPercent(from: $0, to: $1) * pace })
+                rate: { profile.rate(at: $0) * multiplier($0) },
+                // The profile's own block walk (`expectedPercent`), with the
+                // exact integral of the decaying multiplier over each block:
+                // r × [(b−a) + (pace−1)·τ·(e^(−(a−now)/τ) − e^(−(b−now)/τ))],
+                // all in hours. h is measured from `now`, not from `a`, so
+                // spans telescope — gained(now,x) + gained(x,y) ==
+                // gained(now,y). Callers only ever ask forward; a span
+                // starting before `now` would read a multiplier above the
+                // pace factor, which nothing wants.
+                gained: { start, end in
+                    guard end > start else { return 0 }
+                    var total = 0.0
+                    var cursor = start
+                    while cursor < end {
+                        let sliceEnd = min(
+                            WeeklyProfile.blockEnd(after: cursor, calendar: profile.calendar),
+                            end)
+                        let a = cursor.timeIntervalSince(now) / 3600
+                        let b = sliceEnd.timeIntervalSince(now) / 3600
+                        total += profile.rate(at: cursor)
+                            * ((b - a) + (pace - 1) * paceDecayHours
+                                * (exp(-a / paceDecayHours) - exp(-b / paceDecayHours)))
+                        cursor = sliceEnd
+                    }
+                    return total
+                })
         }
         let elapsed = windowLength - reset.timeIntervalSince(now)
         guard elapsed >= minimumBaselineElapsed else { return nil }
@@ -421,6 +466,16 @@ public enum PredictionEngine {
     /// contributes `burstDecayHours × (1 − e^(−h/τ))` hours of itself, which
     /// converges to about one hour however long the window runs. Since the
     /// recent rate is never negative, the total is never negative either.
+    ///
+    /// The BASELINE itself decays the same way on the weekly-profile basis:
+    /// its pace factor fades toward 1 over `paceDecayHours`, because a
+    /// deviation is news about the next day, not about the whole week. A hot
+    /// Tuesday should steepen Wednesday's forecast, not next Monday's.
+    /// Scaling the entire remaining window flat compressed the learned
+    /// week's rhythm into the days before the crossing — with a flattened
+    /// profile it read an ordinary Tuesday as ~1.3× hot and then charged
+    /// every remaining day that much, which is what put a red "runs out
+    /// Monday" on a week that ends quiet.
     private static func blended(
         percent: Int, reset: Date, rate: Double,
         baseline: Baseline, previous: UsagePrediction?, now: Date

@@ -6,6 +6,26 @@ private func sample(_ minutesAgo: Double, _ percent: Int, label: String = "Sessi
     UsageSample(t: now.addingTimeInterval(-minutesAgo * 60), percents: [label: percent])
 }
 
+private let gmt: Calendar = {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(identifier: "GMT")!
+    return calendar
+}()
+
+/// A ready profile with the given per-bucket rates, built directly rather
+/// than learned: `build`'s shrinkage toward the global mean leaves buckets
+/// only *almost* equal, and the pace-decay math below is asserted against a
+/// closed form that needs the rates it was given.
+private func readyProfile(rates: [Double]) -> WeeklyProfile {
+    WeeklyProfile(
+        rates: rates,
+        observedHours: Array(repeating: 24.0, count: WeeklyProfile.bucketCount),
+        globalRatePerHour: rates.reduce(0, +) / Double(rates.count),
+        historySpan: 21 * 86400,
+        pairCount: 500,
+        calendar: gmt)
+}
+
 @Suite("PredictionEngine")
 struct PredictionEngineTests {
     let now = Date(timeIntervalSince1970: 1_000_000)
@@ -278,6 +298,104 @@ struct PredictionEngineTests {
         #expect(prediction?.basis == .weeklyProfile)
         #expect(prediction?.paceFactor != nil)
         #expect((prediction?.projectedAtReset ?? 0) >= 30)
+    }
+
+    // MARK: - Pace decay
+
+    /// 2020-09-13 12:00:00 GMT — a Sunday, and a multiple of 4 hours since
+    /// the epoch, so it sits exactly on a profile block boundary. The block
+    /// walks below then cover whole blocks and their sums are exact.
+    static let blockAligned = Date(timeIntervalSince1970: 1_599_998_400)
+    /// Rates repeating 0, 1, 2 %/h across the 42 buckets. Deliberately NOT
+    /// uniform, so a block walk that mis-attributes a slice shows up — and
+    /// 42 is a multiple of 3, so any six consecutive blocks sum to 6 %/h
+    /// (= 24 percentage points over their 24 hours) wherever they wrap.
+    static let steppedRates = (0..<WeeklyProfile.bucketCount).map { Double($0 % 3) }
+
+    @Test("a hot pace steepens the next day, not the whole remaining window")
+    func paceDecaysOverTheHorizon() throws {
+        // 24h of window elapsed at the typical rhythm's 24 points, but 38%
+        // actually spent: the window reads hot. The horizon is five more
+        // days — far past the one-day decay constant.
+        let now = Self.blockAligned
+        let profile = readyProfile(rates: Self.steppedRates)
+        let reset = now.addingTimeInterval(120 * 3600)
+        let baseline = try #require(PredictionEngine.baseline(
+            percent: 38, reset: reset, windowLength: 144 * 3600,
+            profile: profile, now: now))
+        #expect(baseline.basis == .weeklyProfile)
+        let pace = try #require(baseline.paceFactor)
+        // Strictly inside the clamp, or the assertions below would hold for
+        // reasons unrelated to the decay.
+        #expect(pace > 1.01 && pace < WeeklyProfile.paceFactorRange.upperBound - 0.01)
+
+        let gained = baseline.gained(now, reset)
+        let atRhythm = profile.expectedPercent(from: now, to: reset)
+        #expect(atRhythm > 0)
+        // More than the plain rhythm — the window IS running hot…
+        #expect(gained > atRhythm + 0.01)
+        // …but far less than the old flat multiplier, which charged every
+        // one of the five remaining days the full pace factor.
+        #expect(gained < pace * atRhythm - 0.01)
+
+        // The rate at `now` still reports the full pace factor: the decay is
+        // about the horizon, not about what the meter is doing right now.
+        #expect(abs(baseline.rate(now) - profile.rate(at: now) * pace) < 1e-9)
+    }
+
+    @Test("past the decay constant the pace adds τ hours of baseline, no more")
+    func paceExtraConvergesToTau() throws {
+        // A uniform 0.5%/h rhythm so the block walk's sum equals the
+        // analytic integral exactly, and a 168h horizon = 7τ.
+        let now = Self.blockAligned
+        let rate = 0.5
+        let profile = readyProfile(
+            rates: Array(repeating: rate, count: WeeklyProfile.bucketCount))
+        let horizon = 168.0
+        let reset = now.addingTimeInterval(horizon * 3600)
+        // windowStart = now − 24h, where the rhythm expected 12 points.
+        let baseline = try #require(PredictionEngine.baseline(
+            percent: 20, reset: reset, windowLength: (horizon + 24) * 3600,
+            profile: profile, now: now))
+        let pace = try #require(baseline.paceFactor)
+        #expect(abs(pace - 25.0 / 17.0) < 1e-9)
+
+        let tau = PredictionEngine.paceDecayHours
+        // ∫₀^H r·(1 + (p−1)e^(−h/τ)) dh = r·H + r·(p−1)·τ·(1 − e^(−H/τ)),
+        // and at H = 7τ the trailing e^(−7) ≈ 9e-4 is all that separates it
+        // from the limit r·H + r·(p−1)·τ.
+        let extra = rate * (pace - 1) * tau
+        let closedForm = rate * horizon + extra
+        let residual = extra * exp(-horizon / tau)
+        #expect(residual < 0.01)
+        // The extra is ~5.6 points — three orders above the tolerance, so
+        // this really is asserting the decay's size, not just its sign.
+        #expect(extra > 5)
+        #expect(abs(baseline.gained(now, reset) - closedForm) < 0.01)
+    }
+
+    @Test("a pace of exactly 1 reproduces the plain weekly rhythm")
+    func paceOfOneIsTheRhythm() throws {
+        // The stepped profile expects exactly 24 points over the 24h of
+        // window already elapsed; spending exactly 24 makes the pace factor
+        // (24+5)/(24+5) = 1, where the multiplier is identically 1 and the
+        // block walk must collapse onto `expectedPercent`.
+        let now = Self.blockAligned
+        let profile = readyProfile(rates: Self.steppedRates)
+        let windowStart = now.addingTimeInterval(-24 * 3600)
+        #expect(abs(profile.expectedPercent(from: windowStart, to: now) - 24) < 1e-9)
+
+        let reset = now.addingTimeInterval(72 * 3600)
+        let baseline = try #require(PredictionEngine.baseline(
+            percent: 24, reset: reset, windowLength: 96 * 3600,
+            profile: profile, now: now))
+        #expect(baseline.paceFactor == 1)
+        for hours in [1.0, 5.0, 26.0, 72.0] {
+            let t = now.addingTimeInterval(hours * 3600)
+            #expect(abs(baseline.gained(now, t)
+                - profile.expectedPercent(from: now, to: t)) < 1e-9)
+            #expect(abs(baseline.rate(t) - profile.rate(at: t)) < 1e-9)
+        }
     }
 
     @Test("curve interpolation crosses the knee correctly")
