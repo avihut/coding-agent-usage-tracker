@@ -784,6 +784,53 @@ struct PredictionEngineTests {
         #expect(free == perMeter)
     }
 
+    /// `projectedAtReset` clamps at the limit; the raw projection beside it
+    /// is what says HOW FAR past the limit the pace lands, and it must be
+    /// set on every path that projects at all — nowhere else.
+    @Test("the unclamped projection rides beside the clamped one")
+    func unclampedProjection() throws {
+        let reset = now.addingTimeInterval(2 * 3600)
+
+        // Linear, crossing: clamped 100, raw 120.
+        let red = PredictionEngine.prediction(
+            percent: 80, resetsAt: reset, ratePerHour: 20, now: now)
+        #expect(red.projectedAtReset == 100)
+        #expect(abs(try #require(red.projectedUnclamped) - 120) < 1e-9)
+
+        // Linear, inside the limit: the raw value is the clamped one,
+        // un-rounded.
+        let green = PredictionEngine.prediction(
+            percent: 20, resetsAt: reset, ratePerHour: 3.4, now: now)
+        #expect(green.projectedAtReset == 27)
+        #expect(abs(try #require(green.projectedUnclamped) - 26.8) < 1e-9)
+
+        // Flat: the window ends where it stands.
+        let flat = PredictionEngine.prediction(
+            percent: 40, resetsAt: reset, ratePerHour: 0, now: now)
+        #expect(flat.projectedUnclamped == 40)
+
+        // No live reset: nothing to project at.
+        let noReset = PredictionEngine.prediction(
+            percent: 40, resetsAt: nil, ratePerHour: 20, now: now)
+        #expect(noReset.projectedAtReset == nil)
+        #expect(noReset.projectedUnclamped == nil)
+
+        // Spent: a measurement, not a forecast — no overshoot to state.
+        let spent = PredictionEngine.prediction(
+            percent: 100, resetsAt: reset, ratePerHour: 20, now: now)
+        #expect(spent.projectedAtReset == 100)
+        #expect(spent.projectedUnclamped == nil)
+
+        // Blended (a week-long window with an average-pace baseline): the
+        // raw projection exceeds the clamp it reports.
+        let weekReset = now.addingTimeInterval(4 * 86400)
+        let blended = PredictionEngine.prediction(
+            percent: 60, resetsAt: weekReset, ratePerHour: 4,
+            windowLength: 7 * 86400, now: now)
+        #expect(blended.projectedAtReset == 100)
+        #expect(try #require(blended.projectedUnclamped) > 100)
+    }
+
     @Test("spent limits speak in the past tense")
     func spentPhrasing() {
         let now = Date()

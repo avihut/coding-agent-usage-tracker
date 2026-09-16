@@ -316,8 +316,14 @@
             "t" : "2026-08-16T14:00:00Z"
           }
         ],
+        "overshoot" : {
+          "cost" : 38.4,
+          "percent" : 11.5,
+          "tokens" : 115000
+        },
         "paceFactor" : 1.5,
         "projectedAtReset" : 78,
+        "projectedUnclamped" : 78.4,
         "ratePerHour" : 12,
         "rawVerdict" : "green",
         "severity" : 0.4,
@@ -1403,8 +1409,14 @@
                 "t" : "2026-08-16T14:00:00Z"
               }
             ],
+            "overshoot" : {
+              "cost" : 38.4,
+              "percent" : 11.5,
+              "tokens" : 115000
+            },
             "paceFactor" : 1.5,
             "projectedAtReset" : 78,
+            "projectedUnclamped" : 78.4,
             "ratePerHour" : 12,
             "rawVerdict" : "green",
             "severity" : 0.4,

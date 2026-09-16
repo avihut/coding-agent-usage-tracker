@@ -212,6 +212,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let card = MeterHistoryView(
                 meter: meter, samples: store.samples, timeline: store.tokenTimeline,
                 pricing: store.pricing, prediction: store.predictions[meter.label],
+                overshoot: store.forecastOvershoots[meter.label],
                 outcomes: store.windowOutcomes, agentName: store.provider.agentName,
                 providerID: store.provider.id, highlightReset: reset,
                 outages: store.outages)
@@ -228,6 +229,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let card = MeterHistoryView(
                 meter: meter, samples: store.samples, timeline: store.tokenTimeline,
                 pricing: store.pricing, prediction: store.predictions[meter.label],
+                overshoot: store.forecastOvershoots[meter.label],
                 outcomes: store.windowOutcomes, agentName: store.provider.agentName,
                 providerID: store.profile.scopeKey, outages: store.outages)
             write(ImageRenderer(content: HoverPopoverContent(card: incident, history: card)), "hover.png")

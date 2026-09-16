@@ -423,13 +423,25 @@ public struct MeterForecast: Codable, Sendable, Equatable {
     public let caption: String?
     /// The dashed trajectory to the reset, ≤48 points.
     public let curve: [SeriesPoint]
+    /// What the window would reach at its reset if the limit did not bind
+    /// (0.100.0, additive): `projectedAtReset` before the clamp and before
+    /// rounding. Absent for a pre-0.100 writer and on the spent path.
+    public let projectedUnclamped: Double?
+    /// What covering the forecast crossing would cost (0.100.0, additive):
+    /// percent over, the tokens it is worth, the dollars at list prices.
+    /// Absent whenever the forecast lands inside the limit — and for a
+    /// pre-0.100 writer, which is why absent is never "$0 extra".
+    public let overshoot: ForecastOvershoot?
 
     public init(
         projectedAtReset: Int?, exhaustsAt: Date?, verdict: String,
         rawVerdict: String, severity: Double, ratePerHour: Double,
         baselineRatePerHour: Double?, paceFactor: Double?, basis: String,
-        caption: String?, curve: [SeriesPoint]
+        caption: String?, curve: [SeriesPoint],
+        projectedUnclamped: Double? = nil, overshoot: ForecastOvershoot? = nil
     ) {
+        self.projectedUnclamped = projectedUnclamped
+        self.overshoot = overshoot
         self.projectedAtReset = projectedAtReset
         self.exhaustsAt = exhaustsAt
         self.verdict = verdict
@@ -665,6 +677,10 @@ public enum LiveStateBuilder {
         appVersion: String,
         state: DisplayState,
         predictions: [String: UsagePrediction],
+        /// What covering each forecast crossing would cost, keyed by meter
+        /// label. Empty is the ordinary state (no meter is forecast past
+        /// its limit), never "nothing costs anything".
+        overshoots: [String: ForecastOvershoot] = [:],
         /// The overall weekly rhythm, for the maturity countdown. Nil is a
         /// real state (too little history yet), not a missing argument.
         weeklyProfile: WeeklyProfile? = nil,
@@ -767,7 +783,8 @@ public enum LiveStateBuilder {
 
         let meters = (snapshot?.meters ?? []).map { meter in
             liveMeter(
-                meter, prediction: predictions[meter.label], samples: samples,
+                meter, prediction: predictions[meter.label],
+                overshoot: overshoots[meter.label], samples: samples,
                 timeline: timeline, catalog: catalog, graceSeconds: graceSeconds,
                 colorLedger: colorLedger, accent: accent,
                 now: now, timeZone: calendar.timeZone, locale: locale)
@@ -855,7 +872,8 @@ public enum LiveStateBuilder {
     // MARK: - Meters
 
     private static func liveMeter(
-        _ meter: Meter, prediction: UsagePrediction?, samples: [UsageSample],
+        _ meter: Meter, prediction: UsagePrediction?,
+        overshoot: ForecastOvershoot?, samples: [UsageSample],
         timeline: [TokenSlot], catalog: ModelCatalog, graceSeconds: TimeInterval,
         colorLedger: ModelColorLedger, accent: RGBColor,
         now: Date, timeZone: TimeZone, locale: Locale
@@ -891,10 +909,13 @@ public enum LiveStateBuilder {
                 basis: basisName(prediction.basis),
                 caption: UsageFormatting.forecastCaption(
                     percent: meter.percent, exhaustsAt: prediction.exhaustsAt,
+                    overshoot: overshoot,
                     now: now, timeZone: timeZone, locale: locale),
                 curve: thin(
                     prediction.curve.map { SeriesPoint(t: $0.t, percent: $0.percent) },
-                    to: Self.curveCap))
+                    to: Self.curveCap),
+                projectedUnclamped: prediction.projectedUnclamped,
+                overshoot: overshoot)
         }
 
         return LiveMeter(

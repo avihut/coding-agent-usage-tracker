@@ -574,6 +574,33 @@ pub struct MeterForecast {
     pub severity: f64,
     pub caption: Option<String>,
     pub curve: Vec<SeriesPoint>,
+    /// What the window would reach at its reset if the limit did not bind
+    /// (0.100.0) — `projected_at_reset` before the clamp. Absent for an
+    /// engine that predates the field, and on the spent path.
+    #[serde(default)]
+    pub projected_unclamped: Option<f64>,
+    /// What covering the forecast crossing would cost (0.100.0). Absent
+    /// whenever the forecast lands inside the limit — never "$0 extra".
+    #[serde(default)]
+    pub overshoot: Option<ForecastOvershoot>,
+}
+
+/// How far past its limit a window is forecast to land, and what buying
+/// that much extra usage would cost at API list prices. Mirror only — the
+/// caption already carries the phrasing the engine decided.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ForecastOvershoot {
+    /// Percentage points over the limit at the reset, always > 0.
+    pub percent: f64,
+    /// Tokens that overshoot is worth; absent when the window has no
+    /// attributable token data — never 0.
+    #[serde(default)]
+    pub tokens: Option<i64>,
+    /// USD at list prices; absent when no model in the window is priced —
+    /// never $0.
+    #[serde(default)]
+    pub cost: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]

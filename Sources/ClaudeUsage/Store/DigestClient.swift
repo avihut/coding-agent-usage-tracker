@@ -16,6 +16,10 @@ import UsageCore
 final class DigestClient {
     private(set) var state: DisplayState = .loading
     private(set) var predictions: [String: UsagePrediction] = [:]
+    /// What covering each forecast crossing would cost, mirrored from the
+    /// meters' forecast. Empty when no meter is forecast past its limit —
+    /// and when the host predates 0.100.0, which is never "$0 extra".
+    private(set) var forecastOvershoots: [String: ForecastOvershoot] = [:]
     private(set) var samples: [UsageSample] = []
     private(set) var windowOutcomes: [WindowOutcome] = []
     private(set) var profiles: [String: WeeklyProfile] = [:]
@@ -271,8 +275,10 @@ final class DigestClient {
                 scopedModelName: mirror.scopedModelName)
         }
         var rebuilt: [String: UsagePrediction] = [:]
+        var rebuiltOvershoots: [String: ForecastOvershoot] = [:]
         for mirror in digest.meters {
             guard let forecast = mirror.forecast else { continue }
+            rebuiltOvershoots[mirror.label] = forecast.overshoot
             rebuilt[mirror.label] = UsagePrediction(
                 ratePerHour: forecast.ratePerHour,
                 baselineRatePerHour: forecast.baselineRatePerHour,
@@ -286,9 +292,11 @@ final class DigestClient {
                 text: forecast.caption ?? "",
                 curve: forecast.curve.map {
                     UsagePrediction.Point(t: $0.t, percent: $0.percent)
-                })
+                },
+                projectedUnclamped: forecast.projectedUnclamped)
         }
         predictions = rebuilt
+        forecastOvershoots = rebuiltOvershoots
 
         if let fetchedAt = digest.engine.fetchedAt {
             let plan: PlanInfo? =

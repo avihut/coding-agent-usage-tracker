@@ -42,6 +42,13 @@ public final class UsageEngine {
     /// of what past windows reached (kept indefinitely, tiny).
     public private(set) var windowOutcomes: [WindowOutcome] = []
     public private(set) var predictions: [String: UsagePrediction] = [:]
+    /// What each forecast crossing would cost to cover, keyed by meter
+    /// label — the dollars behind "runs out Mon 20:00 · ~$38 extra".
+    /// Recomputed with the predictions themselves (the same pass, the same
+    /// MainActor hop), so it can trail `tokenTimeline` by one scan the way
+    /// the predictions trail it; a meter with no forecast crossing has no
+    /// entry — absent, never a zero one.
+    public private(set) var forecastOvershoots: [String: ForecastOvershoot] = [:]
     /// Each meter's learned hour-of-week rhythm, rebuilt from the sample
     /// history alongside predictions. Present even before it's ready — the
     /// readiness gate lives on the profile itself.
@@ -384,6 +391,7 @@ public final class UsageEngine {
             appVersion: AppIdentity.version,
             state: state,
             predictions: predictions,
+            overshoots: forecastOvershoots,
             weeklyProfile: weeklyProfile,
             samples: samples,
             timeline: tokenTimeline,
@@ -580,6 +588,9 @@ public final class UsageEngine {
         let samples = self.samples
         let previous = self.predictions
         let meters = snapshot.meters
+        // Read off the main actor's state here — the detached body cannot.
+        let timeline = self.tokenTimeline
+        let pricing = self.pricing
         Task.detached(priority: .utility) { [weak self] in
             var profiles: [String: WeeklyProfile] = [:]
             for meter in meters {
@@ -593,10 +604,23 @@ public final class UsageEngine {
             let fresh = PredictionEngine.predictAll(
                 meters: meters, samples: samples, profiles: profiles,
                 previous: previous, now: now)
-            await MainActor.run { [profiles, fresh] in
+            // What covering each forecast crossing would cost, priced on
+            // the window's own tokens — nothing to state for a meter whose
+            // forecast lands inside its limit.
+            var overshoots: [String: ForecastOvershoot] = [:]
+            for meter in meters {
+                guard let prediction = fresh[meter.label] else { continue }
+                if let overshoot = ForecastOvershoot.estimate(
+                    prediction: prediction, meter: meter, samples: samples,
+                    timeline: timeline, pricing: pricing, now: now) {
+                    overshoots[meter.label] = overshoot
+                }
+            }
+            await MainActor.run { [profiles, fresh, overshoots] in
                 guard let self else { return }
                 self.profiles = profiles
                 self.predictions = fresh
+                self.forecastOvershoots = overshoots
                 self.publishState()
             }
         }

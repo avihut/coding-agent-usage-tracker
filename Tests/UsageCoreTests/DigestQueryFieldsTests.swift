@@ -74,6 +74,24 @@ struct DigestQueryFieldsTests {
         }
     }
 
+    /// The overshoot's four names ride the SAME walk above (it iterates the
+    /// catalog, so a new name extends it for free) — pinned here explicitly
+    /// because they were added noun-side and catalog-side in one change, and
+    /// the walk can only catch the half that drifts. Scalar, all four: they
+    /// have to be combinable in a `--fields` row.
+    @Test("the limit noun catalogues the overshoot fields as scalars, and enumerates them")
+    func overshootFieldsAreCatalogued() throws {
+        let names = ["forecast.projected-raw", "forecast.overshoot", "forecast.overshoot-tokens",
+                     "forecast.overshoot-cost"]
+        let limit = try #require(DigestQuery.fieldCatalog["limit"])
+        for name in names {
+            #expect(limit[name] == .scalar, "limit should catalogue '\(name)' as a scalar")
+            #expect(run(["limit", "session", name]).exitCode == 0)
+        }
+        let note = try #require(run(["limit", "session", "definitelyNotAField"]).note)
+        for name in names { #expect(note.contains(name), "'\(name)' should be enumerated") }
+    }
+
     @Test("an unknown field enumerates the legal ones instead of leaving you to guess")
     func unknownFieldEnumerates() throws {
         let out = run(["session", "latest", "bogusfield"])

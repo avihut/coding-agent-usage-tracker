@@ -5,6 +5,11 @@ struct MeterRow: View {
     let meter: Meter
     let stale: Bool
     let prediction: UsagePrediction?
+    /// How far past the limit this window is forecast to land, and what
+    /// covering it would cost at list prices — appended to the caption's
+    /// "runs out …" half. Nil (the default) keeps the caption exactly what
+    /// it was; the panel passes `owner.forecastOvershoots[meter.label]`.
+    var overshoot: ForecastOvershoot?
     /// What the panel's popover authority calls this row. Defaults to the
     /// meter's own id — the pre-0.96 spelling, and still what a
     /// one-account panel uses; the stacked account form passes
@@ -90,8 +95,10 @@ struct MeterRow: View {
         hoveredMeter == rowKey || openMeter == rowKey
     }
 
-    /// "resets in 3h 20m" — joined by "runs out in 1h 05m" ONLY when the
-    /// forecast actually crosses the limit, in resetText's own tiers. An
+    /// "resets in 3h 20m" — joined by "runs out in 1h 05m · ~$38 extra
+    /// (≈11% over)" ONLY when the forecast actually crosses the limit, in
+    /// resetText's own tiers; the overshoot half appears only where one was
+    /// measured (absent token data prices nothing — never $0). An
     /// on-track forecast stays silent; the bar's tint carries the risk.
     /// No placeholder while the rate is still forming — measuring is the
     /// permanent background state, not news.
@@ -104,7 +111,8 @@ struct MeterRow: View {
         }
         if let prediction,
            let caption = UsageFormatting.forecastCaption(
-               percent: meter.percent, exhaustsAt: prediction.exhaustsAt, now: Date())
+               percent: meter.percent, exhaustsAt: prediction.exhaustsAt,
+               overshoot: overshoot, now: Date())
         {
             parts.append(
                 Text(caption)

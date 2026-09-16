@@ -107,6 +107,15 @@ final class UsageStore {
         case .client(let client): client.predictions
         }
     }
+    /// What covering each forecast crossing would cost, by meter label —
+    /// the dollars behind "runs out Mon 20:00 · ~$38 extra". No entry
+    /// means the meter's forecast stays inside its limit.
+    var forecastOvershoots: [String: ForecastOvershoot] {
+        switch mode {
+        case .hosting: engine?.forecastOvershoots ?? [:]
+        case .client(let client): client.forecastOvershoots
+        }
+    }
     var profiles: [String: WeeklyProfile] {
         switch mode {
         case .hosting: engine?.profiles ?? [:]

@@ -114,13 +114,40 @@ public enum UsageFormatting {
         return eventPhrase("runs out", exhaustsAt, now: now, timeZone: timeZone, locale: locale)
     }
 
+    /// "~$38 extra (≈11% over)" — what a forecast overshoot would cost to
+    /// buy at API list prices, the percent over beside it; "≈11% over"
+    /// alone when nothing in the window carries a rate (absent is never
+    /// $0). Both figures are approximations of a counterfactual — a
+    /// subscription bills no tokens — hence the "~"/"≈" throughout.
+    ///
+    /// The percent floors at 1: an overshoot exists by construction here
+    /// (it is what `ForecastOvershoot.estimate` refuses to return below
+    /// 100), and "≈0% over" would read as no overshoot at all.
+    ///
+    /// `locale` rides along for parity with the other caption builders;
+    /// `money` deliberately speaks one fixed dialect app-wide.
+    public static func overshootCaption(
+        _ overshoot: ForecastOvershoot, locale: Locale = .current
+    ) -> String {
+        let over = "≈\(max(1, Int(overshoot.percent.rounded())))% over"
+        guard let cost = overshoot.cost else { return over }
+        return "~\(money(cost)) extra (\(over))"
+    }
+
     /// The forecast half of a meter's caption, for every surface that
     /// draws one: "runs out in 1h 05m" while the limit still has room,
     /// "spent at 15:32" once it's gone (or a bare "spent" when nothing
     /// witnessed the crossing), nil while the forecast is clean.
+    ///
+    /// An `overshoot` appends what the crossing would cost to cover —
+    /// "runs out Mon 20:00 · ~$38 extra (≈11% over)" — and only on a
+    /// FUTURE crossing: a limit already spent is a measurement, and the
+    /// question there is when it comes back, not what it would have cost.
+    /// Omitted, the caption is exactly what it always was.
     public static func forecastCaption(
         percent: Int?,
         exhaustsAt: Date?,
+        overshoot: ForecastOvershoot? = nil,
         now: Date,
         timeZone: TimeZone = .current,
         locale: Locale = .current
@@ -130,7 +157,9 @@ public enum UsageFormatting {
             return "spent at \(stamp(exhaustsAt, now: now, timeZone: timeZone, locale: locale))"
         }
         guard let exhaustsAt else { return nil }
-        return exhaustText(exhaustsAt, now: now, timeZone: timeZone, locale: locale)
+        let text = exhaustText(exhaustsAt, now: now, timeZone: timeZone, locale: locale)
+        guard exhaustsAt > now, let overshoot else { return text }
+        return "\(text) · \(overshootCaption(overshoot, locale: locale))"
     }
 
     /// "9 days" / "1 day" / "5 hours" — countdown granularity that matches

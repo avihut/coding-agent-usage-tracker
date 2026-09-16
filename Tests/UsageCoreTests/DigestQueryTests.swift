@@ -417,6 +417,91 @@ extension DigestQueryTests {
         #expect(run(["limit", "session", "forecast.caption", "--json"]).stdout == "null")
     }
 
+    // MARK: overshoot (v0.100.0 — "how much extra would I need")
+
+    /// The four fields the overshoot adds, in every register a named scalar
+    /// has: default and `--raw` are the same bytes (a field path auto-raws),
+    /// `--json` the encoded number. Nothing rounds — `forecast.projected` is
+    /// the CLAMPED integer the meter can reach, `forecast.projected-raw` the
+    /// unclamped Double the pace would spend, and they disagree on purpose.
+    @Test func overshootFieldsAnswerInEveryRegister() {
+        #expect(run(["limit", "session", "forecast.projected"]).stdout == "78")
+        #expect(run(["limit", "session", "forecast.projected-raw"]).stdout == "78.4")
+        #expect(run(["limit", "session", "forecast.overshoot"]).stdout == "11.5")
+        #expect(run(["limit", "session", "forecast.overshoot-tokens"]).stdout == "115000")
+        #expect(run(["limit", "session", "forecast.overshoot-cost"]).stdout == "38.4")
+
+        for name in ["forecast.projected-raw", "forecast.overshoot", "forecast.overshoot-tokens",
+                     "forecast.overshoot-cost"] {
+            #expect(run(["limit", "session", name, "--raw"]).stdout == run(["limit", "session", name]).stdout)
+        }
+
+        #expect(run(["limit", "session", "forecast.projected-raw", "--json"]).stdout == "78.4")
+        #expect(run(["limit", "session", "forecast.overshoot", "--json"]).stdout == "11.5")
+        #expect(run(["limit", "session", "forecast.overshoot-tokens", "--json"]).stdout == "115000")
+        #expect(run(["limit", "session", "forecast.overshoot-cost", "--json"]).stdout == "38.4")
+
+        // A typed field and its raw-JSON twin agree byte for byte — the
+        // same invariant `rawNumber` documents, now with a decimal in it.
+        #expect(
+            run(["get", "meters[session].forecast.overshoot.cost"]).stdout
+                == run(["limit", "session", "forecast.overshoot-cost"]).stdout)
+        // Same for the unclamped projection — this is the assertion that
+        // fails if anyone ever rounds it to a decimal place on the way out.
+        #expect(
+            run(["get", "meters[session].forecast.projectedUnclamped"]).stdout
+                == run(["limit", "session", "forecast.projected-raw"]).stdout)
+    }
+
+    /// Two distinct absences, both of which must print absent, never 0/$0:
+    /// a meter with no forecast at all, and a forecast whose own overshoot
+    /// is missing (a digest written before 0.100.0, or a window that isn't
+    /// forecast to be exceeded — the common case).
+    @Test func overshootFieldsStayAbsentWithoutOne() throws {
+        for name in ["forecast.projected-raw", "forecast.overshoot", "forecast.overshoot-tokens",
+                     "forecast.overshoot-cost"] {
+            let bare = run(["limit", "weekly_all", name])
+            #expect(bare.stdout == "")
+            #expect(bare.exitCode == 0)
+            #expect(run(["limit", "weekly_all", name, "--raw"]).stdout == "")
+            #expect(run(["limit", "weekly_all", name, "--json"]).stdout == "null")
+        }
+
+        // Forecast present, overshoot keys stripped: a pre-0.100.0 writer.
+        var object = try #require(try JSONSerialization.jsonObject(with: goldenRaw) as? [String: Any])
+        var meters = try #require(object["meters"] as? [[String: Any]])
+        var forecast = try #require(meters[0]["forecast"] as? [String: Any])
+        forecast.removeValue(forKey: "overshoot")
+        forecast.removeValue(forKey: "projectedUnclamped")
+        meters[0]["forecast"] = forecast
+        object["meters"] = meters
+        let trimmed = try JSONSerialization.data(withJSONObject: object)
+        let older = try LiveState.decoder().decode(LiveState.self, from: trimmed)
+
+        for name in ["forecast.projected-raw", "forecast.overshoot", "forecast.overshoot-tokens",
+                     "forecast.overshoot-cost"] {
+            let out = run(["limit", "session", name], digest: older, rawDigest: trimmed)
+            #expect(out.stdout == "")
+            #expect(out.exitCode == 0)
+            #expect(run(["limit", "session", name, "--raw"], digest: older, rawDigest: trimmed).stdout == "")
+            #expect(
+                run(["limit", "session", name, "--json"], digest: older, rawDigest: trimmed).stdout == "null")
+        }
+        // The clamped projection is untouched by the strip — the two are
+        // separate keys, and an older digest still answers the old one.
+        #expect(run(["limit", "session", "forecast.projected"], digest: older, rawDigest: trimmed).stdout == "78")
+    }
+
+    @Test func overshootFieldsCombineInOneRow() {
+        let out = run(["limit", "session", "--fields", "forecast.overshoot,forecast.overshoot-cost"])
+        #expect(out.exitCode == 0)
+        #expect(out.stdout == "11.5\t38.4")
+        let header = run([
+            "limit", "session", "--fields", "forecast.overshoot,forecast.overshoot-cost", "--header",
+        ])
+        #expect(header.stdout == "forecast.overshoot\tforecast.overshoot-cost\n11.5\t38.4")
+    }
+
     // MARK: series / curve / stretches / models — always TSV
 
     @Test func seriesIsAlwaysTSVRegardlessOfRawFlag() {

@@ -52,6 +52,15 @@ public struct UsagePrediction: Sendable, Equatable {
     /// Projected percent at the window reset (clamped to 100); nil without a
     /// live reset time.
     public let projectedAtReset: Int?
+    /// What the window would reach at its reset if the limit did not bind —
+    /// the same projection as `projectedAtReset` before the clamp, and
+    /// un-rounded. Narrower-window lockouts are still respected (the account
+    /// genuinely cannot spend inside one), so this is "the pace's own
+    /// destination", not an unconstrained ray. Its excess over 100 is how
+    /// much extra usage the window would need (`ForecastOvershoot`). Nil
+    /// wherever `projectedAtReset` is nil, and on the spent path — a limit
+    /// already gone has no forecast left to overshoot.
+    public let projectedUnclamped: Double?
     /// When the forecast crosses 100% — before the reset would save it.
     /// Nil when the trajectory stays under the limit or no reset is known.
     public let exhaustsAt: Date?
@@ -80,8 +89,9 @@ public struct UsagePrediction: Sendable, Equatable {
         ratePerHour: Double, baselineRatePerHour: Double?, paceFactor: Double?,
         basis: Basis, projectedAtReset: Int?, exhaustsAt: Date?,
         verdict: Verdict, rawVerdict: Verdict, severity: Double, text: String,
-        curve: [Point]
+        curve: [Point], projectedUnclamped: Double? = nil
     ) {
+        self.projectedUnclamped = projectedUnclamped
         self.ratePerHour = ratePerHour
         self.baselineRatePerHour = baselineRatePerHour
         self.paceFactor = paceFactor
@@ -579,7 +589,8 @@ public enum PredictionEngine {
                 curve: liveReset.map { reset in
                     [.init(t: now, percent: Double(percent)),
                      .init(t: reset, percent: Double(percent))]
-                } ?? [])
+                } ?? [],
+                projectedUnclamped: liveReset != nil ? Double(percent) : nil)
         }
 
         // The hours of SPENDING it takes, then the wall clock they land on.
@@ -643,7 +654,8 @@ public enum PredictionEngine {
                 curve: [start]
                     + boundaryPoints(before: exhaustDate)
                     + [.init(t: exhaustDate, percent: 100),
-                       .init(t: reset, percent: 100)])
+                       .init(t: reset, percent: 100)],
+                projectedUnclamped: projected)
         }
         let endpoint = UsagePrediction.Point(t: reset, percent: projected)
         let rising = boundaryPoints(before: reset)
@@ -659,7 +671,8 @@ public enum PredictionEngine {
                 rawVerdict: .yellow,
                 severity: severity,
                 text: "tight — proj. \(Int(projected.rounded()))% at reset",
-                curve: [start] + rising + [endpoint])
+                curve: [start] + rising + [endpoint],
+                projectedUnclamped: projected)
         }
         return UsagePrediction(
             ratePerHour: rate,
@@ -672,7 +685,8 @@ public enum PredictionEngine {
             rawVerdict: .green,
             severity: 0,
             text: "on track — proj. \(Int(projected.rounded()))% at reset",
-            curve: [start] + rising + [endpoint])
+            curve: [start] + rising + [endpoint],
+            projectedUnclamped: projected)
     }
 
     // MARK: - Damped blend
@@ -747,7 +761,8 @@ public enum PredictionEngine {
                 rawVerdict: .green,
                 severity: 0,
                 text: "steady — not burning",
-                curve: [start, .init(t: reset, percent: percentD)])
+                curve: [start, .init(t: reset, percent: percentD)],
+                projectedUnclamped: projectedRaw)
         }
 
         let severity = max(0, min(1,
@@ -815,7 +830,8 @@ public enum PredictionEngine {
             rawVerdict: raw,
             severity: severity,
             text: text,
-            curve: curve)
+            curve: curve,
+            projectedUnclamped: projectedRaw)
     }
 
     /// Bisects the crossing of the 100% line to the second. The trajectory

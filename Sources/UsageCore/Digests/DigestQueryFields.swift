@@ -37,7 +37,9 @@ extension DigestQuery {
         "limit": scalars([
             "percent", "left", "label", "tag", "level", "rank", "severity", "risk", "resets-at", "resets-in",
             "caption", "window", "rate-window", "forces-warning", "scoped-model", "exhausted",
-            "forecast.severity", "forecast.projected", "forecast.exhausts-at", "forecast.exhausts-in",
+            "forecast.severity", "forecast.projected", "forecast.projected-raw", "forecast.overshoot",
+            "forecast.overshoot-tokens", "forecast.overshoot-cost", "forecast.exhausts-at",
+            "forecast.exhausts-in",
             "forecast.verdict", "forecast.raw-verdict", "forecast.rate", "forecast.baseline", "forecast.pace",
             "forecast.basis", "forecast.caption",
         ]).merging(tables(["series", "curve", "stretches", "models"])) { lhs, _ in lhs },

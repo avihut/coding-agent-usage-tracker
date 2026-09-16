@@ -16,6 +16,11 @@ struct MeterHistoryView: View {
     let timeline: [TokenSlot]
     let pricing: PricingTable
     let prediction: UsagePrediction?
+    /// The forecast's overshoot for this meter's live window, when the host
+    /// already priced one (the engine's map / the digest's mirror). Nil —
+    /// the default — makes the card measure it itself from the very inputs
+    /// it already holds, so the phrase renders whatever the caller knows.
+    let overshoot: ForecastOvershoot?
     /// Closed-window records — with the samples' reset stamps, the pages
     /// the Current span can turn back to.
     let outcomes: [WindowOutcome]
@@ -141,6 +146,7 @@ struct MeterHistoryView: View {
     init(
         meter: Meter, samples: [UsageSample], timeline: [TokenSlot],
         pricing: PricingTable, prediction: UsagePrediction?,
+        overshoot: ForecastOvershoot? = nil,
         outcomes: [WindowOutcome] = [],
         agentName: String, providerID: String,
         accountTitle: AccountTitle? = nil,
@@ -157,6 +163,7 @@ struct MeterHistoryView: View {
         self.timeline = timeline
         self.pricing = pricing
         self.prediction = prediction
+        self.overshoot = overshoot
         self.outcomes = outcomes
         self.agentName = agentName
         // Meter.id is positional within one provider's snapshot — the
@@ -615,6 +622,9 @@ struct MeterHistoryView: View {
         let colors = ModelPalette.assignment(for: rows.map(\.model))
         let scale = percentPerToken(rows: rows)
         let curves = modelCurves(rows: rows, colors: colors, percentPerToken: scale)
+        // Resolved once here — see `crossingOvershoot`; the stats line and
+        // the hover readout both read this one value.
+        let overshootNow = crossingOvershoot
         VStack(alignment: .leading, spacing: 6) {
             if let accountTitle {
                 HStack(spacing: 5) {
@@ -658,7 +668,7 @@ struct MeterHistoryView: View {
                         .fill(colors[focusedModel] ?? .gray)
                         .frame(width: 6, height: 6)
                 }
-                Text(statsText(rows: rows))
+                Text(statsText(rows: rows, overshoot: overshootNow))
                     .font(.caption2.weight(isPageTitle ? .semibold : .regular))
                     .foregroundStyle(isPageTitle ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
                     .lineLimit(1)
@@ -708,7 +718,8 @@ struct MeterHistoryView: View {
             // outage's readout runs past 500pt, and unbounded it would widen
             // the popover while the nub is hovered. It truncates instead.
             Text(resetReadout ?? grantReadout ?? pinnedReadout ?? segmentReadout
-                ?? outageReadout ?? readout.map(readoutText) ?? hoverHint)
+                ?? outageReadout
+                ?? readout.map { readoutText($0, overshoot: overshootNow) } ?? hoverHint)
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(readout == nil && segmentReadout == nil && resetReadout == nil
                     && grantReadout == nil && pinnedReadout == nil && outageReadout == nil
@@ -1251,6 +1262,25 @@ struct MeterHistoryView: View {
         return exhaust
     }
 
+    /// What covering this window's forecast crossing would cost, or nil
+    /// when there is no crossing on screen to price: only the LIVE Current
+    /// page has a forecast at all, and only a crossing inside it raises the
+    /// question. The host's figure wins when it passed one; otherwise the
+    /// card measures its own from the same inputs `ForecastOvershoot
+    /// .estimate` takes — the prediction, this meter, its samples, the
+    /// timeline and the rates, all of which are already on hand. Evaluate
+    /// it ONCE per render (body binds it): the estimate walks the window's
+    /// token breakdown, and the readout re-renders on every hover move.
+    ///
+    /// Nothing is drawn past 100 for it — the chart's story ends at the
+    /// limit; the overshoot is a phrase, in the stats line and the readout.
+    private var crossingOvershoot: ForecastOvershoot? {
+        guard isLive, exhaustDate != nil, let prediction else { return nil }
+        return overshoot ?? ForecastOvershoot.estimate(
+            prediction: prediction, meter: meter, samples: samples,
+            timeline: timeline, pricing: pricing, now: Date())
+    }
+
     /// The Current span's projected finish height for the Y axis — only
     /// while the forecast stays within the limit (an exhausting one is the
     /// red rule's story) and the axis still speaks percent.
@@ -1705,8 +1735,18 @@ struct MeterHistoryView: View {
 
     // MARK: - Text lines
 
-    /// "89.2M tokens this session", or the focused model's slice of it.
-    private func statsText(rows: [ModelTokenUsage]) -> String {
+    /// "89.2M tokens this session", or the focused model's slice of it —
+    /// and, on the live page of a window the forecast spends, what covering
+    /// the overshoot would cost: "… · ~$38.40 extra (≈11% over)".
+    ///
+    /// The phrase joins the window's own line only while no model is
+    /// focused: a focused line is that model's share, its own story, and
+    /// the two together would truncate at the plot's width rather than
+    /// widen the card (the v0.99.2 rule — this Text is pinned to
+    /// `chartWidth` with `lineLimit(1)`).
+    private func statsText(
+        rows: [ModelTokenUsage], overshoot: ForecastOvershoot? = nil
+    ) -> String {
         if effectiveSpan == .current, pageIndex > 0 {
             if let focusedModel, let row = rows.first(where: { $0.model == focusedModel }) {
                 return "\(row.displayName) · \(TokenFormat.compact(row.tally.total)) tokens · \(pageRange)"
@@ -1716,7 +1756,9 @@ struct MeterHistoryView: View {
         if let focusedModel, let row = rows.first(where: { $0.model == focusedModel }) {
             return "\(row.displayName) · \(TokenFormat.compact(row.tally.total)) tokens \(spanLabel)"
         }
-        return "\(TokenFormat.compact(WindowTokens.total(rows).total)) tokens \(spanLabel)"
+        let line = "\(TokenFormat.compact(WindowTokens.total(rows).total)) tokens \(spanLabel)"
+        guard let overshoot else { return line }
+        return "\(line) · \(UsageFormatting.overshootCaption(overshoot))"
     }
 
     /// The stats line reads as the page's title — primary, semibold — on a
@@ -1816,11 +1858,19 @@ struct MeterHistoryView: View {
     }
 
     /// "14:32 · 34% · 1.2M tokens · $3.40" measured; "16:05 · proj. 41%"
-    /// beyond the notch.
-    private func readoutText(_ readout: Readout) -> String {
+    /// beyond the notch — and past the forecast's crossing, what the rest
+    /// of that projection would cost to cover: "20:10 · proj. 111% ·
+    /// ~$38.40 extra (≈11% over)". Left of the crossing the projection is
+    /// still inside the limit and there is nothing to buy.
+    private func readoutText(
+        _ readout: Readout, overshoot: ForecastOvershoot? = nil
+    ) -> String {
         var parts = [UsageFormatting.clockTime(readout.t)]
         if readout.predicted {
             parts.append("proj. \(readout.percent)%")
+            if let overshoot, let exhaust = exhaustDate, readout.t >= exhaust {
+                parts.append(UsageFormatting.overshootCaption(overshoot))
+            }
             return parts.joined(separator: " · ")
         }
         parts.append("\(readout.percent)%")

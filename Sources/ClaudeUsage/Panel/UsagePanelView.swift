@@ -171,6 +171,7 @@ struct UsagePanelView: View {
                 meter: selection.meter, samples: owner.samples,
                 timeline: owner.tokenTimeline, pricing: owner.pricing,
                 prediction: owner.predictions[selection.meter.label],
+                overshoot: owner.forecastOvershoots[selection.meter.label],
                 outcomes: owner.windowOutcomes,
                 agentName: owner.provider.agentName,
                 // Per ACCOUNT, not per provider: two accounts' popovers
@@ -564,6 +565,7 @@ struct UsagePanelView: View {
                     meter: meter,
                     stale: owner.state.isStale,
                     prediction: owner.predictions[meter.label],
+                    overshoot: owner.forecastOvershoots[meter.label],
                     key: meterKey(meter.id, profileID: profileID),
                     openMeter: $openMeter,
                     hoveredMeter: $hoveredMeter,

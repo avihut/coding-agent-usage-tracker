@@ -73,7 +73,8 @@ struct LiveStateTests {
             text: "", curve: [
                 UsagePrediction.Point(t: now, percent: 53),
                 UsagePrediction.Point(t: date("2026-08-16T14:00:00Z"), percent: 78),
-            ])
+            ],
+            projectedUnclamped: 78.4)
         let samples = [
             UsageSample(
                 t: date("2026-08-16T09:30:00Z"), percents: ["Session (5h)": 91],
@@ -151,6 +152,14 @@ struct LiveStateTests {
             appVersion: "0.65.0",
             state: .live(snapshot),
             predictions: ["Session (5h)": prediction],
+            // The overshoot map is the engine's, separate from the
+            // prediction: a crafted entry here pins the wire shape of both
+            // 0.100.0 keys. The fixture's forecast has no crossing, so the
+            // caption stays clean — the "carried but not phrased" arm.
+            overshoots: [
+                "Session (5h)": ForecastOvershoot(
+                    percent: 11.5, tokens: 115_000, cost: 38.4)
+            ],
             weeklyProfile: WeeklyProfile.build(
                 samples: profileSamples, label: "Weekly (all)", calendar: utc),
             samples: samples,
@@ -650,6 +659,35 @@ struct LiveStateTests {
         let data = try JSONSerialization.data(withJSONObject: object)
         let revived = try LiveState.decoder().decode(LiveState.self, from: data)
         #expect(revived.accountPresence == nil)
+    }
+
+    /// A pre-0.100.0 writer publishes neither overshoot key. Stripping them
+    /// must still decode — absent is "this engine says nothing about an
+    /// overshoot", never "$0 extra".
+    @Test("a digest without the overshoot keys still decodes")
+    func preOvershootDigestDecodes() throws {
+        let state = buildFixture()
+        var object = try #require(
+            try JSONSerialization.jsonObject(
+                with: try LiveState.encoder().encode(state)) as? [String: Any])
+        var meters = try #require(object["meters"] as? [[String: Any]])
+        meters = meters.map { meter in
+            guard var forecast = meter["forecast"] as? [String: Any] else { return meter }
+            forecast.removeValue(forKey: "overshoot")
+            forecast.removeValue(forKey: "projectedUnclamped")
+            var copy = meter
+            copy["forecast"] = forecast
+            return copy
+        }
+        object["meters"] = meters
+        let data = try JSONSerialization.data(withJSONObject: object)
+        let revived = try LiveState.decoder().decode(LiveState.self, from: data)
+        let forecast = try #require(revived.meters.first { $0.id == "session" }?.forecast)
+        #expect(forecast.overshoot == nil)
+        #expect(forecast.projectedUnclamped == nil)
+        // Everything else survives untouched.
+        #expect(forecast.projectedAtReset == 78)
+        #expect(forecast.curve == state.meters.first { $0.id == "session" }?.forecast?.curve)
     }
 
     @Test("series thinning caps points and keeps both endpoints")

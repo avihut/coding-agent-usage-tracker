@@ -366,6 +366,7 @@ final class StatusItemController: NSResponder {
             meter: meter, samples: store.samples,
             timeline: store.tokenTimeline, pricing: store.pricing,
             prediction: store.predictions[meter.label],
+            overshoot: store.forecastOvershoots[meter.label],
             outcomes: store.windowOutcomes,
             agentName: store.provider.agentName,
             providerID: store.profile.scopeKey,

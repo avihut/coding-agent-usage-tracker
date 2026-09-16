@@ -233,6 +233,22 @@ extension DigestQuery {
             let exhausted: Bool? = meter.percent.map { $0 >= 100 } ?? meter.forecast?.exhaustsAt.map { $0 <= now }
             return DigestQueryFormat.boolField(exhausted, json: json)
         case "forecast.projected": return DigestQueryFormat.intField(meter.forecast?.projectedAtReset, json: json)
+        // The unclamped twin and the overshoot it implies. `projected` is
+        // what the meter can REACH (clamped at its own limit); `projected-raw`
+        // is what the pace would spend if nothing bound it, and the three
+        // `overshoot` fields are how much of that is past the line — points,
+        // the tokens they'd take, and the list-rate dollars those tokens
+        // cost. Absent stays absent in every register (tokens/cost are nil
+        // without token data or a priced model, NEVER 0/$0), and nothing
+        // rounds: a field and its raw-JSON twin agree byte for byte.
+        case "forecast.projected-raw":
+            return DigestQueryFormat.numberField(meter.forecast?.projectedUnclamped, json: json)
+        case "forecast.overshoot":
+            return DigestQueryFormat.numberField(meter.forecast?.overshoot?.percent, json: json)
+        case "forecast.overshoot-tokens":
+            return DigestQueryFormat.intField(meter.forecast?.overshoot?.tokens, json: json)
+        case "forecast.overshoot-cost":
+            return DigestQueryFormat.numberField(meter.forecast?.overshoot?.cost, json: json)
         case "forecast.exhausts-at":
             return DigestQueryFormat.dateField(
                 meter.forecast?.exhaustsAt, json: json, unix: unix, relative: relative,

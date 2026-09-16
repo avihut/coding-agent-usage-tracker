@@ -68,9 +68,7 @@ struct UsageSettingsPane: View {
                     "Recent burn",
                     String(format: "%.1f%%/h · %@", prediction.ratePerHour, rateWindowLabel(meter)))
                 infoRow("Baseline", baselineLabel(prediction))
-                infoRow(
-                    "Projected at reset",
-                    prediction.projectedAtReset.map { "\($0)%" } ?? "—")
+                infoRow("Projected at reset", projectedLabel(prediction, meter: meter))
                 if let exhaust = prediction.exhaustsAt {
                     // A crossing already behind us is a record, not a
                     // countdown — "in -3h" is the shape to avoid.
@@ -94,6 +92,24 @@ struct UsageSettingsPane: View {
                     .foregroundStyle(.secondary)
             }
         }
+    }
+
+    /// The panel shows the projection clamped at the limit — 100% is all a
+    /// meter can spend. This page shows the working, so a forecast that
+    /// lands PAST the limit says how far past ("111%") and, where the
+    /// window's own tokens could be priced, what covering the excess would
+    /// cost at list rates. The phrase itself is `overshootCaption`'s, so
+    /// this row and the panel caption can't drift apart; joined with " · "
+    /// rather than nested in parentheses, since the caption already carries
+    /// its own "(≈11% over)". Absent cost stays silent — never "$0".
+    private func projectedLabel(_ prediction: UsagePrediction, meter: Meter) -> String {
+        guard let raw = prediction.projectedUnclamped, raw > 100 else {
+            return prediction.projectedAtReset.map { "\($0)%" } ?? "—"
+        }
+        let projected = "\(Int(raw.rounded()))%"
+        guard let overshoot = store.forecastOvershoots[meter.label], overshoot.cost != nil
+        else { return projected }
+        return "\(projected) · \(UsageFormatting.overshootCaption(overshoot))"
     }
 
     private func rateWindowLabel(_ meter: Meter) -> String {
