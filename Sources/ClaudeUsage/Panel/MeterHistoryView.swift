@@ -205,9 +205,27 @@ struct MeterHistoryView: View {
     /// point) a Y-axis label needs; standard marks closer than this to the
     /// projection mark are dropped instead of overlapped.
     private static let axisLabelClearance = 12.0
-    /// X-axis eclipse reach, as a fraction of the visible domain: half the
-    /// crossing label plus half a base tick label, in plot-relative width.
-    private static let xAxisClearanceFraction = 0.15
+    /// The plot's own width: the chart frame less the Y-axis label column.
+    /// X-axis eclipse math runs in this track space — a fraction-of-domain
+    /// reach can't answer "would these two labels overlap", since a label's
+    /// width is points and a domain is hours.
+    private static let plotTrackWidth = chartWidth - axisLabelWidth
+    /// Horizontal breathing room between two axis-row labels, in points:
+    /// closer than this and the crossing's timestamp is crowding the tick.
+    private static let xAxisLabelGap = 3.0
+    /// A caption2 axis label's drawn width, estimated the way `nowEclipsed`
+    /// estimates the curve-tip name: that one measures an 8pt semibold label
+    /// at 4.5pt per character plus 4pt of padding, i.e. 0.5625 × the point
+    /// size per character. The axis row draws caption2 (10pt on macOS —
+    /// caption1 measures 10pt too, so this one estimator also covers the
+    /// base ticks, which take Charts' own default font). Measured against
+    /// AppKit on macOS 15: "Mon 19:22" 52.3pt vs this estimate's 54.6,
+    /// "Sun" 19.2 vs 20.9, "19:00" 28.7 vs 32.1 — it over-estimates by
+    /// 4–12% and never under, which is the direction that keeps a
+    /// near-touch silenced rather than drawn over.
+    private static func captionWidth(_ text: String) -> Double {
+        Double(text.count) * 5.625 + 4
+    }
     // The Y domain's ceiling is dynamic — dataCeiling × 1.15, headroom
     // where the now and session-duration labels live, atop the data
     // instead of on it and inside the chart instead of crashing into the
@@ -1071,18 +1089,22 @@ struct MeterHistoryView: View {
         // Beyond ~a week the names would repeat, so the month scale keeps
         // the default date ticks; under two days, explicit whole-hour
         // clock ticks. When the forecast crosses the limit, the crossing's
-        // timestamp joins the axis row in red — always on — and any base
-        // tick whose label it would overlap steps aside (the Y axis
-        // projection's eclipse rule, applied to time).
+        // timestamp joins the axis row in red — always on, never truncated
+        // — and any base tick whose label its DRAWN extent would overlap
+        // steps aside (the Y axis projection's eclipse idiom, applied to
+        // time: labels blank, gridlines never).
         .chartXAxis {
             let length = end.timeIntervalSince(start)
             if length >= 48 * 3600, length <= 8 * 86400 {
                 AxisMarks(values: dayTicks) { value in
                     AxisGridLine()
                     AxisValueLabel {
-                        if let day = value.as(Date.self), !tickLabelEclipsed(day) {
-                            Text(Self.dayName.string(from: day))
-                                .fontWeight(.semibold)
+                        if let day = value.as(Date.self) {
+                            let label = Self.dayName.string(from: day)
+                            if !tickLabelEclipsed(day, label: label) {
+                                Text(label)
+                                    .fontWeight(.semibold)
+                            }
                         }
                     }
                 }
@@ -1094,9 +1116,12 @@ struct MeterHistoryView: View {
                 AxisMarks(values: hourTicks) { value in
                     AxisGridLine()
                     AxisValueLabel {
-                        if let date = value.as(Date.self), !tickLabelEclipsed(date) {
-                            Text(UsageFormatting.clockTime(date))
-                                .fontWeight(.semibold)
+                        if let date = value.as(Date.self) {
+                            let label = UsageFormatting.clockTime(date)
+                            if !tickLabelEclipsed(date, label: label) {
+                                Text(label)
+                                    .fontWeight(.semibold)
+                            }
                         }
                     }
                 }
@@ -1286,21 +1311,37 @@ struct MeterHistoryView: View {
         return .top
     }
 
-    /// The crossing's timestamp owns its stretch of the axis row: base
-    /// ticks whose labels would crowd it go silent — the LABEL only, the
-    /// tick's gridline stays on the chart. The reach follows the anchor —
-    /// a trailing-anchored label lies almost entirely left of its tick,
-    /// so the eclipse shifts with it.
-    private func tickLabelEclipsed(_ tick: Date) -> Bool {
+    /// The crossing's timestamp owns the stretch of the axis row it is
+    /// actually DRAWN over: a base tick goes silent exactly when the red
+    /// label's extent would overlap the tick's own, and never otherwise —
+    /// the LABEL only, the tick's gridline stays on the chart. Both extents
+    /// are computed in plot points (a domain fraction can't compare a
+    /// label's width to a tick's), and the crossing's extent follows its
+    /// edge-aware anchor: trailing-anchored it hangs entirely LEFT of its
+    /// tick, leading-anchored entirely right, otherwise centered.
+    private func tickLabelEclipsed(_ tick: Date, label: String) -> Bool {
         guard let exhaust = exhaustDate else { return false }
         let (start, end) = domain
-        let clearance = end.timeIntervalSince(start) * Self.xAxisClearanceFraction
-        let anchor = exhaustLabelAnchor
-        let (leftReach, rightReach): (Double, Double) = anchor == .topTrailing
-            ? (1.7, 0.4)
-            : anchor == .topLeading ? (0.4, 1.7) : (1, 1)
-        let offset = tick.timeIntervalSince(exhaust)
-        return offset >= -clearance * leftReach && offset <= clearance * rightReach
+        let span = end.timeIntervalSince(start)
+        guard span > 0 else { return false }
+        func x(_ date: Date) -> Double {
+            date.timeIntervalSince(start) / span * Self.plotTrackWidth
+        }
+        let crossingX = x(exhaust)
+        let crossingWidth = Self.captionWidth(timeLabel(exhaust))
+        let (crossingLeft, crossingRight): (Double, Double)
+        switch exhaustLabelAnchor {
+        case .topTrailing: (crossingLeft, crossingRight) = (crossingX - crossingWidth, crossingX)
+        case .topLeading: (crossingLeft, crossingRight) = (crossingX, crossingX + crossingWidth)
+        default:
+            (crossingLeft, crossingRight) =
+                (crossingX - crossingWidth / 2, crossingX + crossingWidth / 2)
+        }
+        // Base tick labels center on their own tick.
+        let half = Self.captionWidth(label) / 2
+        let tickX = x(tick)
+        return tickX - half < crossingRight + Self.xAxisLabelGap
+            && tickX + half > crossingLeft - Self.xAxisLabelGap
     }
 
     /// The strip's stretches are `WindowPlot.Nub` — the same type the audit
