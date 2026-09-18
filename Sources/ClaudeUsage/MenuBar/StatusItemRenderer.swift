@@ -3,18 +3,24 @@ import UsageCore
 
 /// Pure state → NSImage for the status button.
 ///
-/// Colors are FIXED and bright, not dynamic: over a tinted wallpaper the
-/// menu bar reports a "light" effective appearance while looking dark, so
-/// every dynamic-color strategy (custom template, dynamic labelColor)
-/// resolved illegibly dark. The image is literal pixels (isTemplate =
-/// false) — bright fixed colors plus a faint dark shadow read on dark and
-/// tinted bars alike.
+/// The ink follows the GROUND (v0.100.1, user-reported: white digits over
+/// a bright wallpaper were unreadable). The menu bar is transparent, and
+/// the system picks its own items' ink from the wallpaper behind it — not
+/// from the app's appearance, and not from the system's Dark Mode switch
+/// (measured: a Dark Mode Mac over a cream wallpaper hands its status
+/// buttons `vibrantLight` and draws the clock black). So the palette comes
+/// in two grounds, `Ground`, chosen from the status button's own effective
+/// appearance: whatever ink the system gives the clock, this item wears
+/// too. The image is still literal pixels (isTemplate = false — a template
+/// can't carry the risk colors), drawn under the ground's appearance so
+/// every palette color resolves for it; the 0.2.1 palette — bright white,
+/// a faint dark shadow — is the `.dark` ground, pixel for pixel.
 ///
-/// Format: `✳︎ S15·W19·F25%`. Digits stay white — thin glyph strokes can't
-/// carry color legibly over Liquid Glass (HIG: keep fine features neutral,
-/// let fills carry color) — so exhaustion risk arrives as solid geometry:
-/// a ramp-colored dot ahead of a number under watch, escalating to a
-/// filled capsule carrying the segment's tag and digits in bold white
+/// Format: `✳︎ S15·W19·F25%`. Digits stay neutral — thin glyph strokes
+/// can't carry color legibly over Liquid Glass (HIG: keep fine features
+/// neutral, let fills carry color) — so exhaustion risk arrives as solid
+/// geometry: a ramp-colored dot ahead of a number under watch, escalating
+/// to a filled capsule carrying the segment's tag and digits in bold white
 /// once the forecast firmly spends the limit.
 ///
 /// Several accounts (0.96.0, decision D5): the item is a row of CELLS under
@@ -190,21 +196,79 @@ enum StatusItemRenderer {
     /// predicted outright) escalates the dot to the badge.
     static let badgeSeverity = 0.75
 
+    /// What the item is drawn over: a bar the system inks in white, or one
+    /// it inks in black.
+    enum Ground: Equatable, Sendable {
+        case dark
+        case light
+
+        /// The ground an appearance stands for — the status button's, in
+        /// the bar: the system sets it from the wallpaper under the item.
+        init(_ appearance: NSAppearance) {
+            let match = appearance.bestMatch(from: [.aqua, .darkAqua, .vibrantLight, .vibrantDark])
+            self = match == .darkAqua || match == .vibrantDark ? .dark : .light
+        }
+
+        /// The appearance the image draws under, so the palette resolves
+        /// for this ground whatever context the image lands in.
+        var appearance: NSAppearance {
+            NSAppearance(named: self == .dark ? .darkAqua : .aqua) ?? .currentDrawing()
+        }
+    }
+
+    /// One palette color in both grounds, resolved when it is DRAWN — the
+    /// runs carry it as they always carried an NSColor, and composition
+    /// never learns which bar it is headed for.
+    static func ink(dark: NSColor, light: NSColor) -> NSColor {
+        NSColor(name: nil) { Ground($0) == .dark ? dark : light }
+    }
+
+    static func ink(white: CGFloat, black: CGFloat) -> NSColor {
+        ink(dark: NSColor.white.withAlphaComponent(white), light: NSColor.black.withAlphaComponent(black))
+    }
+
     /// The active provider's brand accent (Anthropic terracotta #D97757
-    /// while Claude is metered) — tints the glyph; charts derive from it.
+    /// while Claude is metered) — charts derive from it.
     static var accent: NSColor { ProviderStyle.accent }
 
-    static let bright = NSColor.white
-    static let dim = NSColor.white.withAlphaComponent(0.55)
-    static let staleColor = NSColor.white.withAlphaComponent(0.45)
-    static let warningColor = NSColor(srgbRed: 1.0, green: 0.624, blue: 0.039, alpha: 1)
+    /// The glyph's tint: the accent, deepened over a bright bar — the
+    /// vendors' accents are mid-tones picked for dark grounds (terracotta
+    /// on cream is under 3:1).
+    static var glyphInk: NSColor {
+        let accent = accent
+        return ink(dark: accent, light: accent.blended(withFraction: 0.3, of: .black) ?? accent)
+    }
+
+    // Over a bright bar the neutrals are the system's own near-black, and
+    // every hue steps deeper: the dark ground's yellow and orange are
+    // picked to glow on black and wash out on white.
+    static let bright = ink(white: 1, black: 0.85)
+    static let dim = ink(white: 0.55, black: 0.58)
+    static let staleColor = ink(white: 0.45, black: 0.4)
+    static let warningColor = ink(
+        dark: NSColor(srgbRed: 1.0, green: 0.624, blue: 0.039, alpha: 1),
+        light: NSColor(srgbRed: 0.85, green: 0.42, blue: 0.0, alpha: 1))
     /// Dots are solid fills, so unlike digit strokes they can afford a
     /// deep red; the ramp blends from yellow toward this.
-    static let criticalColor = NSColor(srgbRed: 1.0, green: 0.271, blue: 0.227, alpha: 1)
-    static let riskYellow = NSColor(srgbRed: 1.0, green: 0.839, blue: 0.039, alpha: 1)
+    private static let rampRed = (
+        dark: NSColor(srgbRed: 1.0, green: 0.271, blue: 0.227, alpha: 1),
+        light: NSColor(srgbRed: 0.80, green: 0.13, blue: 0.11, alpha: 1))
+    private static let rampYellow = (
+        dark: NSColor(srgbRed: 1.0, green: 0.839, blue: 0.039, alpha: 1),
+        light: NSColor(srgbRed: 0.74, green: 0.51, blue: 0.0, alpha: 1))
     /// The badge's fill — a step deeper than the ramp's red so bold white
-    /// digits sit on it at real contrast (Apple-badge convention).
+    /// digits sit on it at real contrast (Apple-badge convention). White
+    /// on a fill reads over any bar, so this one is the same on both.
     static let badgeRed = NSColor(srgbRed: 0.92, green: 0.216, blue: 0.18, alpha: 1)
+
+    /// The yellow→red ramp at a severity, blended WITHIN a ground — a
+    /// blend of two resolved-late colors would resolve at blend time, under
+    /// whatever appearance happened to be current.
+    static func rampColor(_ severity: Double) -> NSColor {
+        ink(
+            dark: rampYellow.dark.blended(withFraction: severity, of: rampRed.dark) ?? rampRed.dark,
+            light: rampYellow.light.blended(withFraction: severity, of: rampRed.light) ?? rampRed.light)
+    }
 
     /// Exhaustion risk decides the dressing; with no prediction, the
     /// discrete percent-threshold levels stand in. Stale data never
@@ -214,7 +278,7 @@ enum StatusItemRenderer {
         if let severity = segment.severity {
             guard severity > 0 else { return .plain(bright) }
             if severity >= badgeSeverity { return .badge }
-            return .dot(riskYellow.blended(withFraction: severity, of: criticalColor) ?? criticalColor)
+            return .dot(rampColor(severity))
         }
         switch segment.level {
         case .normal: return .plain(bright)
@@ -233,8 +297,8 @@ enum StatusItemRenderer {
         /// same geometry as `badge`, its own fill, and the glyph's font so
         /// the mark keeps its shape (surface S3).
         case glyphBadge(String, NSColor)
-        /// The pending-notice dot over the run drawn just before it: white,
-        /// at the glyph's top-right, knocked out of whatever sits under it
+        /// The pending-notice dot over the run drawn just before it: the
+        /// digits' ink, at the glyph's top-right, knocked out of whatever sits under it
         /// by a clear ring so it separates from the ✳︎ strokes and from a
         /// capsule fill alike. Zero width — it rides the previous run.
         case indicator
@@ -315,132 +379,147 @@ enum StatusItemRenderer {
         return placed
     }
 
-    static func image(for model: Model, height: CGFloat) -> NSImage {
-        image(runs: compose(model), height: height)
+    /// `ground` defaults to the dark bar every preview swatch and snapshot
+    /// paints for itself; only the status item asks the real bar.
+    static func image(for model: Model, height: CGFloat, ground: Ground = .dark) -> NSImage {
+        image(runs: compose(model), height: height, ground: ground)
     }
 
     /// The drawing proper, over any run list — the item's, or one cell's.
-    static func image(runs: [Tagged], height: CGFloat) -> NSImage {
+    static func image(runs: [Tagged], height: CGFloat, ground: Ground = .dark) -> NSImage {
         let placed = place(runs)
         let width = placed.reduce(0) { $0 + $1.width }
         let image = NSImage(
             size: NSSize(width: ceil(width), height: height), flipped: false
         ) { _ in
-            let shadow = NSShadow()
-            shadow.shadowColor = NSColor.black.withAlphaComponent(0.5)
-            shadow.shadowBlurRadius = 1.5
-            shadow.shadowOffset = .zero
-
-            // The run the indicator hugs: its right edge and top.
-            var previousRun: (x: CGFloat, width: CGFloat, top: CGFloat)?
-            for item in placed {
-                let run = item.run
-                let x = item.x
-                switch run {
-                case .indicator:
-                    guard let previousRun else { break }
-                    // Hug the glyph's top-right: the dot's center sits on
-                    // the run's corner, pulled a hair inward so the ring
-                    // never clips at the image's own top edge.
-                    let center = NSPoint(
-                        x: previousRun.x + previousRun.width - indicatorDiameter / 2 + 0.5,
-                        y: min(previousRun.top, height - indicatorDiameter / 2 - indicatorRing)
-                            - indicatorDiameter / 4)
-                    let ring = NSRect(
-                        x: center.x - indicatorDiameter / 2 - indicatorRing,
-                        y: center.y - indicatorDiameter / 2 - indicatorRing,
-                        width: indicatorDiameter + 2 * indicatorRing,
-                        height: indicatorDiameter + 2 * indicatorRing)
-                    NSGraphicsContext.current?.saveGraphicsState()
-                    NSGraphicsContext.current?.compositingOperation = .destinationOut
-                    NSColor.black.setFill()
-                    NSBezierPath(ovalIn: ring).fill()
-                    NSGraphicsContext.current?.restoreGraphicsState()
-                    NSColor.white.setFill()
-                    NSBezierPath(ovalIn: ring.insetBy(dx: indicatorRing, dy: indicatorRing)).fill()
-                case .text(let string, let color, let font):
-                    let attributes: [NSAttributedString.Key: Any] = [
-                        .font: font, .foregroundColor: color, .shadow: shadow,
-                    ]
-                    let size = (string as NSString).size(withAttributes: attributes)
-                    (string as NSString).draw(
-                        at: NSPoint(x: x, y: (height - size.height) / 2),
-                        withAttributes: attributes)
-                case .dot(let color):
-                    NSGraphicsContext.current?.saveGraphicsState()
-                    shadow.set()
-                    color.setFill()
-                    NSBezierPath(ovalIn: NSRect(
-                        x: x + dotGap, y: (height - dotDiameter) / 2,
-                        width: dotDiameter, height: dotDiameter)).fill()
-                    NSGraphicsContext.current?.restoreGraphicsState()
-                case .badge(let string):
-                    let attributes: [NSAttributedString.Key: Any] = [
-                        .font: badgeFont, .foregroundColor: NSColor.white,
-                    ]
-                    let size = (string as NSString).size(withAttributes: attributes)
-                    let rect = NSRect(
-                        x: x, y: (height - badgeHeight) / 2,
-                        width: size.width + 2 * badgePaddingX, height: badgeHeight)
-                    NSGraphicsContext.current?.saveGraphicsState()
-                    shadow.set()
-                    badgeRed.setFill()
-                    NSBezierPath(roundedRect: rect, xRadius: badgeHeight / 2, yRadius: badgeHeight / 2)
-                        .fill()
-                    NSGraphicsContext.current?.restoreGraphicsState()
-                    (string as NSString).draw(
-                        at: NSPoint(x: x + badgePaddingX, y: (height - size.height) / 2),
-                        withAttributes: attributes)
-                case .glyphBadge(let string, let fill):
-                    let attributes: [NSAttributedString.Key: Any] = [
-                        .font: font, .foregroundColor: NSColor.white,
-                    ]
-                    let size = (string as NSString).size(withAttributes: attributes)
-                    let rect = NSRect(
-                        x: x, y: (height - badgeHeight) / 2,
-                        width: size.width + 2 * badgePaddingX, height: badgeHeight)
-                    NSGraphicsContext.current?.saveGraphicsState()
-                    shadow.set()
-                    fill.setFill()
-                    NSBezierPath(roundedRect: rect, xRadius: badgeHeight / 2, yRadius: badgeHeight / 2)
-                        .fill()
-                    NSGraphicsContext.current?.restoreGraphicsState()
-                    (string as NSString).draw(
-                        at: NSPoint(x: x + badgePaddingX, y: (height - size.height) / 2),
-                        withAttributes: attributes)
-                case .gap:
-                    break
-                case .bars(let slots, let stale):
-                    drawBars(slots, stale: stale, x: x, height: height)
-                case .rings(let outer, let inner, let stale):
-                    drawRings(outer: outer, inner: inner, stale: stale, x: x, height: height)
-                case .sentinel(let color, let filled):
-                    drawSentinel(color, filled: filled, x: x, height: height)
-                case .ghost(let string):
-                    let attributes: [NSAttributedString.Key: Any] = [
-                        .font: badgeFont, .foregroundColor: dim,
-                    ]
-                    let size = (string as NSString).size(withAttributes: attributes)
-                    let rect = NSRect(
-                        x: x + 0.5, y: (height - badgeHeight) / 2 + 0.5,
-                        width: size.width + 2 * badgePaddingX - 1, height: badgeHeight - 1)
-                    let outline = NSBezierPath(
-                        roundedRect: rect, xRadius: badgeHeight / 2, yRadius: badgeHeight / 2)
-                    outline.lineWidth = 1
-                    outline.setLineDash([3, 2], count: 2, phase: 0)
-                    dim.setStroke()
-                    outline.stroke()
-                    (string as NSString).draw(
-                        at: NSPoint(x: x + badgePaddingX, y: (height - size.height) / 2),
-                        withAttributes: attributes)
-                }
-                if case .indicator = run { continue }
-                previousRun = (x, inkWidth(run), inkTop(run, height: height))
+            ground.appearance.performAsCurrentDrawingAppearance {
+                draw(placed, height: height, ground: ground)
             }
             return true
         }
         image.isTemplate = false
         return image
+    }
+
+    private static func draw(_ placed: [Placed], height: CGFloat, ground: Ground) {
+        // The faint dark halo lifts white ink off a busy dark wallpaper;
+        // under black ink it is only a smudge.
+        var shadow: NSShadow?
+        if ground == .dark {
+            let halo = NSShadow()
+            halo.shadowColor = NSColor.black.withAlphaComponent(0.5)
+            halo.shadowBlurRadius = 1.5
+            halo.shadowOffset = .zero
+            shadow = halo
+        }
+
+        // The run the indicator hugs: its right edge and top.
+        var previousRun: (x: CGFloat, width: CGFloat, top: CGFloat)?
+        for item in placed {
+            let run = item.run
+            let x = item.x
+            switch run {
+            case .indicator:
+                guard let previousRun else { break }
+                // Hug the glyph's top-right: the dot's center sits on
+                // the run's corner, pulled a hair inward so the ring
+                // never clips at the image's own top edge.
+                let center = NSPoint(
+                    x: previousRun.x + previousRun.width - indicatorDiameter / 2 + 0.5,
+                    y: min(previousRun.top, height - indicatorDiameter / 2 - indicatorRing)
+                        - indicatorDiameter / 4)
+                let ring = NSRect(
+                    x: center.x - indicatorDiameter / 2 - indicatorRing,
+                    y: center.y - indicatorDiameter / 2 - indicatorRing,
+                    width: indicatorDiameter + 2 * indicatorRing,
+                    height: indicatorDiameter + 2 * indicatorRing)
+                NSGraphicsContext.current?.saveGraphicsState()
+                NSGraphicsContext.current?.compositingOperation = .destinationOut
+                NSColor.black.setFill()
+                NSBezierPath(ovalIn: ring).fill()
+                NSGraphicsContext.current?.restoreGraphicsState()
+                bright.setFill()
+                NSBezierPath(ovalIn: ring.insetBy(dx: indicatorRing, dy: indicatorRing)).fill()
+            case .text(let string, let color, let font):
+                var attributes: [NSAttributedString.Key: Any] = [
+                    .font: font, .foregroundColor: color,
+                ]
+                if let shadow { attributes[.shadow] = shadow }
+                let size = (string as NSString).size(withAttributes: attributes)
+                (string as NSString).draw(
+                    at: NSPoint(x: x, y: (height - size.height) / 2),
+                    withAttributes: attributes)
+            case .dot(let color):
+                NSGraphicsContext.current?.saveGraphicsState()
+                shadow?.set()
+                color.setFill()
+                NSBezierPath(ovalIn: NSRect(
+                    x: x + dotGap, y: (height - dotDiameter) / 2,
+                    width: dotDiameter, height: dotDiameter)).fill()
+                NSGraphicsContext.current?.restoreGraphicsState()
+            case .badge(let string):
+                let attributes: [NSAttributedString.Key: Any] = [
+                    .font: badgeFont, .foregroundColor: NSColor.white,
+                ]
+                let size = (string as NSString).size(withAttributes: attributes)
+                let rect = NSRect(
+                    x: x, y: (height - badgeHeight) / 2,
+                    width: size.width + 2 * badgePaddingX, height: badgeHeight)
+                NSGraphicsContext.current?.saveGraphicsState()
+                shadow?.set()
+                badgeRed.setFill()
+                NSBezierPath(roundedRect: rect, xRadius: badgeHeight / 2, yRadius: badgeHeight / 2)
+                    .fill()
+                NSGraphicsContext.current?.restoreGraphicsState()
+                (string as NSString).draw(
+                    at: NSPoint(x: x + badgePaddingX, y: (height - size.height) / 2),
+                    withAttributes: attributes)
+            case .glyphBadge(let string, let fill):
+                let attributes: [NSAttributedString.Key: Any] = [
+                    .font: font, .foregroundColor: NSColor.white,
+                ]
+                let size = (string as NSString).size(withAttributes: attributes)
+                let rect = NSRect(
+                    x: x, y: (height - badgeHeight) / 2,
+                    width: size.width + 2 * badgePaddingX, height: badgeHeight)
+                NSGraphicsContext.current?.saveGraphicsState()
+                shadow?.set()
+                fill.setFill()
+                NSBezierPath(roundedRect: rect, xRadius: badgeHeight / 2, yRadius: badgeHeight / 2)
+                    .fill()
+                NSGraphicsContext.current?.restoreGraphicsState()
+                (string as NSString).draw(
+                    at: NSPoint(x: x + badgePaddingX, y: (height - size.height) / 2),
+                    withAttributes: attributes)
+            case .gap:
+                break
+            case .bars(let slots, let stale):
+                drawBars(slots, stale: stale, x: x, height: height)
+            case .rings(let outer, let inner, let stale):
+                drawRings(outer: outer, inner: inner, stale: stale, x: x, height: height)
+            case .sentinel(let color, let filled):
+                drawSentinel(color, filled: filled, x: x, height: height)
+            case .ghost(let string):
+                let attributes: [NSAttributedString.Key: Any] = [
+                    .font: badgeFont, .foregroundColor: dim,
+                ]
+                let size = (string as NSString).size(withAttributes: attributes)
+                let rect = NSRect(
+                    x: x + 0.5, y: (height - badgeHeight) / 2 + 0.5,
+                    width: size.width + 2 * badgePaddingX - 1, height: badgeHeight - 1)
+                let outline = NSBezierPath(
+                    roundedRect: rect, xRadius: badgeHeight / 2, yRadius: badgeHeight / 2)
+                outline.lineWidth = 1
+                outline.setLineDash([3, 2], count: 2, phase: 0)
+                dim.setStroke()
+                outline.stroke()
+                (string as NSString).draw(
+                    at: NSPoint(x: x + badgePaddingX, y: (height - size.height) / 2),
+                    withAttributes: attributes)
+            }
+            if case .indicator = run { continue }
+            previousRun = (x, inkWidth(run), inkTop(run, height: height))
+        }
     }
 
     /// The invariance guard: a lone cell drawn as unlabeled digits IS
@@ -490,7 +569,7 @@ enum StatusItemRenderer {
     static func glyphRuns(_ model: Model, stale: Bool) -> [Tagged] {
         var runs: [Tagged] = [Tagged(
             run: model.incident.map { .glyphBadge(model.glyph, incidentFill($0)) }
-                ?? .text(model.glyph, stale ? staleColor : accent, font),
+                ?? .text(model.glyph, stale ? staleColor : glyphInk, font),
             cell: nil)]
         if model.indicator { runs.append(Tagged(run: .indicator, cell: nil)) }
         return runs

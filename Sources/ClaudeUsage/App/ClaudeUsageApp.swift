@@ -88,6 +88,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let fake = Self.launchFakeNotices() {
             registry.activeStore.installFakeNotices(fake.card, outages: fake.outages)
         }
+        // `--fake-bar <light|dark>` forces the ground the status item is
+        // inked for (read by StatusItemController) — the other wallpaper
+        // can't be summoned on demand.
         // `--fake-profiles` installs a second, synthetic account ("Work",
         // S 42% and a watched W 80%, no scoped meter) as a fixed-digest
         // face, so the account strip, the menu bar cells and the Accounts
@@ -397,7 +400,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let height = NSStatusBar.system.thickness
-        let ground = NSColor(srgbRed: 0.11, green: 0.11, blue: 0.12, alpha: 1)
+        // Every case on both grounds (0.100.1): the dark bar's PNGs keep
+        // their names and their bytes, and `statusitem-light-*` is the same
+        // model in the bright bar's ink over a bright wallpaper's cream.
+        let grounds: [(StatusItemRenderer.Ground, String, NSColor)] = [
+            (.dark, "", NSColor(srgbRed: 0.11, green: 0.11, blue: 0.12, alpha: 1)),
+            (.light, "light-", NSColor(srgbRed: 0.93, green: 0.89, blue: 0.80, alpha: 1)),
+        ]
         // The hit rectangles beside the pixels: a sidecar naming which
         // account each x-range belongs to, so a layout regression shows as
         // a diff rather than as a hover landing on the wrong card.
@@ -411,20 +420,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     rect.rect.minX, rect.rect.maxX))
             }
             let padded = NSSize(width: ceil(bar.size.width) + 16, height: height + 8)
-            guard let rep = NSBitmapImageRep(
-                bitmapDataPlanes: nil, pixelsWide: Int(padded.width * 2), pixelsHigh: Int(padded.height * 2),
-                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
-                colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)
-            else { continue }
-            rep.size = padded
-            NSGraphicsContext.saveGraphicsState()
-            NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
-            ground.setFill()
-            NSRect(origin: .zero, size: padded).fill()
-            bar.draw(in: NSRect(x: 8, y: 4, width: bar.size.width, height: height))
-            NSGraphicsContext.restoreGraphicsState()
-            try? rep.representation(using: .png, properties: [:])?
-                .write(to: directory.appending(path: "statusitem-\(name).png"))
+            for (ground, prefix, fill) in grounds {
+                guard let rep = NSBitmapImageRep(
+                    bitmapDataPlanes: nil, pixelsWide: Int(padded.width * 2), pixelsHigh: Int(padded.height * 2),
+                    bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                    colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)
+                else { continue }
+                rep.size = padded
+                let inked = StatusItemRenderer.image(for: model, height: height, ground: ground)
+                NSGraphicsContext.saveGraphicsState()
+                NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+                fill.setFill()
+                NSRect(origin: .zero, size: padded).fill()
+                inked.draw(in: NSRect(x: 8, y: 4, width: bar.size.width, height: height))
+                NSGraphicsContext.restoreGraphicsState()
+                try? rep.representation(using: .png, properties: [:])?
+                    .write(to: directory.appending(path: "statusitem-\(prefix)\(name).png"))
+            }
         }
         try? sidecar.joined(separator: "\n").appending("\n")
             .write(to: directory.appending(path: "statusitem-cells.txt"), atomically: true, encoding: .utf8)

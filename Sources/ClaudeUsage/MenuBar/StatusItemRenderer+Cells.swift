@@ -40,10 +40,10 @@ extension StatusItemRenderer {
     static let elementGap: CGFloat = 5
     /// Between two countdowns of one element (`.each`).
     static let countdownGap: CGFloat = 4
-    static let trackColor = NSColor.white.withAlphaComponent(0.22)
-    static let staleTrackColor = NSColor.white.withAlphaComponent(0.14)
-    static let barFillColor = NSColor.white.withAlphaComponent(0.88)
-    static let sentinelQuiet = NSColor.white.withAlphaComponent(0.35)
+    static let trackColor = ink(white: 0.22, black: 0.18)
+    static let staleTrackColor = ink(white: 0.14, black: 0.11)
+    static let barFillColor = ink(white: 0.88, black: 0.8)
+    static let sentinelQuiet = ink(white: 0.35, black: 0.35)
 
     // MARK: - Composition
 
@@ -173,8 +173,12 @@ extension StatusItemRenderer {
 
     /// One cell alone, no glyph — the Settings thumbnails: an account's
     /// own numbers in a candidate form.
-    static func cellImage(_ cell: Cell, height: CGFloat, now: Date = Date(), ghosts: Bool = false) -> NSImage {
-        image(runs: cellRuns(cell, expanded: false, now: Model.minute(now), ghosts: ghosts), height: height)
+    static func cellImage(
+        _ cell: Cell, height: CGFloat, now: Date = Date(), ghosts: Bool = false, ground: Ground = .dark
+    ) -> NSImage {
+        image(
+            runs: cellRuns(cell, expanded: false, now: Model.minute(now), ghosts: ghosts),
+            height: height, ground: ground)
     }
 
     /// One element alone — the palette's tile: what the element itself
@@ -260,7 +264,7 @@ extension StatusItemRenderer {
         if cell.stale { return staleColor }
         guard let severity = worstSeverity(cell), severity > 0 else { return sentinelQuiet }
         if severity >= badgeSeverity { return badgeRed }
-        return riskYellow.blended(withFraction: severity, of: criticalColor) ?? criticalColor
+        return rampColor(severity)
     }
 
     // MARK: - Drawing

@@ -1588,14 +1588,39 @@ the README rather than silently deviating.
   solid geometry instead: a ramp-colored dot ahead of a watched number
   (severity 0→0.75), escalating to a filled red capsule carrying the
   segment's tag + digits in bold white at severity ≥ 0.75 (or discrete
-  critical). Stale stays grey and ornament-free.
+  critical). Stale stays grey and ornament-free. THE INK FOLLOWS THE
+  GROUND (v0.100.1, user-reported: white digits over a bright wallpaper
+  were unreadable): the bar is transparent and the system inks its own
+  items from the WALLPAPER — not the app's appearance, not Dark Mode
+  (measured: a Dark Mode Mac over a cream wallpaper hands status buttons
+  `vibrantLight` and draws the clock black). `StatusItemRenderer.Ground`
+  (.dark/.light) is read off the button's `effectiveAppearance`; the
+  controller KVOs it, and the ground joins the identical-model skip. Every
+  palette static is an `ink(dark:light:)` NSColor resolved at DRAW time —
+  composition never learns the ground — and `image(…ground:)` draws under
+  `ground.appearance`, so an image resolves the same in any context;
+  default `.dark` keeps every preview swatch and snapshot as it was. The
+  `.dark` ground IS the 0.2.1 palette (white + faint dark halo, all 24
+  status item PNGs `cmp` equal across the change); `.light` is the
+  system's near-black, no halo, and every hue a step deeper (the glyph's
+  accent 30% toward black; the ramp amber→deep red) — white-on-fill
+  capsules are the same on both. Never blend two ink colors
+  (`blended` resolves at blend time): `rampColor(_:)` blends WITHIN a
+  ground. The 0.2.1 note that the appearance "lies" is retired: whatever
+  the button reports is the ink the system gives the clock beside us, and
+  matching it is the contract. Hatches: `--fake-bar <light|dark>`;
+  `--snapshot` writes every case twice (`statusitem-light-*` on cream).
+  UNVERIFIED (one display here): an item holds ONE image, so a second
+  display whose wallpaper sits on the other side presumably shows the
+  first bar's ink — only a template image could be inked per display, and
+  a template can't carry the risk colors.
 - The status item is a raw `NSStatusItem` owned by `StatusItemController` —
   NOT `MenuBarExtra`. The menu bar's appearance follows wallpaper tinting,
   not the app's appearance; MenuBarExtra rasterizes its label in the app's
-  appearance and produced dark-on-dark text. Setting `button.image` lets
-  AppKit draw inside the button's appearance context, where dynamic colors
-  resolve correctly; KVO on `button.effectiveAppearance` re-renders on
-  theme/tint changes. The panel is SwiftUI in an `NSPopover`.
+  appearance and produced dark-on-dark text. The item's image is drawn
+  for the button's own ground (the rendering bullet above); KVO on
+  `button.effectiveAppearance` redraws it when a wallpaper change flips
+  the bar's ink. The panel is SwiftUI in an `NSPopover`.
 - `.transient` alone cannot dismiss the panel popover: in an LSUIElement app
   under cooperative activation (macOS 14+) the app usually never becomes
   active, so clicking elsewhere produces no deactivation to close on. While

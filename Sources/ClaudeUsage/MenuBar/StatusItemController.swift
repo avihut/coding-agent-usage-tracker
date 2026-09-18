@@ -2,10 +2,11 @@ import AppKit
 import SwiftUI
 import UsageCore
 
-/// Owns raw NSStatusItems instead of MenuBarExtra. The menu bar's appearance
-/// follows wallpaper tinting, not the app's appearance — drawing the title
-/// through the button (attributedTitle) keeps it in the system's own
-/// appearance/vibrancy pipeline, so it stays legible on any menu bar.
+/// Owns raw NSStatusItems instead of MenuBarExtra. The menu bar's ink
+/// follows the WALLPAPER, not the app's appearance: the system hands each
+/// status button the appearance it inks its own items by, and the item is
+/// drawn for that ground (`StatusItemRenderer.Ground`) and redrawn when it
+/// flips — a wallpaper change, a Space with another picture.
 ///
 /// NSResponder subclass so it can own the buttons' tracking areas: hovering
 /// an account's cell shows that account's usage graph popover, iStat-style;
@@ -26,7 +27,11 @@ final class StatusItemController: NSResponder {
         let statusItem: NSStatusItem
         var model: StatusItemRenderer.Model?
         var rects: [StatusItemRenderer.CellRect] = []
+        /// The ground the image was drawn for — part of "what was last
+        /// drawn", beside the model.
+        var ground: StatusItemRenderer.Ground?
         var visibility: NSKeyValueObservation?
+        var appearance: NSKeyValueObservation?
 
         init(profileID: String?, statusItem: NSStatusItem) {
             self.profileID = profileID
@@ -199,10 +204,12 @@ final class StatusItemController: NSResponder {
         let wanted = itemModels.map(\.profileID)
         if items.map(\.profileID) != wanted { reconcileItems(for: wanted) }
         for (item, drawn) in zip(items, itemModels) {
-            guard item.model != drawn.model else { continue }
+            let ground = ground(of: item)
+            guard item.model != drawn.model || item.ground != ground else { continue }
             item.model = drawn.model
+            item.ground = ground
             item.rects = StatusItemRenderer.cellRects(for: drawn.model, height: height)
-            draw(StatusItemRenderer.image(for: drawn.model, height: height), in: item)
+            draw(StatusItemRenderer.image(for: drawn.model, height: height, ground: ground), in: item)
         }
         armClock(if: StatusItemRenderer.hasCountdown(model))
     }
@@ -223,10 +230,26 @@ final class StatusItemController: NSResponder {
         clock = timer
     }
 
+    /// The bar under this item, as the system reads it: the button's own
+    /// effective appearance, which AppKit sets from the wallpaper behind
+    /// the item. `--fake-bar <light|dark>` overrides it — the other ground
+    /// can't be summoned on a Mac whose wallpaper is what it is.
+    private func ground(of item: Item) -> StatusItemRenderer.Ground {
+        if let forced = Self.forcedGround { return forced }
+        guard let button = item.statusItem.button else { return .dark }
+        return StatusItemRenderer.Ground(button.effectiveAppearance)
+    }
+
+    private static let forcedGround: StatusItemRenderer.Ground? = {
+        let arguments = CommandLine.arguments
+        guard let flag = arguments.firstIndex(of: "--fake-bar"), arguments.indices.contains(flag + 1)
+        else { return nil }
+        return arguments[flag + 1] == "light" ? .light : .dark
+    }()
+
     /// Drawn as literal pixels, not attributedTitle: the bars, dots and
-    /// badges are filled geometry no attributed string can carry. Fixed
-    /// colors keep the image immune to the appearance-context lies a tinted
-    /// menu bar tells.
+    /// badges are filled geometry no attributed string can carry. The
+    /// pixels are the palette resolved for the item's ground.
     private func draw(_ image: NSImage, in item: Item) {
         guard let button = item.statusItem.button else { return }
         button.image = image
@@ -251,6 +274,7 @@ final class StatusItemController: NSResponder {
                 kept[item.profileID] = item
             } else {
                 item.visibility = nil
+                item.appearance = nil
                 NSStatusBar.system.removeStatusItem(item.statusItem)
             }
         }
@@ -277,6 +301,12 @@ final class StatusItemController: NSResponder {
                 }
             }
             if let button = statusItem.button {
+                // The wallpaper under the bar changed sides: redraw in the
+                // other ink. The callback is nonisolated and reads nothing —
+                // `render` asks the button itself.
+                item.appearance = button.observe(\.effectiveAppearance) { [weak self] _, _ in
+                    Task { @MainActor [weak self] in self?.render() }
+                }
                 button.target = self
                 button.action = #selector(togglePopover(_:))
                 button.addTrackingArea(NSTrackingArea(
