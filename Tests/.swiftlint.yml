@@ -1,0 +1,4 @@
+# Test code may force: a `try!` or `as!` that fails IS the test failing.
+disabled_rules:
+  - force_cast
+  - force_try

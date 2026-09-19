@@ -47,7 +47,7 @@ pub fn render(digest_path: &Path) -> String {
     }
     for (index, segment) in state.menu_bar.iter().enumerate() {
         if index > 0 {
-            out.push_str("·");
+            out.push('·');
         }
         out.push_str(&segment.tag);
         let text = segment
@@ -70,7 +70,11 @@ pub fn render(digest_path: &Path) -> String {
         }
     }
     if state.engine.stale {
-        out.push_str(if color { " #[dim]stale#[default]" } else { " stale" });
+        out.push_str(if color {
+            " #[dim]stale#[default]"
+        } else {
+            " stale"
+        });
     }
     // Pending notices: one dot cell and the count, only while the digest's
     // indicator is lit (a lone ongoing outage lights nothing here either).

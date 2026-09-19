@@ -6,15 +6,17 @@
 //! what was actually painted.
 
 use crate::activity::{self, ModelTotal};
-use crate::digest::{DayRollup, HourBucket, LiveState, NoticeCard, NoticesCard, Rgb, ServiceStatusCard};
+use crate::digest::{
+    DayRollup, HourBucket, LiveState, NoticeCard, NoticesCard, Rgb, ServiceStatusCard,
+};
 use crate::layout::{self, Plan, Shape};
 use crate::state::{App, Dimension, Freshness, Hit, Period, Surface};
 use crate::surfaces;
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph};
-use ratatui::Frame;
 use std::collections::HashMap;
 use std::sync::OnceLock;
 use time::{Date, OffsetDateTime, UtcOffset};
@@ -227,14 +229,18 @@ fn notice_color(item: &NoticeCard, accent: Color) -> Color {
 /// outages), the detail as room allows, the time line and — for a
 /// dismissable notice — a × at the row's end. Words verbatim from the
 /// digest; the `×` column is what `hits` registers for a click.
-fn notices_section<'a>(
-    items: &[&'a NoticeCard],
-    accent: Color,
-    rect: Rect,
-) -> Paragraph<'a> {
+fn notices_section<'a>(items: &[&'a NoticeCard], accent: Color, rect: Rect) -> Paragraph<'a> {
     let mut lines = vec![section_title("Notifications")];
-    let rail = if crate::state::look().ascii { "| " } else { "▍ " };
-    let cross = if crate::state::look().ascii { "x" } else { "×" };
+    let rail = if crate::state::look().ascii {
+        "| "
+    } else {
+        "▍ "
+    };
+    let cross = if crate::state::look().ascii {
+        "x"
+    } else {
+        "×"
+    };
     for item in items {
         let color = notice_color(item, accent);
         let mut tail = format!("  {}", item.when);
@@ -258,12 +264,12 @@ fn notices_section<'a>(
         // the × always sits in the last cell (where the hit map expects it).
         let left = room.saturating_sub(title_len);
         let mut used = title_len;
-        if let Some(detail) = &item.detail {
-            if left > 8 {
-                let shown = truncate(detail, left - 2);
-                used += 2 + shown.chars().count();
-                spans.push(Span::styled(format!("  {shown}"), style(DIM)));
-            }
+        if let Some(detail) = &item.detail
+            && left > 8
+        {
+            let shown = truncate(detail, left - 2);
+            used += 2 + shown.chars().count();
+            spans.push(Span::styled(format!("  {shown}"), style(DIM)));
         }
         spans.push(Span::raw(" ".repeat(room.saturating_sub(used))));
         spans.push(Span::styled(tail, style(DIM)));
@@ -280,7 +286,10 @@ fn notices_section<'a>(
 /// 1 = a banner row under the header; 2 = that plus the latest message.
 pub fn status_rungs(card: Option<&ServiceStatusCard>) -> u16 {
     let Some(card) = card else { return 0 };
-    match card.active_incident().map(|incident| incident.impact.as_str()) {
+    match card
+        .active_incident()
+        .map(|incident| incident.impact.as_str())
+    {
         Some("critical") => 2,
         Some("major") => 1,
         // Minor rides the footer; maintenance and unknown never take rows.
@@ -317,7 +326,11 @@ fn status_marker(indicator: &str) -> &'static str {
 /// The incident banner (rungs 1 and 2). A colored rail, the impact, the
 /// name, its phase and how long it has run — and at rung 2 the latest
 /// update's text on a second row.
-fn status_banner<'a>(card: &'a ServiceStatusCard, now: OffsetDateTime, width: u16) -> Paragraph<'a> {
+fn status_banner<'a>(
+    card: &'a ServiceStatusCard,
+    now: OffsetDateTime,
+    width: u16,
+) -> Paragraph<'a> {
     Paragraph::new(status_banner_lines(card, now, width))
 }
 
@@ -332,11 +345,18 @@ fn status_banner_lines<'a>(
         return Vec::new();
     };
     let color = status_color(&incident.impact);
-    let rail = if crate::state::look().ascii { "| " } else { "▍ " };
+    let rail = if crate::state::look().ascii {
+        "| "
+    } else {
+        "▍ "
+    };
 
     let mut head = vec![
         Span::styled(rail.to_owned(), style(color)),
-        Span::styled(incident.impact.to_uppercase(), style(color).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            incident.impact.to_uppercase(),
+            style(color).add_modifier(Modifier::BOLD),
+        ),
         Span::styled("  ".to_owned(), style(DIM)),
     ];
     // The name gets whatever the fixed parts leave: rail + impact + phase and
@@ -347,7 +367,8 @@ fn status_banner_lines<'a>(
         glyphs().sep,
         worked(incident.duration_seconds(now))
     );
-    let spent = rail.chars().count() + incident.impact.chars().count() + 2 + tail.chars().count() + 2;
+    let spent =
+        rail.chars().count() + incident.impact.chars().count() + 2 + tail.chars().count() + 2;
     let room = (width as usize).saturating_sub(spent);
     // Bare bold, not a pinned color: the name inherits the terminal's own
     // foreground, so it reads on any theme the user runs.
@@ -359,16 +380,16 @@ fn status_banner_lines<'a>(
     head.push(Span::styled(tail, style(color)));
 
     let mut lines = vec![Line::from(head)];
-    if status_rungs(Some(card)) >= 2 {
-        if let Some(message) = &incident.last_message {
-            // No marker here: the headline row above already spells the
-            // impact in plain text, colour or not.
-            let room = (width as usize).saturating_sub(rail.chars().count());
-            lines.push(Line::from(vec![
-                Span::styled(rail.to_owned(), style(color)),
-                Span::styled(truncate(message, room), style(DIM)),
-            ]));
-        }
+    if status_rungs(Some(card)) >= 2
+        && let Some(message) = &incident.last_message
+    {
+        // No marker here: the headline row above already spells the
+        // impact in plain text, colour or not.
+        let room = (width as usize).saturating_sub(rail.chars().count());
+        lines.push(Line::from(vec![
+            Span::styled(rail.to_owned(), style(color)),
+            Span::styled(truncate(message, room), style(DIM)),
+        ]));
     }
     lines
 }
@@ -376,7 +397,10 @@ fn status_banner_lines<'a>(
 /// The footer's own rung — the terminal counterpart of the app's footer dot.
 /// A quiet service is one green cell; a minor incident borrows the footer's
 /// right half rather than taking a row of its own.
-fn status_footer_spans(card: Option<&ServiceStatusCard>, now: OffsetDateTime) -> Vec<Span<'static>> {
+fn status_footer_spans(
+    card: Option<&ServiceStatusCard>,
+    now: OffsetDateTime,
+) -> Vec<Span<'static>> {
     let Some(card) = card else { return Vec::new() };
     let color = status_color(&card.indicator);
     let mono = crate::state::look().no_color;
@@ -401,7 +425,9 @@ fn status_footer_spans(card: Option<&ServiceStatusCard>, now: OffsetDateTime) ->
         // Without colour a bare mark carries nothing, so the footer speaks
         // only when it has words worth printing: a healthy service says
         // nothing, and an incident already banner-ed above isn't repeated.
-        let Some(detail) = detail else { return Vec::new() };
+        let Some(detail) = detail else {
+            return Vec::new();
+        };
         return vec![Span::styled(
             format!("  {}{}", status_marker(&card.indicator).trim_end(), detail),
             style(DIM),
@@ -462,10 +488,7 @@ pub fn render(frame: &mut Frame, app: &mut App, now: OffsetDateTime) {
     };
     // The halo band is painted after the widgets, from last frame's
     // geometry — the same one the hit resolved against.
-    let halo = app
-        .hover_hit
-        .as_ref()
-        .and_then(|hit| app.hits.rect_of(hit));
+    let halo = app.hover_hit.as_ref().and_then(|hit| app.hits.rect_of(hit));
     app.focus_hit = focus;
     app.hits.clear();
     let area = frame.area();
@@ -545,10 +568,8 @@ fn highlight_band(frame: &mut Frame, rect: Rect) {
                 } else {
                     Modifier::BOLD
                 });
-                if !no_color {
-                    if let Color::Rgb(r, g, b) = cell.fg {
-                        lift = lift.fg(brighten(r, g, b));
-                    }
+                if !no_color && let Color::Rgb(r, g, b) = cell.fg {
+                    lift = lift.fg(brighten(r, g, b));
                 }
                 cell.set_style(lift);
             }
@@ -666,9 +687,7 @@ impl Dash {
             activation_note,
             // The credits line rides inside the meters section when the
             // provider sent one.
-            meter_rows: digest.meters.len() as u16
-                + u16::from(digest.engine.spend.is_some())
-                + 1,
+            meter_rows: digest.meters.len() as u16 + u16::from(digest.engine.spend.is_some()) + 1,
             activity_rows,
         }
     }
@@ -694,12 +713,19 @@ fn render_dashboard(
 ) {
     let accent = rgb(digest.engine.accent);
     if let Some(rect) = plan.header {
-        frame.render_widget(header(digest, freshness, app, now, accent, rect.width), rect);
+        frame.render_widget(
+            header(digest, freshness, app, now, accent, rect.width),
+            rect,
+        );
     }
     if let Some(rect) = plan.notices {
         let items = listed_notices(digest.notices.as_ref());
         frame.render_widget(notices_section(&items, accent, rect), rect);
-        for (index, item) in items.iter().take((rect.height.max(1) - 1) as usize).enumerate() {
+        for (index, item) in items
+            .iter()
+            .take((rect.height.max(1) - 1) as usize)
+            .enumerate()
+        {
             let row = Rect::new(rect.x, rect.y + 1 + index as u16, rect.width, 1);
             app.hits.add(row, Hit::Notice(item.id.clone()));
             if item.dismissable && rect.width >= 2 {
@@ -749,10 +775,10 @@ fn render_dashboard(
     if let Some(rect) = plan.sessions {
         frame.render_widget(sessions(digest, accent, rect), rect);
     }
-    if let Some(rect) = plan.status {
-        if let Some(card) = digest.service_status.as_ref() {
-            frame.render_widget(status_banner(card, now, rect.width), rect);
-        }
+    if let Some(rect) = plan.status
+        && let Some(card) = digest.service_status.as_ref()
+    {
+        frame.render_widget(status_banner(card, now, rect.width), rect);
     }
     if let Some(rect) = plan.footer {
         frame.render_widget(footer(digest, freshness, app, now, rect.width), rect);
@@ -808,7 +834,11 @@ fn header<'a>(
                 if let Some(fetched) = engine.fetched_at {
                     let stamp = clock(fetched, app.local_offset);
                     status.push(Span::styled(
-                        if compact { stamp } else { format!("updated {stamp}") },
+                        if compact {
+                            stamp
+                        } else {
+                            format!("updated {stamp}")
+                        },
                         style(DIM),
                     ));
                 }
@@ -818,7 +848,11 @@ fn header<'a>(
                         format!(
                             "{}{}",
                             glyphs().sep,
-                            if compact { format!("next {count}") } else { format!("next in {count}") }
+                            if compact {
+                                format!("next {count}")
+                            } else {
+                                format!("next in {count}")
+                            }
                         ),
                         style(DIM),
                     ));
@@ -829,7 +863,11 @@ fn header<'a>(
                 if let Some(fetched) = engine.fetched_at {
                     let stamp = clock(fetched, app.local_offset);
                     status.push(Span::styled(
-                        if compact { stamp } else { format!("as of {stamp}") },
+                        if compact {
+                            stamp
+                        } else {
+                            format!("as of {stamp}")
+                        },
                         style(DIM),
                     ));
                 }
@@ -892,28 +930,30 @@ fn header<'a>(
                 style(DIM),
             ));
         }
-        if !engine.is_local_provider {
-            if let (Some(used), Some(ceiling)) =
-                (engine.api_budget_used, engine.api_budget_ceiling)
-            {
-                // The refresh button's pressure grammar: orange nearing
-                // the hourly budget, red at or past it, quiet otherwise.
-                let pressure = match engine.api_budget_fraction {
-                    Some(fraction) if fraction >= 1.0 => style(CRITICAL),
-                    Some(fraction) if fraction >= 0.8 => style(WARNING),
-                    _ => style(FAINT),
-                };
-                status.push(Span::styled(
-                    format!("{}API {used}/{ceiling}h", glyphs().sep),
-                    pressure,
-                ));
-            }
+        if !engine.is_local_provider
+            && let (Some(used), Some(ceiling)) = (engine.api_budget_used, engine.api_budget_ceiling)
+        {
+            // The refresh button's pressure grammar: orange nearing
+            // the hourly budget, red at or past it, quiet otherwise.
+            let pressure = match engine.api_budget_fraction {
+                Some(fraction) if fraction >= 1.0 => style(CRITICAL),
+                Some(fraction) if fraction >= 0.8 => style(WARNING),
+                _ => style(FAINT),
+            };
+            status.push(Span::styled(
+                format!("{}API {used}/{ceiling}h", glyphs().sep),
+                pressure,
+            ));
         }
         status
     };
     let full = build(false);
     let length: usize = full.iter().map(|span| span.content.chars().count()).sum();
-    let status = if length <= width as usize { full } else { build(true) };
+    let status = if length <= width as usize {
+        full
+    } else {
+        build(true)
+    };
     Paragraph::new(vec![Line::from(identity), Line::from(status)])
 }
 
@@ -922,8 +962,10 @@ fn meters<'a>(digest: &'a LiveState, freshness: Freshness, rect: Rect) -> Paragr
     let grey = freshness == Freshness::Stale || freshness == Freshness::EngineOffline;
     let rows = (rect.height.max(1) - 1) as usize;
     let spend = digest.engine.spend.as_ref();
-    let visible =
-        &digest.meters[..digest.meters.len().min(rows.saturating_sub(usize::from(spend.is_some())))];
+    let visible = &digest.meters[..digest
+        .meters
+        .len()
+        .min(rows.saturating_sub(usize::from(spend.is_some())))];
 
     // One track width for the whole section, stretched into whatever the
     // longest caption leaves free — the app's full-width capsule,
@@ -993,23 +1035,23 @@ fn meters<'a>(digest: &'a LiveState, freshness: Freshness, rect: Rect) -> Paragr
         if let Some(caption) = &meter.reset_caption {
             spans.push(Span::styled(format!("  {caption}"), style(DIM)));
         }
-        if let Some(forecast) = &meter.forecast {
-            if let Some(caption) = &forecast.caption {
-                spans.push(Span::styled(
-                    format!("{}{caption}", glyphs().sep),
-                    style(bar_color),
-                ));
-            }
+        if let Some(forecast) = &meter.forecast
+            && let Some(caption) = &forecast.caption
+        {
+            spans.push(Span::styled(
+                format!("{}{caption}", glyphs().sep),
+                style(bar_color),
+            ));
         }
         lines.push(Line::from(spans));
     }
-    if let Some(spend) = spend {
-        if lines.len() <= rows {
-            lines.push(Line::from(vec![
-                Span::styled(format!("{:<15}", "credits"), style(DIM)),
-                Span::styled(spend_text(spend), Style::new()),
-            ]));
-        }
+    if let Some(spend) = spend
+        && lines.len() <= rows
+    {
+        lines.push(Line::from(vec![
+            Span::styled(format!("{:<15}", "credits"), style(DIM)),
+            Span::styled(spend_text(spend), Style::new()),
+        ]));
     }
     Paragraph::new(lines)
 }
@@ -1024,7 +1066,10 @@ fn spend_text(spend: &crate::digest::SpendStatus) -> String {
             format!("{} ", spend.currency)
         };
         let scaled = minor as f64 / 10f64.powi(spend.exponent);
-        format!("{symbol}{scaled:.precision$}", precision = spend.exponent.max(0) as usize)
+        format!(
+            "{symbol}{scaled:.precision$}",
+            precision = spend.exponent.max(0) as usize
+        )
     };
     match spend.limit_minor {
         Some(limit) => format!("{} of {}", amount(spend.used_minor), amount(limit)),
@@ -1034,11 +1079,19 @@ fn spend_text(spend: &crate::digest::SpendStatus) -> String {
 
 fn today<'a>(digest: &'a LiveState, accent: Color, rect: Rect) -> Paragraph<'a> {
     let activity = &digest.activity;
-    let mut title = format!("TODAY{}{} tok", glyphs().sep, compact(activity.today_tokens));
+    let mut title = format!(
+        "TODAY{}{} tok",
+        glyphs().sep,
+        compact(activity.today_tokens)
+    );
     if let Some(cost) = activity.today_cost {
         title.push_str(&format!("{}{}", glyphs().sep, money(cost)));
     }
-    title.push_str(&format!("{}{} prompts", glyphs().sep, activity.today_prompts));
+    title.push_str(&format!(
+        "{}{} prompts",
+        glyphs().sep,
+        activity.today_prompts
+    ));
     let mut lines = vec![section_title(&title)];
 
     let mut buckets = [0i64; 24];
@@ -1065,7 +1118,12 @@ fn today<'a>(digest: &'a LiveState, accent: Color, rect: Rect) -> Paragraph<'a> 
     }
     lines.push(Line::from(spark));
     lines.push(Line::from(Span::styled(
-        format!("{:<width$}12{:>width$}", "0", "23", width = cell_width * 12 - 1),
+        format!(
+            "{:<width$}12{:>width$}",
+            "0",
+            "23",
+            width = cell_width * 12 - 1
+        ),
         style(FAINT),
     )));
     Paragraph::new(lines)
@@ -1090,9 +1148,7 @@ fn models<'a>(app: &App, data: &'a Dash, seats: usize, rect: Rect) -> Paragraph<
         return Paragraph::new(lines);
     }
     for model in data.models.iter().take(seats) {
-        let dim = data
-            .filter(app)
-            .is_some_and(|filter| filter.id != model.id);
+        let dim = data.filter(app).is_some_and(|filter| filter.id != model.id);
         lines.push(model_row(model, name_width, wide, dim));
     }
     lines.push(cost_rollup(&data.models, seats));
@@ -1150,7 +1206,10 @@ pub fn model_row(model: &ModelTotal, name_width: usize, wide: bool, dim: bool) -
 /// their own row rather than folding them into a section title.
 pub fn model_columns(name_width: usize, wide: bool) -> Line<'static> {
     let labels = if wide {
-        format!("{:>8}{:>8}{:>8}{:>10}", "input", "cached", "output", "est. cost")
+        format!(
+            "{:>8}{:>8}{:>8}{:>10}",
+            "input", "cached", "output", "est. cost"
+        )
     } else {
         format!("{:>8}{:>10}", "tokens", "est. cost")
     };
@@ -1162,14 +1221,23 @@ pub fn model_columns(name_width: usize, wide: bool) -> Line<'static> {
 
 /// "MODELS · 7D" with the grid's column labels flushed right when the pane
 /// is wide enough to seat them over their own columns.
-fn models_title(app: &App, data: &Dash, name_width: usize, wide: bool, width: u16) -> Line<'static> {
+fn models_title(
+    app: &App,
+    data: &Dash,
+    name_width: usize,
+    wide: bool,
+    width: u16,
+) -> Line<'static> {
     let mut title = format!("MODELS{}{}", glyphs().sep, app.period.label());
     if data.models_truncated {
         // No silent caps: per-model rows exist for ~35 days only.
         title.push_str(&format!("{}last ~35d", glyphs().sep));
     }
     let labels = if wide {
-        format!("{:>8}{:>8}{:>8}{:>10}", "input", "cached", "output", "est. cost")
+        format!(
+            "{:>8}{:>8}{:>8}{:>10}",
+            "input", "cached", "output", "est. cost"
+        )
     } else {
         String::new()
     };
@@ -1219,7 +1287,12 @@ fn heat_cell_text(quartile: usize) -> &'static str {
     static CELLS: OnceLock<[String; 4]> = OnceLock::new();
     let cells = CELLS.get_or_init(|| {
         let g = glyphs().heat_density;
-        [g[0].repeat(2), g[1].repeat(2), g[2].repeat(2), g[3].repeat(2)]
+        [
+            g[0].repeat(2),
+            g[1].repeat(2),
+            g[2].repeat(2),
+            g[3].repeat(2),
+        ]
     });
     &cells[quartile.min(3)]
 }
@@ -1261,7 +1334,7 @@ fn span_grid(start: Date, end: Date, oldest: Option<Date>, page: usize) -> HeatG
         let Some(next) = day.next_day() else { break };
         day = next;
     }
-    while cells.len() % 7 != 0 {
+    while !cells.len().is_multiple_of(7) {
         cells.push(None);
     }
     let weeks = cells
@@ -1390,23 +1463,18 @@ fn activity_readout(
     filter: Option<&ModelTotal>,
     window: (&str, &str),
 ) -> String {
-    if let Some(Hit::HeatDay(key)) = &app.hover_hit {
-        if let Some(day) = digest
-            .activity
-            .days
-            .iter()
-            .find(|day| &day.day_key == key)
-        {
-            let mut text = format!("{}{}{} tok", day.day_key, glyphs().sep, compact(day.tokens));
-            if let Some(cost) = day.cost {
-                text.push_str(&format!("{}{}", glyphs().sep, money(cost)));
-            }
-            if day.prompts > 0 {
-                text.push_str(&format!("{}{} prompts", glyphs().sep, day.prompts));
-            }
-            text.push_str("  (click to drill)");
-            return text;
+    if let Some(Hit::HeatDay(key)) = &app.hover_hit
+        && let Some(day) = digest.activity.days.iter().find(|day| &day.day_key == key)
+    {
+        let mut text = format!("{}{}{} tok", day.day_key, glyphs().sep, compact(day.tokens));
+        if let Some(cost) = day.cost {
+            text.push_str(&format!("{}{}", glyphs().sep, money(cost)));
         }
+        if day.prompts > 0 {
+            text.push_str(&format!("{}{} prompts", glyphs().sep, day.prompts));
+        }
+        text.push_str("  (click to drill)");
+        return text;
     }
     let measure = |value: f64| match app.dimension {
         Dimension::Tokens => format!("{} tokens", compact(value as i64)),
@@ -1492,10 +1560,7 @@ fn render_bars(frame: &mut Frame, app: &mut App, digest: &LiveState, data: &Dash
     // row of headroom so the tallest bar's own total still has somewhere to
     // sit.
     let plot_top = rect.y + 1;
-    let plot_height = rect
-        .height
-        .saturating_sub(4 + note.len() as u16)
-        .max(1) as usize;
+    let plot_height = rect.height.saturating_sub(4 + note.len() as u16).max(1) as usize;
     let usable = plot_height.saturating_sub(1).max(1);
     let slot = ((rect.width as usize) / 7).max(1);
     let bar_width = slot.saturating_sub(1).max(1);
@@ -1646,7 +1711,11 @@ fn render_bars(frame: &mut Frame, app: &mut App, digest: &LiveState, data: &Dash
         for date in &days {
             let text = format(*date);
             let lead = (slot.saturating_sub(text.chars().count())) / 2;
-            let mut style = if offset == 0 { style(DIM) } else { style(FAINT) };
+            let mut style = if offset == 0 {
+                style(DIM)
+            } else {
+                style(FAINT)
+            };
             if *date == data.today {
                 style = style.add_modifier(Modifier::BOLD);
             }
@@ -1663,7 +1732,12 @@ fn render_bars(frame: &mut Frame, app: &mut App, digest: &LiveState, data: &Dash
         }
         frame.render_widget(
             Paragraph::new(Line::from(spans)),
-            Rect::new(rect.x, plot_top + plot_height as u16 + offset, rect.width, 1),
+            Rect::new(
+                rect.x,
+                plot_top + plot_height as u16 + offset,
+                rect.width,
+                1,
+            ),
         );
     }
 
@@ -1706,8 +1780,7 @@ fn render_bars(frame: &mut Frame, app: &mut App, digest: &LiveState, data: &Dash
 /// strip (landscape), scoped to the active period.
 fn render_heatmap(frame: &mut Frame, app: &mut App, digest: &LiveState, data: &Dash, rect: Rect) {
     let days = &digest.activity.days;
-    let by_key: HashMap<&str, &DayRollup> =
-        days.iter().map(|d| (d.day_key.as_str(), d)).collect();
+    let by_key: HashMap<&str, &DayRollup> = days.iter().map(|d| (d.day_key.as_str(), d)).collect();
     // A hovered/focused model row filters the grid to that model's own
     // days, in its ledger color — the pane's version of the app's
     // hover-to-filter. Calendar geometry stays unfiltered: paging and
@@ -1719,16 +1792,13 @@ fn render_heatmap(frame: &mut Frame, app: &mut App, digest: &LiveState, data: &D
             .model_days
             .iter()
             .filter_map(|day| {
-                day.models
-                    .iter()
-                    .find(|m| m.id == model.id)
-                    .map(|m| {
-                        let value = match app.dimension {
-                            Dimension::Tokens => m.tally.total() as f64,
-                            Dimension::Cost => m.cost.unwrap_or(0.0),
-                        };
-                        (day.day_key.as_str(), value)
-                    })
+                day.models.iter().find(|m| m.id == model.id).map(|m| {
+                    let value = match app.dimension {
+                        Dimension::Tokens => m.tally.total() as f64,
+                        Dimension::Cost => m.cost.unwrap_or(0.0),
+                    };
+                    (day.day_key.as_str(), value)
+                })
             })
             .collect(),
         None => days
@@ -1808,9 +1878,7 @@ fn render_heatmap(frame: &mut Frame, app: &mut App, digest: &LiveState, data: &D
                 cell_style = style(ramp(heat_color, alpha));
                 text = "██";
             }
-        } else if filter.is_none()
-            && by_key.get(key.as_str()).is_some_and(|day| day.prompts > 0)
-        {
+        } else if filter.is_none() && by_key.get(key.as_str()).is_some_and(|day| day.prompts > 0) {
             cell_style = style(ramp(digest.engine.accent, 0.35));
             text = glyphs().prompt_cell;
         } else {
@@ -1829,25 +1897,22 @@ fn render_heatmap(frame: &mut Frame, app: &mut App, digest: &LiveState, data: &D
         // Weekday letters gutter + weeks as columns.
         let letters = ["M", "T", "W", "T", "F", "S", "S"];
         for row in 0..7usize.min(grid_height) {
-            let mut spans = vec![Span::styled(
-                format!("{} ", letters[row]),
-                style(FAINT),
-            )];
+            let mut spans = vec![Span::styled(format!("{} ", letters[row]), style(FAINT))];
             for (week_index, week) in grid.weeks.iter().enumerate() {
                 let (text, style) = cell(week[row]);
                 spans.push(Span::styled(text, style));
-                if let Some(date) = week[row] {
-                    if let Ok(key) = date.format(surfaces::DAY_KEY) {
-                        app.hits.add(
-                            Rect::new(
-                                rect.x + 2 + (week_index as u16) * 2,
-                                grid_y + row as u16,
-                                2,
-                                1,
-                            ),
-                            Hit::HeatDay(key),
-                        );
-                    }
+                if let Some(date) = week[row]
+                    && let Ok(key) = date.format(surfaces::DAY_KEY)
+                {
+                    app.hits.add(
+                        Rect::new(
+                            rect.x + 2 + (week_index as u16) * 2,
+                            grid_y + row as u16,
+                            2,
+                            1,
+                        ),
+                        Hit::HeatDay(key),
+                    );
                 }
             }
             frame.render_widget(
@@ -1880,18 +1945,13 @@ fn render_heatmap(frame: &mut Frame, app: &mut App, digest: &LiveState, data: &D
                 let (text, style) = cell(*date);
                 spans.push(Span::styled(text, style));
                 spans.push(Span::raw(" "));
-                if let Some(date) = date {
-                    if let Ok(key) = date.format(surfaces::DAY_KEY) {
-                        app.hits.add(
-                            Rect::new(
-                                rect.x + (slot as u16) * 3,
-                                grid_y + 1 + row as u16,
-                                2,
-                                1,
-                            ),
-                            Hit::HeatDay(key),
-                        );
-                    }
+                if let Some(date) = date
+                    && let Ok(key) = date.format(surfaces::DAY_KEY)
+                {
+                    app.hits.add(
+                        Rect::new(rect.x + (slot as u16) * 3, grid_y + 1 + row as u16, 2, 1),
+                        Hit::HeatDay(key),
+                    );
                 }
             }
             frame.render_widget(
@@ -1935,7 +1995,11 @@ fn footer<'a>(
     } else if freshness == Freshness::Backoff {
         if let Some(until) = digest.engine.backoff_until {
             spans.push(Span::styled(
-                format!("  429 backoff{}resumes in {}", glyphs().sep, countdown(until, now)),
+                format!(
+                    "  429 backoff{}resumes in {}",
+                    glyphs().sep,
+                    countdown(until, now)
+                ),
                 style(WARNING),
             ));
         }
@@ -1943,7 +2007,10 @@ fn footer<'a>(
         spans.push(Span::styled(
             format!(
                 "  {}{}v{}{}{}",
-                digest.engine.host, glyphs().sep, digest.engine.app_version, glyphs().sep,
+                digest.engine.host,
+                glyphs().sep,
+                digest.engine.app_version,
+                glyphs().sep,
                 digest.activity.time_zone
             ),
             style(FAINT),
@@ -2041,10 +2108,7 @@ fn render_strip(
                 _ => Color::Reset,
             }
         };
-        spans.push(Span::styled(
-            format!("{} ", segment.tag),
-            style(DIM),
-        ));
+        spans.push(Span::styled(format!("{} ", segment.tag), style(DIM)));
         spans.push(Span::styled(
             segment
                 .percent
@@ -2054,10 +2118,7 @@ fn render_strip(
         ));
     }
     if freshness == Freshness::EngineOffline {
-        spans.push(Span::styled(
-            "  offline".to_owned(),
-            style(CRITICAL),
-        ));
+        spans.push(Span::styled("  offline".to_owned(), style(CRITICAL)));
     } else if freshness == Freshness::Backoff {
         // The 429 marker with its ticking retry countdown — the strip's
         // only word on it, so it earns its columns.
@@ -2129,194 +2190,6 @@ fn render_help(frame: &mut Frame, area: Rect) {
         Paragraph::new(lines).block(ratatui::widgets::Block::bordered().title(" help ")),
         rect,
     );
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::digest::StatusIncident;
-    use time::macros::date;
-
-    fn incident(impact: &str) -> ServiceStatusCard {
-        card(impact, vec![StatusIncident {
-            id: "i".into(),
-            name: "Degraded performance for multiple models".into(),
-            impact: impact.into(),
-            phase: "monitoring".into(),
-            started_at: OffsetDateTime::UNIX_EPOCH,
-            last_update_at: None,
-            last_message: Some("A fix has been implemented.".into()),
-            url: None,
-            component_names: vec![],
-            resolved_at: None,
-        }])
-    }
-
-    fn card(indicator: &str, incidents: Vec<StatusIncident>) -> ServiceStatusCard {
-        ServiceStatusCard {
-            provider_id: "claude".into(),
-            page_name: "Claude".into(),
-            page_url: "https://status.claude.com".into(),
-            indicator: indicator.into(),
-            description_text: "".into(),
-            checked_at: OffsetDateTime::UNIX_EPOCH,
-            ok_at: None,
-            stale: false,
-            components: vec![],
-            incidents,
-            recently_resolved: vec![],
-            maintenances: vec![],
-        }
-    }
-
-    /// The prominence ladder (surface S6): severity buys rows, and quiet
-    /// buys silence. A minor incident deliberately earns none — it speaks
-    /// from the footer instead of pushing the dashboard down.
-    #[test]
-    fn severity_buys_dashboard_rows() {
-        assert_eq!(status_rungs(None), 0);
-        assert_eq!(status_rungs(Some(&card("none", vec![]))), 0);
-        assert_eq!(status_rungs(Some(&card("maintenance", vec![]))), 0);
-        assert_eq!(status_rungs(Some(&card("unknown", vec![]))), 0);
-        assert_eq!(status_rungs(Some(&incident("minor"))), 0);
-        assert_eq!(status_rungs(Some(&incident("major"))), 1);
-        assert_eq!(status_rungs(Some(&incident("critical"))), 2);
-    }
-
-    /// Only the top rung spends a row on the message text; a major incident
-    /// gets its name and phase, and nothing more.
-    #[test]
-    fn only_the_top_rung_carries_the_message() {
-        let now = OffsetDateTime::UNIX_EPOCH + time::Duration::minutes(72);
-
-        let major_card = incident("major");
-        assert_eq!(status_banner_lines(&major_card, now, 80).len(), 1);
-
-        let critical_card = incident("critical");
-        let critical = status_banner_lines(&critical_card, now, 80);
-        assert_eq!(critical.len(), 2);
-        let message: String = critical[1]
-            .spans
-            .iter()
-            .map(|span| span.content.to_string())
-            .collect();
-        assert!(message.contains("A fix has been implemented"));
-
-        // A card with nothing open paints no banner at all.
-        let quiet = card("none", vec![]);
-        assert!(status_banner_lines(&quiet, now, 80).is_empty());
-    }
-
-    /// A quiet service says nothing at all in the footer without color —
-    /// there is no news, and a bare mark would read as some.
-    #[test]
-    fn the_monochrome_footer_stays_silent_when_healthy() {
-        let now = OffsetDateTime::UNIX_EPOCH;
-        // The colored path always marks health; the mono path only speaks
-        // when something is worth saying.
-        let healthy = card("none", vec![]);
-        let spans = status_footer_spans(Some(&healthy), now);
-        if crate::state::look().no_color {
-            assert!(spans.is_empty());
-        } else {
-            assert_eq!(spans.len(), 1, "one green cell");
-        }
-        assert!(status_footer_spans(None, now).is_empty(), "no card, no cell");
-    }
-
-    /// The health mark owns the footer's right edge, and a pane too narrow
-    /// for both clips the key hints rather than losing the mark or blanking
-    /// the row.
-    #[test]
-    fn the_footer_keeps_the_mark_at_the_right_edge() {
-        let now = OffsetDateTime::UNIX_EPOCH + time::Duration::minutes(72);
-        let minor = incident("minor");
-        let claim: usize = status_footer_spans(Some(&minor), now)
-            .iter()
-            .map(|span| span.content.chars().count())
-            .sum();
-
-        for width in [claim as u16 + 4, 80, 100, 200] {
-            let mut spans = vec![Span::raw("q quit / r refresh / ? help".to_owned())];
-            place_status_in_footer(&mut spans, status_footer_spans(Some(&minor), now), width);
-            let painted: String = spans.iter().map(|s| s.content.to_string()).collect();
-            assert!(
-                painted.chars().count() <= width as usize,
-                "footer must never overrun {width} columns"
-            );
-            assert!(
-                painted.contains("1h 12m"),
-                "the incident keeps the tail at {width} columns"
-            );
-            assert!(painted.starts_with('q'), "the key hints keep the head");
-        }
-    }
-
-    /// Rungs that own a banner must not repeat themselves in the footer.
-    #[test]
-    fn the_footer_only_narrates_what_the_banner_does_not() {
-        let now = OffsetDateTime::UNIX_EPOCH + time::Duration::minutes(72);
-        let text = |card: &ServiceStatusCard| {
-            status_footer_spans(Some(card), now)
-                .iter()
-                .map(|span| span.content.to_string())
-                .collect::<String>()
-        };
-        // Minor owns no banner rows, so the footer carries the whole story.
-        assert!(text(&incident("minor")).contains("Degraded performance"));
-        assert!(text(&incident("minor")).contains("1h 12m"));
-        // Major and critical are already on screen above.
-        assert!(!text(&incident("major")).contains("Degraded performance"));
-        assert!(!text(&incident("critical")).contains("Degraded performance"));
-    }
-
-    #[test]
-    fn compact_matches_token_format_tiers() {
-        assert_eq!(compact(999), "999");
-        assert_eq!(compact(12_300), "12.3K");
-        assert_eq!(compact(1_200_000), "1.2M");
-        assert_eq!(compact(3_000_000_000), "3B");
-        assert_eq!(compact(150_000), "150K");
-    }
-
-    #[test]
-    fn data_weeks_spans_monday_to_monday() {
-        let day = |key: &str| DayRollup {
-            day_key: key.into(),
-            tokens: 1,
-            prompts: 0,
-            cost: None,
-        };
-        // 2026-08-16 is a Sunday (week of Mon 08-10). One same-week day.
-        assert_eq!(data_weeks(&[day("2026-08-12")], date!(2026 - 08 - 16)), 1);
-        // A Sunday one week back sits in the previous Monday week.
-        assert_eq!(data_weeks(&[day("2026-08-09")], date!(2026 - 08 - 16)), 2);
-        // Mon 06-01 → Mon 08-10 is ten whole weeks, both endpoints counted.
-        assert_eq!(data_weeks(&[day("2026-06-01")], date!(2026 - 08 - 16)), 11);
-        // No data: today's own week.
-        assert_eq!(data_weeks(&[], date!(2026 - 08 - 16)), 1);
-    }
-
-    #[test]
-    fn heat_grid_aligns_weeks_to_monday_and_pages_back() {
-        let days = vec![DayRollup {
-            day_key: "2026-06-01".into(),
-            tokens: 10,
-            prompts: 0,
-            cost: None,
-        }];
-        // 2026-08-16 is a Sunday; its week's Monday is 08-10.
-        let grid = heat_grid(&days, 4, 0, date!(2026 - 08 - 16));
-        let last_week = grid.weeks.last().unwrap();
-        assert_eq!(last_week[0], Some(date!(2026 - 08 - 10)));
-        assert_eq!(last_week[6], Some(date!(2026 - 08 - 16)));
-        assert!(grid.has_older);
-        assert!(!grid.has_newer);
-
-        let paged = heat_grid(&days, 4, 1, date!(2026 - 08 - 16));
-        assert_eq!(paged.weeks.last().unwrap()[0], Some(date!(2026 - 07 - 13)));
-        assert!(paged.has_newer);
-    }
 }
 
 /// Item 25: the recent-sessions shortlist, the panel's strip in terminal
@@ -2418,10 +2291,7 @@ fn sessions<'a>(digest: &'a LiveState, accent: Color, rect: Rect) -> Paragraph<'
         };
         let title_len = card.title.chars().count();
         let used = match project {
-            Some(pb)
-                if title_len + glyphs().sep.chars().count() + pb.chars().count()
-                    <= zone =>
-            {
+            Some(pb) if title_len + glyphs().sep.chars().count() + pb.chars().count() <= zone => {
                 cells.push(Span::styled(card.title.clone(), style(accent)));
                 cells.push(Span::styled(format!("{}{pb}", glyphs().sep), style(DIM)));
                 title_len + glyphs().sep.chars().count() + pb.chars().count()
@@ -2451,10 +2321,7 @@ fn sessions<'a>(digest: &'a LiveState, accent: Color, rect: Rect) -> Paragraph<'
                 ));
             }
             if dots_w > 0 {
-                cells.push(Span::styled(
-                    " ".repeat(1 + dots_w - dot_count),
-                    style(DIM),
-                ));
+                cells.push(Span::styled(" ".repeat(1 + dots_w - dot_count), style(DIM)));
                 for color in card.model_colors.iter().take(3) {
                     cells.push(Span::styled(glyphs().dot.to_owned(), ramp(*color, 1.0)));
                 }
@@ -2466,10 +2333,7 @@ fn sessions<'a>(digest: &'a LiveState, accent: Color, rect: Rect) -> Paragraph<'
                         style(DIM),
                     )),
                     // Absent cost is absent — blank, never "$0".
-                    None => cells.push(Span::styled(
-                        " ".repeat(1 + cost_w),
-                        style(DIM),
-                    )),
+                    None => cells.push(Span::styled(" ".repeat(1 + cost_w), style(DIM))),
                 }
             }
         }
@@ -2497,4 +2361,198 @@ fn clip(text: &str, room: usize) -> String {
     }
     let kept: String = text.chars().take(room.saturating_sub(1)).collect();
     format!("{kept}{}", glyphs().ellipsis)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::digest::StatusIncident;
+    use time::macros::date;
+
+    fn incident(impact: &str) -> ServiceStatusCard {
+        card(
+            impact,
+            vec![StatusIncident {
+                id: "i".into(),
+                name: "Degraded performance for multiple models".into(),
+                impact: impact.into(),
+                phase: "monitoring".into(),
+                started_at: OffsetDateTime::UNIX_EPOCH,
+                last_update_at: None,
+                last_message: Some("A fix has been implemented.".into()),
+                url: None,
+                component_names: vec![],
+                resolved_at: None,
+            }],
+        )
+    }
+
+    fn card(indicator: &str, incidents: Vec<StatusIncident>) -> ServiceStatusCard {
+        ServiceStatusCard {
+            provider_id: "claude".into(),
+            page_name: "Claude".into(),
+            page_url: "https://status.claude.com".into(),
+            indicator: indicator.into(),
+            description_text: "".into(),
+            checked_at: OffsetDateTime::UNIX_EPOCH,
+            ok_at: None,
+            stale: false,
+            components: vec![],
+            incidents,
+            recently_resolved: vec![],
+            maintenances: vec![],
+        }
+    }
+
+    /// The prominence ladder (surface S6): severity buys rows, and quiet
+    /// buys silence. A minor incident deliberately earns none — it speaks
+    /// from the footer instead of pushing the dashboard down.
+    #[test]
+    fn severity_buys_dashboard_rows() {
+        assert_eq!(status_rungs(None), 0);
+        assert_eq!(status_rungs(Some(&card("none", vec![]))), 0);
+        assert_eq!(status_rungs(Some(&card("maintenance", vec![]))), 0);
+        assert_eq!(status_rungs(Some(&card("unknown", vec![]))), 0);
+        assert_eq!(status_rungs(Some(&incident("minor"))), 0);
+        assert_eq!(status_rungs(Some(&incident("major"))), 1);
+        assert_eq!(status_rungs(Some(&incident("critical"))), 2);
+    }
+
+    /// Only the top rung spends a row on the message text; a major incident
+    /// gets its name and phase, and nothing more.
+    #[test]
+    fn only_the_top_rung_carries_the_message() {
+        let now = OffsetDateTime::UNIX_EPOCH + time::Duration::minutes(72);
+
+        let major_card = incident("major");
+        assert_eq!(status_banner_lines(&major_card, now, 80).len(), 1);
+
+        let critical_card = incident("critical");
+        let critical = status_banner_lines(&critical_card, now, 80);
+        assert_eq!(critical.len(), 2);
+        let message: String = critical[1]
+            .spans
+            .iter()
+            .map(|span| span.content.to_string())
+            .collect();
+        assert!(message.contains("A fix has been implemented"));
+
+        // A card with nothing open paints no banner at all.
+        let quiet = card("none", vec![]);
+        assert!(status_banner_lines(&quiet, now, 80).is_empty());
+    }
+
+    /// A quiet service says nothing at all in the footer without color —
+    /// there is no news, and a bare mark would read as some.
+    #[test]
+    fn the_monochrome_footer_stays_silent_when_healthy() {
+        let now = OffsetDateTime::UNIX_EPOCH;
+        // The colored path always marks health; the mono path only speaks
+        // when something is worth saying.
+        let healthy = card("none", vec![]);
+        let spans = status_footer_spans(Some(&healthy), now);
+        if crate::state::look().no_color {
+            assert!(spans.is_empty());
+        } else {
+            assert_eq!(spans.len(), 1, "one green cell");
+        }
+        assert!(
+            status_footer_spans(None, now).is_empty(),
+            "no card, no cell"
+        );
+    }
+
+    /// The health mark owns the footer's right edge, and a pane too narrow
+    /// for both clips the key hints rather than losing the mark or blanking
+    /// the row.
+    #[test]
+    fn the_footer_keeps_the_mark_at_the_right_edge() {
+        let now = OffsetDateTime::UNIX_EPOCH + time::Duration::minutes(72);
+        let minor = incident("minor");
+        let claim: usize = status_footer_spans(Some(&minor), now)
+            .iter()
+            .map(|span| span.content.chars().count())
+            .sum();
+
+        for width in [claim as u16 + 4, 80, 100, 200] {
+            let mut spans = vec![Span::raw("q quit / r refresh / ? help".to_owned())];
+            place_status_in_footer(&mut spans, status_footer_spans(Some(&minor), now), width);
+            let painted: String = spans.iter().map(|s| s.content.to_string()).collect();
+            assert!(
+                painted.chars().count() <= width as usize,
+                "footer must never overrun {width} columns"
+            );
+            assert!(
+                painted.contains("1h 12m"),
+                "the incident keeps the tail at {width} columns"
+            );
+            assert!(painted.starts_with('q'), "the key hints keep the head");
+        }
+    }
+
+    /// Rungs that own a banner must not repeat themselves in the footer.
+    #[test]
+    fn the_footer_only_narrates_what_the_banner_does_not() {
+        let now = OffsetDateTime::UNIX_EPOCH + time::Duration::minutes(72);
+        let text = |card: &ServiceStatusCard| {
+            status_footer_spans(Some(card), now)
+                .iter()
+                .map(|span| span.content.to_string())
+                .collect::<String>()
+        };
+        // Minor owns no banner rows, so the footer carries the whole story.
+        assert!(text(&incident("minor")).contains("Degraded performance"));
+        assert!(text(&incident("minor")).contains("1h 12m"));
+        // Major and critical are already on screen above.
+        assert!(!text(&incident("major")).contains("Degraded performance"));
+        assert!(!text(&incident("critical")).contains("Degraded performance"));
+    }
+
+    #[test]
+    fn compact_matches_token_format_tiers() {
+        assert_eq!(compact(999), "999");
+        assert_eq!(compact(12_300), "12.3K");
+        assert_eq!(compact(1_200_000), "1.2M");
+        assert_eq!(compact(3_000_000_000), "3B");
+        assert_eq!(compact(150_000), "150K");
+    }
+
+    #[test]
+    fn data_weeks_spans_monday_to_monday() {
+        let day = |key: &str| DayRollup {
+            day_key: key.into(),
+            tokens: 1,
+            prompts: 0,
+            cost: None,
+        };
+        // 2026-08-16 is a Sunday (week of Mon 08-10). One same-week day.
+        assert_eq!(data_weeks(&[day("2026-08-12")], date!(2026 - 08 - 16)), 1);
+        // A Sunday one week back sits in the previous Monday week.
+        assert_eq!(data_weeks(&[day("2026-08-09")], date!(2026 - 08 - 16)), 2);
+        // Mon 06-01 → Mon 08-10 is ten whole weeks, both endpoints counted.
+        assert_eq!(data_weeks(&[day("2026-06-01")], date!(2026 - 08 - 16)), 11);
+        // No data: today's own week.
+        assert_eq!(data_weeks(&[], date!(2026 - 08 - 16)), 1);
+    }
+
+    #[test]
+    fn heat_grid_aligns_weeks_to_monday_and_pages_back() {
+        let days = vec![DayRollup {
+            day_key: "2026-06-01".into(),
+            tokens: 10,
+            prompts: 0,
+            cost: None,
+        }];
+        // 2026-08-16 is a Sunday; its week's Monday is 08-10.
+        let grid = heat_grid(&days, 4, 0, date!(2026 - 08 - 16));
+        let last_week = grid.weeks.last().unwrap();
+        assert_eq!(last_week[0], Some(date!(2026 - 08 - 10)));
+        assert_eq!(last_week[6], Some(date!(2026 - 08 - 16)));
+        assert!(grid.has_older);
+        assert!(!grid.has_newer);
+
+        let paged = heat_grid(&days, 4, 1, date!(2026 - 08 - 16));
+        assert_eq!(paged.weeks.last().unwrap()[0], Some(date!(2026 - 07 - 13)));
+        assert!(paged.has_newer);
+    }
 }

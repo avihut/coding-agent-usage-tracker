@@ -198,7 +198,6 @@ struct NoticeDetectorTests {
         #expect(ledger.notice(id: Notice.outageID(incidentID: "a"))?.ongoing == true)
     }
 
-
     // MARK: Profiles
 
     @Test func grantsStampTheProfileTheyWereReadFor() {

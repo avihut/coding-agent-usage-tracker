@@ -184,7 +184,7 @@ final class StatusItemController: NSResponder {
             _ = observed.predictions
             _ = observed.serviceStatus
             _ = observed.notices
-        } onChange: {
+        } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self, self.observationGeneration == generation else { return }
                 self.render()

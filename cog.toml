@@ -1,0 +1,6 @@
+# Commit-message grammar, enforced by the commit-msg hook
+# (scripts/commit-msg.sh → `cog verify`). Conventional commits —
+# `type(scope): subject`, an area goes in the scope: `feat(menubar): …` —
+# plus this repo's own type for the release ritual's commit.
+[commit_types]
+release = { changelog_title = "Releases", omit_from_changelog = true }

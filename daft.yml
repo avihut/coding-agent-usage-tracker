@@ -1,9 +1,127 @@
+# Merge policy — what makes a green pre-merge ring mean anything. `ff: only`
+# refuses a branch that doesn't already contain main's tip, so the tree the
+# rings tested is the tree that lands (and this history has never held a
+# merge commit); `source_worktree: clean` closes the gap between the working
+# tree the rings see and the committed tree that merges. Rebase first, then
+# `daft merge <branch> --into main`. Relax per invocation with
+# `--no-ff-only` / `--source-worktree any`; both refusals name what to fix.
+merge:
+  ff: only
+  source_worktree: clean
+
+# The merge policy and pre-merge hooks above need a daft that enforces them.
+min_version: "1.27.2"
+
 hooks:
   worktree-post-create:
     jobs:
       - name: mise-trust
         run: mise trust
+      - name: setup
+        description: Pinned tools, the TUI's crates, the git hooks — cached on its inputs
+        run: mise run setup
+        needs: [mise-trust]
       - name: swift-build
         run: swift build
-        needs: [mise-trust]
+        needs: [setup]
         background: true
+
+  # The quality gate. There is no CI here, so this is the only full check
+  # between a branch and main — and unlike lefthook's pre-push it runs BEFORE
+  # main's ref moves. Every ring is the same `mise run` task the git hooks
+  # call (lefthook.yml), so a check has one definition; `mise run gate` is
+  # the set by hand.
+  #
+  # Rings run in the SOURCE worktree (`root`): that is where the branch's code
+  # lives and where its caches are warm. The `merge:` policy above is what
+  # makes that safe. Parallel (the default) on purpose — a gate surfaces every
+  # problem in one pass; SwiftPM's and cargo's own build locks serialize the
+  # rings that share a build directory.
+  #
+  # `glob` skips a toolchain the merge never touched (a docs-only merge builds
+  # nothing). `tags: [deep]` marks the slow ring: drop it for a quick pass
+  # with `daft merge --skip-tag deep`, never by trimming it from the gate.
+  pre-merge:
+    jobs:
+      - name: guard
+        description: "Repo-rule tripwires — tokens, signing identities, dependencies, §10 hosts"
+        root: "{merge_source_path}"
+        run: mise run guard
+
+      - name: lint
+        description: "SwiftLint + shell lint over the whole tree (pre-commit only ever saw staged files)"
+        root: "{merge_source_path}"
+        run: mise run lint
+
+      - name: fmt-check
+        description: "Formatting — SwiftFormat's hygiene rules, cargo fmt"
+        root: "{merge_source_path}"
+        run: mise run fmt-check
+
+      - name: check-config
+        description: "lefthook.yml, daft.yml, mise.toml and Info.plist parse"
+        root: "{merge_source_path}"
+        run: mise run check-config
+
+      - name: test-hooks
+        description: "The hook scripts' own pass and refusal paths, in a throwaway repo"
+        root: "{merge_source_path}"
+        run: mise run test-hooks
+
+      - name: incoming-commits
+        description: "Every commit the merge would land has a conventional subject (catches --no-verify)"
+        root: "{merge_source_path}"
+        run: mise run merge-commits
+
+      - name: swift-check
+        description: "Every target + tests build with warnings as errors; the Swift suite; the digest freeze against the target's goldens"
+        root: "{merge_source_path}"
+        glob:
+          - Sources/**
+          - Tests/**
+          - Package.swift
+        # The freeze tests (DigestFreezeTests) only run when a baseline is
+        # named: the TARGET branch's goldens, which this branch's decoder
+        # must still read and whose keys must all still be on the wire.
+        run: DIGEST_BASELINE_DIR="$(scripts/digest-baseline.sh "$DAFT_MERGE_TARGET_BRANCH")" mise run check
+
+      - name: tui-clippy
+        description: "Clippy over the TUI, warnings denied"
+        root: "{merge_source_path}"
+        glob:
+          - tui/**
+        run: mise run tui-clippy
+
+      - name: tui-test
+        description: "The Rust suite — it decodes the same goldens, and the target's too"
+        root: "{merge_source_path}"
+        # The goldens live under Tests/, and the serde mirror must follow them.
+        glob:
+          - tui/**
+          - Tests/UsageCoreTests/Fixtures/digest/**
+        run: DIGEST_BASELINE_DIR="$(scripts/digest-baseline.sh "$DAFT_MERGE_TARGET_BRANCH")" mise run tui-test
+
+      - name: release-build
+        description: "Every product builds in the release configuration (what bundle.sh ships)"
+        root: "{merge_source_path}"
+        tags: [deep]
+        glob:
+          - Sources/**
+          - Package.swift
+        # Deliberately NOT `mise run bundle`: bundle.sh replaces
+        # ClaudeUsage.app in its worktree, and that may be the very bundle
+        # the running app and the usaged launch agent point at.
+        run: mise run release-build
+
+  # Tripwires, not a second suite. Warn rather than abort (also the default
+  # for post-merge): the ref has already moved, so an error exit would report
+  # a verdict on work that is done — the useful outcome is a loud notice.
+  post-merge:
+    fail_mode: warn
+    jobs:
+      - name: landed-matches-gated
+        description: The landed tree is the tree the rings tested
+        run: mise run landed-check
+      - name: release-reminder
+        description: Unreleased feat/fix on main means the release ritual is owed
+        run: mise run release-reminder

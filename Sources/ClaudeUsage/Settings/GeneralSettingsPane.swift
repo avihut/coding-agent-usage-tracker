@@ -161,7 +161,7 @@ struct GeneralSettingsPane: View {
     private var graceSeconds = ActivityGrace.defaultSeconds
     /// Claude Code's own transcript retention, mirrored from — and
     /// written back to — ~/.claude/settings.json.
-    // Placeholder until onAppear mirrors the agent's own stored value.
+    /// Placeholder until onAppear mirrors the agent's own stored value.
     @State private var retentionDays = 30
     @State private var retentionWriteFailed = false
     /// What the transcripts weigh on disk, measured once per appearance

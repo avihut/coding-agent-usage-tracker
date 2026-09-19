@@ -220,7 +220,7 @@ final class DaemonHost {
     /// Auto mode follows the machine: a daily pass re-ranks the harness
     /// signals and rebuilds onto the winner when it changed.
     private func scheduleDailyRedetect() {
-        let timer = Timer.scheduledTimer(withTimeInterval: 24 * 3600, repeats: true) { _ in
+        let timer = Timer.scheduledTimer(withTimeInterval: 24 * 3600, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 let selection =

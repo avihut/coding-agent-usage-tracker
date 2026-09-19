@@ -1,0 +1,67 @@
+# Git hooks. Every check is a mise task (`mise tasks`), so a hook, the merge
+# gate in daft.yml, and a person at a prompt all run the same definition —
+# `mise run gate` is the whole set in one go.
+#
+# Installed by `mise run setup` (daft's post-create and mise's enter hook both
+# call it) — into the bare repo's shared hooks directory, so once per clone
+# covers every worktree; each worktree runs its OWN lefthook.yml.
+
+# The hook launcher resolves lefthook through mise's pin, so hooks work from a
+# shell (or a GUI git client) that never activated mise — and say so loudly
+# rather than skip when lefthook can't be found.
+min_version: "2.1.12"
+lefthook: mise exec -- lefthook
+assert_lefthook_installed: true
+
+# Staged files only, each well under a second. Sequential on purpose: the
+# formatters rewrite the files the linter reads next.
+pre-commit:
+  jobs:
+    - name: fmt-swift
+      glob: "*.swift"
+      run: mise run fmt-swift -- {staged_files}
+      stage_fixed: true
+    - name: fmt-rust
+      glob: "tui/**/*.rs"
+      run: mise run fmt-rust
+      stage_fixed: true
+    - name: whitespace
+      # Conflict markers and whitespace errors in what is staged — after the
+      # formatters, which re-stage what they fix.
+      run: git diff --cached --check
+    - name: lint-swift
+      glob: "*.swift"
+      run: mise run lint-swift -- {staged_files}
+    - name: lint-shell
+      glob: "scripts/*.sh"
+      run: mise run lint-shell -- {staged_files}
+    - name: check-config
+      glob: "{lefthook.yml,daft.yml,mise.toml,Support/Info.plist}"
+      run: mise run check-config
+    - name: guard
+      run: mise run guard -- --staged
+
+commit-msg:
+  jobs:
+    - name: message
+      run: mise run commit-msg -- "{1}"
+
+# Unconditional, like the daft repo's: a rebase over main can break the build
+# with no local diff in the files a glob would watch. Warm, the set is
+# seconds; the strict build keeps its own cache in .build/strict.
+pre-push:
+  parallel: true
+  jobs:
+    - name: swift-check
+      run: mise run check
+    - name: tui-clippy
+      run: mise run tui-clippy
+    - name: tui-test
+      run: mise run tui-test
+    - name: release-check
+      run: mise run release-check
+      use_stdin: true
+    - name: test-hooks
+      run: mise run test-hooks
+    - name: check-config
+      run: mise run check-config

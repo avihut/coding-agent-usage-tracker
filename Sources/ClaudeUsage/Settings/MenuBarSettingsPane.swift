@@ -156,7 +156,6 @@ struct MenuBarSettingsCard: View {
     }
 }
 
-
 /// Each metered account's place in the bar: whether it shows, whether it
 /// takes an item of its own, and — while the bar draws each account its
 /// own way — its form and its elements. Only with more than one account

@@ -95,14 +95,22 @@ pub fn plan_with_status(
     model_rows: u16,
     activity_rows: u16,
 ) -> Plan {
-    let planned = plan_inner(area, status_rows, notice_rows, meter_rows, model_rows, activity_rows);
+    let planned = plan_inner(
+        area,
+        status_rows,
+        notice_rows,
+        meter_rows,
+        model_rows,
+        activity_rows,
+    );
     if planned.meters.is_some() {
         return planned;
     }
     // Notices go first (the header dot still speaks), then the banner (the
     // footer rung still speaks) — the meters are what the pane is for.
     if notice_rows > 0 {
-        let without_notices = plan_inner(area, status_rows, 0, meter_rows, model_rows, activity_rows);
+        let without_notices =
+            plan_inner(area, status_rows, 0, meter_rows, model_rows, activity_rows);
         if without_notices.meters.is_some() || status_rows == 0 {
             return without_notices;
         }
@@ -157,7 +165,11 @@ fn landed(plan: &Plan) -> usize {
 }
 
 fn pick(gapped: Plan, tight: Plan) -> Plan {
-    if landed(&tight) > landed(&gapped) { tight } else { gapped }
+    if landed(&tight) > landed(&gapped) {
+        tight
+    } else {
+        gapped
+    }
 }
 
 /// One column, priority flow top-down; the activity section absorbs the
@@ -237,7 +249,11 @@ fn wide_portrait(area: Rect, want: &Wants, gap: u16, activity: u16) -> Plan {
         let leftover = body_height.saturating_sub(height + gap);
         if leftover >= SESSIONS_MIN_ROWS {
             plan.sessions = Some(Rect::new(
-                right.x, right.y + height + gap, right.width, leftover));
+                right.x,
+                right.y + height + gap,
+                right.width,
+                leftover,
+            ));
         }
     }
     plan.footer = Some(Rect::new(area.x, area.y + area.height - 1, area.width, 1));
@@ -294,12 +310,7 @@ fn landscape(area: Rect, want: &Wants, gap: u16, activity: u16) -> Plan {
     if left_leftover >= SESSIONS_MIN_ROWS {
         plan.sessions = Some(Rect::new(left.x, y, left.width, left_leftover));
     }
-    plan.footer = Some(Rect::new(
-        area.x,
-        area.y + area.height - 1,
-        area.width,
-        1,
-    ));
+    plan.footer = Some(Rect::new(area.x, area.y + area.height - 1, area.width, 1));
     plan
 }
 
@@ -417,8 +428,14 @@ mod tests {
         let (header, heatmap) = (plan.header.unwrap(), plan.heatmap.unwrap());
         assert!(header.x < heatmap.x, "heatmap lives in the right column");
         assert_eq!(heatmap.y, 0, "heatmap starts at the top of the pane");
-        assert_eq!(heatmap.height, 56, "53 data weeks + title + labels + readout");
-        assert!(plan.models.is_some(), "priority sections keep the left column");
+        assert_eq!(
+            heatmap.height, 56,
+            "53 data weeks + title + labels + readout"
+        );
+        assert!(
+            plan.models.is_some(),
+            "priority sections keep the left column"
+        );
         assert_eq!(plan.footer.unwrap().width, 95);
         // Below the wide threshold the single column keeps the pane.
         let narrow = super::plan(rect(60, 80), 4, 5, 56);
@@ -453,8 +470,14 @@ mod status_slot_tests {
             let header = plan.header.expect("header");
             let status = plan.status.expect("status banner");
             let meters = plan.meters.expect("meters");
-            assert!(status.y >= header.y + header.height, "banner is below the header");
-            assert!(meters.y >= status.y + status.height, "meters are below the banner");
+            assert!(
+                status.y >= header.y + header.height,
+                "banner is below the header"
+            );
+            assert!(
+                meters.y >= status.y + status.height,
+                "meters are below the banner"
+            );
             assert_eq!(status.height, 2);
         }
     }
@@ -496,7 +519,11 @@ mod status_slot_tests {
     /// rung is the whole story down there.
     #[test]
     fn the_strip_has_no_banner() {
-        assert!(plan_with_status(area(38, 8), 2, 0, 3, 4, 8).status.is_none());
+        assert!(
+            plan_with_status(area(38, 8), 2, 0, 3, 4, 8)
+                .status
+                .is_none()
+        );
     }
 }
 
@@ -545,8 +572,11 @@ mod sessions_slot_tests {
     #[test]
     fn notices_sit_under_the_banner_and_yield_first() {
         let roomy = plan_with_status(area(46, 30), 1, 3, 4, 5, 56);
-        let (status, notices, meters) =
-            (roomy.status.unwrap(), roomy.notices.unwrap(), roomy.meters.unwrap());
+        let (status, notices, meters) = (
+            roomy.status.unwrap(),
+            roomy.notices.unwrap(),
+            roomy.meters.unwrap(),
+        );
         assert!(status.y < notices.y && notices.y < meters.y);
         assert_eq!(notices.height, 3);
 

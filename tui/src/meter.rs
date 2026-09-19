@@ -49,14 +49,38 @@ const DAY: i64 = 86400;
 /// Every rung the pane knows, shortest first. Which of them a meter can
 /// actually offer depends on how much window it publishes.
 pub const FRAMES: [Frame; 8] = [
-    Frame { label: "last 1h", seconds: HOUR },
-    Frame { label: "last 2h", seconds: 2 * HOUR },
-    Frame { label: "last 5h", seconds: 5 * HOUR },
-    Frame { label: "last 12h", seconds: 12 * HOUR },
-    Frame { label: "last 24h", seconds: DAY },
-    Frame { label: "last 2 days", seconds: 2 * DAY },
-    Frame { label: "last 7 days", seconds: 7 * DAY },
-    Frame { label: "last 30 days", seconds: 30 * DAY },
+    Frame {
+        label: "last 1h",
+        seconds: HOUR,
+    },
+    Frame {
+        label: "last 2h",
+        seconds: 2 * HOUR,
+    },
+    Frame {
+        label: "last 5h",
+        seconds: 5 * HOUR,
+    },
+    Frame {
+        label: "last 12h",
+        seconds: 12 * HOUR,
+    },
+    Frame {
+        label: "last 24h",
+        seconds: DAY,
+    },
+    Frame {
+        label: "last 2 days",
+        seconds: 2 * DAY,
+    },
+    Frame {
+        label: "last 7 days",
+        seconds: 7 * DAY,
+    },
+    Frame {
+        label: "last 30 days",
+        seconds: 30 * DAY,
+    },
 ];
 
 /// The domain the digest builder publishes for a meter without a stated
@@ -100,7 +124,10 @@ pub fn ladder(meter: &LiveMeter) -> Vec<Frame> {
         .filter(|frame| frame.seconds <= window)
         .collect();
     let Some(widest) = rungs.last().copied() else {
-        return vec![Frame { label: "the window", seconds: window }];
+        return vec![Frame {
+            label: "the window",
+            seconds: window,
+        }];
     };
     // Three samples is the fewest that reads as a trend rather than a dot.
     let floor = sample_spacing(meter).map_or(0, |spacing| spacing * 3);
@@ -108,7 +135,11 @@ pub fn ladder(meter: &LiveMeter) -> Vec<Frame> {
         .into_iter()
         .filter(|frame| frame.seconds >= floor)
         .collect();
-    if usable.is_empty() { vec![widest] } else { usable }
+    if usable.is_empty() {
+        vec![widest]
+    } else {
+        usable
+    }
 }
 
 /// The rung a meter opens on — the app's own rule (5h windows read at 5h,
@@ -165,12 +196,7 @@ impl View<'_> {
 
 /// The visible slice. `rung` indexes the meter's own ladder and is clamped,
 /// so a zoom level carried over from a wider meter can't fall off the end.
-pub fn view<'a>(
-    meter: &'a LiveMeter,
-    span: Span,
-    rung: usize,
-    now: OffsetDateTime,
-) -> View<'a> {
+pub fn view<'a>(meter: &'a LiveMeter, span: Span, rung: usize, now: OffsetDateTime) -> View<'a> {
     let window = window_seconds(meter);
     let (start, end, label) = if span == Span::Current && window_available(meter, now) {
         let reset = meter.resets_at.expect("window_available checked the reset");
@@ -195,7 +221,12 @@ pub fn view<'a>(
     // slice it rather than filtering, and scrub keeps indexing a slice.
     let first = meter.series.partition_point(|point| point.t < start);
     let last = meter.series.partition_point(|point| point.t <= end);
-    View { start, end, points: &meter.series[first..last], label }
+    View {
+        start,
+        end,
+        points: &meter.series[first..last],
+        label,
+    }
 }
 
 /// The diagonal fill over the unreachable region: past the projected
@@ -261,7 +292,11 @@ mod tests {
             percent: Some(50),
             level: "normal".into(),
             rank: 0,
-            risk: Some(Rgb { red: 1.0, green: 0.0, blue: 0.0 }),
+            risk: Some(Rgb {
+                red: 1.0,
+                green: 0.0,
+                blue: 0.0,
+            }),
             resets_at: reset,
             limit_window: window,
             scoped_model_name: None,
@@ -296,7 +331,13 @@ mod tests {
         let rungs: Vec<&str> = ladder(&weekly).iter().map(|f| f.label).collect();
         assert_eq!(
             rungs,
-            ["last 5h", "last 12h", "last 24h", "last 2 days", "last 7 days"]
+            [
+                "last 5h",
+                "last 12h",
+                "last 24h",
+                "last 2 days",
+                "last 7 days"
+            ]
         );
         // A meter sampled every couple of minutes keeps the tight end.
         let mut dense = meter(Some(7.0 * 86400.0), None);
@@ -312,7 +353,10 @@ mod tests {
         let mut cliffed = weekly.clone();
         cliffed.series.insert(
             1,
-            SeriesPoint { t: datetime!(2026-08-10 01:30:01 UTC), percent: 0.0 },
+            SeriesPoint {
+                t: datetime!(2026-08-10 01:30:01 UTC),
+                percent: 0.0,
+            },
         );
         assert_eq!(ladder(&cliffed).first().unwrap().label, "last 5h");
         // Samples so sparse that no rung can hold them still leave one.
@@ -378,7 +422,10 @@ mod tests {
         // 10:00–12:00 inclusive.
         let zoomed = view(&session, Span::History, 1, now);
         assert_eq!(zoomed.points.len(), 13);
-        assert_eq!(zoomed.points.first().unwrap().t, datetime!(2026-08-16 10:00 UTC));
+        assert_eq!(
+            zoomed.points.first().unwrap().t,
+            datetime!(2026-08-16 10:00 UTC)
+        );
         assert_eq!(zoomed.points.last().unwrap().t, now);
         // The current span reaches back further AND forward to the reset.
         let whole = view(&session, Span::Current, 1, now);
@@ -399,9 +446,11 @@ mod tests {
         // A 300-minute domain on a 40×10 chart, dead from minute 120.
         let points = hatch(120.0, 300.0, 100.0, 300.0, 40, 10, 5);
         assert!(!points.is_empty());
-        assert!(points
-            .iter()
-            .all(|(x, y)| (120.0..=300.0).contains(x) && (0.0..=100.0).contains(y)));
+        assert!(
+            points
+                .iter()
+                .all(|(x, y)| (120.0..=300.0).contains(x) && (0.0..=100.0).contains(y))
+        );
         // It reaches both edges of the region, so the fill reads as ground
         // rather than a stray diagonal.
         assert!(points.iter().any(|(x, _)| *x < 130.0));

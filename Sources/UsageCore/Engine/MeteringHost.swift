@@ -421,7 +421,7 @@ public final class MeteringHost {
     private func scheduleReprobe() {
         let interval = configuration.reprobeInterval
         nextReprobeAt = Date().addingTimeInterval(interval)
-        let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
+        let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.nextReprobeAt = Date().addingTimeInterval(interval)

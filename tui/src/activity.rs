@@ -91,13 +91,15 @@ pub fn model_totals(activity: &ActivityRollup, start: &str, end: &str) -> Vec<Mo
         for model in &day.models {
             // Identity from the first sighting, figures from every day —
             // seeding with the row's own tally would count day one twice.
-            let entry = by_id.entry(model.id.as_str()).or_insert_with(|| ModelTotal {
-                id: model.id.clone(),
-                display_name: model.display_name.clone(),
-                color: model.color,
-                tally: Tally::default(),
-                cost: None,
-            });
+            let entry = by_id
+                .entry(model.id.as_str())
+                .or_insert_with(|| ModelTotal {
+                    id: model.id.clone(),
+                    display_name: model.display_name.clone(),
+                    color: model.color,
+                    tally: Tally::default(),
+                    cost: None,
+                });
             entry.tally.add(model.tally);
             if let Some(cost) = model.cost {
                 *entry.cost.get_or_insert(0.0) += cost;

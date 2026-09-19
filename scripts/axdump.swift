@@ -41,8 +41,11 @@ func frame(_ element: AXUIElement) -> CGRect? {
           let sizeValue = attr(element, kAXSizeAttribute) else { return nil }
     var point = CGPoint.zero
     var size = CGSize.zero
+    // CoreFoundation types have no conditional cast — `as!` is the only spelling.
+    // swiftlint:disable force_cast
     AXValueGetValue(posValue as! AXValue, .cgPoint, &point)
     AXValueGetValue(sizeValue as! AXValue, .cgSize, &size)
+    // swiftlint:enable force_cast
     return CGRect(origin: point, size: size)
 }
 

@@ -24,7 +24,7 @@ final class DigestFeed {
         reload()
         // A 2s stat is the reload signal — cheaper and simpler than
         // re-arming a DispatchSource across the publisher's atomic renames.
-        let timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { _ in
+        let timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in self?.tick() }
         }
         timer.tolerance = 0.5

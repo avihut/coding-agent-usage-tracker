@@ -30,14 +30,18 @@ use std::time::{Duration, Instant};
 use time::{OffsetDateTime, UtcOffset};
 
 fn support_root() -> PathBuf {
-    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_default();
     home.join("Library/Application Support/com.avihu.ClaudeUsage")
 }
 
 /// The usaged binary embedded in ClaudeUsage.app: the standard install
 /// spots first, then Spotlight's LaunchServices view for unusual homes.
 fn find_usaged() -> Option<PathBuf> {
-    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_default();
     let candidates = [
         home.join("Applications/ClaudeUsage.app"),
         PathBuf::from("/Applications/ClaudeUsage.app"),
@@ -129,7 +133,11 @@ fn main() {
         Ok(paths) => paths,
         Err(message) => {
             eprintln!("{message}");
-            std::process::exit(if message.starts_with("usage-tui") { 0 } else { 2 });
+            std::process::exit(if message.starts_with("usage-tui") {
+                0
+            } else {
+                2
+            });
         }
     };
     // Capture the local offset while still single-threaded (the `time`
@@ -260,9 +268,13 @@ fn handle_key(app: &mut App, code: KeyCode, reply_tx: &mpsc::Sender<String>) {
             app.notice = Some("refreshing…".into());
             std::thread::spawn(move || {
                 let reply = match socket::refresh(&socket_path) {
-                    Some(reply) => reply
-                        .message
-                        .unwrap_or_else(|| if reply.ok { "ok".into() } else { "refused".into() }),
+                    Some(reply) => reply.message.unwrap_or_else(|| {
+                        if reply.ok {
+                            "ok".into()
+                        } else {
+                            "refused".into()
+                        }
+                    }),
                     None => "engine socket not listening".into(),
                 };
                 let _ = tx.send(reply);
@@ -284,28 +296,32 @@ fn handle_key(app: &mut App, code: KeyCode, reply_tx: &mpsc::Sender<String>) {
             app.notice = Some(format!("pace → {}m…", seconds / 60));
             std::thread::spawn(move || {
                 let reply = match socket::set_interval(&socket_path, seconds) {
-                    Some(reply) => reply
-                        .message
-                        .unwrap_or_else(|| if reply.ok { "ok".into() } else { "refused".into() }),
+                    Some(reply) => reply.message.unwrap_or_else(|| {
+                        if reply.ok {
+                            "ok".into()
+                        } else {
+                            "refused".into()
+                        }
+                    }),
                     None => "engine socket not listening".into(),
                 };
                 let _ = tx.send(reply);
             });
         }
         KeyCode::Char(digit @ '1'..='4') => {
-            if let Some(digest) = &app.digest {
-                if let Some(index) = surfaces::meter_index_matching(&digest.meters, digit) {
-                    app.surface = Surface::Meter(index);
-                    app.scrub = None;
-                }
+            if let Some(digest) = &app.digest
+                && let Some(index) = surfaces::meter_index_matching(&digest.meters, digit)
+            {
+                app.surface = Surface::Meter(index);
+                app.scrub = None;
             }
         }
         KeyCode::Tab => {
-            if let (Surface::Meter(index), Some(digest)) = (&app.surface, &app.digest) {
-                if !digest.meters.is_empty() {
-                    app.surface = Surface::Meter((index + 1) % digest.meters.len());
-                    app.scrub = None;
-                }
+            if let (Surface::Meter(index), Some(digest)) = (&app.surface, &app.digest)
+                && !digest.meters.is_empty()
+            {
+                app.surface = Surface::Meter((index + 1) % digest.meters.len());
+                app.scrub = None;
             }
         }
         KeyCode::Char('[') => page_heatmap(app, 1),
@@ -322,7 +338,9 @@ fn handle_key(app: &mut App, code: KeyCode, reply_tx: &mpsc::Sender<String>) {
             }
         }
         KeyCode::Char('x') => match app.hover_hit.clone() {
-            Some(Hit::Notice(id)) | Some(Hit::NoticeDismiss(id)) => dismiss_notice(app, id, reply_tx),
+            Some(Hit::Notice(id)) | Some(Hit::NoticeDismiss(id)) => {
+                dismiss_notice(app, id, reply_tx)
+            }
             _ => app.notice = Some("focus a notification first (n)".into()),
         },
         KeyCode::Char('X') => {
@@ -368,10 +386,7 @@ fn handle_key(app: &mut App, code: KeyCode, reply_tx: &mpsc::Sender<String>) {
 /// stays put rather than wrapping.
 fn focus_move(app: &mut App, dx: i32, dy: i32) {
     app.keyboard_mode = true;
-    let origin = app
-        .focus_hit
-        .as_ref()
-        .and_then(|hit| app.hits.rect_of(hit));
+    let origin = app.focus_hit.as_ref().and_then(|hit| app.hits.rect_of(hit));
     if let Some(next) = app.hits.spatial_next(origin, dx, dy) {
         app.focus_hit = Some(next);
     }
@@ -414,7 +429,10 @@ fn meter_span(app: &mut App, zoom: bool) {
         (span.toggled(), rung)
     };
     app.meter_span.insert(meter.id.clone(), next);
-    app.notice = Some(format!("span {}", meter::view(meter, next.0, next.1, now).label));
+    app.notice = Some(format!(
+        "span {}",
+        meter::view(meter, next.0, next.1, now).label
+    ));
     app.scrub = None;
 }
 
@@ -455,9 +473,13 @@ fn step(app: &mut App, direction: i64) {
 /// The reply's one word for the pane's echo line.
 fn reply_word(reply: Option<socket::Reply>) -> String {
     match reply {
-        Some(reply) => reply
-            .message
-            .unwrap_or_else(|| if reply.ok { "ok".into() } else { "refused".into() }),
+        Some(reply) => reply.message.unwrap_or_else(|| {
+            if reply.ok {
+                "ok".into()
+            } else {
+                "refused".into()
+            }
+        }),
         None => "engine socket not listening".into(),
     }
 }
@@ -476,7 +498,9 @@ fn dismiss_notice(app: &mut App, id: String, reply_tx: &mpsc::Sender<String>) {
 /// Every pending notice the pane has drawn gets marked seen ONCE per run —
 /// the app's panel does the same on open. Seen is not dismissed.
 fn mark_seen(app: &App, sent: &mut std::collections::HashSet<String>) {
-    let Some(card) = app.digest.as_ref().and_then(|d| d.notices.as_ref()) else { return };
+    let Some(card) = app.digest.as_ref().and_then(|d| d.notices.as_ref()) else {
+        return;
+    };
     let ids: Vec<String> = card
         .items
         .iter()

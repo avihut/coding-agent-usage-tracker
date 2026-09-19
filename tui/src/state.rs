@@ -149,7 +149,11 @@ impl HitMap {
     /// The first registered hit matching `pred`, in paint order — `n`
     /// uses it to land the cursor on the first notification row.
     pub fn find(&self, pred: impl Fn(&Hit) -> bool) -> Option<Hit> {
-        self.regions.iter().map(|(_, hit)| hit).find(|hit| pred(hit)).cloned()
+        self.regions
+            .iter()
+            .map(|(_, hit)| hit)
+            .find(|hit| pred(hit))
+            .cloned()
     }
 
     pub fn rect_of(&self, hit: &Hit) -> Option<Rect> {
@@ -294,10 +298,12 @@ impl App {
     /// state (history, at the meter's native scale) until `s`/`z` say
     /// otherwise.
     pub fn meter_view(&self, meter: &crate::digest::LiveMeter) -> (crate::meter::Span, usize) {
-        self.meter_span
-            .get(&meter.id)
-            .copied()
-            .unwrap_or_else(|| (crate::meter::Span::default(), crate::meter::default_rung(meter)))
+        self.meter_span.get(&meter.id).copied().unwrap_or_else(|| {
+            (
+                crate::meter::Span::default(),
+                crate::meter::default_rung(meter),
+            )
+        })
     }
 
     /// Stat + reload when the publisher rewrote the file. Returns true when
@@ -351,10 +357,10 @@ impl App {
         if age > cutoff {
             return Freshness::EngineOffline;
         }
-        if let Some(backoff) = digest.engine.backoff_until {
-            if backoff > now {
-                return Freshness::Backoff;
-            }
+        if let Some(backoff) = digest.engine.backoff_until
+            && backoff > now
+        {
+            return Freshness::Backoff;
         }
         if digest.engine.stale {
             return Freshness::Stale;

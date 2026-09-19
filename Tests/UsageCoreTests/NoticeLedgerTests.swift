@@ -147,7 +147,6 @@ struct NoticeLedgerTests {
         try? FileManager.default.removeItem(at: directory)
     }
 
-
     // MARK: Profiles
 
     @Test func resetsAreOneProfilesEvents() {

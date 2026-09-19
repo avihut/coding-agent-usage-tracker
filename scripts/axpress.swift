@@ -73,6 +73,8 @@ func activate(_ match: AXUIElement) -> String? {
             AXUIElementSetAttributeValue(current, kAXSelectedAttribute as CFString, kCFBooleanTrue)
             return "selected"
         }
+        // A CoreFoundation type has no conditional cast — `as!` is the only spelling.
+        // swiftlint:disable:next force_cast
         element = attr(current, kAXParentAttribute).map { ($0 as! AXUIElement) }
     }
     return nil

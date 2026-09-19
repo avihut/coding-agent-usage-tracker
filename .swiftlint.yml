@@ -1,0 +1,62 @@
+# Correctness only, opt-in. SwiftLint's defaults are mostly style and size
+# opinions this codebase deliberately doesn't share (956 findings, led by
+# identifier_name / trailing_comma / line_length); the rules below each name
+# a bug class, and the custom rules are CLAUDE.md's "never again" list for
+# Swift source. Tests/.swiftlint.yml lifts the force-* rules for test code.
+included:
+  - Sources
+  - Tests
+  - scripts
+  - Package.swift
+excluded:
+  - .build
+  - tui
+
+only_rules:
+  - custom_rules
+  - class_delegate_protocol
+  - compiler_protocol_init
+  - discarded_notification_center_observer
+  - duplicate_enum_cases
+  - duplicate_imports
+  - duplicated_key_in_dictionary_literal
+  - empty_count
+  - force_cast
+  - force_try
+  - is_disjoint
+  - legacy_random
+  - ns_number_init_as_function_reference
+  - orphaned_doc_comment
+  - reduce_boolean
+  - self_in_property_initialization
+  - unowned_variable_capture
+  - unused_optional_binding
+  - unused_setter_value
+  - valid_ibinspectable
+  - weak_delegate
+
+custom_rules:
+  headless_core:
+    name: "Headless core"
+    included: "Sources/(UsageCore|usaged|usage-cli)/.*\\.swift"
+    regex: '^\s*(@\w+\s+)*import\s+(AppKit|SwiftUI|Cocoa)\b'
+    message: "UsageCore, usaged and usage-cli import no UI framework — all logic stays headlessly testable (CLAUDE.md, Architecture)."
+    severity: error
+  native_keychain_call:
+    name: "Native Keychain call"
+    regex: '\bSecItem(CopyMatching|Add|Update|Delete)\b'
+    excluded_match_kinds: [comment, doccomment]
+    message: "Never write to the Keychain, and read it only through /usr/bin/security (v0.82.1) — a native SecItem read re-prompts on every token refresh (spec §10)."
+    severity: error
+  coding_key_strategy:
+    name: "Key strategy"
+    regex: '\bconvert(From|To)SnakeCase\b'
+    excluded_match_kinds: [comment, doccomment]
+    message: "Explicit CodingKeys per type; never a key strategy (CLAUDE.md, Swift practices)."
+    severity: error
+  chart_scrollable_axes:
+    name: "chartScrollableAxes"
+    regex: '\.chartScrollableAxes\b'
+    excluded_match_kinds: [comment, doccomment]
+    message: "chartScrollableAxes never responded to trackpad scrolls here — pan through HorizontalPanCatcher (chart contract, clause 9)."
+    severity: error

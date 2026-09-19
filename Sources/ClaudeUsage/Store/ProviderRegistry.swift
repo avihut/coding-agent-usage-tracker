@@ -125,7 +125,7 @@ final class ProviderRegistry {
         }
         let timer = Timer.scheduledTimer(
             withTimeInterval: EngineHostBroker.checkInterval, repeats: true
-        ) { _ in
+        ) { [weak self] _ in
             Task { @MainActor [weak self] in self?.evaluateRole() }
         }
         timer.tolerance = 5
@@ -531,7 +531,7 @@ final class ProviderRegistry {
             case .client(let feed):
                 _ = feed.digest
             }
-        } onChange: {
+        } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self, generation == self.observationGeneration else { return }
                 switch self.role {

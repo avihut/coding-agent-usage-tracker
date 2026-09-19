@@ -18,7 +18,9 @@ pub struct Reply {
 pub fn send(socket_path: &Path, command: &serde_json::Value) -> Option<Reply> {
     let stream = UnixStream::connect(socket_path).ok()?;
     stream.set_read_timeout(Some(Duration::from_secs(3))).ok()?;
-    stream.set_write_timeout(Some(Duration::from_secs(3))).ok()?;
+    stream
+        .set_write_timeout(Some(Duration::from_secs(3)))
+        .ok()?;
     let mut writer = stream.try_clone().ok()?;
     let mut line = serde_json::to_vec(command).ok()?;
     line.push(b'\n');
@@ -46,7 +48,10 @@ pub fn set_interval(socket_path: &Path, seconds: u32) -> Option<Reply> {
 /// The person's × on a notice. The engine refuses an ongoing one (`ok:
 /// false`, "not dismissable") — the reply, not the request, is the word.
 pub fn dismiss_notice(socket_path: &Path, id: &str) -> Option<Reply> {
-    send(socket_path, &serde_json::json!({ "dismissNotice": { "id": id } }))
+    send(
+        socket_path,
+        &serde_json::json!({ "dismissNotice": { "id": id } }),
+    )
 }
 
 pub fn dismiss_all_notices(socket_path: &Path) -> Option<Reply> {
@@ -57,5 +62,8 @@ pub fn dismiss_all_notices(socket_path: &Path) -> Option<Reply> {
 /// dot stays, but an outage watched here ends with "Outage ended" rather
 /// than a full recount.
 pub fn mark_notices_seen(socket_path: &Path, ids: &[String]) -> Option<Reply> {
-    send(socket_path, &serde_json::json!({ "markNoticesSeen": { "ids": ids } }))
+    send(
+        socket_path,
+        &serde_json::json!({ "markNoticesSeen": { "ids": ids } }),
+    )
 }

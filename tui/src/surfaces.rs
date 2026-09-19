@@ -4,15 +4,15 @@
 //! swap text in place, never reflowing the layout under the cursor.
 
 use crate::activity::ModelTotal;
-use crate::digest::{DayRollup, LiveState, LiveMeter};
+use crate::digest::{DayRollup, LiveMeter, LiveState};
 use crate::state::{App, Dimension, Hit};
-use crate::ui::{compact, glyphs, money, ramp, rgb, CRITICAL, DIM, FAINT, HATCH, WARNING};
+use crate::ui::{CRITICAL, DIM, FAINT, HATCH, WARNING, compact, glyphs, money, ramp, rgb};
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::symbols;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Axis, Chart, Dataset, GraphType, Paragraph};
-use ratatui::Frame;
 use time::format_description::BorrowedFormatItem;
 use time::macros::format_description;
 use time::{Date, OffsetDateTime};
@@ -26,8 +26,14 @@ const AXIS_DAY: &[BorrowedFormatItem<'static>] =
 pub fn back_line(app: &mut App, rect: Rect, title: &str) -> Line<'static> {
     app.hits.add(Rect::new(rect.x, rect.y, 7, 1), Hit::Back);
     Line::from(vec![
-        Span::styled(glyphs().back, crate::ui::style(DIM).add_modifier(Modifier::BOLD)),
-        Span::styled(format!("  {title}"), Style::new().add_modifier(Modifier::BOLD)),
+        Span::styled(
+            glyphs().back,
+            crate::ui::style(DIM).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!("  {title}"),
+            Style::new().add_modifier(Modifier::BOLD),
+        ),
     ])
 }
 
@@ -42,7 +48,9 @@ pub fn render_meter(
     pushed: bool,
     now: OffsetDateTime,
 ) {
-    let Some(meter) = digest.meters.get(index) else { return };
+    let Some(meter) = digest.meters.get(index) else {
+        return;
+    };
     let accent = rgb(digest.engine.accent);
     let risk = meter.risk.map(rgb);
     let line_color = risk.unwrap_or(accent);
@@ -113,8 +121,11 @@ pub fn render_meter(
     }
     let base = view.start;
     let x_end = view.minutes();
-    let measured: Vec<(f64, f64)> =
-        view.points.iter().map(|p| (view.at(p.t), p.percent)).collect();
+    let measured: Vec<(f64, f64)> = view
+        .points
+        .iter()
+        .map(|p| (view.at(p.t), p.percent))
+        .collect();
     // The trajectory is clipped to the domain too — a sliding frame must
     // not stretch the axis out to a reset it isn't showing.
     let trajectory: Vec<(f64, f64)> = meter
@@ -126,7 +137,13 @@ pub fn render_meter(
         .collect();
     let now_x = view.at(now);
     let now_marker = if view.holds(now) {
-        vec![(now_x, 0.0), (now_x, 25.0), (now_x, 50.0), (now_x, 75.0), (now_x, 100.0)]
+        vec![
+            (now_x, 0.0),
+            (now_x, 25.0),
+            (now_x, 50.0),
+            (now_x, 75.0),
+            (now_x, 100.0),
+        ]
     } else {
         Vec::new()
     };
@@ -160,7 +177,9 @@ pub fn render_meter(
     // view the percent trace uses, so a spanned/zoomed frame can't show a
     // curve running past the plot's own domain. Colours come from the
     // digest's ledger — the TUI never derives a model colour.
-    let model_curves: Vec<(String, crate::digest::Rgb, Vec<(f64, f64)>)> = meter
+    /// One model's curve: its name, its ledger colour, its points.
+    type ModelCurve = (String, crate::digest::Rgb, Vec<(f64, f64)>);
+    let model_curves: Vec<ModelCurve> = meter
         .model_series
         .iter()
         .map(|curve| {
@@ -229,7 +248,11 @@ pub fn render_meter(
     let mut x_axis = Axis::default().bounds([0.0, x_end]);
     if x_labeled {
         let marks: usize = if chart_area.width >= 76 { 5 } else { 3 };
-        let format = if x_end <= 36.0 * 60.0 { AXIS_TIME } else { AXIS_DAY };
+        let format = if x_end <= 36.0 * 60.0 {
+            AXIS_TIME
+        } else {
+            AXIS_DAY
+        };
         let labels: Vec<Span> = (0..marks)
             .map(|mark| {
                 let minutes_in = x_end * mark as f64 / (marks - 1) as f64;
@@ -249,22 +272,23 @@ pub fn render_meter(
     } else {
         vec!["0", "", "", "", "50", "", "", "", "100", ""]
     };
-    let chart = Chart::new(datasets)
-        .x_axis(x_axis)
-        .y_axis(
-            Axis::default()
-                .bounds([0.0, 112.5])
-                .labels(y_labels)
-                .labels_alignment(ratatui::layout::Alignment::Right)
-                .style(crate::ui::style(FAINT)),
-        );
+    let chart = Chart::new(datasets).x_axis(x_axis).y_axis(
+        Axis::default()
+            .bounds([0.0, 112.5])
+            .labels(y_labels)
+            .labels_alignment(ratatui::layout::Alignment::Right)
+            .style(crate::ui::style(FAINT)),
+    );
     frame.render_widget(chart, chart_area);
 
     // The session-stretch track under the plot, exhausted tail in red.
     let track_y = chart_area.y + chart_area.height;
     if track_y < rect.y + rect.height {
         let width = chart_area.width.saturating_sub(4) as usize;
-        let mut cells = vec![Span::styled(glyphs().nub_idle.repeat(width), crate::ui::style(FAINT))];
+        let mut cells = vec![Span::styled(
+            glyphs().nub_idle.repeat(width),
+            crate::ui::style(FAINT),
+        )];
         if width > 0 && x_end > 0.0 {
             let mut painted = vec![None::<bool>; width];
             for stretch in &meter.stretches {
@@ -290,7 +314,12 @@ pub fn render_meter(
         }
         frame.render_widget(
             Paragraph::new(Line::from(cells)),
-            Rect::new(chart_area.x + 4, track_y, chart_area.width.saturating_sub(4), 1),
+            Rect::new(
+                chart_area.x + 4,
+                track_y,
+                chart_area.width.saturating_sub(4),
+                1,
+            ),
         );
     }
 
@@ -316,9 +345,7 @@ pub fn render_meter(
                 } else if !hatch.is_empty() {
                     // What the shaded region means, in words — so the fill
                     // never has to carry the meaning by itself.
-                    if let Some(crossing) =
-                        meter.forecast.as_ref().and_then(|f| f.exhausts_at)
-                    {
+                    if let Some(crossing) = meter.forecast.as_ref().and_then(|f| f.exhausts_at) {
                         let local = crossing.to_offset(app.local_offset);
                         text.push_str(&format!(
                             "{}unreachable past {:02}:{:02}",

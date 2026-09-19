@@ -1,0 +1,13 @@
+# Hygiene only, opt-in. This codebase's LAYOUT is hand-made on purpose —
+# one-line `if x { return }` bodies, hand-wrapped arguments — and
+# SwiftFormat's defaults would rewrite 230 of its 249 files, so no layout
+# rule is enabled and none should be added without reading its whole-tree
+# diff first (`mise run fmt-check` after editing this list).
+--swiftversion 6.0
+--exclude .build,tui
+# Tried and REJECTED after reading their diffs — they are opinions, not
+# hygiene: modifierOrder (rewrites this codebase's consistent
+# `nonisolated(unsafe) private` to `private nonisolated(unsafe)`),
+# redundantNilInit (strips the deliberate `= nil` off optional handlers),
+# todos (mangled `// MARK: --relative` into `// MARK: - -relative`).
+--rules trailingSpace,linebreakAtEndOfFile,consecutiveBlankLines,duplicateImports,semicolons,emptyBraces,spaceInsideBraces,spaceInsideParens,spaceInsideBrackets,spaceAroundBraces,void,redundantBreak,redundantLet,redundantParens

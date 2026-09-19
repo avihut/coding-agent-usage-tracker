@@ -3,8 +3,26 @@
 # daft repo's convention, adopted with its Rust toolchain wiring.
 minimum_release_age = "7d"
 
+# Entering a worktree, or changing one of setup's inputs, converges it:
+# pinned tools, crates, git hooks. Cached by the task's sources/outputs, so
+# the common case is a no-op.
+[hooks]
+enter = "mise run setup"
+
+[[watch_files]]
+patterns = ["mise.toml", "lefthook.yml", "tui/Cargo.toml", "tui/Cargo.lock"]
+run = "mise run setup"
+
 [tools]
 rust = "1.95"
+# Hook tooling — dev tools only; the zero-dependency rule is about what the
+# Swift targets link, and none of these is linked into anything. Pinned, so
+# every clone lints and formats with the same rule set.
+lefthook = "2.1.12"
+cocogitto = "7.0.0"
+shellcheck = "0.11.0"
+swiftlint = "0.65.1"
+swiftformat = "0.63.0"
 
 [tasks.build]
 description = "Build all targets"
@@ -48,7 +66,8 @@ run = [
     "scripts/bundle.sh",
     "pkill -x ClaudeUsage || true",
     "for i in $(seq 1 30); do pgrep -x ClaudeUsage >/dev/null || break; sleep 0.1; done",
-    "open ClaudeUsage.app --args {{arg(name='flags', var=true)}}",
+    # mise appends the task's arguments to this, its last command.
+    "open ClaudeUsage.app --args",
 ]
 
 [tasks.bundle]
@@ -68,7 +87,8 @@ description = "usaged launch-agent control (arg: install|uninstall|start|stop|st
 run = [
     "swift build --product usage-cli",
     "scripts/sign.sh .build/debug/usage-cli",
-    ".build/debug/usage-cli daemon {{arg(name='verb')}}",
+    # mise appends the task's arguments (the verb) to this, its last command.
+    ".build/debug/usage-cli daemon",
 ]
 
 [tasks.icon]
@@ -93,4 +113,116 @@ run = "cargo build --release --manifest-path tui/Cargo.toml"
 
 [tasks.tui-test]
 description = "Rust TUI tests (digest contract, layout, formatting)"
-run = "cargo test --manifest-path tui/Cargo.toml"
+run = "scripts/no-warnings.sh cargo test --manifest-path tui/Cargo.toml --locked"
+
+# ── Quality gates ───────────────────────────────────────────────────────────
+# One task per check. lefthook.yml (commit / push) and daft.yml (merge) both
+# call these, so a check has exactly one definition; `gate` is all of them.
+
+[tasks.setup]
+description = "Install the pinned tools, fetch the TUI's crates, install the git hooks (cached until an input changes)"
+sources = ["mise.toml", "lefthook.yml", "tui/Cargo.toml", "tui/Cargo.lock", "scripts/setup.sh"]
+outputs = [".build/setup.stamp"]
+run = "scripts/setup.sh"
+
+[tasks.gate]
+description = "Every check the hooks enforce, in one go (pre-commit + pre-push + the merge gate, minus its deep ring)"
+depends = ["guard", "lint", "fmt-check", "check-config", "test-hooks", "check", "tui-clippy", "tui-test"]
+
+[tasks.check]
+description = "Strict gate: build every target and the tests with warnings as errors, then run the Swift tests"
+# Warnings must be ERRORS, not grepped: an incremental build re-emits nothing
+# for a file it doesn't recompile, so a warning the last build printed is
+# invisible to the next one. As an error it keeps its module from ever
+# counting as built. Its own scratch path, because a changed -Xswiftc flag
+# invalidates the cache — sharing .build would make this task and `mise run
+# app` rebuild the world on each other's heels.
+# UPDATE_GOLDENS is unset so an inherited one can never turn a gate into a
+# writer; no-warnings.sh also refuses the linker's and SwiftPM's warnings,
+# which the compiler flag doesn't reach.
+run = "scripts/no-warnings.sh env -u UPDATE_GOLDENS swift test --scratch-path .build/strict -Xswiftc -warnings-as-errors"
+
+[tasks.release-build]
+description = "Build every product in the release configuration (the merge gate's deep ring; what bundle.sh builds, without touching ClaudeUsage.app)"
+# The strict scratch path again, not .build: the flag would otherwise
+# invalidate the release cache bundle.sh and dist.sh build into.
+run = "scripts/no-warnings.sh swift build -c release --scratch-path .build/strict -Xswiftc -warnings-as-errors"
+
+[tasks.tui-clippy]
+description = "Clippy over the TUI — every target, warnings denied, Cargo.lock honored"
+run = "scripts/no-warnings.sh cargo clippy --manifest-path tui/Cargo.toml --all-targets --locked -- -D warnings"
+
+[tasks.lint]
+description = "Every linter over the whole tree: SwiftLint + shell"
+depends = ["lint-swift", "lint-shell"]
+
+[tasks.lint-swift]
+description = "SwiftLint: the correctness-only rule set + CLAUDE.md's never-again rules (args: files, default the whole tree)"
+run = "swiftlint lint --strict --quiet"
+
+[tasks.lint-shell]
+description = "shellcheck for the bash scripts, zsh -n for the zsh ones (args: files, default scripts/*.sh)"
+run = "scripts/lint-shell.sh"
+
+[tasks.fmt]
+description = "Apply every formatter: SwiftFormat's hygiene rules + cargo fmt"
+depends = ["fmt-swift", "fmt-rust"]
+
+[tasks.fmt-swift]
+description = "SwiftFormat, hygiene rules only — see .swiftformat (args: files, default the whole tree)"
+# `.` is the whole tree: .swiftformat excludes .build and tui.
+usage = 'arg "[files]..." default="."'
+run = 'swiftformat ${usage_files:-.}'
+
+[tasks.fmt-rust]
+description = "cargo fmt over the TUI crate"
+run = "cargo fmt --manifest-path tui/Cargo.toml"
+
+[tasks.fmt-check]
+description = "Formatting, check only — nothing is rewritten"
+run = [
+    # `--lint` goes LAST: ahead of the paths, SwiftFormat reads the first
+    # path as its value and refuses.
+    "swiftformat . --lint",
+    "cargo fmt --manifest-path tui/Cargo.toml --check",
+]
+
+[tasks.guard]
+description = "Repo-rule tripwires: tokens, signing identities, dependencies, §10 hosts, script↔task pairing (arg: --staged for the index)"
+run = "scripts/guard.sh"
+
+[tasks.commit-msg]
+description = "Verify a commit message file: conventional subject, release subject ↔ AppIdentity.version (arg: path)"
+run = "scripts/commit-msg.sh"
+
+[tasks.release-check]
+description = "pre-push: every release commit/tag on stdin is whole — version, annotated tag, tag on the commit"
+run = "scripts/release-check.sh"
+
+[tasks.digest-freeze]
+description = "Hold this tree's digest decoders to another ref's goldens (arg: ref, default main) — the merge gate's additive-only check"
+usage = 'arg "[ref]" default="main"'
+run = [
+    'DIGEST_BASELINE_DIR="$(scripts/digest-baseline.sh "${usage_ref:-main}")" env -u UPDATE_GOLDENS swift test --scratch-path .build/strict -Xswiftc -warnings-as-errors --filter DigestFreeze',
+    'DIGEST_BASELINE_DIR="$(scripts/digest-baseline.sh "${usage_ref:-main}")" cargo test --manifest-path tui/Cargo.toml --locked baseline_goldens',
+]
+
+[tasks.landed-check]
+description = "post-merge tripwire: the landed tree is the tree the merge gate tested (daft's post-merge hook only)"
+run = "scripts/landed-check.sh"
+
+[tasks.release-reminder]
+description = "post-merge: list unreleased feat/fix commits on main and the release ritual's steps"
+run = "scripts/release-reminder.sh"
+
+[tasks.check-config]
+description = "The gate's own configuration parses: lefthook.yml, daft.yml, mise.toml, Info.plist"
+run = "scripts/check-config.sh"
+
+[tasks.merge-commits]
+description = "pre-merge: every incoming commit has a conventional subject (catches --no-verify commits)"
+run = "scripts/merge-commits.sh"
+
+[tasks.test-hooks]
+description = "Exercise every hook script's pass AND failure paths in a throwaway repository"
+run = "scripts/test-hooks.sh"

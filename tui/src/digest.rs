@@ -745,6 +745,29 @@ mod tests {
             .unwrap_or_else(|e| panic!("missing golden fixture {}: {e}", path.display()))
     }
 
+    /// The merge gate's half of the schema freeze: the TUI built from this
+    /// tree must still read the digests the TARGET branch's engine writes.
+    /// The golden is regenerated in place, so only the other side of a
+    /// merge still holds the old one — scripts/digest-baseline.sh exports
+    /// it and names the directory here. No baseline, nothing to hold.
+    #[test]
+    fn baseline_goldens_decode() {
+        let Some(dir) = std::env::var_os("DIGEST_BASELINE_DIR").filter(|d| !d.is_empty()) else {
+            return;
+        };
+        let entries = std::fs::read_dir(&dir)
+            .unwrap_or_else(|e| panic!("unreadable DIGEST_BASELINE_DIR {dir:?}: {e}"));
+        for entry in entries {
+            let path = entry.expect("baseline directory entry").path();
+            if path.extension().is_some_and(|ext| ext == "json") {
+                let bytes = std::fs::read(&path).expect("baseline golden");
+                LiveState::parse(&bytes).unwrap_or_else(|e| {
+                    panic!("baseline golden {} no longer decodes: {e}", path.display())
+                });
+            }
+        }
+    }
+
     #[test]
     fn golden_fixture_decodes() {
         let state = LiveState::parse(&golden()).expect("golden must decode");
@@ -753,7 +776,10 @@ mod tests {
         assert_eq!(state.engine.host, "app");
         assert_eq!(state.meters.len(), 2);
         assert_eq!(state.menu_bar.len(), 3);
-        let accent = state.engine.system_accent.expect("golden carries systemAccent");
+        let accent = state
+            .engine
+            .system_accent
+            .expect("golden carries systemAccent");
         assert!((accent.blue - 1.0).abs() < 1e-9);
         // The maturity countdown, phrased once by the engine: three days
         // of the fourteen collected, so the note is still owed.
@@ -786,7 +812,11 @@ mod tests {
             .find(|m| m.id == "mystery-model")
             .expect("unpriced model in golden");
         assert!(mystery.cost.is_none(), "unpriced cost must be None");
-        let priced = state.models.iter().find(|m| m.id == "claude-fable-5").unwrap();
+        let priced = state
+            .models
+            .iter()
+            .find(|m| m.id == "claude-fable-5")
+            .unwrap();
         assert!(priced.cost.is_some());
         // The prompt-only day has no cost key at all.
         let prompt_only = state
@@ -857,7 +887,13 @@ mod tests {
         // Some(empty), which is NOT the same as None.
         assert_eq!(
             state.sessions[0].accounts.as_deref(),
-            Some(["primary@example.com".to_string(), "work@example.com".to_string()].as_slice())
+            Some(
+                [
+                    "primary@example.com".to_string(),
+                    "work@example.com".to_string()
+                ]
+                .as_slice()
+            )
         );
         assert_eq!(state.sessions[1].accounts.as_deref(), Some([].as_slice()));
     }
@@ -938,9 +974,13 @@ mod wave4_tests {
         assert!(!first.model_colors.is_empty());
 
         for card in &state.sessions {
-            for field in [Some(card.title.clone()), card.project.clone(), card.branch.clone()]
-                .into_iter()
-                .flatten()
+            for field in [
+                Some(card.title.clone()),
+                card.project.clone(),
+                card.branch.clone(),
+            ]
+            .into_iter()
+            .flatten()
             {
                 assert!(!field.contains('/'), "path leaked: {field}");
                 assert!(!field.contains('~'), "home leaked: {field}");
@@ -967,11 +1007,13 @@ mod wave4_tests {
         let incident = card.active_incident().expect("active incident");
         assert_eq!(incident.name, "Degraded performance for multiple models");
         assert_eq!(incident.phase, "monitoring");
-        assert!(incident
-            .last_message
-            .as_deref()
-            .unwrap()
-            .starts_with("A fix has been implemented"));
+        assert!(
+            incident
+                .last_message
+                .as_deref()
+                .unwrap()
+                .starts_with("A fix has been implemented")
+        );
         assert_eq!(incident.component_names, vec!["claude.ai"]);
         assert!(incident.resolved_at.is_none());
         // Going 1h 12m at the digest's own `now`.

@@ -1978,6 +1978,85 @@ the README rather than silently deviating.
 - Day-to-day: `mise run test` / `mise run cli` / `mise run build` /
   `mise run app` (rebundle + relaunch) / `mise run bundle` (no launch)
   from the worktree.
+- HOOKS AND THE MERGE GATE (2026-09-19): git hooks are lefthook
+  (`lefthook.yml`), the merge gate is daft (`daft.yml` `merge:` +
+  `pre-merge`/`post-merge`), and EVERY check is a mise task both call — one
+  definition each; `mise run gate` is the whole set by hand, run it before
+  showing work. There is no CI: these are the only gates. pre-commit
+  (staged files, sequential — formatters rewrite what the linter reads
+  next): `fmt-swift`, `fmt-rust`, `git diff --cached --check`,
+  `lint-swift`, `lint-shell`, `check-config`, `guard`.
+  commit-msg: conventional commits via `cog verify` (`cog.toml` adds this
+  repo's `release` type; an AREA IS A SCOPE — `feat(menubar): …`, never
+  `menubar: …`), a `release:` subject is exactly `release: vX.Y.Z` and must
+  equal the staged `AppIdentity.version`, and a commit that moves the
+  version must BE that release commit. pre-push: `check`, `tui-clippy`,
+  `tui-test`, `test-hooks`, `check-config`, `release-check` (a pushed
+  release commit has an ANNOTATED `vX.Y.Z` tag on that very commit —
+  publish.sh reads the annotation as the release notes). Push with `daft push`, so the hook runs in the pushed
+  branch's own worktree. WARNINGS ARE ERRORS, NEVER GREPPED: an incremental
+  `swift build` re-emits nothing for a file it doesn't recompile, so a
+  no-op build prints zero warnings whatever the tree holds; `check` is
+  `swift test -Xswiftc -warnings-as-errors` (all targets + tests + the
+  suite) in its OWN scratch path `.build/strict` — a changed `-Xswiftc`
+  flag invalidates the cache, and sharing `.build` would make `check` and
+  `mise run app` rebuild the world on each other's heels (~38s cold,
+  seconds warm, ~290MB per worktree). Every build/test task also runs
+  under `scripts/no-warnings.sh`, which fails a command that exited 0 but
+  printed `warning:` — the linker, SwiftPM and cargo warn outside the
+  compiler flags' reach — and `check` unsets `UPDATE_GOLDENS`, so a gate
+  can never become a golden WRITER. The pattern it caught on day one,
+  seven times: an outer Timer/`onChange` closure capturing `self` strongly
+  around a `Task { [weak self] … }` — the `[weak self]` belongs on the
+  OUTER closure, or a repeating timer keeps its owner alive.
+  LINT/FORMAT ARE OPT-IN ALLOWLISTS, because this codebase's layout is
+  hand-made on purpose: SwiftLint's defaults are 956 style/size findings
+  and SwiftFormat's would rewrite 230 of 249 files. `.swiftlint.yml` =
+  twenty correctness rules + `custom_rules`, the home of this file's
+  greppable "never again" rules for Swift source (headless core, native
+  SecItem calls, key strategies, `chartScrollableAxes`) — add the next one
+  THERE; `Tests/.swiftlint.yml` lifts `force_try`/`force_cast`.
+  `.swiftformat` = whitespace hygiene only; `modifierOrder`,
+  `redundantNilInit` and `todos` were tried and rejected after reading
+  their diffs (the last mangled `// MARK: --relative`) — read a rule's
+  whole-tree diff before enabling it. `scripts/guard.sh` holds the rules
+  that aren't Swift source: token-shaped strings, signing identities,
+  package/crate dependencies, the §10 HOST ALLOWLIST (every host `Sources`
+  and `tui/src` name — a new host is a §10 amendment first, then a line
+  there), script↔mise-task pairing. The app scripts are zsh, which
+  shellcheck cannot read (SC1071): `lint-shell` gives them `zsh -n` and
+  shellcheck the hook scripts, which are bash for that reason (and
+  3.2-safe — macOS's own: no apostrophe inside a `${VAR:?message}`, 3.2
+  reads it as an unterminated quote — `test-hooks` caught that one).
+  THE HOOK SCRIPTS HAVE TESTS: `scripts/test-hooks.sh` (`mise run
+  test-hooks`, 52 checks, in pre-push and the merge gate) drives every
+  script through its pass AND refusal paths in a throwaway repo under
+  `.build/` — a new hook script or rule lands with its cases there. MERGE: `ff: only` + `source_worktree: clean`
+  (this history has never held a merge commit) — rebase, then `daft merge
+  <branch> --into main`; rings run in the SOURCE worktree, `glob` skips a
+  toolchain the merge never touched, `--skip-tag deep` drops the release
+  build (deliberately NOT `mise run bundle`: bundle.sh replaces
+  `ClaudeUsage.app`, possibly the live install's). THE DIGEST FREEZE is
+  the one check only a merge can make: the golden is regenerated in place,
+  so on any branch code and golden agree and a breaking change +
+  `UPDATE_GOLDENS=1` passes both suites — `scripts/digest-baseline.sh`
+  exports the TARGET's goldens, and `DigestFreezeTests` + the Rust
+  `baseline_goldens_decode` (both inert without `DIGEST_BASELINE_DIR`)
+  require that this tree's decoders read them and that every key path they
+  carry is still in the current golden (`mise run digest-freeze` by hand).
+  The `incoming-commits` ring (`cog check target..HEAD`) catches
+  subjects written with `--no-verify`. post-merge (warn-only): the landed
+  tree is the gated tree, and unreleased `feat`/`fix` on main prints the
+  release ritual. SETUP is `mise run setup` (pinned tools, `cargo fetch
+  --locked`, `lefthook install`), cached on its sources; daft's
+  post-create, mise's `enter` hook and its `watch_files` all call it.
+  Hooks install into the bare repo's SHARED hooks dir, and the launcher
+  resolves lefthook as `mise exec -- lefthook` (`lefthook:` in
+  lefthook.yml), so hooks run from shells that never activated mise; a
+  worktree whose branch has no `lefthook.yml` prints a one-line notice and
+  proceeds. mise's `arg()` task templates are deprecated (gone in mise
+  2027.5): take arguments through a task's `usage` field, or rely on mise
+  appending them to the LAST command of `run`.
 - The app icon (the "cursor fuel" mark — mint prompt chevron, block cursor
   charged yellow→orange to the budget left) has NO checked-in asset:
   `scripts/icon.swift` draws it in CoreGraphics (512-pt design space mapped

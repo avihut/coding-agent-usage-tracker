@@ -226,7 +226,7 @@ final class DigestClient {
         let feed = feed
         withObservationTracking {
             _ = feed.digest
-        } onChange: {
+        } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self, !self.isShutDown else { return }
                 self.applyFromFeed()
