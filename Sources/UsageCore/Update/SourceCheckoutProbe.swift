@@ -46,6 +46,29 @@ public enum SourceCheckoutProbe {
             hasReleaseTag: hasTag)
     }
 
+    /// The variables through which git is told WHERE its repository is. Git
+    /// exports them to every hook it runs (always, in a bare-repo-plus-
+    /// worktrees layout like this project's), and they outrank `-C`: a child
+    /// `git -C <root>` that inherits `GIT_DIR` reads — or WRITES — the
+    /// inherited repository instead of the one at `<root>`. On 2026-09-19
+    /// this suite's throwaway-repo fixture, run by the pre-push hook,
+    /// committed "one", tagged v1.2.3 and set `user.name = Test` in the real
+    /// repository that way.
+    static let gitDiscoveryVariables: Set<String> = [
+        "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
+        "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_NAMESPACE", "GIT_PREFIX",
+    ]
+
+    /// An environment under which `git -C <root>` means `<root>` and nothing
+    /// else. Everything that spawns git for this probe — the tests' fixture
+    /// included — runs under it.
+    static func gitEnvironment(
+        from environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> [String: String] {
+        environment.filter { !gitDiscoveryVariables.contains($0.key) }
+    }
+
     /// One local git read: trimmed stdout on exit 0, nil on anything else.
     /// Output rides a temp file so nothing non-Sendable crosses the
     /// termination handler.
@@ -64,6 +87,7 @@ public enum SourceCheckoutProbe {
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
             process.arguments = ["-C", root.path] + arguments
+            process.environment = gitEnvironment()
             process.standardOutput = handle
             process.standardError = FileHandle.nullDevice
             process.terminationHandler = { continuation.resume(returning: $0.terminationStatus) }

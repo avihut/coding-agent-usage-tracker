@@ -1963,6 +1963,21 @@ the README rather than silently deviating.
 - The credential path is NOT unit-tested; verify it live with `mise run cli`.
   Fixtures prove the renderer, not credential access — exercise the real
   path before calling a milestone done (spec §11).
+- A TEST THAT SPAWNS GIT SCRUBS GIT'S DISCOVERY VARIABLES (2026-09-19, the
+  day the hooks landed): git exports `GIT_DIR`/`GIT_WORK_TREE`/
+  `GIT_INDEX_FILE` to every hook — always, in this bare-repo-plus-worktrees
+  layout — and they OUTRANK `-C`. The pre-push hook runs the suite, so
+  `SourceCheckoutProbeTests`' throwaway-repo fixture (`git -C <tmp> init /
+  config / commit / tag`) ran against the REAL repository instead: a commit
+  "one" by `Test <test@example.com>` on main, a lightweight `v1.2.3` tag,
+  and `user.name = Test` written into the shared config (which would have
+  re-authored every later commit in every worktree). Nothing reached
+  origin. Two layers now: `SourceCheckoutProbe.gitEnvironment()` strips the
+  variables for the probe's own reads AND the fixture (unit-tested), and
+  the `check` task unsets them before `swift test`. Any new test or script
+  that shells out to git does the same — the hook scripts `unset` them at
+  the top. Symptom to recognize: a stray commit/tag/config whose author is
+  a fixture identity.
 - `swift test` green before showing any milestone.
 
 ## Workflow

@@ -34,6 +34,9 @@ struct SourceCheckoutProbeTests {
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
             process.arguments = ["-C", root.path] + arguments
+            // Without this, an inherited GIT_DIR (any git hook) sends every
+            // command below into the REAL repository — see gitEnvironment.
+            process.environment = SourceCheckoutProbe.gitEnvironment()
             process.standardOutput = FileHandle.nullDevice
             process.standardError = FileHandle.nullDevice
             process.terminationHandler = { continuation.resume(returning: $0.terminationStatus) }
@@ -45,6 +48,16 @@ struct SourceCheckoutProbeTests {
             }
         }
         if status != 0 { throw GitFailed() }
+    }
+
+    @Test("git's discovery variables never reach a spawned git; everything else does")
+    func discoveryVariablesAreScrubbed() {
+        let scrubbed = SourceCheckoutProbe.gitEnvironment(from: [
+            "GIT_DIR": "/elsewhere/.git/worktrees/main", "GIT_WORK_TREE": "/elsewhere/main",
+            "GIT_INDEX_FILE": "index.lock", "GIT_COMMON_DIR": "/elsewhere/.git",
+            "PATH": "/usr/bin", "GIT_AUTHOR_NAME": "kept — identity, not discovery",
+        ])
+        #expect(scrubbed.keys.sorted() == ["GIT_AUTHOR_NAME", "PATH"])
     }
 
     @Test("branch, commit, and tag presence come back from a real checkout")

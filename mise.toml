@@ -140,7 +140,12 @@ description = "Strict gate: build every target and the tests with warnings as er
 # UPDATE_GOLDENS is unset so an inherited one can never turn a gate into a
 # writer; no-warnings.sh also refuses the linker's and SwiftPM's warnings,
 # which the compiler flag doesn't reach.
-run = "scripts/no-warnings.sh env -u UPDATE_GOLDENS swift test --scratch-path .build/strict -Xswiftc -warnings-as-errors"
+#
+# GIT_DIR and friends are unset too: git exports them to hooks, and a test
+# that spawns `git -C <tmp>` under them operates on THIS repository instead
+# (2026-09-19: a fixture's commit, tag and user.name landed on main). The
+# tests scrub for themselves; this is the belt.
+run = "scripts/no-warnings.sh env -u UPDATE_GOLDENS -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_COMMON_DIR -u GIT_PREFIX swift test --scratch-path .build/strict -Xswiftc -warnings-as-errors"
 
 [tasks.release-build]
 description = "Build every product in the release configuration (the merge gate's deep ring; what bundle.sh builds, without touching ClaudeUsage.app)"
