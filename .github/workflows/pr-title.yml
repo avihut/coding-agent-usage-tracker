@@ -35,6 +35,9 @@ jobs:
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
+          # cog opens the repository and reads its identity even to verify a
+          # bare string; a runner has none.
+          git config user.name "ci" && git config user.email "ci@users.noreply.github.com"
           case "$PR_TITLE" in
           release:* | release\(*)
               echo "A PR is never a release — the release commit is cut on main by scripts/release.sh." >&2

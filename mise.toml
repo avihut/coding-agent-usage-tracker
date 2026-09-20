@@ -14,7 +14,10 @@ patterns = ["mise.toml", "lefthook.yml", "tui/Cargo.toml", "tui/Cargo.lock"]
 run = "mise run setup"
 
 [tools]
-rust = "1.95"
+# clippy + rustfmt named, not assumed: a machine whose rustup predates this
+# repo has them from its default profile, a FRESH one (CI's runner, a new
+# contributor's clone) gets the bare toolchain and `tui-clippy` has no clippy.
+rust = { version = "1.95", components = "clippy,rustfmt" }
 # Hook tooling — dev tools only; the zero-dependency rule is about what the
 # Swift targets link, and none of these is linked into anything. Pinned, so
 # every clone lints and formats with the same rule set.
