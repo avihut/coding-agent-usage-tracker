@@ -68,6 +68,11 @@ absent ≠ zero (unpriced cost and unreported percent are nulls, never 0).
 Regenerate goldens deliberately: `UPDATE_GOLDENS=1 swift test --filter
 LiveState`, then read the diff.
 
+Consumers RENDER, they never compute: the digest carries pre-phrased
+captions and resolved colours, and a face that recomputes either will
+disagree with the other faces. Colour and risk maths live in core
+(`RiskRamp`, `ModelColorMath`).
+
 Contents, by section:
 
 - `engine` — provider identity (id, names, glyph, accent sRGB), plan label,
@@ -113,6 +118,11 @@ longer decodes). `usage-cli state | jq .menuBar` etc.
 
 ## The host arbitration (shipped v0.66.0)
 
+- The arbitration itself is PURE (`EngineHostBroker`) and therefore
+  unit-tested; the IO around it (`EngineLease`, `ControlSocket`,
+  `StatePublisher`) is thin by design. Measured live at v0.66.0: an app
+  yields in 10–14s, a client takes over in ≤35s, no double-poll across a
+  handover, and meters come back instantly from cache.
 - `engine.lock` — an exclusive `flock(2)`: whoever holds it runs engine +
   publisher + socket. The kernel releases on death, so a held lease is
   always a live process and stale locks cannot exist.
@@ -138,7 +148,9 @@ longer decodes). `usage-cli state | jq .menuBar` etc.
   identity, IOKit sleep/wake (sleep acknowledged immediately), daily
   auto-redetection. Since v0.70.0 installation is automatic (spec §10
   re-amendment 2026-08-16): core `LaunchAgentInstaller` converges the
-  agent — the app runs it at every launch, the TUI spawns
+  agent (install absent → repoint moved → bootstrap unloaded →
+  kickstart stale-version daemon; the decision table `ensureAction` is
+  unit-tested) — the app runs it at every launch, the TUI spawns
   `usaged ensure` when no engine publishes, and `usaged
   install|ensure|uninstall` make the binary its own installer (the plist
   points at whichever copy ran the verb). The sticky opt-out

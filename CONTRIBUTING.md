@@ -2,7 +2,8 @@
 
 Thanks for looking. This is a one-maintainer project with strong opinions
 written down; this page is the short version. The long version is `CLAUDE.md`
-(architecture and the reasons behind its rules) and `docs/SPEC.md`.
+(the hard rules, a map of `docs/`, and the mistakes that were expensive once)
+and the per-area docs it points to — read the one for the area you touch.
 
 ## Setup
 

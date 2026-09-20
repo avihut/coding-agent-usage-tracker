@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # post-merge reminder (daft.yml): a shipped feature or fix is not done until
-# it is released, in the same session (CLAUDE.md, release ritual — written
+# it is released, in the same session (docs/WORKFLOW.md, release ritual — written
 # after a session committed two changes and stopped, and every install
 # stayed behind). Exits non-zero while main holds unreleased feat/fix
 # commits so daft shows it as a warning row; post-merge never rolls back.
