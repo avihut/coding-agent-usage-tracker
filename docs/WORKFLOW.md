@@ -145,7 +145,10 @@ showing work.
   `fix`, nothing otherwise; pre-1.0 a `!` is a minor, never an automatic
   1.0.0), stamps `AppIdentity.version` — the ONE version source, Info.plist
   is stamped from it — commits `release: vX.Y.Z` with those notes, spends
-  the fragment in the same commit, and annotates the tag. It is idempotent:
+  the fragment in the same commit, and annotates the tag (the fragment's
+  FIRST LINE is the tag's subject; the template's HTML comment is stripped —
+  v0.102.0's annotation was cut with that comment as its subject and had to
+  be re-annotated by hand before the tag was pushed). It is idempotent:
   a tip that is already `release: vX.Y.Z` only gets its missing tag, which
   is how a branch cut under the OLD ritual still lands correctly.
   IT NEVER PUSHES. Reading the release and then (1) `git push origin main

@@ -23,7 +23,9 @@ dry_run=false
 identity=Sources/UsageCore/AppIdentity.swift
 notes=.release-notes/next.md
 template='<!-- What shipped, in prose. This becomes the annotation of the next
-     release tag, which publish.sh ships as the GitHub release notes. -->'
+     release tag, which publish.sh ships as the GitHub release notes.
+     The FIRST LINE is the tag'"'"'s subject: make it a short title, then a
+     blank line. This comment is stripped. -->'
 
 say() { printf 'release: %s\n' "$1"; }
 refuse() {
@@ -57,8 +59,17 @@ current=$(sed -n 's/.*static let version = "\(.*\)".*/\1/p' "$identity")
 # a list of subjects, and it rode the pre-merge gate like any other file.
 written_notes() { # → the fragment on stdout, or 1 when it says nothing
     [ -f "$notes" ] || return 1
-    grep -vE '^[[:space:]]*(<!--|-->|$)' "$notes" | grep -q . || return 1
-    cat "$notes"
+    # The template's HTML comment is scaffolding, not notes. It used to ride
+    # along: v0.102.0's annotation was cut with the comment as its SUBJECT and
+    # had to be re-annotated by hand before the tag was pushed. Whole comment
+    # lines go, then the blank lines they leave at the top.
+    stripped=$(awk '
+        /<!--/ { comment = 1 }
+        !comment { print }
+        /-->/ { comment = 0 }
+    ' "$notes" | sed -e '/./,$!d')
+    [ -n "$stripped" ] || return 1
+    printf '%s\n' "$stripped"
 }
 
 tag_head() { # <version> <notes file>
