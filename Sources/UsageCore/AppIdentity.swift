@@ -25,7 +25,7 @@ public enum AppIdentity {
     /// legacy cleanup — nothing else may name them.
     public static let legacyBundleID = "com.avihu.ClaudeUsage"
     public static let legacyDaemonLabel = "com.avihu.usaged"
-    public static let version = "0.101.0"
+    public static let version = "0.102.0"
     public static let userAgent = "\(name)/\(version)"
     /// Where releases are published — the self-updater's one feed.
     public static let repository = "avihut/coding-agent-usage-tracker"
