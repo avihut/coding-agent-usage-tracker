@@ -4,7 +4,7 @@ import UsageCore
 
 /// The app's standard running-breakdown chart — any surface that plots a
 /// cumulative series over an event list renders THIS view so the synchronized
-/// behaviors (repo CLAUDE.md, "CHART BEHAVIOR CONTRACT") arrive by
+/// behaviors (docs/CHARTS.md, "the chart behavior contract") arrive by
 /// construction rather than by reimplementation:
 ///
 /// - a Cost/Tokens measure picker in the header, with the series total beside
