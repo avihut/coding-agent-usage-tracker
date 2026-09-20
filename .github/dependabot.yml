@@ -1,0 +1,23 @@
+# Version bumps arrive as PRs through the same gate as any other change.
+# The cooldown mirrors mise.toml's minimum_release_age: nothing younger than
+# a week. scripts/guard.sh still holds the TUI to its four crates — this only
+# ever moves their versions.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "chore(ci)"
+
+  - package-ecosystem: cargo
+    directory: /tui
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "chore(tui)"

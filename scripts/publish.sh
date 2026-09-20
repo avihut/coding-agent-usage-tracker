@@ -1,29 +1,36 @@
 #!/bin/zsh
-# Publishes the current version as a GitHub release: builds the dist zip and
-# attaches it to a release for the version's tag — the artifact the in-app
-# updater's feed announces. Run AFTER the release commit and its annotated
-# tag exist and are pushed; the release notes are the tag's own annotation.
+# Publishes the current version as a GitHub release: the tag's own annotation
+# as the notes, and NO binary (2026-09-20). A macOS app strangers can open
+# needs a Developer ID and notarization; without them a downloaded zip is one
+# Gatekeeper rejects, so the project ships source and every install is built
+# and signed by the Mac that runs it (README → Install). The release still
+# matters: it is the feed every install's update check reads — a release is
+# what makes "a new version is tagged, pull and rebuild" appear in the app.
+#
+# Run AFTER the release commit and its annotated tag exist and are pushed.
+# `mise run dist` still builds a signed zip for carrying to another Mac of
+# your own; nothing here uploads it, and nothing should.
 set -euo pipefail
 
 ROOT="${0:A:h:h}"
 VERSION=$(sed -n 's/.*static let version = "\(.*\)".*/\1/p' \
     "$ROOT/Sources/UsageCore/AppIdentity.swift")
 TAG="v$VERSION"
-ZIP="$ROOT/dist/ClaudeUsage-$VERSION.zip"
 
 if ! git -C "$ROOT" rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
     echo "Tag $TAG does not exist — tag the release commit first." >&2
     exit 1
 fi
 
-"$ROOT/scripts/dist.sh"
-
-NOTES=$(git -C "$ROOT" tag -l --format='%(contents)' "$TAG")
-if gh release view "$TAG" --repo "$(git -C "$ROOT" remote get-url origin)" >/dev/null 2>&1; then
-    # Re-publishing the same version replaces the asset, never the notes.
-    gh release upload "$TAG" "$ZIP" --clobber
-else
-    gh release create "$TAG" --verify-tag --title "$TAG" --notes "$NOTES" "$ZIP"
+cd "$ROOT"
+if gh release view "$TAG" >/dev/null 2>&1; then
+    echo "Release $TAG already exists — nothing to publish."
+    exit 0
 fi
 
-echo "Published $TAG"
+# subject + body, NOT %(contents): tags are GPG-signed, and %(contents) carries
+# the signature block — every release through v0.100.1 ended in one.
+NOTES=$(git tag -l --format='%(contents:subject)%0a%0a%(contents:body)' "$TAG")
+gh release create "$TAG" --verify-tag --title "$TAG" --notes "$NOTES"
+
+echo "Published $TAG (notes only — releases carry no binary)"

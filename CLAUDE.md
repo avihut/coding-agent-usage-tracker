@@ -1,6 +1,8 @@
 # claude-usage-menubar — agent guidelines
 
-Personal macOS menu bar app (LSUIElement, single user, not for distribution)
+macOS menu bar app (LSUIElement) — open source (MIT) and SOURCE-ONLY since
+2026-09-20: no binary is published, every install is built and signed by the
+Mac that runs it (see "Open source" under Workflow) —
 showing Claude plan usage limits from the undocumented `/api/oauth/usage`
 endpoint, authenticated with the local Claude Code OAuth access token. The
 build contract is `docs/SPEC.md` — milestones in §12, acceptance in §13.
@@ -1852,10 +1854,22 @@ the README rather than silently deviating.
 
 ## Self-update & distribution channels (v0.87.0, channels v0.88.0)
 
-- Distribution is GitHub Releases; `mise run publish` builds the dist zip
-  (universal, timestamped signatures, usaged + usage-cli embedded) and
-  attaches it to the version's tag via `gh release create`, notes from the
-  tag annotation. Info.plist versions are STAMPED from AppIdentity.swift by
+- RELEASES CARRY NO BINARY (2026-09-20, user-directed: "I don't have a paid
+  Apple Developer ID with notarization, I don't think I should release any
+  binary […] Download it, compile it with your own ID, and run it"). An
+  Apple Development signature is one Gatekeeper REJECTS on any other Mac
+  (`spctl -a` on the v0.100.1 zip: rejected), so the 31 zips published from
+  v0.87.1 to v0.100.1 were removed and `mise run publish` now creates the
+  release from the tag's annotation alone (`%(contents:subject)` +
+  `%(contents:body)` — `%(contents)` carries the GPG signature block, and
+  every earlier release's notes ended in one). The release still matters:
+  it is the feed the update check reads. `mise run dist` survives as a
+  private tool for carrying a build to another Mac of the maintainer's own.
+  The one-click pipeline below is DORMANT, not deleted — with no asset a
+  click opens the release page. Before it is ever re-armed (Developer ID +
+  notarization): `AppUpdater` checks that a download's signature is VALID,
+  never WHOSE it is (an ad-hoc bundle passes `codesign --verify`) — pin the
+  running app's own designated requirement first. Info.plist versions are STAMPED from AppIdentity.swift by
   bundle.sh/dist.sh — never hand-edit them (they drifted two releases behind
   when hand-maintained, and the updater verifies downloads by that key).
 - DISTRIBUTION CHANNELS (v0.88.0, user-directed "think of it as
@@ -2160,7 +2174,10 @@ the README rather than silently deviating.
   (`lefthook.yml`), the merge gate is daft (`daft.yml` `merge:` +
   `pre-merge`/`post-merge`), and EVERY check is a mise task both call — one
   definition each; `mise run gate` is the whole set by hand, run it before
-  showing work. There is no CI: these are the only gates. pre-commit
+  showing work. CI (`.github/workflows/ci.yml`, since 2026-09-20) runs that
+  same `gate` plus `digest-freeze` for pull requests — it exists because a
+  merge made with GitHub's button never meets daft's rings; the local gates
+  stay the ones the maintainer's own merges pass through. pre-commit
   (staged files, sequential — formatters rewrite what the linter reads
   next): `fmt-swift`, `fmt-rust`, `git diff --cached --check`,
   `lint-swift`, `lint-shell`, `check-config`, `guard`.
@@ -2244,6 +2261,25 @@ the README rather than silently deviating.
   proceeds. mise's `arg()` task templates are deprecated (gone in mise
   2027.5): take arguments through a task's `usage` field, or rely on mise
   appending them to the LAST command of `run`.
+- OPEN SOURCE (2026-09-20, after the first outside PR): MIT `LICENSE`,
+  `CONTRIBUTING.md`, `SECURITY.md` (private vulnerability reporting),
+  Dependabot with a 7-day cooldown. WORKFLOWS are hardened on purpose —
+  `pull_request` and NEVER `pull_request_target`, read-only token, every
+  action pinned to a commit SHA (a repo setting refuses anything else), no
+  event text interpolated into a shell line, fork PRs wait for approval, and
+  NO SECRET EXISTS to steal: CI never signs, bundles or publishes. RULESETS
+  live as text in `.github/rulesets/` (README there): main's integrity rules
+  and the tag immutability rule have NO bypass, the maintainer included — a
+  pushed `v*` tag never moves, so re-cut a release BEFORE pushing it; the PR
+  gate is bypassed by the repository admin so `daft merge` + `git push
+  origin main vX.Y.Z` keeps working. AN OUTSIDE PR LANDS by GitHub's squash
+  button (the contributor gets a merged PR; a local `daft merge` would
+  leave it "closed"), its TITLE is the commit subject (`pr-title.yml` holds
+  it to `cog verify` and refuses `release:`), then on main: `git pull`, `mise run
+  release`, push, publish. release.sh wants a CLEAN worktree and, with no
+  fragment, annotates with the merged subjects — so for prose notes, push
+  `.release-notes/next.md` onto the PR branch BEFORE merging (maintainer
+  edits are allowed on fork PRs), never as a dirty file on main.
 - The app icon (the "cursor fuel" mark — mint prompt chevron, block cursor
   charged yellow→orange to the budget left) has NO checked-in asset:
   `scripts/icon.swift` draws it in CoreGraphics (512-pt design space mapped
@@ -2284,9 +2320,9 @@ the README rather than silently deviating.
   a tip that is already `release: vX.Y.Z` only gets its missing tag, which
   is how a branch cut under the OLD ritual still lands correctly.
   IT NEVER PUSHES. Reading the release and then (1) `git push origin main
-  vX.Y.Z`; (2) `mise run publish` — universal dist zip, timestamped
-  signature from a real identity, attached to the tag's release; installed
-  apps see it on their next 6h check — stay a human step, and `release-check`
+  vX.Y.Z`; (2) `mise run publish` — the GitHub release from the tag's notes,
+  NO binary (see Self-update); installs see it on their next 6h check and
+  say "pull and rebuild" — stay a human step, and `release-check`
   (pre-push) is the backstop if the hook ever leaves a release half made
   (post-merge warns, never rolls back). Tags and commits GPG-sign by config,
   so a locked agent makes the job warn rather than release; `mise run
