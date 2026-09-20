@@ -70,7 +70,7 @@ was learned the hard way.
 - Never install or register anything (login items, launch agents) without
   asking the user in-session. Launch-at-login is a user-clicked toggle only.
   ONE standing exception (user-directed 2026-08-16, v0.70.0): the
-  com.avihu.usaged launch agent auto-installs from the UI entry points via
+  io.github.avihut.usaged launch agent auto-installs from the UI entry points via
   core LaunchAgentInstaller, governed by the sticky `daemonAutoInstall`
   opt-out (uninstall paths set it false; every auto-install honors it).
 - Nothing outside a provider's own files may name a vendor: no
@@ -78,7 +78,7 @@ was learned the hard way.
   model-id parsing. Views read `store.provider.*`. guard.sh's host
   allowlist mechanizes only the URLs — the paths and the strings are on
   you. (`docs/ARCHITECTURE.md`, the provider seam)
-- Honest `User-Agent` (`claude-usage-menubar/<version>` via `AppIdentity`);
+- Honest `User-Agent` (`coding-agent-usage-tracker/<version>` via `AppIdentity`);
   never impersonate Claude Code or the Claude app.
 - Every failure mode must render readable state. A blank or crashed menu bar
   item is a bug.
@@ -112,7 +112,7 @@ was learned the hard way.
 | CloudKit sync (designed, NOT shipped) | `docs/SYNC.md` |
 
 Five targets: `UsageCore` (the headless library — every rule that says
-"core" means here), `ClaudeUsage` (the app), `usaged` (the launchd host),
+"core" means here), `AgentUsage` (the app), `usaged` (the launchd host),
 `usage-cli` (argv and exit codes only; the query logic is core), and
 `tui/` (Rust). `ls` tells you the folders; the rules are that new code
 lands in the folder matching its subject, that a file outgrowing ~600

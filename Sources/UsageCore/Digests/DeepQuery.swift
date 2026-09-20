@@ -34,7 +34,7 @@ public enum DeepQuery {
     /// app bundle, `.standard` already IS that domain and the suite call
     /// would return nil.
     static func appDefaults() -> UserDefaults {
-        let bundleID = "com.avihu.ClaudeUsage"
+        let bundleID = AppIdentity.bundleID
         if Bundle.main.bundleIdentifier == bundleID { return .standard }
         return UserDefaults(suiteName: bundleID) ?? .standard
     }
@@ -79,7 +79,7 @@ public enum DeepQuery {
         providerID: String, profileID: String, roots: StorageScope.Roots = .standard
     ) -> URL {
         StorageScope.supportDirectory(
-            bundleID: Bundle.main.bundleIdentifier ?? "com.avihu.ClaudeUsage", providerID: providerID,
+            bundleID: Bundle.main.bundleIdentifier ?? AppIdentity.bundleID, providerID: providerID,
             profileID: profileID, roots: roots)
     }
 

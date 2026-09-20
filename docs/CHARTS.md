@@ -15,7 +15,7 @@ are produced is in [MEASUREMENT.md](MEASUREMENT.md).
 - CHART BEHAVIOR CONTRACT (2026-08-15 v0.32.0, user-directed standing
   rule): any surface that plots a running/cumulative series over an
   event list renders `RunningBreakdownChart`
-  (Sources/ClaudeUsage/Charts/) fed by a core `SessionChartModel`
+  (Sources/AgentUsage/Charts/) fed by a core `SessionChartModel`
   (per-row carry-forward cumulative arrays for O(1) hover lookup;
   per-model series with cost NIL for unpriced models — never a flat $0
   line; promptRows; prompt-to-prompt Sections with per-measure
@@ -276,7 +276,7 @@ are produced is in [MEASUREMENT.md](MEASUREMENT.md).
   unhighlighted nubs). The dead stretch past the exhaustion
   crossing gets a red nub of its own ("unreachable" in the readout).
   Segmented pickers are built ONLY through the shared `SegmentedPicker`
-  (Sources/ClaudeUsage/Components/SegmentedPicker.swift — mini/bare/semibold, one
+  (Sources/AgentUsage/Components/SegmentedPicker.swift — mini/bare/semibold, one
   place for the style; settings panes pass size: .regular). Hover-driven stats lines are fixed-height by
   design — swapping text must never reflow the layout under the cursor —
   and today's cell/bar carries a subtle ring (grids only — the 7D bar's

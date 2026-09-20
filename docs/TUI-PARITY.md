@@ -138,7 +138,7 @@ gives each stack band its own density glyph.
 15. [M][✓] **USER-CONFIRMED (redefined)**: the TUI day drill gets a
     chart of the drilled day in the app's NON-RING drill presentation.
     Before building: READ the app's day-drill view in
-    `Sources/ClaudeUsage/Panel/HeatmapView.swift` and mirror its
+    `Sources/AgentUsage/Panel/HeatmapView.swift` and mirror its
     non-donut arrangement (per-model composition + the day's usage
     breakdown as the app draws it, terminal-idiomized). Data: the
     day's models from `model_days` (≤35d, labeled degrade beyond,
@@ -245,7 +245,7 @@ gives each stack band its own density glyph.
 ## Context a fresh session needs (do not rediscover)
 
 ### Repo + versions
-- daft contained layout; worktree `~/Projects/claude-usage-menubar/main`
+- daft contained layout; worktree `<repo>/main`
   (NOT a plain git repo root — `.git` is bare at the project root).
 - Current: v0.72.0 shipped, tagged, pushed. Daemon (usaged) runs live
   on this machine, self-upgrades on every `mise run app` via
@@ -260,7 +260,7 @@ gives each stack band its own density glyph.
 ### Digest (the only data source the TUI may use)
 - Schema: `Sources/UsageCore/Digests/LiveState.swift` (+ builder),
   published by `Engine/StatePublisher.swift` at every landing point to
-  `~/Library/Application Support/com.avihu.ClaudeUsage/live-state.json`.
+  `~/Library/Application Support/io.github.avihut.AgentUsage/live-state.json`.
 - FROZEN, additive-only. Golden fixture
   `Tests/UsageCoreTests/Fixtures/digest/live-state-v1.json` is decoded
   by BOTH LiveStateTests (Swift) and tui/src/digest.rs serde tests.
@@ -342,7 +342,7 @@ gives each stack band its own density glyph.
 - status.rs: --status tmux line.
 
 ### App-side reference code (READ these to copy presentation)
-- `Sources/ClaudeUsage/Panel/HeatmapView.swift` — 7D stacked bars,
+- `Sources/AgentUsage/Panel/HeatmapView.swift` — 7D stacked bars,
   30D calendar, All grid, the period picker (@AppStorage
   "activityPeriod", default .week), Tokens/Cost toggle, and THE DAY
   DRILL (item 15's model — mirror its non-ring presentation).

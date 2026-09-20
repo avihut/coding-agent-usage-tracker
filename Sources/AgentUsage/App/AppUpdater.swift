@@ -51,7 +51,7 @@ final class AppUpdater {
         // the aside bundle is only needed until its relaunch succeeds.
         let parent = Bundle.main.bundleURL.deletingLastPathComponent()
         if let entries = try? FileManager.default.contentsOfDirectory(atPath: parent.path) {
-            for entry in entries where entry.hasPrefix(".ClaudeUsage-previous-") {
+            for entry in entries where entry.hasPrefix(".AgentUsage-previous-") {
                 try? FileManager.default.removeItem(at: parent.appending(path: entry))
             }
         }
@@ -145,7 +145,7 @@ final class AppUpdater {
         defer { session.finishTasksAndInvalidate() }
 
         let work = FileManager.default.temporaryDirectory
-            .appending(path: "ClaudeUsage-update-\(ProcessInfo.processInfo.processIdentifier)")
+            .appending(path: "AgentUsage-update-\(ProcessInfo.processInfo.processIdentifier)")
         try? FileManager.default.removeItem(at: work)
         try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: work) }
@@ -172,7 +172,7 @@ final class AppUpdater {
         // the signature intact — the same reason dist.sh packs with it.
         guard await run("/usr/bin/ditto", ["-x", "-k", archive.path, work.path]) == 0
         else { throw UpdateError.unpack }
-        let unpacked = work.appending(path: "ClaudeUsage.app")
+        let unpacked = work.appending(path: "AgentUsage.app")
         guard FileManager.default.fileExists(atPath: unpacked.path) else {
             throw UpdateError.unpack
         }
@@ -205,7 +205,7 @@ final class AppUpdater {
             throw UpdateError.notWritable(parent.path)
         }
         let staging = parent.appending(
-            path: ".ClaudeUsage-staged-\(ProcessInfo.processInfo.processIdentifier).app")
+            path: ".AgentUsage-staged-\(ProcessInfo.processInfo.processIdentifier).app")
         try? FileManager.default.removeItem(at: staging)
         do {
             try FileManager.default.copyItem(at: unpacked, to: staging)
@@ -220,7 +220,7 @@ final class AppUpdater {
     nonisolated private static func swapBundle(with staging: URL, bundleURL: URL) throws {
         let fm = FileManager.default
         let aside = staging.deletingLastPathComponent().appending(
-            path: ".ClaudeUsage-previous-\(ProcessInfo.processInfo.processIdentifier).app")
+            path: ".AgentUsage-previous-\(ProcessInfo.processInfo.processIdentifier).app")
         try? fm.removeItem(at: aside)
         do {
             try fm.moveItem(at: bundleURL, to: aside)
@@ -244,7 +244,7 @@ final class AppUpdater {
     nonisolated private static func kickstartDaemon() async {
         _ = await run(
             "/bin/launchctl",
-            ["kickstart", "-k", "gui/\(getuid())/com.avihu.usaged"])
+            ["kickstart", "-k", "gui/\(getuid())/io.github.avihut.usaged"])
     }
 
     /// The classic self-relaunch: a detached shell outlives this process,

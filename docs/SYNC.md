@@ -132,7 +132,7 @@ Notes:
 ## Transport plan (membership-gated)
 
 `CKSyncEngine` (macOS 14+; we target 15) against the private database,
-container `iCloud.com.avihu.ClaudeUsage`:
+container `iCloud.io.github.avihut.AgentUsage`:
 
 - Engine state (`CKSyncEngine.State.Serialization`) persists in the
   provider-scoped Application Support directory beside the activity cache.

@@ -58,23 +58,25 @@ run = [
     # `open` on a running bundle ID only activates the old process — kill it
     # so the freshly built binary is what actually launches, and wait for it
     # to actually exit or `open` races the teardown and fails with -600.
-    "pkill -x ClaudeUsage || true",
-    "for i in $(seq 1 30); do pgrep -x ClaudeUsage >/dev/null || break; sleep 0.1; done",
-    "open ClaudeUsage.app",
+    # ClaudeUsage: what the process was called through 0.101.0 — the first
+    # `mise run app` after the rename has that one to replace.
+    "pkill -x AgentUsage || pkill -x ClaudeUsage || true",
+    "for i in $(seq 1 30); do pgrep -x AgentUsage >/dev/null || pgrep -x ClaudeUsage >/dev/null || break; sleep 0.1; done",
+    "open AgentUsage.app",
 ]
 
 [tasks.hatch]
 description = "Relaunch the app with launch-hatch args (e.g. mise run hatch -- --sessions)"
 run = [
     "scripts/bundle.sh",
-    "pkill -x ClaudeUsage || true",
-    "for i in $(seq 1 30); do pgrep -x ClaudeUsage >/dev/null || break; sleep 0.1; done",
+    "pkill -x AgentUsage || true",
+    "for i in $(seq 1 30); do pgrep -x AgentUsage >/dev/null || break; sleep 0.1; done",
     # mise appends the task's arguments to this, its last command.
-    "open ClaudeUsage.app --args",
+    "open AgentUsage.app --args",
 ]
 
 [tasks.bundle]
-description = "Assemble + sign ClaudeUsage.app without launching (arg: release|debug)"
+description = "Assemble + sign AgentUsage.app without launching (arg: release|debug)"
 run = "scripts/bundle.sh"
 
 [tasks.identity]
@@ -99,7 +101,7 @@ description = "Render the app icon to .build/icon/AppIcon.icns (cached until scr
 run = "scripts/icon.sh"
 
 [tasks.axdump]
-description = "Dump the app's AX tree with frames (arg: pid, default newest ClaudeUsage)"
+description = "Dump the app's AX tree with frames (arg: pid, default newest AgentUsage)"
 run = "swift scripts/axdump.swift"
 
 [tasks.axpress]
@@ -151,7 +153,7 @@ description = "Strict gate: build every target and the tests with warnings as er
 run = "scripts/no-warnings.sh env -u UPDATE_GOLDENS -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_COMMON_DIR -u GIT_PREFIX swift test --scratch-path .build/strict -Xswiftc -warnings-as-errors"
 
 [tasks.release-build]
-description = "Build every product in the release configuration (the merge gate's deep ring; what bundle.sh builds, without touching ClaudeUsage.app)"
+description = "Build every product in the release configuration (the merge gate's deep ring; what bundle.sh builds, without touching AgentUsage.app)"
 # The strict scratch path again, not .build: the flag would otherwise
 # invalidate the release cache bundle.sh and dist.sh build into.
 run = "scripts/no-warnings.sh swift build -c release --scratch-path .build/strict -Xswiftc -warnings-as-errors"

@@ -88,7 +88,7 @@ enum DeepQuerySessions {
 
     /// pricing.json's home: vendor-level, shared by every profile.
     private static func providerDirectory(providerID: String) -> URL {
-        StorageScope.providerDirectory(bundleID: "com.avihu.ClaudeUsage", providerID: providerID)
+        StorageScope.providerDirectory(bundleID: AppIdentity.bundleID, providerID: providerID)
     }
 
     /// The same disk-cached LiteLLM table the legacy dump used, bundled

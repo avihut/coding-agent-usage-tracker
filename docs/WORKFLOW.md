@@ -82,7 +82,7 @@ showing work.
   limbo. `source_worktree: clean` stays; rings run in the SOURCE worktree,
   `glob` skips a toolchain the merge never touched, `--skip-tag deep` drops
   the release build (deliberately NOT `mise run bundle`: bundle.sh replaces
-  `ClaudeUsage.app`, possibly the live install's). THE DIGEST FREEZE is
+  `AgentUsage.app`, possibly the live install's). THE DIGEST FREEZE is
   the one check only a merge can make: the golden is regenerated in place,
   so on any branch code and golden agree and a breaking change +
   `UPDATE_GOLDENS=1` passes both suites — `scripts/digest-baseline.sh`
@@ -249,6 +249,38 @@ showing work.
 
 ## The app icon
 
+- THE RENAME (0.102.0, 2026-09-20, maintainer-directed: "the app name should
+  be changed to AgentUsage […] any change that needs to be done to support
+  it needs to happen"): the app was `ClaudeUsage.app` / `com.avihu
+  .ClaudeUsage` / launch agent `com.avihu.usaged` / package and User-Agent
+  `claude-usage-menubar`; it is `AgentUsage.app` / `io.github.avihut
+  .AgentUsage` / `io.github.avihut.usaged` / `coding-agent-usage-tracker`
+  (the repository's name). `AppIdentity` holds all of them — `bundleID`,
+  `daemonLabel`, and the two `legacy…` constants that ONLY
+  `IdentityMigration` and `LaunchAgentInstaller.retireLegacy` may read; no
+  other literal of either id exists in Swift (the TUI has its one Rust
+  constant), and AppIdentityTests holds Info.plist to the same value. A
+  BUNDLE ID IS A DATA MIGRATION: `IdentityMigration` (core, Storage/) runs
+  FIRST in the app and in usaged — before `StorageMigration`, whose lock file
+  would create the new root, and before usaged's installer verbs, which read
+  the sticky `daemonAutoInstall` out of the very defaults being carried. Its
+  order is the design: retire the old agent → wait (bounded) for the old
+  engine's lease → MOVE the Application Support and Caches roots
+  (`rename(2)`; an entry the new root already holds is never overwritten,
+  the old copy stays) → carry defaults keys the new domain lacks (AppKit's
+  status-item positions ride along) → marker LAST, so an interrupted run
+  retries. The app first asks a running copy of the old bundle id to quit
+  (the one AppKit piece). Readers — `usage-cli`, the TUI — never migrate.
+  NOT carried, because they belong to a bundle id: the login item
+  (`SMAppService` — switch it on again) and whatever a menu bar manager
+  remembered about the old status item (the v0.97.2 lesson, this time
+  unavoidable). `bundle.sh` deletes a stale `ClaudeUsage.app` beside the new
+  bundle: it is still a launchable app under the old id, and one launch of
+  it re-creates the old directories. Goldens and captured fixtures keep
+  their `ClaudeUsage-<version>.zip` asset names — they are records of real
+  releases, not names of this app. `SignerPin` will refuse a one-click
+  update ACROSS the rename (the designated requirement names the old
+  identifier) — moot while releases carry no binary, and correct anyway.
 - OPEN SOURCE (2026-09-20, after the first outside PR): MIT `LICENSE`,
   `CONTRIBUTING.md`, `SECURITY.md` (private vulnerability reporting),
   Dependabot with a 7-day cooldown. WORKFLOWS are hardened on purpose —

@@ -121,7 +121,7 @@ per-harness geometry of the bar is in [HARNESSES.md](HARNESSES.md).
   it. Tearing it down and creating it afresh (0.97.0's rebuild) handed the
   bar a NEW item, which Bartender 6 filed under its new-item policy —
   hidden — and remembered; System Events (`menu bar item of menu bar 2 of
-  process "ClaudeUsage"`) still listed the item, at Bartender's hidden x.
+  process "AgentUsage"`) still listed the item, at Bartender's hidden x.
   Every created item gets `isVisible = true` (a persisted ⌘-drag removal
   must not keep a re-shown account off the bar). ⌘, (v0.97.2): the SwiftUI
   `Settings { EmptyView() }` scene bound ⌘, to an EMPTY window — it is
@@ -241,12 +241,12 @@ per-harness geometry of the bar is in [HARNESSES.md](HARNESSES.md).
   trailing half-column while its mark labels spanned the row) and
   mis-measure wrapped text in custom rows (the token-class grid overlapped
   its neighbors). The panel's ⋯ menu and the General pane share
-  `SettingsBindings` so both surfaces stay in lockstep. `ClaudeUsage
+  `SettingsBindings` so both surfaces stay in lockstep. `AgentUsage
   --settings` opens the window at launch and `--panel` opens the main
   panel — the verification hatches, since menus and the status item can't
   be scripted (`mise run axdump` / `mise run axpress` — the harness's eyes
   and hands — dump frames and press controls for layout checks; both
-  default to the newest running ClaudeUsage). Popover windows never
+  default to the newest running AgentUsage). Popover windows never
   appear in AXWindows (both tools sweep the app element's roleless
   children to catch them), and any real user click dismisses the panel —
   don't AX-verify it while the user is mousing.

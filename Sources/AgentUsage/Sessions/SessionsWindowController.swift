@@ -46,7 +46,7 @@ final class SessionsWindowController {
             window.isReleasedWhenClosed = false
             window.center()
             // After centering so a remembered size/position wins over it.
-            window.setFrameAutosaveName("ClaudeUsageSessions")
+            window.setFrameAutosaveName("AgentUsageSessions")
             self.window = window
         }
         if let sessionID { navigator.requested = sessionID }

@@ -1,4 +1,4 @@
-# Agent Usage (claude-usage-menubar)
+# Agent Usage
 
 A macOS menu bar app that meters your coding agents' plan limits — Claude Code's
 session, weekly and per-model weekly limits (mirroring Settings → Usage in the
@@ -116,7 +116,7 @@ of Anthropic's subscription-auth policy:
 - It consumes zero model capacity and makes no inference calls.
 - It is strictly read-only over my own account's usage state.
 - It has exactly one beneficiary: me, on my own machine.
-- It sends its own honest `User-Agent` (`claude-usage-menubar/<version>`), never
+- It sends its own honest `User-Agent` (`coding-agent-usage-tracker/<version>`), never
   impersonating Claude Code or the Claude app.
 
 If this app ever grows a feature that calls a model, it switches to API-key auth
@@ -461,7 +461,7 @@ v0.66.0.
 
 ## Install on another Mac
 
-The easy path: grab `ClaudeUsage-<version>.zip` from the [releases
+The easy path: grab `AgentUsage-<version>.zip` from the [releases
 page](https://github.com/avihut/coding-agent-usage-tracker/releases) —
 `mise run publish` puts one there per tagged version. From then on the app
 updates itself: it notices the next release and installs it in one click.
@@ -472,13 +472,13 @@ To build the artifact locally instead:
 mise run dist   # universal (arm64 + x86_64), signed with a timestamp, zipped
 ```
 
-That writes `dist/ClaudeUsage-<version>.zip` and verifies the signature survives
+That writes `dist/AgentUsage-<version>.zip` and verifies the signature survives
 the round trip. On the target Mac:
 
 ```sh
-ditto -x -k ClaudeUsage-<version>.zip /Applications
-xattr -dr com.apple.quarantine /Applications/ClaudeUsage.app
-open /Applications/ClaudeUsage.app
+ditto -x -k AgentUsage-<version>.zip /Applications
+xattr -dr com.apple.quarantine /Applications/AgentUsage.app
+open /Applications/AgentUsage.app
 ```
 
 The `xattr` step only matters when the transfer set the quarantine bit — AirDrop,

@@ -2,7 +2,7 @@
 // Presses (or selects) the first element matching a title/description/value —
 // buttons, tab items, and sidebar rows alike. The verification harness's
 // hands, next to axdump's eyes. Usage: axpress.swift [pid] <target> — pid
-// defaults to the newest running ClaudeUsage.
+// defaults to the newest running AgentUsage.
 
 import AppKit
 import ApplicationServices
@@ -18,12 +18,12 @@ guard let target = args.first else {
 func resolvePid() -> pid_t {
     if let explicitPid { return explicitPid }
     let candidates = NSWorkspace.shared.runningApplications.filter {
-        $0.bundleIdentifier == "com.avihu.ClaudeUsage" || $0.localizedName == "ClaudeUsage"
+        $0.bundleIdentifier == "io.github.avihut.AgentUsage" || $0.localizedName == "AgentUsage"
     }
     guard let newest = candidates.max(by: {
         ($0.launchDate ?? .distantPast) < ($1.launchDate ?? .distantPast)
     }) else {
-        FileHandle.standardError.write(Data("no running ClaudeUsage and no pid given\n".utf8))
+        FileHandle.standardError.write(Data("no running AgentUsage and no pid given\n".utf8))
         exit(2)
     }
     return newest.processIdentifier

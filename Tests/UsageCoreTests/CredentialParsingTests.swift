@@ -167,7 +167,7 @@ struct KeychainCredentialSourceTests {
     /// consent UI (consent is per-item).
     @Test("absent service maps to notFound, promptless")
     func absentService() {
-        let source = KeychainCredentialSource(service: "ClaudeUsage-test-no-such-item")
+        let source = KeychainCredentialSource(service: "AgentUsage-test-no-such-item")
         do {
             _ = try source.readCredential()
             Issue.record("expected a throw")

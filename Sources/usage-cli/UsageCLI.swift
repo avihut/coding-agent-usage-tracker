@@ -136,7 +136,7 @@ struct UsageCLI {
     /// app will publish it.
     private static func runSyncDigest(providerID: String?) {
         let chosen = DeepQuery.resolveProviderID(flag: providerID)
-        let bundleID = "com.avihu.ClaudeUsage"
+        let bundleID = AppIdentity.bundleID
         guard chosen == "claude" else {
             die("sync-digest is not wired for '\(chosen)' in the CLI yet", code: 11)
         }
@@ -206,7 +206,7 @@ struct UsageCLI {
             guard let binary = LaunchAgentInstaller.embeddedBinary(appOverride: appOverride)
             else {
                 die(
-                    "cannot find ClaudeUsage.app (searched LaunchServices) — pass --app <path-to-ClaudeUsage.app>",
+                    "cannot find AgentUsage.app (searched LaunchServices) — pass --app <path-to-AgentUsage.app>",
                     code: 14)
             }
             LaunchAgentInstaller.setAutoInstall(true, defaults: .standard)
@@ -243,7 +243,7 @@ struct UsageCLI {
             if !LaunchAgentInstaller.autoInstallAllowed(defaults: .standard) {
                 note("auto-install: off (sticky — `daemon install` re-arms it)")
             }
-            let digest = LiveState.fileURL(bundleID: "com.avihu.ClaudeUsage")
+            let digest = LiveState.fileURL(bundleID: AppIdentity.bundleID)
             if let attributes = try? FileManager.default.attributesOfItem(atPath: digest.path),
                let modified = attributes[.modificationDate] as? Date {
                 let age = Int(Date().timeIntervalSince(modified))
@@ -251,7 +251,7 @@ struct UsageCLI {
             } else {
                 note("digest: absent")
             }
-            let socket = EngineHostBroker.socketURL(bundleID: "com.avihu.ClaudeUsage")
+            let socket = EngineHostBroker.socketURL(bundleID: AppIdentity.bundleID)
             if let reply = ControlSocket.send(.status, to: socket) {
                 note("socket: \(reply.message ?? "ok")")
             } else {
@@ -267,7 +267,7 @@ struct UsageCLI {
     /// Prints live-state.json verbatim — no re-encoding, so what you pipe
     /// into jq is byte-for-byte what the engine's publisher wrote.
     private static func runState() {
-        let fileURL = LiveState.fileURL(bundleID: "com.avihu.ClaudeUsage")
+        let fileURL = LiveState.fileURL(bundleID: AppIdentity.bundleID)
         guard let data = FileManager.default.contents(atPath: fileURL.path) else {
             die(
                 "no live-state digest at \(fileURL.path) — launch the app (or usaged) so the engine publishes one",
@@ -323,7 +323,7 @@ struct UsageCLI {
         }
 
         let fileURL = digestPath.map { URL(fileURLWithPath: $0) }
-            ?? LiveState.fileURL(bundleID: "com.avihu.ClaudeUsage")
+            ?? LiveState.fileURL(bundleID: AppIdentity.bundleID)
         let digestData = FileManager.default.contents(atPath: fileURL.path)
 
         if DeepQuery.nouns.contains(noun) {
@@ -391,7 +391,7 @@ struct UsageCLI {
         default:
             die("usage: usage-cli notices dismiss <id> | --all", code: 19)
         }
-        let socket = EngineHostBroker.socketURL(bundleID: "com.avihu.ClaudeUsage")
+        let socket = EngineHostBroker.socketURL(bundleID: AppIdentity.bundleID)
         guard let reply = ControlSocket.send(command, to: socket) else {
             die("no engine listening on \(socket.path) — launch the app (or usaged)", code: 13)
         }

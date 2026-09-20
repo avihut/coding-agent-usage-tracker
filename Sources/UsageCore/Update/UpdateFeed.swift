@@ -118,7 +118,7 @@ public struct GitHubRelease: Sendable, Equatable {
     /// pipeline publishes when present, else any zip, else nothing (the UI
     /// then links the release page instead).
     public var updateAsset: Asset? {
-        assets.first { $0.name == "ClaudeUsage-\(version).zip" }
+        assets.first { $0.name == "AgentUsage-\(version).zip" }
             ?? assets.first { $0.name.hasSuffix(".zip") }
     }
 

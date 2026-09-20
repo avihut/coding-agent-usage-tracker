@@ -181,12 +181,12 @@ design above still holds.
 
 ## Dev loop on this machine
 
-- The live install already runs from THIS worktree's `ClaudeUsage.app`, and
+- The live install already runs from THIS worktree's `AgentUsage.app`, and
   the launch agent points here. Every `mise run app` / `hatch` / `bundle`
   replaces the live app.
 - `ensure` only restarts the daemon when the VERSION changes, and the version
   is frozen until M5 — so after every rebundle that should reach the daemon,
-  `launchctl kickstart -k gui/$(id -u)/com.avihu.usaged`, or the daemon keeps
+  `launchctl kickstart -k gui/$(id -u)/io.github.avihut.usaged`, or the daemon keeps
   publishing from the old code while the app is debugged against it.
 - A `--snapshot` run kills the live app and quits; relaunch it afterwards.
 - Baselines live in `.build/snapshots/` (git-ignored, survives sessions):

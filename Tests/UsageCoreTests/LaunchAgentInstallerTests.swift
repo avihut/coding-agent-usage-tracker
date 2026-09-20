@@ -7,7 +7,7 @@ import Testing
 /// The imperative shell (launchctl, plist writes) stays untested like the
 /// rest of the process-spawning seams; everything decision-shaped is here.
 struct LaunchAgentInstallerTests {
-    private let binary = URL(fileURLWithPath: "/Applications/ClaudeUsage.app/Contents/MacOS/usaged")
+    private let binary = URL(fileURLWithPath: "/Applications/AgentUsage.app/Contents/MacOS/usaged")
 
     // MARK: - Plist shape
 
@@ -16,7 +16,7 @@ struct LaunchAgentInstallerTests {
         let plist = try #require(
             try PropertyListSerialization.propertyList(from: data, format: nil)
                 as? [String: Any])
-        #expect(plist["Label"] as? String == "com.avihu.usaged")
+        #expect(plist["Label"] as? String == AppIdentity.daemonLabel)
         #expect(plist["ProgramArguments"] as? [String] == [binary.path])
         #expect(plist["RunAtLoad"] as? Bool == true)
         #expect(plist["KeepAlive"] as? Bool == true)

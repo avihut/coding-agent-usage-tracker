@@ -6,7 +6,7 @@ import Testing
 /// `prices`/`price` — exercised through the injectable
 /// `DeepQuery.pricesVerb(parsed:providerID:cacheDirectory:)` overload, never
 /// the dispatcher-facing one: that one resolves this MACHINE'S real
-/// `~/Library/Application Support/com.avihu.ClaudeUsage/claude/pricing.json`
+/// `~/Library/Application Support/io.github.avihut.AgentUsage/claude/pricing.json`
 /// (which exists and holds real data on a dev box that has run the app —
 /// verified present on this one), so hitting it from a test would read live
 /// user data and make the suite non-deterministic. Every test here points at

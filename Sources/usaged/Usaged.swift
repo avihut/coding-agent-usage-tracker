@@ -18,13 +18,13 @@ import UsageCore
 @main
 @MainActor
 struct Usaged {
-    static let bundleID = "com.avihu.ClaudeUsage"
+    static let bundleID = AppIdentity.bundleID
 
     static func main() {
-        // Embedded at Contents/MacOS, usaged inherits ClaudeUsage.app's
+        // Embedded at Contents/MacOS, usaged inherits AgentUsage.app's
         // bundle identity — and suiteName == your own bundle id is
         // Foundation-nonsense (returns nil). There, `.standard` IS the
-        // com.avihu.ClaudeUsage domain. Run bare (dev builds), the suite
+        // io.github.avihut.AgentUsage domain. Run bare (dev builds), the suite
         // reaches the same domain explicitly.
         let defaults: UserDefaults
         if Bundle.main.bundleIdentifier == bundleID {
@@ -34,6 +34,10 @@ struct Usaged {
         } else {
             fatalError("cannot open defaults suite \(bundleID)")
         }
+        // An install that was ClaudeUsage carries its data and settings over
+        // first — ahead of the installer verbs too, which read the sticky
+        // `daemonAutoInstall` opt-out out of the very defaults being carried.
+        IdentityMigration.standard(defaults: defaults)
         // With an argument, usaged is its own installer (spec §10
         // re-amendment: the UI entry points auto-install by asking the
         // embedded binary to register itself). No arguments — launchd's

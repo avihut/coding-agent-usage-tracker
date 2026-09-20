@@ -60,7 +60,7 @@ public final class ControlSocket: @unchecked Sendable {
     public let socketURL: URL
     private let handler: Handler
     private let queue = DispatchQueue(
-        label: "com.avihu.ClaudeUsage.control-socket", qos: .utility)
+        label: "\(AppIdentity.bundleID).control-socket", qos: .utility)
     private var listenFD: Int32 = -1
 
     public init(socketURL: URL, handler: @escaping Handler) {

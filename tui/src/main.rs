@@ -33,18 +33,18 @@ fn support_root() -> PathBuf {
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_default();
-    home.join("Library/Application Support/com.avihu.ClaudeUsage")
+    home.join("Library/Application Support/io.github.avihut.AgentUsage")
 }
 
-/// The usaged binary embedded in ClaudeUsage.app: the standard install
+/// The usaged binary embedded in AgentUsage.app: the standard install
 /// spots first, then Spotlight's LaunchServices view for unusual homes.
 fn find_usaged() -> Option<PathBuf> {
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_default();
     let candidates = [
-        home.join("Applications/ClaudeUsage.app"),
-        PathBuf::from("/Applications/ClaudeUsage.app"),
+        home.join("Applications/AgentUsage.app"),
+        PathBuf::from("/Applications/AgentUsage.app"),
     ];
     for app in candidates {
         let binary = app.join("Contents/MacOS/usaged");
@@ -53,7 +53,7 @@ fn find_usaged() -> Option<PathBuf> {
         }
     }
     let found = std::process::Command::new("/usr/bin/mdfind")
-        .arg("kMDItemCFBundleIdentifier == 'com.avihu.ClaudeUsage'")
+        .arg("kMDItemCFBundleIdentifier == 'io.github.avihut.AgentUsage'")
         .output()
         .ok()?;
     String::from_utf8_lossy(&found.stdout)
@@ -72,7 +72,8 @@ fn ensure_engine(reply_tx: &mpsc::Sender<String>) {
     std::thread::spawn(move || {
         let reply = match find_usaged() {
             None => {
-                "no engine and no ClaudeUsage.app on this Mac — install the app once".to_owned()
+                "no engine and no AgentUsage.app on this Mac — build the app once (README: Install)"
+                    .to_owned()
             }
             Some(binary) => match std::process::Command::new(&binary).arg("ensure").output() {
                 Ok(output) => String::from_utf8_lossy(&output.stderr)

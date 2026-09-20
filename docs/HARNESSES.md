@@ -219,8 +219,9 @@ provider also needs a spec §10 amendment for its hosts and local trees.
   `--snapshot` writes `accounts-cards.png`. THE NAME: `AppIdentity
   .displayName` ("Agent Usage", user-directed — it meters every coding
   agent) is what window titles, the panel footer, the Quit item and
-  `CFBundleName` say; the wire name, bundle id and bundle file name are
-  identities and did not move.
+  `CFBundleName` say. In 0.101.0 the wire name, bundle id and bundle file
+  name stayed behind as identities; 0.102.0 moved them too
+  (`docs/WORKFLOW.md`, "The rename").
 
 ## Brand accent is provider data
 

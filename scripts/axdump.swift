@@ -3,7 +3,7 @@
 // numeric truth for layout bugs (overflow past the window edge, overlapping
 // rows) that text-only dumps can't see. The verification harness's eyes,
 // next to axpress's hands. Usage: axdump.swift [pid] — defaults to the
-// newest running ClaudeUsage.
+// newest running AgentUsage.
 
 import AppKit
 import ApplicationServices
@@ -17,12 +17,12 @@ func resolvePid() -> pid_t {
         return pid
     }
     let candidates = NSWorkspace.shared.runningApplications.filter {
-        $0.bundleIdentifier == "com.avihu.ClaudeUsage" || $0.localizedName == "ClaudeUsage"
+        $0.bundleIdentifier == "io.github.avihut.AgentUsage" || $0.localizedName == "AgentUsage"
     }
     guard let newest = candidates.max(by: {
         ($0.launchDate ?? .distantPast) < ($1.launchDate ?? .distantPast)
     }) else {
-        FileHandle.standardError.write(Data("no running ClaudeUsage and no pid given\n".utf8))
+        FileHandle.standardError.write(Data("no running AgentUsage and no pid given\n".utf8))
         exit(2)
     }
     return newest.processIdentifier
