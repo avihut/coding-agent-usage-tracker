@@ -38,7 +38,7 @@ final class SettingsWindowController {
             window.isReleasedWhenClosed = false
             window.center()
             // After centering so a remembered size/position wins over it.
-            window.setFrameAutosaveName("ClaudeUsageSettings")
+            window.setFrameAutosaveName("AgentUsageSettings")
             self.window = window
         }
         // Dock tile + Cmd+Tab entry ride window visibility; the policy must

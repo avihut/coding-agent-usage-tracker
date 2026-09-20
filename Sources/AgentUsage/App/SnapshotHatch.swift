@@ -5,7 +5,7 @@ import UsageCore
 /// The `--snapshot <dir>` hatch: renders the surfaces a live popover can't be
 /// caught on (any real click dismisses the panel, and a user at the machine is
 /// always clicking) headlessly to PNGs, then quits. Split out of
-/// `ClaudeUsageApp.swift` at the house rule when harness cases landed.
+/// `AgentUsageApp.swift` at the house rule when harness cases landed.
 ///
 /// The `statusitem-*.png` set is the renderer's regression test: fixed models,
 /// pinned clock, both grounds, `cmp`-ed against the previous release's files,

@@ -11,7 +11,7 @@ extension DeepQuery {
     /// `directory` is a test seam ONLY — `nil` (every real call site) makes
     /// this resolve the provider's Application Support directory exactly as
     /// `UsageEngine` does at its own `WindowLedger` call site
-    /// (`Bundle.main.bundleIdentifier ?? "com.avihu.ClaudeUsage"`, since a
+    /// (`Bundle.main.bundleIdentifier ?? AppIdentity.bundleID`, since a
     /// bare CLI process has no bundle identity of its own); a test passes a
     /// synthetic temp directory it created and owns, never the real support
     /// path. Default parameter keeps `DeepQuery.run`'s call site compiling

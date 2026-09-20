@@ -2,7 +2,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "claude-usage-menubar",
+    name: "coding-agent-usage-tracker",
     platforms: [.macOS(.v15)],
     targets: [
         .target(name: "UsageCore"),
@@ -11,7 +11,7 @@ let package = Package(
             dependencies: ["UsageCore"]
         ),
         .executableTarget(
-            name: "ClaudeUsage",
+            name: "AgentUsage",
             dependencies: ["UsageCore"]
         ),
         .executableTarget(

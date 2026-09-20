@@ -2,8 +2,8 @@ import CoreServices
 import Foundation
 
 /// The one sanctioned launch-agent registration (spec §10): writes and
-/// bootstraps `com.avihu.usaged`, pointing launchd at the usaged binary
-/// embedded in ClaudeUsage.app.
+/// bootstraps `io.github.avihut.usaged`, pointing launchd at the usaged binary
+/// embedded in AgentUsage.app.
 ///
 /// Since the 2026-08-16 re-amendment, installation is automatic for
 /// convenience: the app converges the agent at launch and the TUI asks
@@ -13,7 +13,7 @@ import Foundation
 /// policy is only ever flipped by an explicit user action (the CLI verbs,
 /// the Settings toggle).
 public enum LaunchAgentInstaller {
-    public static let label = "com.avihu.usaged"
+    public static let label = AppIdentity.daemonLabel
     /// Sticky opt-out. Absent means allowed: auto-install is the default,
     /// and only a deliberate uninstall writes `false`.
     public static let autoInstallKey = "daemonAutoInstall"
@@ -83,6 +83,21 @@ public enum LaunchAgentInstaller {
         try? FileManager.default.removeItem(at: plistURL)
     }
 
+    /// The agent under the label it carried through 0.101.0. Booted out and
+    /// its plist removed so no old engine keeps writing to the old
+    /// directories — `IdentityMigration`'s first step. NOT an uninstall: the
+    /// sticky opt-out is untouched, and `ensure` installs the agent under
+    /// today's label by the same policy as ever. True when there was one.
+    @discardableResult
+    public static func retireLegacy(runner: CommandRunner = launchctl) -> Bool {
+        let legacy = FileManager.default.homeDirectoryForCurrentUser
+            .appending(path: "Library/LaunchAgents/\(AppIdentity.legacyDaemonLabel).plist")
+        let existed = FileManager.default.fileExists(atPath: legacy.path)
+        _ = runner(["bootout", "gui/\(getuid())/\(AppIdentity.legacyDaemonLabel)"])
+        if existed { try? FileManager.default.removeItem(at: legacy) }
+        return existed
+    }
+
     public static func isInstalled() -> Bool {
         FileManager.default.fileExists(atPath: plistURL.path)
     }
@@ -128,7 +143,7 @@ public enum LaunchAgentInstaller {
         public var description: String {
             switch self {
             case .disabled: "auto-install disabled (daemonAutoInstall=false)"
-            case .binaryNotFound: "no usaged binary found — is ClaudeUsage.app installed?"
+            case .binaryNotFound: "no usaged binary found — is AgentUsage.app installed?"
             case .installed(let path): "installed → \(path)"
             case .started: "started (was installed but not loaded)"
             case .upgraded: "restarted into the current version"
@@ -181,7 +196,7 @@ public enum LaunchAgentInstaller {
     public static func ensure(
         binary: URL?,
         defaults: UserDefaults,
-        bundleID: String = "com.avihu.ClaudeUsage",
+        bundleID: String = AppIdentity.bundleID,
         runner: CommandRunner = launchctl
     ) -> EnsureOutcome {
         let resolved = binary ?? embeddedBinary()
@@ -227,7 +242,7 @@ public enum LaunchAgentInstaller {
             return FileManager.default.fileExists(atPath: url.path) ? url : nil
         }
         guard let apps = LSCopyApplicationURLsForBundleIdentifier(
-            "com.avihu.ClaudeUsage" as CFString, nil)?.takeRetainedValue() as? [URL]
+            AppIdentity.bundleID as CFString, nil)?.takeRetainedValue() as? [URL]
         else { return nil }
         for app in apps {
             let url = app.appending(path: "Contents/MacOS/usaged")

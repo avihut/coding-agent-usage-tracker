@@ -24,7 +24,7 @@ final class NetworkMonitor {
                 self.wasSatisfied = satisfied
             }
         }
-        monitor.start(queue: DispatchQueue(label: "com.avihu.ClaudeUsage.network-monitor"))
+        monitor.start(queue: DispatchQueue(label: "\(AppIdentity.bundleID).network-monitor"))
         pathMonitor = monitor
     }
 

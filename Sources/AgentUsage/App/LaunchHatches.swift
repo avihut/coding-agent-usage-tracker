@@ -13,7 +13,7 @@ extension AppDelegate {
     /// meters rewritten and the third dropped — the absent scoped bar is
     /// exactly the case a one-account Mac can't otherwise produce.
     static func installFakeProfile(into registry: ProviderRegistry) {
-        let url = LiveState.fileURL(bundleID: Bundle.main.bundleIdentifier ?? "com.avihu.ClaudeUsage")
+        let url = LiveState.fileURL(bundleID: Bundle.main.bundleIdentifier ?? AppIdentity.bundleID)
         guard let data = try? Data(contentsOf: url),
               let live = try? LiveState.decoder().decode(LiveState.self, from: data)
         else { return }
@@ -65,7 +65,7 @@ extension AppDelegate {
             profile,
             store: UsageStore(
                 profile: profile, provider: registry.activeProvider,
-                bundleID: Bundle.main.bundleIdentifier ?? "com.avihu.ClaudeUsage", fixed: fake))
+                bundleID: Bundle.main.bundleIdentifier ?? AppIdentity.bundleID, fixed: fake))
     }
 
     /// Builds the `--fake-update` card: `current` renders the up-to-date
@@ -353,7 +353,7 @@ extension AppDelegate {
         let providers = registry.providers
         guard let provider = providers.first(where: { $0.id != providers[0].id }) else { return }
         let style = HarnessStyle(provider)
-        let bundleID = Bundle.main.bundleIdentifier ?? "com.avihu.ClaudeUsage"
+        let bundleID = Bundle.main.bundleIdentifier ?? AppIdentity.bundleID
         let live = (try? Data(contentsOf: LiveState.fileURL(bundleID: bundleID)))
             .flatMap { try? LiveState.decoder().decode(LiveState.self, from: $0) }
         let segments = [

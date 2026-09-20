@@ -42,6 +42,13 @@ custom_rules:
     regex: '^\s*(@\w+\s+)*import\s+(AppKit|SwiftUI|Cocoa)\b'
     message: "UsageCore, usaged and usage-cli import no UI framework — all logic stays headlessly testable (docs/ARCHITECTURE.md)."
     severity: error
+  bundle_id_literal:
+    name: "Bundle id literal"
+    included: "Sources/.*\\.swift"
+    excluded: "Sources/UsageCore/AppIdentity\\.swift"
+    regex: '"(com\.avihu|io\.github\.avihut)\.'
+    message: "The bundle id and the launch agent's label are spelled ONCE, in AppIdentity — every path on disk hangs off them, and the 0.102.0 rename had 25 literals to find (docs/WORKFLOW.md, The rename)."
+    severity: error
   native_keychain_call:
     name: "Native Keychain call"
     regex: '\bSecItem(CopyMatching|Add|Update|Delete)\b'

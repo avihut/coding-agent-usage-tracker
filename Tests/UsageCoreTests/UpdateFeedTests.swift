@@ -109,7 +109,7 @@ struct InstallKindTests {
         // Contained-layout worktree: .git is a FILE at the repo root. The
         // reported root is the NEAREST .git-bearing ancestor.
         let repo = root.appending(path: "repo")
-        let app = repo.appending(path: "main/ClaudeUsage.app")
+        let app = repo.appending(path: "main/AgentUsage.app")
         try FileManager.default.createDirectory(at: app, withIntermediateDirectories: true)
         try Data("gitdir: ../.git/worktrees/main".utf8)
             .write(to: repo.appending(path: ".git"))
@@ -121,7 +121,7 @@ struct InstallKindTests {
 
         // Plain clone: .git is a directory.
         let clone = root.appending(path: "clone")
-        let cloneApp = clone.appending(path: "ClaudeUsage.app")
+        let cloneApp = clone.appending(path: "AgentUsage.app")
         try FileManager.default.createDirectory(
             at: clone.appending(path: ".git"), withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: cloneApp, withIntermediateDirectories: true)
@@ -136,7 +136,7 @@ struct InstallKindTests {
     func standalone() throws {
         let root = try makeTree()
         defer { try? FileManager.default.removeItem(at: root) }
-        let app = root.appending(path: "Applications/ClaudeUsage.app")
+        let app = root.appending(path: "Applications/AgentUsage.app")
         try FileManager.default.createDirectory(at: app, withIntermediateDirectories: true)
         #expect(InstallKind.detect(bundleURL: app) == .standaloneApp)
     }
@@ -165,7 +165,7 @@ struct DistributionChannelTests {
     func releaseFlavor() throws {
         let root = try makeTree()
         defer { try? FileManager.default.removeItem(at: root) }
-        let app = root.appending(path: "Applications/ClaudeUsage.app")
+        let app = root.appending(path: "Applications/AgentUsage.app")
         try FileManager.default.createDirectory(at: app, withIntermediateDirectories: true)
 
         let channel = try #require(Distribution.channel(for: app) as? GitHubChannel)
@@ -181,7 +181,7 @@ struct DistributionChannelTests {
         let root = try makeTree()
         defer { try? FileManager.default.removeItem(at: root) }
         let repo = root.appending(path: "repo")
-        let app = repo.appending(path: "ClaudeUsage.app")
+        let app = repo.appending(path: "AgentUsage.app")
         try FileManager.default.createDirectory(
             at: repo.appending(path: ".git"), withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: app, withIntermediateDirectories: true)
@@ -236,7 +236,7 @@ struct DistributionChannelTests {
         let root = try makeTree()
         defer { try? FileManager.default.removeItem(at: root) }
         let repo = root.appending(path: "repo")
-        let app = repo.appending(path: "ClaudeUsage.app")
+        let app = repo.appending(path: "AgentUsage.app")
         try FileManager.default.createDirectory(
             at: repo.appending(path: ".git"), withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: app, withIntermediateDirectories: true)

@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Assembles ClaudeUsage.app from the SPM-built binary and signs it with the
+# Assembles AgentUsage.app from the SPM-built binary and signs it with the
 # machine-local identity sign.sh resolves (see that script). Always launch
 # the bundled app: a bare `swift run` binary has no Info.plist, so LSUIElement
 # wouldn't apply and a Dock icon appears.
@@ -8,12 +8,16 @@ set -euo pipefail
 ROOT="${0:A:h:h}"
 CONFIG="${1:-release}"
 
-swift build -c "$CONFIG" --product ClaudeUsage --package-path "$ROOT"
+swift build -c "$CONFIG" --product AgentUsage --package-path "$ROOT"
 swift build -c "$CONFIG" --product usaged --package-path "$ROOT"
 swift build -c "$CONFIG" --product usage-cli --package-path "$ROOT"
 
-APP="$ROOT/ClaudeUsage.app"
+APP="$ROOT/AgentUsage.app"
 rm -rf "$APP"
+# What this script built through 0.101.0. A stale copy is still a launchable
+# app under the OLD bundle id — a login item or Spotlight would start it, and
+# it would host the engine against the old directories.
+rm -rf "$ROOT/ClaudeUsage.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$ROOT/Support/Info.plist" "$APP/Contents/Info.plist"
 # AppIdentity.swift is the ONE version source (the release-bump sed path);
@@ -26,7 +30,7 @@ VERSION=$(sed -n 's/.*static let version = "\(.*\)".*/\1/p' \
     -c "Set :CFBundleShortVersionString $VERSION" \
     -c "Set :CFBundleVersion $VERSION" \
     "$APP/Contents/Info.plist"
-cp "$ROOT/.build/$CONFIG/ClaudeUsage" "$APP/Contents/MacOS/ClaudeUsage"
+cp "$ROOT/.build/$CONFIG/AgentUsage" "$APP/Contents/MacOS/AgentUsage"
 # The launchd engine rides inside the bundle so there is exactly one
 # installed copy; sign it before the outer bundle seals over it, with the
 # same identity as the app so launchd sees one consistent job.

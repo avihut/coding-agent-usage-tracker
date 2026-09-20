@@ -116,8 +116,8 @@ private struct MenuBarPreviewSurface: NSViewRepresentable {
 /// speaks text still gets the token; the account it was dragged from
 /// under a second type, so the drop lands on that account's cell.
 enum MenuBarElementDrag {
-    static let pasteboardType = NSPasteboard.PasteboardType("com.avihu.ClaudeUsage.menubar-element")
-    static let profileType = NSPasteboard.PasteboardType("com.avihu.ClaudeUsage.menubar-element-profile")
+    static let pasteboardType = NSPasteboard.PasteboardType("\(AppIdentity.bundleID).menubar-element")
+    static let profileType = NSPasteboard.PasteboardType("\(AppIdentity.bundleID).menubar-element-profile")
 
     /// The element a pasteboard carries, if it carries one of ours.
     static func element(on pasteboard: NSPasteboard) -> MenuBarElement? {

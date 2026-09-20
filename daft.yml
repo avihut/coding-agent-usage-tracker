@@ -119,7 +119,7 @@ hooks:
           - Sources/**
           - Package.swift
         # Deliberately NOT `mise run bundle`: bundle.sh replaces
-        # ClaudeUsage.app in its worktree, and that may be the very bundle
+        # AgentUsage.app in its worktree, and that may be the very bundle
         # the running app and the usaged launch agent point at.
         run: mise run release-build
 

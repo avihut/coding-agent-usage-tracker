@@ -496,7 +496,7 @@ Non-negotiable; flag rather than work around:
 - No sandbox entitlement, and no request for entitlements we don't need.
 - Don't install or register anything (login items, launch agents) without asking me
   first in the session. Amendment 2026-08-16 (user-directed): the
-  `com.avihu.usaged` launch agent below is the one standing exception —
+  `io.github.avihut.usaged` launch agent below is the one standing exception —
   the UI entry points install it automatically when absent, under the
   sticky opt-out described there.
 - Engine host + consumer interfaces (amendment 2026-08-16, v0.66.0;
@@ -539,7 +539,7 @@ Non-negotiable; flag rather than work around:
     `setProfileEnabled`, `profilesChanged`) carry its id, and the rest
     address the focused profile or fan out to all of them. Plus two tiny host-arbitration artifacts beside it:
     `engine.lock` (flock) and `daemon.alive` (liveness marker).
-  - Exactly one launch agent, `com.avihu.usaged`, running the same engine
+  - Exactly one launch agent, `io.github.avihut.usaged`, running the same engine
     code under every rule in this section (read-only trees, the two
     network destinations, Keychain conduct, the 180s floor).
     Re-amendment 2026-08-16 (user-directed, v0.70.0; supersedes

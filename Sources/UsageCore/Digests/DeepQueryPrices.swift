@@ -102,7 +102,7 @@ extension DeepQuery {
     /// codebase; there's no shared constant for it). Vendor-level: pricing
     /// is shared by every profile of the provider.
     private static func defaultCacheDirectory(providerID: String) -> URL {
-        StorageScope.providerDirectory(bundleID: "com.avihu.ClaudeUsage", providerID: providerID)
+        StorageScope.providerDirectory(bundleID: AppIdentity.bundleID, providerID: providerID)
     }
 
     // MARK: - prices (the whole catalog)

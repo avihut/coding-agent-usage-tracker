@@ -328,7 +328,7 @@ struct GeneralSettingsPane: View {
                 if store.isDigestClient {
                     infoRow("Engine", "running as the background agent")
                 }
-                note("Runs the engine as a launch agent (com.avihu.usaged), so the meters, the terminal dashboard, and the tmux status line keep updating with the app closed. It installs itself when missing; off is sticky — the agent is removed and stays away until this is turned back on.")
+                note("Runs the engine as a launch agent (io.github.avihut.usaged), so the meters, the terminal dashboard, and the tmux status line keep updating with the app closed. It installs itself when missing; off is sticky — the agent is removed and stays away until this is turned back on.")
             }
             // Present only where the distribution channel polls a release
             // feed at all — an install with no channel (or a future store

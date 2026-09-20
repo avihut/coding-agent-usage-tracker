@@ -35,4 +35,4 @@ install is built from source, so the fix is a new tag and a rebuild.
 ## Releases are source only
 
 This repository publishes no binaries (README → Install). Anything offering a
-prebuilt "Agent Usage" / "ClaudeUsage" download is not from this project.
+prebuilt "Agent Usage" / "AgentUsage" download is not from this project.

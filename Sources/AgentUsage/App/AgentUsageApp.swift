@@ -3,7 +3,7 @@ import SwiftUI
 import UsageCore
 
 @main
-struct ClaudeUsageApp: App {
+struct AgentUsageApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
     var body: some Scene {
@@ -21,7 +21,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsKeyMonitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let bundleID = Bundle.main.bundleIdentifier ?? "com.avihu.ClaudeUsage"
+        let bundleID = Bundle.main.bundleIdentifier ?? AppIdentity.bundleID
+        // Before anything opens a file or reads a setting: an install that
+        // was ClaudeUsage (through 0.101.0) carries its data and settings
+        // over to this identity, once. A copy of the old app still running
+        // would go on hosting the engine against the old directories, so it
+        // is asked to quit first — the one AppKit piece of the migration.
+        if IdentityMigration.isPending(defaults: .standard) {
+            let old = NSRunningApplication.runningApplications(
+                withBundleIdentifier: AppIdentity.legacyBundleID)
+            old.forEach { $0.terminate() }
+            let deadline = Date().addingTimeInterval(3)
+            while old.contains(where: { !$0.isTerminated }), Date() < deadline {
+                RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+            }
+            IdentityMigration.standard(defaults: .standard)
+        }
         // Older layouts step forward before any store opens a file:
         // pre-registry singletons into the claude scope (v1), and every
         // provider's per-account artifacts into its default profile (v3).
@@ -105,7 +120,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if CommandLine.arguments.contains("--fake-harnesses") {
             Self.installFakeHarness(into: registry)
         }
-        // Verification hatches: `ClaudeUsage --settings [--pane-cost]` /
+        // Verification hatches: `AgentUsage --settings [--pane-cost]` /
         // `--panel` open UI straight away (the ⋯ menu can't be scripted,
         // and AX row selection can't drive the sidebar).
         if CommandLine.arguments.contains("--settings") {

@@ -8,7 +8,7 @@ import Foundation
 final class StatePublisher: Sendable {
     private let fileURL: URL
     private let queue = DispatchQueue(
-        label: "com.avihu.ClaudeUsage.state-publisher", qos: .utility)
+        label: "\(AppIdentity.bundleID).state-publisher", qos: .utility)
 
     init(fileURL: URL) {
         self.fileURL = fileURL

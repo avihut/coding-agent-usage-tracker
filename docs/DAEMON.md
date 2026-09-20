@@ -55,7 +55,7 @@ became an embeddable core engine with thin faces in front of it.
 
 ## The digest (`live-state.json`)
 
-Path: `~/Library/Application Support/com.avihu.ClaudeUsage/live-state.json`
+Path: `~/Library/Application Support/io.github.avihut.AgentUsage/live-state.json`
 — the bundle root, above the provider and per-home scopes: one host, one
 file, however many homes are metered.
 
@@ -143,7 +143,7 @@ longer decodes). `usage-cli state | jq .menuBar` etc.
   clears the pin), refreshProfile, setProfileEnabled, profilesChanged,
   shutdown. One socket per host however many homes it meters; an app-hosted
   socket still refuses setProvider and shutdown.
-- `usaged` (Sources/usaged/, embedded at ClaudeUsage.app/Contents/MacOS/):
+- `usaged` (Sources/usaged/, embedded at AgentUsage.app/Contents/MacOS/):
   RunAtLoad + KeepAlive + ThrottleInterval 10, signed with the app's
   identity, IOKit sleep/wake (sleep acknowledged immediately), daily
   auto-redetection. Since v0.70.0 installation is automatic (spec §10
