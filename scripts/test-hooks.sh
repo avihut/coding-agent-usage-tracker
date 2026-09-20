@@ -175,6 +175,48 @@ fails env DAFT_MERGE_RESULT=success DAFT_MERGE_SOURCE_SHAS="$base" "$scripts/lan
 passes env DAFT_MERGE_RESULT=conflict DAFT_MERGE_SOURCE_SHAS="$base" "$scripts/landed-check.sh"
 fails env -u DAFT_MERGE_SOURCE_SHAS "$scripts/landed-check.sh"
 
+# ── release.sh ──────────────────────────────────────────────────────────────
+# The release is the merge's side-effect, so every case runs against main
+# after something landed. The fixture's main holds a fix since v0.2.0.
+passes "$scripts/release.sh" # on topic: releases are cut from main
+git checkout -q main
+passes env DAFT_MERGE_RESULT=conflict "$scripts/release.sh" # post-merge fires on conflict too
+printf 'stray\n' >stray.txt
+fails "$scripts/release.sh" # nothing gets built on a dirty tree
+rm stray.txt
+
+passes "$scripts/release.sh" --dry-run
+cp "$out" "$tmp/dry-run.log" # `passes` truncates $out before its own command reads it
+passes grep -q '0.2.0 → 0.2.1' "$tmp/dry-run.log"
+passes test "$(git log -1 --format=%s)" = 'fix(panel): something users would notice'
+
+passes "$scripts/release.sh"
+passes test "$(git log -1 --format=%s)" = 'release: v0.2.1'
+passes test "$(git cat-file -t v0.2.1)" = tag
+passes test -n "$(git tag --points-at HEAD --list v0.2.1)"
+landed=$(git rev-parse HEAD)
+
+# Idempotent: a second run releases nothing and writes no commit.
+passes "$scripts/release.sh"
+passes test "$(git rev-parse HEAD)" = "$landed"
+
+# A tip that is ALREADY a release commit only gets its missing tag — which is
+# how a branch cut under the old ritual still lands correctly.
+git tag -d v0.2.1 >/dev/null
+passes "$scripts/release.sh"
+passes test "$(git cat-file -t v0.2.1)" = tag
+passes test "$(git rev-parse HEAD)" = "$landed"
+
+# The notes fragment is the annotation, and the release commit spends it.
+mkdir -p .release-notes
+printf 'Prose the fragment carried.\n' >.release-notes/next.md
+git add -A
+git commit -qm 'feat(panel): something worth a minor'
+passes "$scripts/release.sh"
+passes test "$(git log -1 --format=%s)" = 'release: v0.3.0'
+passes sh -c "git tag -l --format='%(contents)' v0.3.0 | grep -q 'Prose the fragment carried'"
+passes sh -c "! grep -q 'Prose the fragment carried' .release-notes/next.md"
+
 # ── digest-baseline.sh ──────────────────────────────────────────────────────
 passes "$scripts/digest-baseline.sh" main
 exported=$(cat "$out")

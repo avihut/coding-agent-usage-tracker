@@ -216,6 +216,10 @@ run = [
 description = "post-merge tripwire: the landed tree is the tree the merge gate tested (daft's post-merge hook only)"
 run = "scripts/landed-check.sh"
 
+[tasks.release]
+description = "Cut the release main has earned — bump, 'release: vX.Y.Z' commit, annotated tag from .release-notes/next.md. Never pushes (--dry-run for the verdict)"
+run = "scripts/release.sh"
+
 [tasks.release-reminder]
 description = "post-merge: list unreleased feat/fix commits on main and the release ritual's steps"
 run = "scripts/release-reminder.sh"

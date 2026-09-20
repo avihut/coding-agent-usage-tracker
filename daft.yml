@@ -1,12 +1,16 @@
-# Merge policy — what makes a green pre-merge ring mean anything. `ff: only`
-# refuses a branch that doesn't already contain main's tip, so the tree the
-# rings tested is the tree that lands (and this history has never held a
-# merge commit); `source_worktree: clean` closes the gap between the working
-# tree the rings see and the committed tree that merges. Rebase first, then
-# `daft merge <branch> --into main`. Relax per invocation with
-# `--no-ff-only` / `--source-worktree any`; both refusals name what to fix.
+# Merge policy — what makes a green pre-merge ring mean anything.
+# `source_worktree: clean` closes the gap between the working tree the rings
+# see and the committed tree that merges. Rebase first, then
+# `daft merge <branch> --into main -F <message>`.
+#
+# `ff: only` USED TO BE HERE and is deliberately gone: merges are squashes now
+# (the style is `daft.merge.style`, a git config — daft.yml has no key for it),
+# and a squash can never fast-forward, so the gate would have been a lie. It
+# was doing two jobs, though, and the second is worth keeping: it also refused
+# a branch that didn't already contain the target's tip, which is what makes
+# "the tree the rings tested is the tree that lands" true. That half moved to
+# the `source-up-to-date` ring below.
 merge:
-  ff: only
   source_worktree: clean
 
 # The merge policy and pre-merge hooks above need a daft that enforces them.
@@ -43,6 +47,12 @@ hooks:
   # with `daft merge --skip-tag deep`, never by trimming it from the gate.
   pre-merge:
     jobs:
+      - name: source-up-to-date
+        description: "The branch already contains the target's tip, so the tested tree is the landed tree"
+        root: "{merge_source_path}"
+        # The half of `ff: only` that survived squash merges (see the top).
+        run: git merge-base --is-ancestor "$DAFT_MERGE_TARGET_BRANCH" HEAD
+
       - name: guard
         description: "Repo-rule tripwires — tokens, signing identities, dependencies, §10 hosts"
         root: "{merge_source_path}"
@@ -113,15 +123,26 @@ hooks:
         # the running app and the usaged launch agent point at.
         run: mise run release-build
 
-  # Tripwires, not a second suite. Warn rather than abort (also the default
+  # Tripwires, and ONE side-effect. Warn rather than abort (also the default
   # for post-merge): the ref has already moved, so an error exit would report
   # a verdict on work that is done — the useful outcome is a loud notice.
+  #
+  # `piped` on purpose, where pre-merge is parallel: `release` writes a commit,
+  # so it must not race the check that reads the landed tree, and the reminder
+  # is only interesting once `release` has had its say.
   post-merge:
     fail_mode: warn
+    piped: true
     jobs:
       - name: landed-matches-gated
         description: The landed tree is the tree the rings tested
         run: mise run landed-check
+      - name: release
+        description: A merge that brought releasable work cuts its release — bump, commit, annotated tag
+        # Issuing the release is the merge's SIDE-EFFECT, never its intent:
+        # nothing on a branch names a version, so no merge commit carries a
+        # version move. Pushing and publishing stay a human step.
+        run: mise run release
       - name: release-reminder
         description: Unreleased feat/fix on main means the release ritual is owed
         run: mise run release-reminder

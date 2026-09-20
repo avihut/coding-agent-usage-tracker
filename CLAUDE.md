@@ -2044,13 +2044,22 @@ the README rather than silently deviating.
   3.2-safe — macOS's own: no apostrophe inside a `${VAR:?message}`, 3.2
   reads it as an unterminated quote — `test-hooks` caught that one).
   THE HOOK SCRIPTS HAVE TESTS: `scripts/test-hooks.sh` (`mise run
-  test-hooks`, 52 checks, in pre-push and the merge gate) drives every
+  test-hooks`, 71 checks, in pre-push and the merge gate) drives every
   script through its pass AND refusal paths in a throwaway repo under
-  `.build/` — a new hook script or rule lands with its cases there. MERGE: `ff: only` + `source_worktree: clean`
-  (this history has never held a merge commit) — rebase, then `daft merge
-  <branch> --into main`; rings run in the SOURCE worktree, `glob` skips a
-  toolchain the merge never touched, `--skip-tag deep` drops the release
-  build (deliberately NOT `mise run bundle`: bundle.sh replaces
+  `.build/` — a new hook script or rule lands with its cases there. MERGE
+  (squash-first since 2026-09-20): `daft.merge.style = squash` — a git
+  config, since daft.yml has no key for the STYLE, which is why a personal
+  global `squash` once overrode a repo that declared `ff: only` and left a
+  squash staged on main that no commit message could land. `ff: only` is
+  GONE from daft.yml (a squash can never fast-forward), and the half of it
+  worth keeping — the branch already contains the target's tip, so the
+  tested tree is the landed tree — is the `source-up-to-date` pre-merge
+  ring. Rebase, then `daft merge <branch> --into main -F <message>`: ALWAYS
+  pass `-m`/`-F`/`--no-edit`, because a squash opens an editor and an empty
+  message is git's own refusal, before any hook, leaving the same staged
+  limbo. `source_worktree: clean` stays; rings run in the SOURCE worktree,
+  `glob` skips a toolchain the merge never touched, `--skip-tag deep` drops
+  the release build (deliberately NOT `mise run bundle`: bundle.sh replaces
   `ClaudeUsage.app`, possibly the live install's). THE DIGEST FREEZE is
   the one check only a merge can make: the golden is regenerated in place,
   so on any branch code and golden agree and a breaking change +
@@ -2090,12 +2099,32 @@ the README rather than silently deviating.
 - RELEASE RITUAL — a shipped feature or fix is NOT done until it is
   released, in the same session (a fresh session on 2026-09-03 committed
   two changes and stopped, because nothing had written this down; every
-  install stayed behind). Minor bump for features, patch for fixes:
-  (1) bump `AppIdentity.version` — the ONE version source, Info.plist is
-  stamped from it; (2) commit `release: vX.Y.Z` whose body summarizes
-  what shipped since the last release (docs that ride along may join it);
-  (3) `git tag -a vX.Y.Z` on that commit — the annotation IS the GitHub
-  release notes (publish.sh reads it; tags and commits GPG-sign by
-  config); (4) `git push origin main vX.Y.Z`; (5) `mise run publish` —
-  universal dist zip, timestamped signature from a real identity, attached
-  to the tag's release; installed apps see it on their next 6h check.
+  install stayed behind). THE RELEASE IS A SIDE-EFFECT OF THE MERGE, NOT
+  ITS INTENT (user-directed 2026-09-20: "the merge's intent is to bring in
+  new code, the side-effect is to issue a release"). So NOTHING ON A BRANCH
+  NAMES A VERSION — no bump, no `release:` commit, no tag — and therefore no
+  merge ever carries a version move, which is what stops `commit-msg.sh`'s
+  "a commit that moves the version must BE the release commit" from applying
+  to merges at all. It used to be prepared by hand on the branch; that
+  coupled the release to the merge's INPUT, so a squash had to be named
+  `release: vX.Y.Z` and the branch's tag stayed behind on a commit that
+  never landed.
+  A branch instead writes `.release-notes/next.md` — prose, gated like any
+  other file, because the annotation IS the GitHub release notes and a list
+  of commit subjects is a visible downgrade. On merge, daft's post-merge
+  `release` job (`mise run release`, scripts/release.sh) reads the
+  conventional commits since the last tag (minor for `feat`, patch for
+  `fix`, nothing otherwise; pre-1.0 a `!` is a minor, never an automatic
+  1.0.0), stamps `AppIdentity.version` — the ONE version source, Info.plist
+  is stamped from it — commits `release: vX.Y.Z` with those notes, spends
+  the fragment in the same commit, and annotates the tag. It is idempotent:
+  a tip that is already `release: vX.Y.Z` only gets its missing tag, which
+  is how a branch cut under the OLD ritual still lands correctly.
+  IT NEVER PUSHES. Reading the release and then (1) `git push origin main
+  vX.Y.Z`; (2) `mise run publish` — universal dist zip, timestamped
+  signature from a real identity, attached to the tag's release; installed
+  apps see it on their next 6h check — stay a human step, and `release-check`
+  (pre-push) is the backstop if the hook ever leaves a release half made
+  (post-merge warns, never rolls back). Tags and commits GPG-sign by config,
+  so a locked agent makes the job warn rather than release; `mise run
+  release` by hand finishes it.
