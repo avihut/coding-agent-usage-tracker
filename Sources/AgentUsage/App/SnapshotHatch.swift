@@ -13,6 +13,71 @@ import UsageCore
 /// compares the old sidecar as a PREFIX of the new one.
 @MainActor
 extension AppDelegate {
+    /// The whole panel, as `panel-dark.png` / `panel-light.png`. ImageRenderer
+    /// leaves a ScrollView's content blank and the live popover closes the
+    /// moment this app resigns active, so the real `UsagePanelView` is hosted
+    /// in a window parked off every screen and drawn through AppKit's own
+    /// `cacheDisplay` — no screen capture, so no Screen Recording consent and
+    /// nothing of the desktop in the picture. With `--demo-digest` this is
+    /// the README's picture of the app.
+    static func stagePanelSnapshots(registry: ProviderRegistry) -> [(name: String, window: NSWindow)] {
+        [("panel-dark.png", NSAppearance.Name.darkAqua), ("panel-light.png", .aqua)].map { name, appearance in
+            // The popover's material is the panel's ground on screen; a
+            // bare hosted view has none, so it is given the window's.
+            let host = NSHostingController(
+                rootView: UsagePanelView(
+                    registry: registry, onOpenSettings: { _ in }, onOpenSessions: {},
+                    onOpenSession: { _ in })
+                    .background(Color(nsColor: .windowBackgroundColor)))
+            // As the popover sizes it: the ScrollView's ideal height is its
+            // content's, which `fittingSize` on a bare view collapses.
+            host.sizingOptions = .preferredContentSize
+            let window = NSWindow(
+                contentRect: NSRect(x: -20_000, y: -20_000, width: 360, height: 800),
+                styleMask: .borderless, backing: .buffered, defer: false)
+            window.appearance = NSAppearance(named: appearance)
+            window.contentViewController = host
+            window.orderFrontRegardless()
+            return (name, window)
+        }
+    }
+
+    /// Once the content has measured itself: the window takes that size, and
+    /// the draw waits another beat for the resized tree to render.
+    static func fitPanelSnapshots(_ panels: [(name: String, window: NSWindow)]) {
+        for (_, window) in panels {
+            guard let size = window.contentViewController?.preferredContentSize, size.height > 0 else { continue }
+            window.setContentSize(size)
+        }
+    }
+
+    static func writePanelSnapshots(_ panels: [(name: String, window: NSWindow)], to directory: URL) {
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        for (name, window) in panels {
+            guard let view = window.contentView, let rep = retinaBitmap(of: view) else { continue }
+            try? rep.representation(using: .png, properties: [:])?
+                .write(to: directory.appending(path: name))
+            window.close()
+        }
+    }
+
+    /// `view` drawn at 2x whatever screen it is (not) on: a window parked off
+    /// every display has a backing scale of 1, and a picture for a README is
+    /// looked at on a Retina one.
+    static func retinaBitmap(of view: NSView, scale: CGFloat = 2) -> NSBitmapImageRep? {
+        let size = view.bounds.size
+        guard size.width > 0, size.height > 0,
+              let rep = NSBitmapImageRep(
+                  bitmapDataPlanes: nil, pixelsWide: Int(size.width * scale),
+                  pixelsHigh: Int(size.height * scale), bitsPerSample: 8, samplesPerPixel: 4,
+                  hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+                  bytesPerRow: 0, bitsPerPixel: 0)
+        else { return nil }
+        rep.size = size
+        view.cacheDisplay(in: view.bounds, to: rep)
+        return rep
+    }
+
     static func writeSnapshots(registry: ProviderRegistry, to directory: URL) {
         let store = registry.focusedStore
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -71,6 +136,11 @@ extension AppDelegate {
         if let rep = preview.snapshot() {
             try? rep.representation(using: .png, properties: [:])?
                 .write(to: directory.appending(path: "menubar-preview.png"))
+        }
+        // The same strip at 2x, beside the 1x file the baselines compare.
+        if let rep = retinaBitmap(of: preview) {
+            try? rep.representation(using: .png, properties: [:])?
+                .write(to: directory.appending(path: "menubar-preview@2x.png"))
         }
         let picker = MenuBarFormPicker(
             cell: MenuBarModelBuilder.sampleCell(for: registry.focusedProfile, registry: registry),

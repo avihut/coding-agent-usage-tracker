@@ -597,4 +597,5 @@ Stop and show me at each:
 - [ ] Survives token expiry and recovers once Claude Code refreshes, no restart.
 - [ ] Rebuild does not re-trigger the Keychain prompt.
 - [ ] Killing network shows greyed cached numbers, not a blank or crashed item.
-- [ ] README documents the undocumented-endpoint risk and the policy reasoning in §2.
+- [ ] `docs/PRIVACY.md` documents the undocumented-endpoint risk and the policy reasoning in §2
+      (the README carries the summary and the link).

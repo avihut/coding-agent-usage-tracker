@@ -45,7 +45,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             providerIDs: HarnessResolution.standardProviders().map(\.id))
         // The registry meters every harness found on this Mac and installs
         // the union model catalog before any UI renders.
-        let registry = ProviderRegistry(bundleID: bundleID)
+        // `--demo-digest <live-state.json>` renders every face from that
+        // file and nothing else (scripts/demo-digest.py writes a synthetic
+        // one) — how the README's pictures show nobody's real usage. Its
+        // own storage scope keeps this Mac's history out of the charts.
+        let demo = Self.launchDemoDigest()
+        let registry = ProviderRegistry(
+            bundleID: demo == nil ? bundleID : bundleID + ".demo", demo: demo)
         controller = StatusItemController(registry: registry)
         // ⌘, wherever this app is key — the panel, a hosted window. A
         // LOCAL monitor rather than a main-menu item: SwiftUI owns that
@@ -143,6 +149,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor in
                 // Let the digest, the scan and the first layout land.
                 try? await Task.sleep(for: .seconds(3))
+                // The panel is staged first and written a beat later: a
+                // hosted SwiftUI tree lays out and draws its charts over
+                // the next few turns of the run loop, not on insertion.
+                let panels = Self.stagePanelSnapshots(registry: registry)
+                try? await Task.sleep(for: .seconds(1))
+                Self.fitPanelSnapshots(panels)
+                try? await Task.sleep(for: .seconds(1))
+                Self.writePanelSnapshots(panels, to: directory)
                 Self.writeSnapshots(registry: registry, to: directory)
                 NSApp.terminate(nil)
             }

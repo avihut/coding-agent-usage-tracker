@@ -229,8 +229,8 @@ public enum PricingFeedError: Error, Sendable {
 
 /// One call against the community pricing feed (LiteLLM's model price list on
 /// raw.githubusercontent.com — the second and only other network destination
-/// this app talks to, plain GET, no credentials attached, documented in the
-/// README). Anthropic publishes no pricing API; this feed is the standard
+/// this app talks to, plain GET, no credentials attached, documented in
+/// docs/PRIVACY.md). Anthropic publishes no pricing API; this feed is the standard
 /// machine-readable mirror of the list prices.
 public struct PricingFeedClient: Sendable {
     public static let endpoint = URL(

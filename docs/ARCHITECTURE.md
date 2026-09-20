@@ -106,6 +106,36 @@ seam.
   amendment for its hosts (and for any local trees it reads); the engine,
   history, charts, and panel need zero changes.
 
+## Adaptive refresh, as the user meets it
+
+The poll rate follows actual Claude use instead of a fixed clock (supersedes
+spec §9's fixed interval). The "Refresh when active" setting (default 5 min)
+is the pace while Claude is in use; sustained quiet decays it ×2 after 15
+minutes, ×4 after an hour, ×8 after four hours, never slower than one poll
+per hour (or your chosen pace, when that's slower). Two signals snap it back: FSEvents on `~/.claude/projects` (Claude
+Code writing a transcript — this also polls immediately whenever the shown
+data is older than the active pace, so re-engaging catches the meters up at
+once), and usage percentages rising between polls (which is how Claude
+app/web use gets noticed). An HTTP 429 pauses polling — 5 minutes,
+doubling per repeat up to an hour, honoring `Retry-After` up to two hours —
+and heals automatically on the next success; the panel says so and shows the
+retry countdown. Manual refresh still works during a pause. The panel footer
+shows "idle ×N" whenever the cadence is decayed.
+
+Nothing ever polls faster than once per **180 seconds** (supersedes the spec's
+60s floor, and the app's own earlier 1-minute option). Field evidence: this
+endpoint rate-limits sustained sub-3-minute polling into sticky 429s — this
+app hit it at 60s, and community testing found the same
+([anthropics/claude-code#31637](https://github.com/anthropics/claude-code/issues/31637),
+[#31021](https://github.com/anthropics/claude-code/issues/31021)). The pace
+is set in the settings window with a logarithmic slider — 3 minutes to 2
+hours, snapping to marked stops at 3/5/15/30 minutes and 1/2 hours — while
+the panel's ⋯ menu keeps 3/5/15 quick picks. A request ledger tracks the trailing
+hour of calls against an estimated budget (20/hour to start, tightened
+whenever a real 429 reveals a lower ceiling and remembered across launches);
+the footer shows `API n/Nh` once half the budget is spent and the refresh
+button turns orange/red as manual clicks approach it.
+
 ## Refresh: one pipeline, one entry point
 
 - One refresh pipeline, one entry point: `UsageEngine.refresh(_:)` (the

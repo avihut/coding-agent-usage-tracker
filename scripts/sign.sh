@@ -49,7 +49,7 @@ if [[ "${1:-}" == "--which" ]]; then
     echo "source:   $SOURCE"
     if [[ "$RESOLVED" == "-" ]]; then
         echo "hint:     Xcode → Settings → Accounts → Manage Certificates → + Apple Development,"
-        echo "          or set CODESIGN_IDENTITY (mise.local.toml). See README → Code signing."
+        echo "          or set CODESIGN_IDENTITY (mise.local.toml). See docs/WORKFLOW.md → Signing."
         # Lets dist.sh fail fast, before its universal builds, not after.
         [[ -n "${CODESIGN_REQUIRE_IDENTITY:-}" ]] && exit 1
     fi
@@ -62,7 +62,7 @@ if [[ "$RESOLVED" == "-" ]]; then
     if [[ -n "${CODESIGN_REQUIRE_IDENTITY:-}" ]]; then
         echo "sign.sh: no code-signing identity found and this build refuses ad-hoc." >&2
         echo "         Add an Apple Development certificate in Xcode (Settings → Accounts →" >&2
-        echo "         Manage Certificates) or set CODESIGN_IDENTITY. README → Code signing." >&2
+        echo "         Manage Certificates) or set CODESIGN_IDENTITY. docs/WORKFLOW.md → Signing." >&2
         exit 1
     fi
     echo "sign.sh: no code-signing identity found — ad-hoc signing $(basename "$BINARY")." >&2

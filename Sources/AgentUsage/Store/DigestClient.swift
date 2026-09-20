@@ -75,6 +75,7 @@ final class DigestClient {
 
     let provider: any UsageProvider
     let localActivity: (any LocalActivitySource)?
+    private let scansLocally: Bool
     private(set) var isShutDown = false
     /// True while the host's digest carries no section for this profile —
     /// a pre-profile daemon asked about a second account, or a profile the
@@ -98,7 +99,7 @@ final class DigestClient {
     /// directory that doesn't exist, and a store with no samples at all.
     init(
         profileID: String, storageID: String, provider: any UsageProvider, feed: DigestFeed,
-        bundleID: String
+        bundleID: String, scansLocally: Bool = true
     ) {
         self.profileID = profileID
         self.provider = provider
@@ -108,7 +109,10 @@ final class DigestClient {
             bundleID: bundleID, providerID: provider.id, profileID: storageID)
         let providerSupport = StorageScope.providerDirectory(
             bundleID: bundleID, providerID: provider.id)
-        self.localActivity = provider.makeLocalActivity(cacheDirectory: support)
+        // `--demo-digest`: no transcript is read at all — activity comes
+        // from the digest (`apply`), so nothing of this Mac reaches a demo.
+        self.scansLocally = scansLocally
+        self.localActivity = scansLocally ? provider.makeLocalActivity(cacheDirectory: support) : nil
         self.history = UsageHistory(
             directory: support, relabel: { provider.currentMeterLabel(forStored: $0) })
         self.windowLedger = WindowLedger(directory: support)
@@ -261,6 +265,10 @@ final class DigestClient {
 
     private func apply(_ digest: LiveState) {
         digestGeneratedAt = digest.engine.generatedAt
+        if !scansLocally {
+            activity = DigestActivity.daily(from: digest.activity)
+            sessions = DigestActivity.sessions(from: digest.sessions, models: digest.models)
+        }
         serviceStatus = digest.serviceStatus
         appUpdate = digest.appUpdate
         accountPresence = digest.accountPresence
