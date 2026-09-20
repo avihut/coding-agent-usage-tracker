@@ -10,7 +10,7 @@ public enum AppIdentity {
     /// Support/Info.plist spells the same words. The wire `name`, the bundle
     /// id and the bundle's file name are identities, not labels, and stay.
     public static let displayName = "Agent Usage"
-    public static let version = "0.100.1"
+    public static let version = "0.101.0"
     public static let userAgent = "\(name)/\(version)"
     /// Where releases are published — the self-updater's one feed.
     public static let repository = "avihut/coding-agent-usage-tracker"
