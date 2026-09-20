@@ -107,6 +107,7 @@ final class AppUpdater {
         case download
         case unpack
         case verification
+        case signer
         case versionMismatch(found: String?)
         case notWritable(String)
         case swap
@@ -116,6 +117,8 @@ final class AppUpdater {
             case .download: "The download failed. Check the connection and try again."
             case .unpack: "The downloaded archive could not be unpacked."
             case .verification: "The download failed its signature check and was discarded."
+            case .signer:
+                "The download isn't signed by whoever signed this app, so it was discarded. Rebuild from source instead."
             case .versionMismatch(let found):
                 "The archive contains \(found ?? "an unknown version"), not the announced release."
             case .notWritable(let path): "This app's location isn't writable (\(path))."
@@ -174,12 +177,21 @@ final class AppUpdater {
             throw UpdateError.unpack
         }
 
-        // Integrity, then identity: a bundle that fails codesign is
-        // discarded outright, and one carrying a different version than the
-        // clicked release never installs.
+        // Integrity, signer, then version: a bundle that fails codesign is
+        // discarded outright, so is one somebody else signed, and one
+        // carrying a different version than the clicked release never
+        // installs.
         guard await run(
             "/usr/bin/codesign", ["--verify", "--deep", "--strict", unpacked.path]) == 0
         else { throw UpdateError.verification }
+        // …and WHOSE signature: intact is not enough — an ad-hoc bundle, or
+        // anyone's certificate, passes the check above. The download must
+        // satisfy this install's own designated requirement (SignerPin).
+        do {
+            try SignerPin.verify(candidate: unpacked, against: bundleURL)
+        } catch {
+            throw UpdateError.signer
+        }
         let plist = unpacked.appending(path: "Contents/Info.plist")
         let found = (try? PropertyListSerialization.propertyList(
             from: Data(contentsOf: plist), format: nil) as? [String: Any])

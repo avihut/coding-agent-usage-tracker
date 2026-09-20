@@ -184,7 +184,15 @@ showing work.
   release still matters: it is the feed the update check reads. `mise run
   dist` survives as a private tool for carrying a build to another Mac of
   one's own. The one-click pipeline below is DORMANT, not deleted — with no
-  asset a click opens the release page. Info.plist versions are STAMPED from AppIdentity.swift by
+  asset nothing offers it (`store.canSelfInstall(update)`; a standalone
+  install's card says to rebuild from source instead). It checks WHOSE
+  signature a download carries, not only that it is intact: `SignerPin`
+  (core) requires the bundle to satisfy the running app's own designated
+  requirement — `codesign --verify` alone passes an ad-hoc re-sign. An
+  ad-hoc install can therefore vouch for nothing and never self-updates,
+  and a changed bundle id or certificate fails the same way: by design, the
+  way through is a rebuild. `--fake-asset` beside `--fake-update` shows the
+  one-click presentation. Info.plist versions are STAMPED from AppIdentity.swift by
   bundle.sh/dist.sh — never hand-edit them (they drifted two releases behind
   when hand-maintained, and the updater verifies downloads by that key).
 - DISTRIBUTION CHANNELS (v0.88.0, user-directed "think of it as

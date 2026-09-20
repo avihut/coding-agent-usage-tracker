@@ -411,7 +411,7 @@ struct GeneralSettingsPane: View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
             let offering = update.updateAvailable
                 && update.latestVersion != AppIdentity.version
-            let canInstall = store.updateCanSelfInstall
+            let canInstall = store.canSelfInstall(update)
             VStack(alignment: .leading, spacing: 8) {
                 if offering {
                     HStack(alignment: .firstTextBaseline) {
@@ -520,7 +520,7 @@ struct GeneralSettingsPane: View {
         if checkoutState?.hasReleaseTag == true {
             return "Tag v\(update.latestVersion) is already fetched in this checkout — a rebuild is all it takes."
         }
-        return store.distribution?.manualUpdateHint
+        return store.distribution?.manualUpdateHint(for: update)
     }
 
     /// Local-only git reads against the checkout the bundle lives in —

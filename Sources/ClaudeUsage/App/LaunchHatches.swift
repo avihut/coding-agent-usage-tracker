@@ -85,11 +85,16 @@ extension AppDelegate {
                 assetURL: nil, assetBytes: nil, checkedAt: now.addingTimeInterval(-120),
                 updateAvailable: false)
         }
+        // Releases carry no asset, so the plain fake is the source-only
+        // offer. `--fake-asset` dresses it as a release that has one, to see
+        // the one-click presentation: its "URL" has no host, which the
+        // updater's allowlist refuses — a click opens the release page.
+        let asset: String? = arguments.contains("--fake-asset") ? "fake-asset" : nil
         return AppUpdateCard(
             latestVersion: version,
             url: "\(AppIdentity.releasesPage)/tag/v\(version)",
-            publishedAt: now.addingTimeInterval(-3_600), assetName: nil,
-            assetURL: nil, assetBytes: nil, checkedAt: now.addingTimeInterval(-120),
+            publishedAt: now.addingTimeInterval(-3_600), assetName: asset,
+            assetURL: asset, assetBytes: nil, checkedAt: now.addingTimeInterval(-120),
             updateAvailable: true)
     }
 

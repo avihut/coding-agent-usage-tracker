@@ -247,6 +247,13 @@ final class UsageStore {
         return Distribution.allowsSelfInstall(bundleURL: Bundle.main.bundleURL)
     }
 
+    /// Whether THIS release may be one-click installed: the install's word
+    /// above, and an asset to install — a source-only release has none, and
+    /// offering "Update to X…" for it would promise a swap that can't happen.
+    func canSelfInstall(_ release: AppUpdateCard) -> Bool {
+        updateCanSelfInstall && release.assetURL != nil
+    }
+
     var provider: any UsageProvider { providerValue }
     /// This account's harness as every accent surface takes it (0.101.0) —
     /// the value that replaced the one-active-provider statics.
