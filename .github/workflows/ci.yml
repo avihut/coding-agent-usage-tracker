@@ -1,0 +1,54 @@
+# The PR gate: the same `mise run gate` the git hooks and daft's merge gate
+# run, on GitHub's runner — a merge made with GitHub's button never passes
+# through daft's pre-merge rings, so this is what stands in for them.
+#
+# Hardening, deliberately:
+#   - `pull_request`, NEVER `pull_request_target`: a fork's code runs with a
+#     read-only token and no secrets, and there are no secrets here to reach.
+#   - every action pinned to a full commit SHA (the repo setting requires it).
+#   - nothing from the event is interpolated into a shell line.
+# This workflow builds and tests. It never signs, bundles or publishes —
+# releases carry no binary (README → Install).
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: gate
+    # The toolchain this repo is developed with (Swift 6.4). `check` builds
+    # with warnings as errors, so an older compiler is a different gate.
+    runs-on: xcode-27
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The digest freeze reads the base branch's goldens.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+
+      - name: Install daft (check-config validates daft.yml with it)
+        run: brew install avihut/tap/daft
+
+      - name: Gate
+        run: mise run gate
+
+      # The one check only a merge can make locally (daft.yml): this tree's
+      # decoders still read the TARGET's digest goldens — additive-only.
+      - name: Digest freeze against the base branch
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: mise run digest-freeze -- "origin/$BASE_REF"

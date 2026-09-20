@@ -41,11 +41,11 @@ run = [
 ]
 
 [tasks.dist]
-description = "Build a universal, signed, zipped app to install on another Mac"
+description = "Build a universal, signed, zipped app to carry to another Mac of your own (never published)"
 run = "scripts/dist.sh"
 
 [tasks.publish]
-description = "Publish the current tagged version as a GitHub release with the dist zip"
+description = "Publish the current tagged version as a GitHub release — the tag's notes, no binary"
 run = "scripts/publish.sh"
 
 [tasks.app]

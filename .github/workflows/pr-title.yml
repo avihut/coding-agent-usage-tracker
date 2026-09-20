@@ -1,0 +1,44 @@
+# A PR lands as ONE squash commit whose subject is the PR title, and
+# scripts/release.sh reads those subjects to choose the next version — so the
+# title is held to the same grammar the commit-msg hook holds a commit to.
+# Its own workflow so that editing a title re-runs this, not the macOS gate.
+name: PR title
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-title-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pr-title:
+    name: pr-title
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          install_args: cocogitto
+
+      # The title arrives through the environment, never interpolated into
+      # the script: a title is attacker-controlled text.
+      - name: Conventional commit subject
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          case "$PR_TITLE" in
+          release:* | release\(*)
+              echo "A PR is never a release — the release commit is cut on main by scripts/release.sh." >&2
+              exit 1
+              ;;
+          esac
+          cog verify "$PR_TITLE"

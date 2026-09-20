@@ -1,8 +1,40 @@
-# claude-usage-menubar
+# Agent Usage (claude-usage-menubar)
 
-Personal macOS menu bar app showing my Claude plan usage limits (session, weekly,
-per-model weekly), mirroring Settings → Usage in the Claude app. Single user, not
-for distribution.
+A macOS menu bar app that meters your coding agents' plan limits — Claude Code's
+session, weekly and per-model weekly limits (mirroring Settings → Usage in the
+Claude app), with Codex and Gemini CLI metered beside it from their local files
+— plus a terminal dashboard (`usage-tui`) and a scriptable CLI (`usage-cli`).
+
+It is an independent, unofficial project: not affiliated with, endorsed by or
+supported by Anthropic, OpenAI or Google. It reads an undocumented endpoint
+with your own local sign-in (see [Known risk](#known-risk-undocumented-endpoint)
+and [Credential rules](#credential-rules-non-negotiable)), sends nothing
+anywhere else, and carries no analytics. MIT licensed — see [LICENSE](LICENSE).
+
+## Install: build it yourself
+
+There is no download. A macOS app that strangers can open needs a paid Apple
+Developer ID and notarization, which this project doesn't have — so rather
+than ship a binary Gatekeeper rejects, it ships source, and the app you run is
+one your own Mac built and signed:
+
+```sh
+git clone https://github.com/avihut/coding-agent-usage-tracker.git
+cd coding-agent-usage-tracker
+mise trust && mise run setup   # pinned tools, the TUI's crates, the git hooks
+mise run app                   # build + bundle + sign + launch
+```
+
+Needs macOS 15+, Xcode (Swift 6) and [mise](https://mise.jdx.dev). No Apple
+account is required — with no certificate the build signs ad-hoc and works;
+[Code signing](#code-signing) covers the free certificate that makes rebuilds
+quieter. To update: `git pull`, then `mise run app` again — the app tells you
+when a new version is tagged (it checks this repo's releases; see
+[below](#fourth-network-destination-this-apps-own-releases)).
+
+Releases here are tags with notes, never binaries. Contributions are welcome —
+[CONTRIBUTING.md](CONTRIBUTING.md); security reports —
+[SECURITY.md](SECURITY.md).
 
 ## Status
 
@@ -132,20 +164,22 @@ destination.
 
 ### Fourth network destination: this app's own releases
 
-Standalone installs (the app living in /Applications rather than inside a
-git checkout) check this repository's newest GitHub release every six hours —
+Every install checks this repository's newest GitHub release every six hours —
 one anonymous conditional GET of
 `api.github.com/repos/avihut/coding-agent-usage-tracker/releases/latest` on a
 cookie-less session, nothing identifying beyond the public repo path. When a
 newer version exists, a small accent arrow appears beside the version label
-in the panel footer; one click downloads the release zip (from
-`github.com`, redirecting to GitHub's asset CDN — the only automatic-nothing
-download, it happens exclusively on that click), verifies its code signature
-and version, swaps the app bundle in place, restarts the background engine,
-and relaunches. Settings → General governs it: check now, automatic checks
-off, or skip a version. A build sitting inside a git checkout polls the same
-anonymous feed — knowing it's behind is half the point — but only informs:
-its update path stays `git pull` and a rebuild, and the app swaps nothing
+in the panel footer, and Settings → General says how to get it: `git pull`
+and a rebuild. Settings → General governs the check: check now, automatic
+checks off, or skip a version.
+
+Releases carry no binary (2026-09-20 — see [Install](#install-build-it-yourself)),
+so that is the whole story today. The one-click path is still in the code and
+dormant: for an app living outside a git checkout, a release that DID carry a
+zip would be downloaded on a click (from `github.com`, redirecting to GitHub's
+asset CDN — never automatically), verified for code signature and version,
+and swapped in place. With no asset, the same click opens the release page. A
+build sitting inside a git checkout only ever informs, and swaps nothing
 (distribution channels, 2026-08-23). This amends spec §10 (2026-08-23).
 
 ### One local identity read: which account is signed in
@@ -351,10 +385,12 @@ certificates last a year; when one expires, `mise run identity` falls back to
 ad-hoc and signing warns — renew it in the same place, and the identity
 survives because its name does.
 
-`mise run dist` refuses ad-hoc outright (`CODESIGN_REQUIRE_IDENTITY`): a
-release zip must carry a timestamped signature from a real identity, or the
-in-app updater's `codesign --verify` and Gatekeeper reject it on the
-receiving Mac.
+`mise run dist` — a universal, zipped copy for carrying to another Mac of your
+own — refuses ad-hoc outright (`CODESIGN_REQUIRE_IDENTITY`): a build that
+leaves the machine that made it must carry a timestamped signature from a real
+identity. It is a private convenience, not a release step: nothing it builds
+is published (`mise run publish` creates the GitHub release from the tag's
+notes alone).
 
 ## The terminal dashboard (usage-tui)
 
