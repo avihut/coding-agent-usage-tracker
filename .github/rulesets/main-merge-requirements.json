@@ -1,5 +1,5 @@
 {
-  "name": "main: PR gate",
+  "name": "main: merge requirements",
   "target": "branch",
   "enforcement": "active",
   "bypass_actors": [
@@ -25,8 +25,8 @@
         "strict_required_status_checks_policy": true,
         "do_not_enforce_on_create": false,
         "required_status_checks": [
-          { "context": "gate", "integration_id": 15368 },
-          { "context": "pr-title", "integration_id": 15368 }
+          { "context": "ci-gate", "integration_id": 15368 },
+          { "context": "conventional-title", "integration_id": 15368 }
         ]
       }
     }

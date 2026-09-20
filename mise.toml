@@ -132,7 +132,22 @@ run = "scripts/setup.sh"
 
 [tasks.gate]
 description = "Every check the hooks enforce, in one go (pre-commit + pre-push + the merge gate, minus its deep ring)"
-depends = ["guard", "lint", "fmt-check", "check-config", "test-hooks", "check", "tui-clippy", "tui-test"]
+# Its three halves are CI's three jobs (.github/workflows/ci.yml), so a red
+# check on a pull request is reproduced by the one task named beside it. A
+# check belongs to exactly one half, and guard.sh holds CI to running them all.
+depends = ["gate-lint", "gate-swift", "gate-tui"]
+
+[tasks.gate-lint]
+description = "CI's 'Lint, format & repo rules' job: every check that reads the tree without building it"
+depends = ["guard", "lint", "fmt-check", "check-config", "test-hooks"]
+
+[tasks.gate-swift]
+description = "CI's 'Swift: strict build + tests' job"
+depends = ["check"]
+
+[tasks.gate-tui]
+description = "CI's 'TUI (Rust): clippy + tests' job"
+depends = ["tui-clippy", "tui-test"]
 
 [tasks.check]
 description = "Strict gate: build every target and the tests with warnings as errors, then run the Swift tests"
@@ -198,7 +213,7 @@ run = [
 ]
 
 [tasks.guard]
-description = "Repo-rule tripwires: tokens, signing identities, dependencies, §10 hosts, script↔task pairing (arg: --staged for the index)"
+description = "Repo-rule tripwires: tokens, signing identities, dependencies, §10 hosts, script↔task pairing, CI ↔ gate coverage (arg: --staged for the index)"
 run = "scripts/guard.sh"
 
 [tasks.commit-msg]
@@ -212,10 +227,25 @@ run = "scripts/release-check.sh"
 [tasks.digest-freeze]
 description = "Hold this tree's digest decoders to another ref's goldens (arg: ref, default main) — the merge gate's additive-only check"
 usage = 'arg "[ref]" default="main"'
+# Two halves because CI's Swift and TUI jobs each run their own, on the build
+# they already have; each command keeps exactly one definition.
+# `baseline=$(…) &&` and not `DIGEST_BASELINE_DIR="$(…)" cmd`: a command
+# substitution in an assignment PREFIX loses its exit status, so a ref that
+# does not resolve left the freeze tests an empty baseline and a green run.
 run = [
-    'DIGEST_BASELINE_DIR="$(scripts/digest-baseline.sh "${usage_ref:-main}")" env -u UPDATE_GOLDENS swift test --scratch-path .build/strict -Xswiftc -warnings-as-errors --filter DigestFreeze',
-    'DIGEST_BASELINE_DIR="$(scripts/digest-baseline.sh "${usage_ref:-main}")" cargo test --manifest-path tui/Cargo.toml --locked baseline_goldens',
+    'mise run digest-freeze-swift -- "${usage_ref:-main}"',
+    'mise run digest-freeze-tui -- "${usage_ref:-main}"',
 ]
+
+[tasks.digest-freeze-swift]
+description = "digest-freeze, the Swift decoders only (arg: ref, default main)"
+usage = 'arg "[ref]" default="main"'
+run = 'baseline="$(scripts/digest-baseline.sh "${usage_ref:-main}")" && DIGEST_BASELINE_DIR="$baseline" env -u UPDATE_GOLDENS swift test --scratch-path .build/strict -Xswiftc -warnings-as-errors --filter DigestFreeze'
+
+[tasks.digest-freeze-tui]
+description = "digest-freeze, the TUI's decoders only (arg: ref, default main)"
+usage = 'arg "[ref]" default="main"'
+run = 'baseline="$(scripts/digest-baseline.sh "${usage_ref:-main}")" && DIGEST_BASELINE_DIR="$baseline" cargo test --manifest-path tui/Cargo.toml --locked baseline_goldens'
 
 [tasks.landed-check]
 description = "post-merge tripwire: the landed tree is the tree the merge gate tested (daft's post-merge hook only)"

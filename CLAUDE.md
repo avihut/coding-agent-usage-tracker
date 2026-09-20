@@ -177,7 +177,8 @@ Rules a grep can hold are mechanized rather than remembered:
 `.swiftlint.yml` `custom_rules` (headless core, native `SecItem`, key
 strategies, `chartScrollableAxes`) and `scripts/guard.sh` (token-shaped
 strings, signing identities, dependencies, the §10 host allowlist,
-script↔task pairing). Adding a rule there beats adding a paragraph here.
+script↔task pairing, CI covering every half of the gate). Adding a rule
+there beats adding a paragraph here.
 
 ## Swift practices
 

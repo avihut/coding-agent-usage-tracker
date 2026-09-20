@@ -61,6 +61,11 @@ one needs to say so up front (they are spec §10; most are enforced by
   and linter run narrow allowlists, so please don't reformat what you didn't
   change.
 - CI for a fork's PR waits for the maintainer's approval before it runs.
+- **A red check names its own command.** CI runs the gate as three jobs —
+  "Lint, format & repo rules" (`mise run gate-lint`), "Swift: strict build +
+  tests" (`mise run gate-swift`) and "TUI (Rust): clippy + tests"
+  (`mise run gate-tui`) — and `ci-gate` is green when all three are.
+  `conventional-title` is the PR title check above.
 
 ## Licensing
 

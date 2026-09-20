@@ -66,7 +66,22 @@ cp "$root/cog.toml" .
 set_version 0.1.0
 printf 'let package = Package(name: "fixture")\n' >Package.swift
 printf '[package]\nname = "fixture"\n\n[dependencies]\nserde = "1"\n' >tui/Cargo.toml
-printf '[tasks.tool]\nrun = "scripts/tool.sh"\n' >mise.toml
+gate_halves() { # the fixture's mise.toml, with these halves of the gate
+    printf '[tasks.tool]\nrun = "scripts/tool.sh"\n\n[tasks.gate]\ndepends = [%s]\n' "$1" >mise.toml
+}
+gate_halves '"gate-lint"'
+mkdir -p .github/workflows
+cat >.github/workflows/ci.yml <<'YAML'
+jobs:
+  lint:
+    steps:
+      - name: mise run gate-lint
+        run: mise run --continue-on-error gate-lint
+  ci-gate:
+    needs:
+      - lint
+    if: always()
+YAML
 printf '#!/bin/sh\n' >scripts/tool.sh
 printf 'let status = "https://status.claude.com/api"\n' >Sources/UsageCore/Links.swift
 printf '{"schemaVersion":1}\n' >Tests/UsageCoreTests/Fixtures/digest/live-state-v1.json
@@ -95,6 +110,14 @@ trips tui/Cargo.toml 'tokio = "1"'
 trips Sources/UsageCore/Links.swift 'let beacon = "https://telemetry.example.com/collect"'
 printf '#!/bin/sh\n' >scripts/orphan.sh
 git add -A
+fails "$scripts/guard.sh" --staged
+git reset -q --hard "$base"
+# ci-gate is the one required check: a job it does not need, or a half of
+# the gate no job runs, is a check a pull request can fail and still merge.
+trips .github/workflows/ci.yml $'  orphan:\n    runs-on: ubuntu-latest'
+gate_halves '"gate-lint", "gate-docs"'
+git add -A
+fails "$scripts/guard.sh"
 fails "$scripts/guard.sh" --staged
 git reset -q --hard "$base"
 

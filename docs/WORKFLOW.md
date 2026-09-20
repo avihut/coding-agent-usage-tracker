@@ -19,7 +19,17 @@ showing work.
   showing work. CI (`.github/workflows/ci.yml`, since 2026-09-20) runs that
   same `gate` plus `digest-freeze` for pull requests — it exists because a
   merge made with GitHub's button never meets daft's rings; the local gates
-  stay the ones the maintainer's own merges pass through. pre-commit
+  stay the ones the maintainer's own merges pass through. CI RUNS THE GATE
+  AS ITS THREE HALVES, one job each, named for what a contributor reads on
+  the PR page — `gate-lint` ("Lint, format & repo rules"), `gate-swift`
+  ("Swift: strict build + tests"), `gate-tui` ("TUI (Rust): clippy +
+  tests") — and `ci-gate` fans them in as the ONE required check (the daft
+  repo's pattern), so a job is added, split or renamed without touching the
+  ruleset. A new check joins one half, never `gate` directly; guard.sh
+  holds both ends: every job is in `ci-gate`'s `needs:`, and every half of
+  `gate` is run by a job. The lint and TUI jobs run with
+  `--continue-on-error --output keep-order`: one run names every failure,
+  because a fork's next run costs the maintainer an approval click. pre-commit
   (staged files, sequential — formatters rewrite what the linter reads
   next): `fmt-swift`, `fmt-rust`, `git diff --cached --check`,
   `lint-swift`, `lint-shell`, `check-config`, `guard`.
@@ -293,12 +303,12 @@ showing work.
   NO SECRET EXISTS to steal: CI never signs, bundles or publishes. RULESETS
   live as text in `.github/rulesets/` (README there): main's integrity rules
   and the tag immutability rule have NO bypass, the maintainer included — a
-  pushed `v*` tag never moves, so re-cut a release BEFORE pushing it; the PR
-  gate is bypassed by the repository admin so `daft merge` + `git push
+  pushed `v*` tag never moves, so re-cut a release BEFORE pushing it; the
+  merge requirements are bypassed by the repository admin so `daft merge` + `git push
   origin main vX.Y.Z` keeps working. A PR LANDS by GitHub's squash button
   (the contributor gets a merged PR; a local `daft merge` would leave it
-  "closed"), its TITLE is the commit subject (`pr-title.yml` holds it to
-  `cog verify` and refuses `release:`), then on main: `git pull`, `mise run
+  "closed"), its TITLE is the commit subject (`pr-title.yml`'s `conventional-title`
+  check holds it to `cog verify` and refuses `release:`), then on main: `git pull`, `mise run
   release`, push, publish. release.sh wants a CLEAN worktree and, with no
   fragment, annotates with the merged subjects — so for prose notes, push
   `.release-notes/next.md` onto the PR branch BEFORE merging (maintainer
