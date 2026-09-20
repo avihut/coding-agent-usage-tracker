@@ -78,11 +78,15 @@ public enum MTimeProbe {
         public let present: Bool
         public let recentFiles: Int
         public let newest: Date?
+        /// The local start of every day holding one of the recent files —
+        /// the cross-harness focus signal (`HarnessFocusRule`).
+        public let recentDays: Set<Date>
 
-        public init(present: Bool, recentFiles: Int, newest: Date?) {
+        public init(present: Bool, recentFiles: Int, newest: Date?, recentDays: Set<Date> = []) {
             self.present = present
             self.recentFiles = recentFiles
             self.newest = newest
+            self.recentDays = recentDays
         }
     }
 
@@ -90,12 +94,13 @@ public enum MTimeProbe {
     /// only); nil walks the whole tree, still under `cap` stats.
     public static func signal(
         directories: [URL], recentSince cutoff: Date, cap: Int = HarnessDetector.statCap,
-        maxDepth: Int? = nil
+        maxDepth: Int? = nil, calendar: Calendar = .current
     ) -> Signal {
         let manager = FileManager.default
         var present = false
         var recent = 0
         var newest: Date?
+        var days: Set<Date> = []
         var statted = 0
 
         for directory in directories {
@@ -121,10 +126,13 @@ public enum MTimeProbe {
                 statted += 1
                 guard let modified = values.contentModificationDate else { continue }
                 if newest.map({ modified > $0 }) ?? true { newest = modified }
-                if modified >= cutoff { recent += 1 }
+                if modified >= cutoff {
+                    recent += 1
+                    days.insert(calendar.startOfDay(for: modified))
+                }
             }
         }
-        return Signal(present: present, recentFiles: recent, newest: newest)
+        return Signal(present: present, recentFiles: recent, newest: newest, recentDays: days)
     }
 
     /// The modification date of one path, nil when absent.
@@ -140,11 +148,18 @@ public struct ProfileProbe: Sendable, Equatable {
     public let identity: AccountIdentity?
     public let lastActivityAt: Date?
     public let recentFiles: Int
+    /// The days inside the activity window that saw a session write — a
+    /// harness's focus weight is the union over its accounts.
+    public let activeDays: Set<Date>
 
-    public init(identity: AccountIdentity?, lastActivityAt: Date?, recentFiles: Int = 0) {
+    public init(
+        identity: AccountIdentity?, lastActivityAt: Date?, recentFiles: Int = 0,
+        activeDays: Set<Date> = []
+    ) {
         self.identity = identity
         self.lastActivityAt = lastActivityAt
         self.recentFiles = recentFiles
+        self.activeDays = activeDays
     }
 }
 
@@ -166,9 +181,11 @@ public enum ProfileActivity {
         provider: any UsageProvider, cacheDirectory: URL, now: Date
     ) -> ProfileProbe {
         let source = provider.makeLocalActivity(cacheDirectory: cacheDirectory)
+        let recent = source?.recentActivitySignal(since: now.addingTimeInterval(-window))
         return ProfileProbe(
             identity: provider.accountIdentity?.currentIdentity(),
             lastActivityAt: source?.lastActivity(now: now),
-            recentFiles: source?.recentActivity(since: now.addingTimeInterval(-window)) ?? 0)
+            recentFiles: recent?.recentFiles ?? 0,
+            activeDays: recent?.recentDays ?? [])
     }
 }

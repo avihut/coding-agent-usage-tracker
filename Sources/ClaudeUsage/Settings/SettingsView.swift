@@ -38,13 +38,9 @@ struct SettingsView: View {
     /// the way the panel does.
     private var store: UsageStore { registry.focusedStore }
 
-    /// Accounts only where the agent can have several homes (0.97.0): a
-    /// one-home harness (Codex, Gemini) has nothing to put there.
-    private var sections: [SettingsSection] {
-        SettingsSection.allCases.filter {
-            $0 != .accounts || registry.activeProvider.supportsMultipleHomes
-        }
-    }
+    /// Every section, always: Accounts lists every metered harness's
+    /// accounts (0.101.0 — it used to vanish for a one-home harness).
+    private var sections: [SettingsSection] { SettingsSection.allCases }
 
     init(
         registry: ProviderRegistry, navigator: SettingsNavigator,
@@ -70,7 +66,7 @@ struct SettingsView: View {
             case .menuBar: MenuBarSettingsPane(registry: registry)
             case .accounts: AccountsSettingsPane(registry: registry, navigator: navigator)
             case .usage: UsageSettingsPane(store: store)
-            case .apiCost: CostSettingsPane(store: store)
+            case .apiCost: CostSettingsPane(store: store, registry: registry)
             }
         }
         // A request landing while the window is already open retargets it

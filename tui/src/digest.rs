@@ -73,6 +73,52 @@ pub struct LiveState {
     /// alone. Mirrored for completeness; the TUI draws one cell today.
     #[serde(default)]
     pub menu_bar_cells: Option<Vec<MenuBarCell>>,
+    /// Every metered harness (0.101.0), in the roster's order. `None` = a
+    /// writer before harnesses, which metered exactly one; `Some` always
+    /// holds at least the bundled one.
+    #[serde(default)]
+    pub harnesses: Option<Vec<HarnessState>>,
+    /// The account focus is PINNED to, when one is — `None` means focus
+    /// follows activity.
+    #[serde(default)]
+    pub pinned_profile: Option<String>,
+}
+
+/// Mirror of `HarnessState`: one metered harness — who it is, whether the
+/// person shows it, how much it has been used lately, and the cards that
+/// belong to the VENDOR rather than to an account. Every harness found on
+/// the machine is listed, hidden ones included: hiding is a display choice.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HarnessState {
+    pub id: String,
+    pub service_name: String,
+    pub agent_name: String,
+    pub glyph: String,
+    /// The agent's first word — what a face with no glyph alphabet prints
+    /// where the glyph would go (ASCII mode).
+    pub short_name: String,
+    pub accent: Rgb,
+    pub is_local_provider: bool,
+    pub present: bool,
+    /// Drawn in the bar and eligible for focus; a hidden harness is still
+    /// metered, still forecast, still priced.
+    pub shown: bool,
+    #[serde(default)]
+    pub recent_files: Option<u32>,
+    #[serde(default)]
+    pub active_days: Option<u32>,
+    #[serde(with = "time::serde::rfc3339::option", default)]
+    pub newest_activity_at: Option<OffsetDateTime>,
+    pub account_count: u32,
+    /// ABSENT IS NOT HEALTHY: `None` = this vendor publishes no status feed,
+    /// or its card has not landed.
+    #[serde(default)]
+    pub service_status: Option<ServiceStatusCard>,
+    #[serde(default)]
+    pub notices: Option<NoticesCard>,
+    #[serde(default)]
+    pub outages: Option<Vec<OutageSpan>>,
 }
 
 /// Mirror of `ProfileState`: one profile's (account's) section. Identity
@@ -82,9 +128,15 @@ pub struct LiveState {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProfileState {
+    /// The account's flat key — the bare profile id for the bundled
+    /// harness, provider-qualified otherwise ("codex", "codex.ab12cd34").
     pub id: String,
     #[serde(rename = "providerID")]
     pub provider_id: String,
+    /// Its STORAGE id, which several harnesses share ("default"): what
+    /// names a directory, where `id` names the account on the wire.
+    #[serde(rename = "accountID", default)]
+    pub account_id: Option<String>,
     pub label: String,
     #[serde(default)]
     pub nickname: Option<String>,
@@ -123,6 +175,11 @@ pub struct MenuBarCell {
     #[serde(rename = "providerID")]
     pub provider_id: String,
     pub glyph: String,
+    /// Its harness's brand accent, so a face tints the mark ahead of this
+    /// cell without knowing any vendor (0.101.0). `None` = a one-harness
+    /// writer, whose accent is the top level's.
+    #[serde(default)]
+    pub accent: Option<Rgb>,
     pub monogram: String,
     pub segments: Vec<SegmentStatus>,
     pub stale: bool,
@@ -768,6 +825,26 @@ mod tests {
         }
     }
 
+    /// Every golden in the fixtures directory decodes, not just the one this
+    /// file names — the multi-harness fixture (v0.101.0) rides the same
+    /// contract, and so will the next one added.
+    #[test]
+    fn every_golden_decodes() {
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../Tests/UsageCoreTests/Fixtures/digest");
+        let mut seen = 0;
+        for entry in std::fs::read_dir(&dir).expect("goldens directory") {
+            let path = entry.expect("goldens directory entry").path();
+            if path.extension().is_some_and(|ext| ext == "json") {
+                let bytes = std::fs::read(&path).expect("golden fixture");
+                LiveState::parse(&bytes)
+                    .unwrap_or_else(|e| panic!("golden {} no longer decodes: {e}", path.display()));
+                seen += 1;
+            }
+        }
+        assert!(seen >= 2, "expected the harness golden beside the base one");
+    }
+
     #[test]
     fn golden_fixture_decodes() {
         let state = LiveState::parse(&golden()).expect("golden must decode");
@@ -775,7 +852,9 @@ mod tests {
         assert_eq!(state.engine.provider_id, "claude");
         assert_eq!(state.engine.host, "app");
         assert_eq!(state.meters.len(), 2);
-        assert_eq!(state.menu_bar.len(), 3);
+        // One segment per limit the account HAS (0.101.0): two meters, two
+        // segments — never a third dash for a scoped limit that isn't there.
+        assert_eq!(state.menu_bar.len(), 2);
         let accent = state
             .engine
             .system_accent
@@ -914,6 +993,7 @@ mod tests {
 #[cfg(test)]
 mod wave4_tests {
     use super::*;
+    use std::path::PathBuf;
 
     fn golden_bytes() -> Vec<u8> {
         std::fs::read(concat!(
@@ -925,6 +1005,26 @@ mod wave4_tests {
 
     fn golden() -> LiveState {
         serde_json::from_slice(&golden_bytes()).expect("golden decodes")
+    }
+
+    /// One named golden beside the default one — the harness golden is a
+    /// SECOND fixture, decoded by this suite and by Swift's alike.
+    fn named_golden(name: &str) -> LiveState {
+        serde_json::from_slice(&named_golden_bytes(name)).expect("golden decodes")
+    }
+
+    fn named_golden_bytes(name: &str) -> Vec<u8> {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../Tests/UsageCoreTests/Fixtures/digest")
+            .join(name);
+        std::fs::read(&path).unwrap_or_else(|_| panic!("golden fixture {name}"))
+    }
+
+    fn golden_object(name: &str) -> serde_json::Map<String, serde_json::Value> {
+        match serde_json::from_slice(&named_golden_bytes(name)).expect("golden is json") {
+            serde_json::Value::Object(object) => object,
+            _ => panic!("golden {name} is not an object"),
+        }
     }
 
     /// Item 20: the per-model curves arrive with the engine's ledger colour
@@ -1132,6 +1232,69 @@ mod wave4_tests {
         assert!(live.ongoing && live.end.is_none());
         assert_eq!(live.id, "q7txxvbsftgq");
         assert!(live.url.is_some());
+    }
+
+    /// 0.101.0: the harness roster rides beside the accounts, and each
+    /// account's section names the harness it belongs to. This pair of
+    /// suites — this one and Swift's LiveStateTests — IS the schema freeze,
+    /// so every field added there is mirrored and decoded here.
+    #[test]
+    fn harnesses_ride_beside_the_accounts() {
+        let state = named_golden("live-state-v1-harnesses.json");
+        let harnesses = state.harnesses.as_ref().expect("harnesses in golden");
+        assert!(harnesses.len() >= 2, "the golden meters several harnesses");
+
+        let bundled = &harnesses[0];
+        assert!(bundled.present && bundled.shown);
+        assert!(!bundled.glyph.is_empty() && !bundled.short_name.is_empty());
+        assert!(bundled.account_count >= 1);
+
+        // A hidden harness is still LISTED — hiding is a display choice, and
+        // a face that dropped it would stop being able to say so.
+        assert!(
+            harnesses.iter().any(|harness| !harness.shown),
+            "the golden carries a hidden harness"
+        );
+        // Every account names a harness the roster lists, and carries the
+        // storage id beside its flat key.
+        let profiles = state.profiles.as_ref().expect("profiles in golden");
+        for profile in profiles {
+            assert!(
+                harnesses
+                    .iter()
+                    .any(|harness| harness.id == profile.provider_id),
+                "profile {} names an unlisted harness",
+                profile.id
+            );
+            assert!(
+                profile.account_id.is_some(),
+                "profile {} has no storage id",
+                profile.id
+            );
+        }
+        // A cell carries its own harness's mark and accent, so a face tints
+        // it without knowing any vendor.
+        let cells = state.menu_bar_cells.as_ref().expect("cells in golden");
+        assert!(cells.iter().any(|cell| cell.accent.is_some()));
+        assert!(
+            cells
+                .iter()
+                .any(|cell| cell.provider_id != cells[0].provider_id),
+            "the golden's bar spans harnesses"
+        );
+    }
+
+    /// A pre-0.101 writer publishes none of it, and the mirrors read that as
+    /// absent rather than failing the whole decode.
+    #[test]
+    fn a_writer_without_harnesses_still_decodes() {
+        let mut object = golden_object("live-state-v1.json");
+        object.remove("harnesses");
+        object.remove("pinnedProfile");
+        let state: LiveState =
+            serde_json::from_value(serde_json::Value::Object(object)).expect("decodes");
+        assert!(state.harnesses.is_none());
+        assert!(state.pinned_profile.is_none());
     }
 
     /// 0.96.0: profiles ride beside the focused top level — the focused

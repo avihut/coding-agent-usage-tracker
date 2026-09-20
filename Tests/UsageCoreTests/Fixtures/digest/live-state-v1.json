@@ -245,6 +245,153 @@
     }
   },
   "focusedProfile" : "default",
+  "harnesses" : [
+    {
+      "accent" : {
+        "blue" : 0.341,
+        "green" : 0.467,
+        "red" : 0.851
+      },
+      "accountCount" : 2,
+      "agentName" : "Claude Code",
+      "glyph" : "✳︎",
+      "id" : "claude",
+      "isLocalProvider" : false,
+      "newestActivityAt" : "2026-08-16T11:30:00Z",
+      "notices" : {
+        "indicator" : true,
+        "items" : [
+          {
+            "components" : [
+              "claude.ai"
+            ],
+            "detail" : "Monitoring · “A fix has been implemented and we are monitoring the results.”",
+            "dismissable" : false,
+            "id" : "outage|q7txxvbsftgq",
+            "kind" : "outage",
+            "occurredAt" : "2026-08-16T10:49:00Z",
+            "ongoing" : true,
+            "ownsMenuBarSurface" : true,
+            "seen" : true,
+            "severity" : "minor",
+            "title" : "Degraded performance for multiple models",
+            "url" : "https:\/\/stspg.io\/tcsfmtc03xgm",
+            "when" : "Ongoing · 1 hr 11 min"
+          },
+          {
+            "components" : [
+
+            ],
+            "detail" : "Weekly (all) fell from 71% ahead of its reset.",
+            "dismissable" : true,
+            "endedAt" : "2026-08-15T18:10:30Z",
+            "id" : "reset|1786817400",
+            "kind" : "reset",
+            "meterLabel" : "Weekly (all)",
+            "occurredAt" : "2026-08-15T18:10:30Z",
+            "ongoing" : false,
+            "ownsMenuBarSurface" : false,
+            "seen" : false,
+            "title" : "Limit reset · Claude",
+            "when" : "~18:10 yesterday"
+          }
+        ],
+        "pendingCount" : 2
+      },
+      "outages" : [
+        {
+          "components" : [
+            "Claude Code"
+          ],
+          "end" : "2026-08-14T03:20:00Z",
+          "id" : "k2m9dj3lqp0a",
+          "ongoing" : false,
+          "severity" : "major",
+          "start" : "2026-08-14T01:10:00Z",
+          "title" : "Elevated errors on Claude Code",
+          "url" : "https:\/\/stspg.io\/k2m9dj3lqp0a"
+        },
+        {
+          "components" : [
+            "claude.ai"
+          ],
+          "id" : "q7txxvbsftgq",
+          "ongoing" : true,
+          "severity" : "minor",
+          "start" : "2026-08-16T10:49:00Z",
+          "title" : "Degraded performance for multiple models",
+          "url" : "https:\/\/stspg.io\/tcsfmtc03xgm"
+        }
+      ],
+      "present" : true,
+      "serviceName" : "Claude",
+      "serviceStatus" : {
+        "checkedAt" : "2026-08-16T11:58:30Z",
+        "components" : [
+          {
+            "name" : "claude.ai",
+            "status" : "degraded_performance"
+          },
+          {
+            "name" : "Claude API (api.anthropic.com)",
+            "status" : "operational"
+          },
+          {
+            "name" : "Claude Code",
+            "status" : "operational"
+          }
+        ],
+        "descriptionText" : "Partially Degraded Service",
+        "incidents" : [
+          {
+            "componentNames" : [
+              "claude.ai"
+            ],
+            "id" : "q7txxvbsftgq",
+            "impact" : "minor",
+            "lastMessage" : "A fix has been implemented and we are monitoring the results.",
+            "lastUpdateAt" : "2026-08-16T11:55:00Z",
+            "name" : "Degraded performance for multiple models",
+            "phase" : "monitoring",
+            "startedAt" : "2026-08-16T10:49:00Z",
+            "url" : "https:\/\/stspg.io\/tcsfmtc03xgm"
+          }
+        ],
+        "indicator" : "minor",
+        "maintenances" : [
+          {
+            "id" : "mnt7k2p9wq11",
+            "name" : "Scheduled infrastructure maintenance",
+            "phase" : "scheduled",
+            "windowEnd" : "2026-08-20T04:00:00Z",
+            "windowStart" : "2026-08-20T02:00:00Z"
+          }
+        ],
+        "okAt" : "2026-08-16T11:58:30Z",
+        "pageName" : "Claude",
+        "pageURL" : "https:\/\/status.claude.com",
+        "providerID" : "claude",
+        "recentlyResolved" : [
+          {
+            "componentNames" : [
+              "Claude Code"
+            ],
+            "id" : "earlier-blip",
+            "impact" : "minor",
+            "lastMessage" : "This incident has been resolved.",
+            "lastUpdateAt" : "2026-08-16T09:40:00Z",
+            "name" : "Elevated error rates",
+            "phase" : "resolved",
+            "resolvedAt" : "2026-08-16T09:40:00Z",
+            "startedAt" : "2026-08-16T09:00:00Z"
+          }
+        ],
+        "stale" : false
+      },
+      "shortName" : "Claude",
+      "shown" : true
+    }
+  ],
   "menuBar" : [
     {
       "level" : "normal",
@@ -261,14 +408,15 @@
     {
       "level" : "warning",
       "tag" : "W"
-    },
-    {
-      "level" : "normal",
-      "tag" : "M"
     }
   ],
   "menuBarCells" : [
     {
+      "accent" : {
+        "blue" : 0.341,
+        "green" : 0.467,
+        "red" : 0.851
+      },
       "glyph" : "✳︎",
       "indicator" : true,
       "monogram" : "W",
@@ -290,10 +438,6 @@
         {
           "level" : "warning",
           "tag" : "W"
-        },
-        {
-          "level" : "normal",
-          "tag" : "M"
         }
       ],
       "stale" : false,
@@ -1129,6 +1273,7 @@
   ],
   "profiles" : [
     {
+      "accountID" : "default",
       "accountPresence" : {
         "accounts" : [
           {
@@ -1387,10 +1532,6 @@
         {
           "level" : "warning",
           "tag" : "W"
-        },
-        {
-          "level" : "normal",
-          "tag" : "M"
         }
       ],
       "meters" : [
@@ -2206,6 +2347,7 @@
       ]
     },
     {
+      "accountID" : "c982130e",
       "dormant" : true,
       "enabled" : true,
       "homeDisplayPath" : "~\/.claude-personal",

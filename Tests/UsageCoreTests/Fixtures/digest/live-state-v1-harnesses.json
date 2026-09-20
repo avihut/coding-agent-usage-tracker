@@ -1,0 +1,554 @@
+{
+  "activity" : {
+    "days" : [
+
+    ],
+    "hourDays" : [
+
+    ],
+    "modelDays" : [
+
+    ],
+    "timeZone" : "GMT",
+    "todayHours" : [
+
+    ],
+    "todayPrompts" : 0,
+    "todayTokens" : 0
+  },
+  "engine" : {
+    "accent" : {
+      "blue" : 0.498,
+      "green" : 0.639,
+      "red" : 0.063
+    },
+    "activeIntervalSeconds" : 300,
+    "agentName" : "Codex",
+    "appVersion" : "0.101.0",
+    "fetchedAt" : "2026-09-19T11:58:00Z",
+    "forecastProfile" : {
+      "caption" : "Personalized forecast activates in 14 days — learning your weekly rhythm.",
+      "historySpanSeconds" : 0,
+      "isReady" : false,
+      "remainingSeconds" : 1209600
+    },
+    "gateFloorSeconds" : 180,
+    "generatedAt" : "2026-09-19T12:00:00Z",
+    "glyph" : "⬡",
+    "host" : "daemon",
+    "isLocalProvider" : true,
+    "nextPollAt" : "2026-09-19T12:03:00Z",
+    "paceMultiplier" : 1,
+    "pid" : 909,
+    "providerID" : "codex",
+    "serviceName" : "ChatGPT",
+    "stale" : false
+  },
+  "focusedProfile" : "codex",
+  "harnesses" : [
+    {
+      "accent" : {
+        "blue" : 0.341,
+        "green" : 0.467,
+        "red" : 0.851
+      },
+      "accountCount" : 2,
+      "activeDays" : 9,
+      "agentName" : "Claude Code",
+      "glyph" : "✳︎",
+      "id" : "claude",
+      "isLocalProvider" : false,
+      "newestActivityAt" : "2026-09-19T11:30:00Z",
+      "notices" : {
+        "indicator" : false,
+        "items" : [
+
+        ],
+        "pendingCount" : 0
+      },
+      "outages" : [
+
+      ],
+      "present" : true,
+      "recentFiles" : 412,
+      "serviceName" : "Claude",
+      "shortName" : "Claude",
+      "shown" : true
+    },
+    {
+      "accent" : {
+        "blue" : 0.498,
+        "green" : 0.639,
+        "red" : 0.063
+      },
+      "accountCount" : 1,
+      "activeDays" : 6,
+      "agentName" : "Codex",
+      "glyph" : "⬡",
+      "id" : "codex",
+      "isLocalProvider" : true,
+      "newestActivityAt" : "2026-09-19T10:05:00Z",
+      "notices" : {
+        "indicator" : true,
+        "items" : [
+          {
+            "components" : [
+
+            ],
+            "detail" : "Weekly fell from 62% ahead of its reset.",
+            "dismissable" : true,
+            "endedAt" : "2026-09-18T18:10:00Z",
+            "id" : "codex:reset|1789755000",
+            "kind" : "reset",
+            "meterLabel" : "Weekly",
+            "occurredAt" : "2026-09-18T18:10:00Z",
+            "ongoing" : false,
+            "ownsMenuBarSurface" : false,
+            "profile" : "codex",
+            "seen" : false,
+            "title" : "Limit reset · ChatGPT",
+            "when" : "~18:10 yesterday"
+          }
+        ],
+        "pendingCount" : 1
+      },
+      "present" : true,
+      "recentFiles" : 22,
+      "serviceName" : "ChatGPT",
+      "shortName" : "Codex",
+      "shown" : true
+    },
+    {
+      "accent" : {
+        "blue" : 0.957,
+        "green" : 0.522,
+        "red" : 0.259
+      },
+      "accountCount" : 1,
+      "activeDays" : 0,
+      "agentName" : "Gemini CLI",
+      "glyph" : "✦",
+      "id" : "gemini",
+      "isLocalProvider" : true,
+      "newestActivityAt" : "2026-09-17T08:00:00Z",
+      "notices" : {
+        "indicator" : false,
+        "items" : [
+
+        ],
+        "pendingCount" : 0
+      },
+      "present" : true,
+      "recentFiles" : 0,
+      "serviceName" : "Google AI",
+      "shortName" : "Gemini",
+      "shown" : false
+    }
+  ],
+  "menuBar" : [
+    {
+      "level" : "normal",
+      "percent" : 13,
+      "resetsAt" : "2026-09-19T14:00:00Z",
+      "tag" : "S"
+    }
+  ],
+  "menuBarCells" : [
+    {
+      "accent" : {
+        "blue" : 0.341,
+        "green" : 0.467,
+        "red" : 0.851
+      },
+      "glyph" : "✳︎",
+      "indicator" : false,
+      "monogram" : "W",
+      "profile" : "default",
+      "providerID" : "claude",
+      "segments" : [
+        {
+          "level" : "normal",
+          "percent" : 41,
+          "resetsAt" : "2026-09-19T14:00:00Z",
+          "tag" : "S"
+        }
+      ],
+      "stale" : false
+    },
+    {
+      "accent" : {
+        "blue" : 0.498,
+        "green" : 0.639,
+        "red" : 0.063
+      },
+      "glyph" : "⬡",
+      "indicator" : true,
+      "monogram" : "C",
+      "profile" : "codex",
+      "providerID" : "codex",
+      "segments" : [
+        {
+          "level" : "normal",
+          "percent" : 13,
+          "resetsAt" : "2026-09-19T14:00:00Z",
+          "tag" : "S"
+        }
+      ],
+      "stale" : false
+    }
+  ],
+  "meters" : [
+    {
+      "forcesWarning" : false,
+      "id" : "session",
+      "label" : "Session",
+      "level" : "normal",
+      "limitWindow" : 18000,
+      "modelSeries" : [
+
+      ],
+      "percent" : 13,
+      "rank" : 0,
+      "rateWindowSeconds" : 2700,
+      "resetCaption" : "resets in 2h",
+      "resetsAt" : "2026-09-19T14:00:00Z",
+      "series" : [
+
+      ],
+      "stretches" : [
+
+      ],
+      "tag" : "S"
+    }
+  ],
+  "models" : [
+
+  ],
+  "notices" : {
+    "indicator" : true,
+    "items" : [
+      {
+        "components" : [
+
+        ],
+        "detail" : "Weekly fell from 62% ahead of its reset.",
+        "dismissable" : true,
+        "endedAt" : "2026-09-18T18:10:00Z",
+        "id" : "codex:reset|1789755000",
+        "kind" : "reset",
+        "meterLabel" : "Weekly",
+        "occurredAt" : "2026-09-18T18:10:00Z",
+        "ongoing" : false,
+        "ownsMenuBarSurface" : false,
+        "profile" : "codex",
+        "seen" : false,
+        "title" : "Limit reset · ChatGPT",
+        "when" : "~18:10 yesterday"
+      }
+    ],
+    "pendingCount" : 1
+  },
+  "profiles" : [
+    {
+      "accountID" : "default",
+      "activity" : {
+        "days" : [
+
+        ],
+        "hourDays" : [
+
+        ],
+        "modelDays" : [
+
+        ],
+        "timeZone" : "GMT",
+        "todayHours" : [
+
+        ],
+        "todayPrompts" : 0,
+        "todayTokens" : 0
+      },
+      "dormant" : false,
+      "enabled" : true,
+      "engine" : {
+        "accent" : {
+          "blue" : 0.341,
+          "green" : 0.467,
+          "red" : 0.851
+        },
+        "activeIntervalSeconds" : 300,
+        "agentName" : "Claude Code",
+        "appVersion" : "0.101.0",
+        "fetchedAt" : "2026-09-19T11:58:00Z",
+        "forecastProfile" : {
+          "caption" : "Personalized forecast activates in 14 days — learning your weekly rhythm.",
+          "historySpanSeconds" : 0,
+          "isReady" : false,
+          "remainingSeconds" : 1209600
+        },
+        "gateFloorSeconds" : 180,
+        "generatedAt" : "2026-09-19T12:00:00Z",
+        "glyph" : "✳︎",
+        "host" : "daemon",
+        "isLocalProvider" : false,
+        "nextPollAt" : "2026-09-19T12:03:00Z",
+        "paceMultiplier" : 1,
+        "pid" : 909,
+        "providerID" : "claude",
+        "serviceName" : "Claude",
+        "stale" : false
+      },
+      "homeDisplayPath" : "~\/.claude",
+      "id" : "default",
+      "isFocused" : false,
+      "label" : "work@example.com",
+      "lastActivityAt" : "2026-09-19T11:30:00Z",
+      "menuBar" : [
+        {
+          "level" : "normal",
+          "percent" : 41,
+          "resetsAt" : "2026-09-19T14:00:00Z",
+          "tag" : "S"
+        }
+      ],
+      "meters" : [
+        {
+          "forcesWarning" : false,
+          "id" : "session",
+          "label" : "Session (5h)",
+          "level" : "normal",
+          "limitWindow" : 18000,
+          "modelSeries" : [
+
+          ],
+          "percent" : 41,
+          "rank" : 0,
+          "rateWindowSeconds" : 2700,
+          "resetCaption" : "resets in 2h",
+          "resetsAt" : "2026-09-19T14:00:00Z",
+          "series" : [
+
+          ],
+          "stretches" : [
+
+          ],
+          "tag" : "S"
+        }
+      ],
+      "models" : [
+
+      ],
+      "monogram" : "W",
+      "providerID" : "claude",
+      "sessions" : [
+
+      ]
+    },
+    {
+      "accountID" : "c982130e",
+      "dormant" : true,
+      "enabled" : true,
+      "homeDisplayPath" : "~\/.claude-personal",
+      "id" : "c982130e",
+      "isFocused" : false,
+      "label" : "Personal",
+      "lastActivityAt" : "2026-08-02T09:00:00Z",
+      "monogram" : "P",
+      "nickname" : "Personal",
+      "providerID" : "claude"
+    },
+    {
+      "accountID" : "default",
+      "activity" : {
+        "days" : [
+
+        ],
+        "hourDays" : [
+
+        ],
+        "modelDays" : [
+
+        ],
+        "timeZone" : "GMT",
+        "todayHours" : [
+
+        ],
+        "todayPrompts" : 0,
+        "todayTokens" : 0
+      },
+      "dormant" : false,
+      "enabled" : true,
+      "engine" : {
+        "accent" : {
+          "blue" : 0.498,
+          "green" : 0.639,
+          "red" : 0.063
+        },
+        "activeIntervalSeconds" : 300,
+        "agentName" : "Codex",
+        "appVersion" : "0.101.0",
+        "fetchedAt" : "2026-09-19T11:58:00Z",
+        "forecastProfile" : {
+          "caption" : "Personalized forecast activates in 14 days — learning your weekly rhythm.",
+          "historySpanSeconds" : 0,
+          "isReady" : false,
+          "remainingSeconds" : 1209600
+        },
+        "gateFloorSeconds" : 180,
+        "generatedAt" : "2026-09-19T12:00:00Z",
+        "glyph" : "⬡",
+        "host" : "daemon",
+        "isLocalProvider" : true,
+        "nextPollAt" : "2026-09-19T12:03:00Z",
+        "paceMultiplier" : 1,
+        "pid" : 909,
+        "providerID" : "codex",
+        "serviceName" : "ChatGPT",
+        "stale" : false
+      },
+      "id" : "codex",
+      "isFocused" : true,
+      "label" : "Codex",
+      "lastActivityAt" : "2026-09-19T10:05:00Z",
+      "menuBar" : [
+        {
+          "level" : "normal",
+          "percent" : 13,
+          "resetsAt" : "2026-09-19T14:00:00Z",
+          "tag" : "S"
+        }
+      ],
+      "meters" : [
+        {
+          "forcesWarning" : false,
+          "id" : "session",
+          "label" : "Session",
+          "level" : "normal",
+          "limitWindow" : 18000,
+          "modelSeries" : [
+
+          ],
+          "percent" : 13,
+          "rank" : 0,
+          "rateWindowSeconds" : 2700,
+          "resetCaption" : "resets in 2h",
+          "resetsAt" : "2026-09-19T14:00:00Z",
+          "series" : [
+
+          ],
+          "stretches" : [
+
+          ],
+          "tag" : "S"
+        }
+      ],
+      "models" : [
+
+      ],
+      "monogram" : "C",
+      "providerID" : "codex",
+      "sessions" : [
+
+      ]
+    },
+    {
+      "accountID" : "default",
+      "activity" : {
+        "days" : [
+
+        ],
+        "hourDays" : [
+
+        ],
+        "modelDays" : [
+
+        ],
+        "timeZone" : "GMT",
+        "todayHours" : [
+
+        ],
+        "todayPrompts" : 0,
+        "todayTokens" : 0
+      },
+      "dormant" : false,
+      "enabled" : true,
+      "engine" : {
+        "accent" : {
+          "blue" : 0.957,
+          "green" : 0.522,
+          "red" : 0.259
+        },
+        "activeIntervalSeconds" : 300,
+        "agentName" : "Gemini CLI",
+        "appVersion" : "0.101.0",
+        "fetchedAt" : "2026-09-19T11:58:00Z",
+        "forecastProfile" : {
+          "caption" : "Personalized forecast activates in 14 days — learning your weekly rhythm.",
+          "historySpanSeconds" : 0,
+          "isReady" : false,
+          "remainingSeconds" : 1209600
+        },
+        "gateFloorSeconds" : 180,
+        "generatedAt" : "2026-09-19T12:00:00Z",
+        "glyph" : "✦",
+        "host" : "daemon",
+        "isLocalProvider" : true,
+        "nextPollAt" : "2026-09-19T12:03:00Z",
+        "paceMultiplier" : 1,
+        "pid" : 909,
+        "providerID" : "gemini",
+        "serviceName" : "Google AI",
+        "stale" : false
+      },
+      "id" : "gemini",
+      "isFocused" : false,
+      "label" : "Gemini CLI",
+      "lastActivityAt" : "2026-09-17T08:00:00Z",
+      "menuBar" : [
+        {
+          "level" : "normal",
+          "percent" : 4,
+          "resetsAt" : "2026-09-19T14:00:00Z",
+          "tag" : "S"
+        }
+      ],
+      "meters" : [
+        {
+          "forcesWarning" : false,
+          "id" : "session",
+          "label" : "Daily · counted locally",
+          "level" : "normal",
+          "limitWindow" : 18000,
+          "modelSeries" : [
+
+          ],
+          "percent" : 4,
+          "rank" : 0,
+          "rateWindowSeconds" : 2700,
+          "resetCaption" : "resets in 2h",
+          "resetsAt" : "2026-09-19T14:00:00Z",
+          "series" : [
+
+          ],
+          "stretches" : [
+
+          ],
+          "tag" : "S"
+        }
+      ],
+      "models" : [
+
+      ],
+      "monogram" : "G",
+      "providerID" : "gemini",
+      "sessions" : [
+
+      ]
+    }
+  ],
+  "schemaVersion" : 1,
+  "sessions" : [
+
+  ],
+  "sessionsCap" : 8
+}

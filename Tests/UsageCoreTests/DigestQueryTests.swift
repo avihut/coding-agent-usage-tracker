@@ -148,7 +148,7 @@ extension DigestQueryTests {
         let esc = "\u{1B}"
         let glyph = "\(esc)[38;2;217;119;87m✳︎\(esc)[0m"
         let percent = "\(esc)[38;2;255;156;29m53%\(esc)[0m"
-        #expect(out.stdout == "\(glyph) S \(percent) W — M —")
+        #expect(out.stdout == "\(glyph) S \(percent) W —")
     }
 }
 
@@ -987,20 +987,20 @@ extension DigestQueryTests {
 
 extension DigestQueryTests {
     @Test func promptNoColorFlagStripsColor() {
-        #expect(run(["prompt", "--no-color"]).stdout == "✳︎ S 53% W — M —")
+        #expect(run(["prompt", "--no-color"]).stdout == "✳︎ S 53% W —")
     }
 
     @Test func promptNoColorEnvStripsColor() {
-        #expect(run(["prompt"], env: ["NO_COLOR": "1"]).stdout == "✳︎ S 53% W — M —")
+        #expect(run(["prompt"], env: ["NO_COLOR": "1"]).stdout == "✳︎ S 53% W —")
     }
 
     @Test func promptRawFlagAlsoStripsColor() {
-        #expect(run(["prompt", "--raw"]).stdout == "✳︎ S 53% W — M —")
+        #expect(run(["prompt", "--raw"]).stdout == "✳︎ S 53% W —")
     }
 
     @Test func promptTmuxMarkup() {
         let out = run(["prompt", "--tmux"])
-        #expect(out.stdout == "#[fg=#D97757]✳︎#[default] S #[fg=#FF9C1D]53%#[default] W — M —")
+        #expect(out.stdout == "#[fg=#D97757]✳︎#[default] S #[fg=#FF9C1D]53%#[default] W —")
     }
 
     @Test func promptSegmentFilterReordersToRequestedOrder() {
@@ -1018,7 +1018,7 @@ extension DigestQueryTests {
     }
 
     @Test func promptNoGlyphDropsLeadingGlyphAndSpace() {
-        #expect(run(["prompt", "--no-color", "--no-glyph"]).stdout == "S 53% W — M —")
+        #expect(run(["prompt", "--no-color", "--no-glyph"]).stdout == "S 53% W —")
     }
 
     @Test func promptStaleMarkerAllThreeModes() {
@@ -1043,7 +1043,7 @@ extension DigestQueryTests {
         let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         #expect(object["glyph"] as? String == "✳︎")
         #expect(object["stale"] as? Bool == false)
-        #expect((object["segments"] as? [Any])?.count == 3)
+        #expect((object["segments"] as? [Any])?.count == 2)
 
         // --no-glyph: `glyph` is a Swift Optional<String> encoded through
         // the standard synthesized Encodable, which OMITS a nil key
@@ -1164,7 +1164,7 @@ extension DigestQueryTests {
         let out = run(["get", "menuBar", "--json"])
         let array = try #require(
             try JSONSerialization.jsonObject(with: Data(out.stdout.utf8)) as? [Any])
-        #expect(array.count == 3)
+        #expect(array.count == 2)
     }
 
     @Test func getRequiresExactlyOnePath() {

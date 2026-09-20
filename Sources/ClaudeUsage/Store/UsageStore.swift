@@ -49,7 +49,7 @@ final class UsageStore {
     /// This profile's engine while hosting; nil in client mode and while
     /// no engine runs for the profile (dormant, disabled, reconciling).
     private var engine: UsageEngine? {
-        if case .hosting(let host) = mode { return host.engines[profile.id] }
+        if case .hosting(let host) = mode { return host.engines[profile.key] }
         return nil
     }
 
@@ -96,7 +96,7 @@ final class UsageStore {
     var outages: [OutageSpan] {
         if let fakeOutages { return fakeOutages }
         switch mode {
-        case .hosting(let host): return host.outages
+        case .hosting(let host): return host.outages(harness: providerValue.id)
         case .client(let client): return client.outages
         }
     }
@@ -149,19 +149,19 @@ final class UsageStore {
     }
     var pricing: PricingTable {
         switch mode {
-        case .hosting(let host): host.services.pricing
+        case .hosting(let host): host.pricing(harness: providerValue.id) ?? providerValue.bundledRates
         case .client(let client): client.pricing
         }
     }
     var isRefreshingPricing: Bool {
         switch mode {
-        case .hosting(let host): host.services.isRefreshingPricing
+        case .hosting(let host): host.isRefreshingPricing(harness: providerValue.id)
         case .client: false
         }
     }
     var pricingRefreshError: String? {
         switch mode {
-        case .hosting(let host): host.services.pricingRefreshError
+        case .hosting(let host): host.pricingRefreshError(harness: providerValue.id)
         case .client: nil
         }
     }
@@ -171,7 +171,7 @@ final class UsageStore {
     var serviceStatus: ServiceStatusCard? {
         if let fakeServiceStatus { return fakeServiceStatus }
         switch mode {
-        case .hosting(let host): return host.serviceStatus
+        case .hosting(let host): return host.serviceStatus(harness: providerValue.id)
         case .client(let client): return client.serviceStatus
         }
     }
@@ -186,7 +186,7 @@ final class UsageStore {
     var notices: NoticesCard? {
         if let fakeNotices { return fakeNotices }
         switch mode {
-        case .hosting(let host): return host.notices
+        case .hosting(let host): return host.notices(harness: providerValue.id)
         case .client(let client): return client.notices
         }
     }
@@ -248,6 +248,9 @@ final class UsageStore {
     }
 
     var provider: any UsageProvider { providerValue }
+    /// This account's harness as every accent surface takes it (0.101.0) —
+    /// the value that replaced the one-active-provider statics.
+    var style: HarnessStyle { HarnessStyle(providerValue) }
     var localActivity: (any LocalActivitySource)? {
         switch mode {
         case .hosting: engine?.localActivity
@@ -329,7 +332,8 @@ final class UsageStore {
         self.init(
             profile: profile, provider: provider, bundleID: bundleID,
             mode: .client(DigestClient(
-                profileID: profile.id, provider: provider, feed: DigestFeed(fixed: fixed),
+                profileID: profile.key, storageID: profile.id, provider: provider,
+                feed: DigestFeed(fixed: fixed),
                 bundleID: bundleID)))
     }
 

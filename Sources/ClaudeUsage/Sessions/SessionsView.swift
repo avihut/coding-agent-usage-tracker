@@ -64,7 +64,7 @@ struct SessionsView: View {
     private var modelColors: [String: Color] {
         var models: Set<String> = []
         for session in store.sessions { models.formUnion(session.models.keys) }
-        return ModelPalette.assignment(for: models.sorted())
+        return ModelPalette.assignment(for: models.sorted(), style: store.style)
     }
 
     var body: some View {
@@ -86,6 +86,9 @@ struct SessionsView: View {
         }
         .toolbar(removing: .sidebarToggle)
         .frame(minWidth: 940, minHeight: 560)
+        // This window belongs to ONE account, so its harness comes down the
+        // environment; the leaves (a skeleton's accent bar) need no plumbing.
+        .environment(\.harnessStyle, store.style)
     }
 
     private func sidebar(colors: [String: Color]) -> some View {

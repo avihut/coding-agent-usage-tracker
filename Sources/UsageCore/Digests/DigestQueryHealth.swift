@@ -25,8 +25,10 @@ extension DigestQuery {
         if parsed.flags["check"] != nil {
             // No card is not an incident. Silence and 0 — the same answer a
             // healthy service gives, because neither is news.
-            let incident = card?.hasIncident ?? false
-            return QueryOutput(stdout: "", exitCode: incident ? exitIncident : exitOK)
+            // Across every SHOWN harness (0.101.0): "is something down" is
+            // about this Mac's agents, not about whichever one holds focus.
+            return QueryOutput(
+                stdout: "", exitCode: digest.anyIncident() ? exitIncident : exitOK)
         }
 
         func resolve(_ field: String, asJSON: Bool) -> QueryOutput {

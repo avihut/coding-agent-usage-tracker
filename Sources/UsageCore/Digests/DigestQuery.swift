@@ -45,7 +45,8 @@ public enum DigestQuery {
     /// anything else); public so a caller can enumerate it without a
     /// second copy of the list.
     public static let nouns: Set<String> = [
-        "status", "health", "account", "accounts", "notices", "limits", "limit", "budget", "spend",
+        "status", "health", "account", "accounts", "harnesses", "notices", "limits", "limit",
+        "budget", "spend",
         "activity", "cost", "models", "model",
         "sessions", "session", "prompt", "get",
     ]
@@ -73,11 +74,12 @@ public enum DigestQuery {
         "check", "no-glyph", "tmux", "all", "background", "no-background",
         "no-scan",
     ]
-    /// `digest`/`provider` are recognized-but-inert here: the CLI already
-    /// consumed `--digest` to choose which file to read, and digest verbs
-    /// ignore `--provider` by design (the digest is single-provider). They
-    /// still have to parse cleanly or every documented invocation in the
-    /// design doc would exit 19 on its own flags. `last` is the deep list
+    /// `digest` is recognized-but-inert here: the CLI already consumed it to
+    /// choose which file to read. `--provider` NARROWS to one harness since
+    /// v0.101.0 (an account noun answers for that harness's focused account,
+    /// and a deep verb checks it before reading a vendor's files); on a
+    /// provider-level noun it stays inert rather than exiting 19, so every
+    /// documented invocation keeps parsing. `last` is the deep list
     /// verbs' count-or-duration flag (`DeepQuery.parseLast`), registered
     /// here for the same one-shared-parser reason as the booleans above.
     private static let valueFlags: Set<String> = [
@@ -113,15 +115,26 @@ public enum DigestQuery {
 
     // MARK: - Entry point
 
-    /// `profiles` and `homes` are the CLI's to supply (the app's stored
-    /// profile list and the provider's home facts — `DeepQuery
-    /// .storedProfiles`/`.storedHomes`); this function stays a pure
-    /// function of its arguments. With the defaults, only the digest's own
-    /// profiles are selectable and the environment selects nothing.
+    /// One harness — how every caller ran this before several were metered.
     public static func run(
         arguments: [String], digest: LiveState, rawDigest: Data,
         environment: [String: String], now: Date,
-        profiles: [Profile] = [], homes: ProfileSelector.Homes = .none
+        profiles: [Profile], homes: ProfileSelector.Homes
+    ) -> QueryOutput {
+        run(
+            arguments: arguments, digest: digest, rawDigest: rawDigest, environment: environment,
+            now: now, profiles: profiles, homes: [homes])
+    }
+
+    /// `profiles` and `homes` are the CLI's to supply — every metered
+    /// harness's accounts and home facts (`DeepQuery.storedProfiles(now:)` /
+    /// `.storedHomes()`); this function stays a pure function of its
+    /// arguments. With the defaults, only the digest's own accounts are
+    /// selectable and the environment selects nothing.
+    public static func run(
+        arguments: [String], digest: LiveState, rawDigest: Data,
+        environment: [String: String], now: Date,
+        profiles: [Profile] = [], homes: [ProfileSelector.Homes] = []
     ) -> QueryOutput {
         guard let noun = arguments.first else {
             return badQuery("no noun given — usage-cli <noun> [selector] [field] [flags]")
@@ -175,6 +188,8 @@ public enum DigestQuery {
         case "accounts":
             return runAccounts(
                 parsed: parsed, digest: digest, now: now, json: json, raw: raw, selectedID: view.id)
+        case "harnesses":
+            return runHarnesses(parsed: parsed, digest: digest, now: now, json: json, raw: raw)
         case "notices": return runNotices(parsed: parsed, digest: digest, json: json, raw: raw)
         case "limits": return runLimits(parsed: parsed, digest: digest, json: json, raw: raw)
         case "limit": return runLimit(parsed: parsed, digest: digest, now: now, json: json)
@@ -204,13 +219,21 @@ public enum DigestQuery {
 
     // MARK: - Account selection
 
-    /// The digest as the selected profile sees it. `projected` = a section
+    /// The digest as the selected account sees it. `projected` = a section
     /// other than the top level was lifted (so raw bytes must be
-    /// re-encoded); `digest` is nil only when the caller had none.
+    /// re-encoded); `digest` is nil only when the caller had none;
+    /// `providerID` is the HARNESS that account belongs to — what a verb
+    /// wired for one vendor's files checks before reading any.
     struct ProfileView {
+        /// The account's `ProfileKey` — what the person named and what every
+        /// message repeats back.
         let id: String
         let digest: LiveState?
         let projected: Bool
+        let providerID: String
+        /// Its STORAGE id inside that harness — what a directory is named
+        /// after. Never the key: `<bundle>/codex/codex/` holds nothing.
+        let accountID: String
     }
 
     /// Shared by every entry point that answers per profile (`run` here,
@@ -219,34 +242,85 @@ public enum DigestQuery {
     /// top level whatever the environment says. An unknown selection is
     /// exit 20 with every known id listed; a profile the store enrolled but
     /// the writer has not published yet is 20 too, worded apart.
-    static func selectProfile(
+    /// Which account a run answers for, before any section is lifted: the
+    /// key the person named, its storage id, and its harness. Resolution and
+    /// PROJECTION are separate steps because a verb wired for one vendor's
+    /// files must refuse on the harness (exit 11) before "that account isn't
+    /// in the digest yet" (exit 20) can speak for it.
+    struct Account {
+        let id: String
+        let accountID: String
+        let providerID: String
+        let source: ProfileSelector.Source
+    }
+
+    static func resolveAccount(
         noun: String, parsed: ParsedArgs, environment: [String: String], digest: LiveState?,
-        profiles: [Profile], homes: ProfileSelector.Homes
-    ) -> Outcome<ProfileView> {
+        profiles: [Profile], homes: [ProfileSelector.Homes]
+    ) -> Outcome<Account> {
+        func harness(_ key: String) -> String {
+            ProfileSelector.harness(of: key, digest: digest, profiles: profiles)
+        }
+        func account(_ key: String) -> String {
+            (digest?.profiles ?? []).first { $0.id == key }?.accountID
+                ?? profiles.first { $0.key == key }?.id
+                ?? key
+        }
         guard accountNouns.contains(noun) else {
-            return .success(ProfileView(
-                id: digest?.focusedProfile ?? Profile.defaultID, digest: digest, projected: false))
+            let id = digest?.focusedProfile ?? Profile.defaultID
+            return .success(Account(
+                id: id, accountID: account(id), providerID: harness(id), source: .focus))
         }
-        let selection: ProfileSelector.Selection
         switch ProfileSelector.resolve(
-            flag: parsed.flags["account"], environment: environment, digest: digest,
-            profiles: profiles, homes: homes)
+            flag: parsed.flags["account"], provider: parsed.flags["provider"],
+            environment: environment, digest: digest, profiles: profiles, homes: homes)
         {
-        case .failure(let unknown): return .failure(noMatch(unknown.message))
-        case .success(let resolved): selection = resolved
+        case .failure(let unknown):
+            // A selector nobody meters is a miss; an ambiguous name or a
+            // contradicted pair is a bad query.
+            return .failure(unknown.kind == .noMatch
+                ? noMatch(unknown.message) : badQuery(unknown.message))
+        case .success(let selection):
+            return .success(Account(
+                id: selection.id, accountID: account(selection.id),
+                providerID: harness(selection.id), source: selection.source))
         }
+    }
+
+    /// That account's section lifted onto the top level, when it isn't
+    /// already there.
+    static func projectAccount(_ account: Account, digest: LiveState?) -> Outcome<ProfileView> {
         guard let digest else {
-            return .success(ProfileView(id: selection.id, digest: nil, projected: false))
+            return .success(ProfileView(
+                id: account.id, digest: nil, projected: false, providerID: account.providerID,
+                accountID: account.accountID))
         }
         let focusedID = digest.focusedProfile ?? Profile.defaultID
-        if selection.id == focusedID {
-            return .success(ProfileView(id: selection.id, digest: digest, projected: false))
+        if account.id == focusedID {
+            return .success(ProfileView(
+                id: account.id, digest: digest, projected: false, providerID: account.providerID,
+                accountID: account.accountID))
         }
-        guard let view = digest.viewing(profile: selection.id) else {
+        guard let view = digest.viewing(profile: account.id) else {
             return .failure(noMatch(
-                "account \(selection.id) is enrolled but not in the digest yet — the engine publishes it within a poll"))
+                "account \(account.id) is enrolled but not in the digest yet — the engine publishes it within a poll"))
         }
-        return .success(ProfileView(id: selection.id, digest: view, projected: true))
+        return .success(ProfileView(
+            id: account.id, digest: view, projected: true, providerID: account.providerID,
+            accountID: account.accountID))
+    }
+
+    static func selectProfile(
+        noun: String, parsed: ParsedArgs, environment: [String: String], digest: LiveState?,
+        profiles: [Profile], homes: [ProfileSelector.Homes]
+    ) -> Outcome<ProfileView> {
+        switch resolveAccount(
+            noun: noun, parsed: parsed, environment: environment, digest: digest,
+            profiles: profiles, homes: homes)
+        {
+        case .failure(let output): return .failure(output)
+        case .success(let account): return projectAccount(account, digest: digest)
+        }
     }
 
     // MARK: - Argument parsing

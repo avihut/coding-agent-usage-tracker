@@ -170,23 +170,25 @@ public enum DeepQuerySessionsCLI {
             return rejection
         }
 
-        let providerID = DeepQuery.resolveProviderID(flag: parsed.flags["provider"])
-        let stored = profiles ?? DeepQuery.storedProfiles(providerID: providerID, now: now)
+        let stored = profiles ?? DeepQuery.storedProfiles(now: now)
         let view: DigestQuery.ProfileView
         switch DigestQuery.selectProfile(
             noun: noun, parsed: parsed, environment: environment, digest: digest,
-            profiles: stored, homes: homes ?? DeepQuery.storedHomes(providerID: providerID))
+            profiles: stored, homes: homes.map { [$0] } ?? DeepQuery.storedHomes())
         {
         case .failure(let output): return output
         case .success(let selected): view = selected
         }
+        // The SELECTED account's harness decides which parser may run, not a
+        // stale stored pick: these verbs read one vendor's transcripts.
+        let providerID = parsed.flags["provider"] ?? view.providerID
         let digest = view.digest ?? digest
 
         // The scan roots at the profile's home. A profile the writer names
         // but the store holds no home for cannot be scanned honestly —
         // rooting at the standard home would list the OTHER account's
         // sessions — so any query that could scan refuses up front.
-        let home = stored.first { $0.id == view.id }?.home
+        let home = stored.first { $0.key == view.id }?.home
         let mayScan = parsed.flags["all"] != nil || (noun == "session" && parsed.flags["no-scan"] == nil)
         if noun != "transcript", view.id != Profile.defaultID, home == nil, mayScan {
             return DigestQuery.noMatch(
@@ -233,7 +235,7 @@ public enum DeepQuerySessionsCLI {
         let json = parsed.flags["json"] != nil
         let scan = {
             DeepQuerySessions.buildIndex(
-                providerFlag: parsed.flags["provider"], home: home, profileID: view.id, now: now)
+                providerFlag: providerID, home: home, profileID: view.accountID, now: now)
         }
         switch noun {
         case "sessions":

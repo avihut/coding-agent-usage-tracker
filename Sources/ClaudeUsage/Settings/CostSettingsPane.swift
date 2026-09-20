@@ -8,11 +8,14 @@ import UsageCore
 /// arithmetic, and the what-if playground.
 struct CostSettingsPane: View {
     var store: UsageStore
+    /// Rates are listed per HARNESS (0.101.0, R4), so this pane needs every
+    /// detected one — not just the account it opened for.
+    var registry: ProviderRegistry
 
     var body: some View {
         SettingsPaneScroll {
             pricingDataCard
-            ratesCard
+            CostRatesCard(registry: registry)
             explainerCard
             playgroundCard
         }
@@ -30,9 +33,8 @@ struct CostSettingsPane: View {
             Divider()
             infoRow("Fetched", fetchedLabel)
             Divider()
-            infoRow(
-                "Models priced",
-                "\(store.pricing.rates.count) \(store.provider.serviceName) models")
+            // Counted per vendor slice: one feed, several tables.
+            infoRow("Models priced", pricedCounts)
             HStack(spacing: 8) {
                 Button("Refresh Now") { store.refreshPricingNow() }
                     .disabled(store.isRefreshingPricing)
@@ -49,6 +51,18 @@ struct CostSettingsPane: View {
         }
     }
 
+    /// "28 Anthropic · 156 OpenAI · 70 Google" — each harness's own slice of
+    /// the one feed.
+    private var pricedCounts: String {
+        let counts = registry.providers.compactMap { provider -> String? in
+            guard let table = registry.store(ofHarness: provider.id)?.pricing,
+                  !table.rates.isEmpty
+            else { return nil }
+            return "\(table.rates.count) \(provider.serviceName)"
+        }
+        return counts.isEmpty ? "—" : counts.joined(separator: " · ")
+    }
+
     private var sourceLabel: String {
         switch store.pricing.source {
         case .live: "LiteLLM community feed"
@@ -62,89 +76,6 @@ struct CostSettingsPane: View {
         let absolute = fetched.formatted(date: .abbreviated, time: .shortened)
         let relative = fetched.formatted(.relative(presentation: .named))
         return "\(absolute) (\(relative))"
-    }
-
-    // MARK: Rates
-
-    private var ratesCard: some View {
-        SettingsCard(
-            "List rates for your models",
-            footer: "Subscription sessions cache with the 1-hour TTL, so their writes bill at the ×2 column. Models missing from the feed show — and sit out cost estimates."
-        ) {
-            VStack(alignment: .leading, spacing: 9) {
-                HStack {
-                    Spacer()
-                    Text("US$ per 1M tokens")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
-                rateLine("model", ["input", "output", "cache read", "write 5m", "write 1h"], header: true)
-                ForEach(ModelFamily.group(rateTableIDs)) { family in
-                    ForEach(family.models, id: \.self) { model in
-                        let rates = store.pricing.rates(for: model)
-                        rateLine(ModelNames.display(model), [
-                            perMTok(rates?.input),
-                            perMTok(rates?.output),
-                            perMTok(rates?.cacheRead ?? rates.map { $0.input * 0.1 }),
-                            perMTok(rates?.cacheWrite ?? rates.map { $0.input * 1.25 }),
-                            perMTok(rates?.cacheWrite1h ?? rates.map { $0.input * 2 }),
-                        ])
-                    }
-                }
-            }
-        }
-    }
-
-    /// Every model the playground can price, plus anything seen locally
-    /// even when unpriced — one table, same family order as the picker.
-    private var rateTableIDs: [String] {
-        var ids = seenModels
-        let names = Set(ids.map(ModelNames.display))
-        ids += store.pricing.rates.keys
-            .filter { !Self.hasDateSuffix($0) && !names.contains(ModelNames.display($0)) }
-            .sorted()
-        return ids
-    }
-
-    /// One table line: the name column keeps its natural width (names never
-    /// truncate), the five rate columns share the card's remaining width
-    /// evenly — the table spans the card instead of hugging its left edge.
-    private func rateLine(_ name: String, _ values: [String], header: Bool = false) -> some View {
-        HStack(spacing: 8) {
-            Text(name)
-                .font(header ? .caption2 : .callout)
-                .foregroundStyle(header ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.primary))
-                .fixedSize(horizontal: true, vertical: false)
-                .frame(minWidth: 96, alignment: .leading)
-            ForEach(Array(values.enumerated()), id: \.offset) { _, value in
-                Text(value)
-                    .font(header ? .caption2 : .callout.monospacedDigit())
-                    .foregroundStyle(header ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.secondary))
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-            }
-        }
-    }
-
-    private func perMTok(_ perToken: Double?) -> String {
-        perToken.map { String(format: "$%.2f", $0 * 1_000_000) } ?? "—"
-    }
-
-    /// Lifetime tokens per raw model id, from local transcripts.
-    private var seenTotals: [String: Int] {
-        var totals: [String: Int] = [:]
-        for day in store.activity {
-            for (model, tally) in day.models {
-                totals[model, default: 0] += tally.total
-            }
-        }
-        return totals
-    }
-
-    /// Models seen in local transcripts, heaviest lifetime usage first.
-    private var seenModels: [String] {
-        seenTotals
-            .sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }
-            .map(\.key)
     }
 
     // MARK: Explainer
@@ -230,34 +161,33 @@ struct CostSettingsPane: View {
     // MARK: Playground
 
     private var playgroundCard: some View {
-        let families = playgroundFamilies
-        return SettingsCard(
+        SettingsCard(
             "Session cost playground",
             footer: "The simulator runs the loop described above in closed form — every dial re-prices the whole session at the selected model's list rates."
         ) {
             CostPlaygroundView(
-                pricing: store.pricing,
-                families: families,
-                initialModel: families.first?.models.first
-                    ?? store.pricing.rates.keys.sorted().first ?? "")
+                pricing: pricingAcrossHarnesses,
+                models: playgroundModels,
+                initialModel: playgroundModels.first?.id ?? "")
         }
     }
 
-    /// Priced models grouped per family for the picker — the models seen
-    /// locally plus the rest of the table's base ids.
-    private var playgroundFamilies: [ModelFamily] {
-        var pricedIDs = seenModels.filter { store.pricing.rates(for: $0) != nil }
-        let seenNames = Set(pricedIDs.map(ModelNames.display))
-        pricedIDs += store.pricing.rates.keys
-            .filter { !Self.hasDateSuffix($0) && !seenNames.contains(ModelNames.display($0)) }
-            .sorted()
-        return ModelFamily.group(pricedIDs)
+    /// Every detected harness's PRICED models, that harness's own tier
+    /// order within each group — what the search picker ranks over.
+    private var playgroundModels: [PricedModel] {
+        CostRatesCard.pricedModels(registry: registry)
     }
 
-    /// "claude-haiku-4-5-20251001" — dated release aliases of a base id.
-    private static func hasDateSuffix(_ id: String) -> Bool {
-        guard let last = id.split(separator: "-").last else { return false }
-        return last.count == 8 && last.allSatisfy(\.isNumber)
+    /// One table spanning every harness, so the simulator can price whatever
+    /// the picker offers. Ids are vendor-unique, so the union cannot collide.
+    private var pricingAcrossHarnesses: PricingTable {
+        var rates: [String: ModelRates] = [:]
+        for provider in registry.providers {
+            let table = registry.store(ofHarness: provider.id)?.pricing ?? provider.bundledRates
+            rates.merge(table.rates) { first, _ in first }
+        }
+        return PricingTable(
+            rates: rates, fetchedAt: store.pricing.fetchedAt, source: store.pricing.source)
     }
 }
 

@@ -364,16 +364,16 @@ struct UsageCLI {
                 "live-state digest at \(fileURL.path) does not decode (\(type(of: error))) — regenerate it",
                 code: 13)
         }
-        // The account selector's inputs: the app's stored profile list
-        // (the daemon's own view of it) and the digest's provider's home
-        // facts — `--account` and `$CLAUDE_CONFIG_DIR` resolve against
-        // these; `DigestQuery.run` itself stays pure.
+        // The account selector's inputs: EVERY metered harness's accounts
+        // (the daemon's own view of the store) and every harness's home
+        // facts — `--account`, `--provider` and a home variable like
+        // `$CLAUDE_CONFIG_DIR` resolve against these; `DigestQuery.run`
+        // itself stays pure.
         let now = Date()
         let output = DigestQuery.run(
             arguments: arguments, digest: digest, rawDigest: data,
             environment: ProcessInfo.processInfo.environment, now: now,
-            profiles: DeepQuery.storedProfiles(providerID: digest.engine.providerID, now: now),
-            homes: DeepQuery.storedHomes(providerID: digest.engine.providerID))
+            profiles: DeepQuery.storedProfiles(now: now), homes: DeepQuery.storedHomes())
         emit(output)
     }
 

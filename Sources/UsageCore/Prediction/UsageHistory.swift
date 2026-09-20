@@ -25,23 +25,51 @@ public struct UsageHistory: Sendable {
     let retention: TimeInterval
     let denseWindow: TimeInterval
     let thinnedResolution: TimeInterval
+    /// A retired meter label → the one its provider writes now
+    /// (`UsageProvider.currentMeterLabel`). Applied on READ: samples are
+    /// keyed by label, so a renamed meter would otherwise lose its history
+    /// — no percent line, no forecast, token curves with nothing to scale
+    /// against (0.101.0, user-reported the hour Codex's week stopped being
+    /// called "Session (168h)"). The engine appends to what it loaded, so
+    /// the file itself heals on the next write.
+    let relabel: (@Sendable (String) -> String)?
 
     public init(
         directory: URL, retention: TimeInterval = 56 * 86400,
         denseWindow: TimeInterval = 7 * 86400,
-        thinnedResolution: TimeInterval = 900
+        thinnedResolution: TimeInterval = 900,
+        relabel: (@Sendable (String) -> String)? = nil
     ) {
         self.fileURL = directory.appending(path: "history.json")
         self.retention = retention
         self.denseWindow = denseWindow
         self.thinnedResolution = thinnedResolution
+        self.relabel = relabel
     }
 
     public func load() -> [UsageSample] {
         guard let data = try? Data(contentsOf: fileURL),
               let samples = try? JSONDecoder().decode([UsageSample].self, from: data)
         else { return [] }
-        return samples
+        guard let relabel else { return samples }
+        return samples.map { Self.relabeled($0, relabel) }
+    }
+
+    /// One sample with every key carried to its current label. A sample
+    /// that somehow holds BOTH spellings keeps the current one's value.
+    static func relabeled(_ sample: UsageSample, _ relabel: (String) -> String) -> UsageSample {
+        func carried<Value>(_ values: [String: Value]) -> [String: Value] {
+            var out: [String: Value] = [:]
+            for (label, value) in values where relabel(label) != label {
+                out[relabel(label)] = value
+            }
+            for (label, value) in values where relabel(label) == label { out[label] = value }
+            return out
+        }
+        let percents = carried(sample.percents)
+        guard percents != sample.percents || sample.resets.map({ carried($0) != $0 }) == true
+        else { return sample }
+        return UsageSample(t: sample.t, percents: percents, resets: sample.resets.map(carried))
     }
 
     /// Appends a sample from the snapshot, prunes old entries, saves, and

@@ -90,17 +90,27 @@ final class DigestClient {
     private var lastScan: Date?
     private var isScanning = false
 
-    init(profileID: String, provider: any UsageProvider, feed: DigestFeed, bundleID: String) {
+    /// TWO ids, never one (0.101.0, user-reported: Codex's card drew no
+    /// percent line and scaled its model curves to the plot). `profileID` is
+    /// the flat KEY — the digest's section and the socket's verbs. `storageID`
+    /// is the account's directory name. Every harness's standard account is
+    /// `default` on disk, so a key used as a path reads `codex/codex/`: a
+    /// directory that doesn't exist, and a store with no samples at all.
+    init(
+        profileID: String, storageID: String, provider: any UsageProvider, feed: DigestFeed,
+        bundleID: String
+    ) {
         self.profileID = profileID
         self.provider = provider
         self.feed = feed
         self.bundleID = bundleID
         let support = StorageScope.supportDirectory(
-            bundleID: bundleID, providerID: provider.id, profileID: profileID)
+            bundleID: bundleID, providerID: provider.id, profileID: storageID)
         let providerSupport = StorageScope.providerDirectory(
             bundleID: bundleID, providerID: provider.id)
         self.localActivity = provider.makeLocalActivity(cacheDirectory: support)
-        self.history = UsageHistory(directory: support)
+        self.history = UsageHistory(
+            directory: support, relabel: { provider.currentMeterLabel(forStored: $0) })
         self.windowLedger = WindowLedger(directory: support)
         self.pricingService = PricingService(
             cacheDirectory: providerSupport, fallback: provider.bundledRates,

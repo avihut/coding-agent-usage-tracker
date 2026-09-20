@@ -6,7 +6,9 @@ import UsageCore
 /// whole session live.
 struct CostPlaygroundView: View {
     let pricing: PricingTable
-    let families: [ModelFamily]
+    /// Every detected harness's priced models (0.101.0) — the list is long
+    /// enough now that it is searched rather than scrolled.
+    let models: [PricedModel]
 
     @State private var model: String
     @State private var steps: Double = Self.defaults.steps
@@ -19,25 +21,16 @@ struct CostPlaygroundView: View {
     /// growing 2.5K per step — the shape of real transcripts here.
     private static let defaults = (steps: 60.0, context: 18_000.0, growth: 2_500.0, output: 400.0)
 
-    init(pricing: PricingTable, families: [ModelFamily], initialModel: String) {
+    init(pricing: PricingTable, models: [PricedModel], initialModel: String) {
         self.pricing = pricing
-        self.families = families
+        self.models = models
         _model = State(initialValue: initialModel)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Picker("Model", selection: $model) {
-                    ForEach(families) { family in
-                        Section(family.name) {
-                            ForEach(family.models, id: \.self) { id in
-                                Text(ModelNames.display(id)).tag(id)
-                            }
-                        }
-                    }
-                }
-                .fixedSize()
+                ModelSearchPicker(models: models, selection: $model)
                 Spacer()
                 SegmentedPicker(
                     title: "Cache TTL", selection: $oneHourTTL,

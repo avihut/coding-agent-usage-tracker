@@ -34,6 +34,8 @@ extension DigestQuery {
             "account",
         ]),
         "accounts": scalars(["count", "focused", "selected"]).merging(tables(["items"])) { lhs, _ in lhs },
+        "harnesses": scalars(["count", "shown", "hidden", "focused"])
+            .merging(tables(["items"])) { lhs, _ in lhs },
         "limit": scalars([
             "percent", "left", "label", "tag", "level", "rank", "severity", "risk", "resets-at", "resets-in",
             "caption", "window", "rate-window", "forces-warning", "scoped-model", "exhausted",

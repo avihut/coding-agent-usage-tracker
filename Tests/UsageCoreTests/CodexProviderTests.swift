@@ -326,6 +326,63 @@ struct CodexProviderTests {
         #expect(!selector.includes("claude-fable-5", "anthropic"))
         #expect(!selector.includes("gemini-3-pro", "gemini"))
     }
+
+    /// The real 2026-09-20 shape: ONE window, a week long, in `primary`,
+    /// with `secondary` null — the payload that read "Session (168h)".
+    private static func windowsLine(stamp: String, windows: [(slot: String, minutes: Int)], reset: Int) -> String {
+        let named = Set(windows.map(\.slot))
+        let present = windows.map {
+            "\"\($0.slot)\":{\"used_percent\":35.0,\"window_minutes\":\($0.minutes),\"resets_at\":\(reset)}"
+        }
+        let absent = ["primary", "secondary"].filter { !named.contains($0) }.map { "\"\($0)\":null" }
+        return """
+        {"timestamp":"\(stamp)","type":"event_msg","payload":{"type":"token_count",\
+        "info":{"last_token_usage":{"input_tokens":1000,"cached_input_tokens":600,\
+        "output_tokens":200,"total_tokens":1200}},"rate_limits":{"limit_id":"codex",\
+        \((present + absent).joined(separator: ",")),"plan_type":"prolite"}}}
+        """
+    }
+
+    private func meters(_ windows: [(slot: String, minutes: Int)]) throws -> [Meter] {
+        let fixture = try CodexFixture()
+        defer { fixture.tearDown() }
+        let now = Date()
+        try fixture.writeRollout(
+            "2026/09/20/rollout-2026-09-20T00-20-48-aaaa.jsonl",
+            lines: [Self.windowsLine(
+                stamp: "2026-09-20T00:21:00.000Z", windows: windows,
+                reset: Int(now.timeIntervalSince1970) + 86400)])
+        let payload = try CodexRollouts.latestUsagePayload(root: fixture.root)
+        return try CodexMeterBuilder.snapshot(
+            fromPayload: payload, thresholds: .standard, now: now).meters
+    }
+
+    @Test("a window is what its LENGTH says, never what its slot used to hold")
+    func classifiedByWindow() throws {
+        // A week in the primary slot is the weekly limit: its name, its
+        // rank, its id and its bar letter all say so.
+        let weekOnly = try meters([("primary", 10080)])
+        #expect(weekOnly.map(\.label) == ["Weekly"])
+        #expect(weekOnly.map(\.rank) == [1])
+        #expect(weekOnly.map(\.id) == ["1-weekly"])
+        #expect(weekOnly[0].limitWindow == TimeInterval(7 * 86400))
+        let bar = UsageFormatting.menuBarSegments(from: weekOnly)
+        #expect(bar.map(\.tag) == ["W"])
+        #expect(bar.map(\.percent) == [35])
+
+        // The historical pair reads exactly as it always did.
+        let pair = try meters([("primary", 300), ("secondary", 10080)])
+        #expect(pair.map(\.label) == ["Session (5h)", "Weekly"])
+        #expect(pair.map(\.id) == ["0-session", "1-weekly"])
+        #expect(UsageFormatting.menuBarSegments(from: pair).map(\.tag) == ["S", "W"])
+
+        // Two long windows stay two meters: distinct ids, distinct labels
+        // (both key stored state), both in the bar, shortest first.
+        let long = try meters([("primary", 43200), ("secondary", 10080)])
+        #expect(Set(long.map(\.id)).count == 2)
+        #expect(Set(long.map(\.label)) == ["Monthly", "Weekly"])
+        #expect(UsageFormatting.menuBarSegments(from: long).map(\.tag) == ["W", "M"])
+    }
 }
 
 /// A temp `~/.codex/sessions`-shaped tree plus a scoped cache directory.

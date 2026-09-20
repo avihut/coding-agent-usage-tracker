@@ -23,7 +23,7 @@ struct MenuBarElementPalette: View {
             RunsOutTile(
                 cell: MenuBarModelBuilder.runsOutSample(
                     for: profile, registry: registry, scope: scope ?? .earliest),
-                profileID: profile?.id,
+                profileID: profile?.key,
                 placed: scope != nil,
                 onAdd: { onChange(MenuBarLayout.settingRunsOut(.earliest, in: elements)) })
                 .fixedSize()
@@ -86,6 +86,7 @@ private struct RunsOutTile: View {
     let profileID: String?
     let placed: Bool
     let onAdd: () -> Void
+    var style: HarnessStyle = .bundled
 
     @State private var hovering = false
 
@@ -98,7 +99,7 @@ private struct RunsOutTile: View {
     var body: some View {
         let image = thumbnail
         VStack(spacing: 4) {
-            MenuBarSwatch(image: image, selected: placed, hovering: hovering)
+            MenuBarSwatch(image: image, selected: placed, hovering: hovering, style: style)
                 .overlay(
                     ElementDragSource(
                         element: .runsOut(.earliest), profileID: profileID, image: image,

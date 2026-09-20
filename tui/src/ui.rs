@@ -792,6 +792,47 @@ fn section_title(text: &str) -> Line<'static> {
     ))
 }
 
+/// Every SHOWN harness other than the focused account's, as (mark, accent,
+/// digits). Empty for a writer that meters one, so a one-harness header is
+/// exactly what it was.
+fn other_harnesses(digest: &LiveState) -> Vec<(String, crate::digest::Rgb, String)> {
+    let (Some(harnesses), Some(cells)) =
+        (digest.harnesses.as_ref(), digest.menu_bar_cells.as_ref())
+    else {
+        return Vec::new();
+    };
+    let focused = digest
+        .focused_profile
+        .as_ref()
+        .and_then(|id| digest.profiles.as_ref()?.iter().find(|p| &p.id == id))
+        .map(|profile| profile.provider_id.clone());
+    harnesses
+        .iter()
+        .filter(|harness| harness.shown && Some(&harness.id) != focused.as_ref())
+        .filter_map(|harness| {
+            let digits: Vec<String> = cells
+                .iter()
+                .filter(|cell| cell.provider_id == harness.id)
+                .flat_map(|cell| cell.segments.iter())
+                .map(|segment| {
+                    segment
+                        .percent
+                        .map(|p| format!("{}{p}", segment.tag))
+                        .unwrap_or_else(|| format!("{}—", segment.tag))
+                })
+                .collect();
+            if digits.is_empty() {
+                return None;
+            }
+            Some((
+                harness.glyph.clone(),
+                harness.accent,
+                digits.join(glyphs().sep),
+            ))
+        })
+        .collect()
+}
+
 fn header<'a>(
     digest: &'a LiveState,
     freshness: Freshness,
@@ -820,6 +861,23 @@ fn header<'a>(
     ));
     if let Some(plan) = &engine.plan_label {
         identity.push(Span::styled(format!("  {plan}"), style(DIM)));
+    }
+    // The OTHER metered harnesses, in miniature (0.101.0): this pane's
+    // meters are the focused account's, and a terminal that could not see
+    // the second vendor at all would be a worse face than the menu bar.
+    // Each keeps its own mark in its own colour; a hidden harness is absent,
+    // and a writer that meters one adds nothing here.
+    for (glyph, accent, digits) in other_harnesses(digest) {
+        identity.push(Span::styled(
+            format!("   {glyph} "),
+            style(Color::Rgb(
+                (accent.red * 255.0).round() as u8,
+                (accent.green * 255.0).round() as u8,
+                (accent.blue * 255.0).round() as u8,
+            ))
+            .add_modifier(Modifier::BOLD),
+        ));
+        identity.push(Span::styled(digits, style(DIM)));
     }
 
     // The status line is built at full phrasing first; when the pane can't

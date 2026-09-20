@@ -21,7 +21,7 @@ import UsageCore
 @MainActor
 final class StatusItemController: NSResponder {
     /// One menu bar item and what was last drawn in it.
-    private final class Item {
+    final class Item {
         /// Nil = the grouped item carrying every cell.
         let profileID: String?
         let statusItem: NSStatusItem
@@ -39,14 +39,14 @@ final class StatusItemController: NSResponder {
         }
     }
 
-    private let registry: ProviderRegistry
-    private var items: [Item] = []
-    private let popover = NSPopover()
-    private let hoverPopover = NSPopover()
-    private var hoverTask: Task<Void, Never>?
-    /// The cell the pointer is over (nil id = the glyph), as of the last
-    /// mouse event — what the dwell task reads when it fires.
-    private var hoverTarget: (item: Item, profileID: String?)?
+    let registry: ProviderRegistry
+    var items: [Item] = []
+    let popover = NSPopover()
+    let hoverPopover = NSPopover()
+    var hoverTask: Task<Void, Never>?
+    /// The cell the pointer is over (nil id = that harness's mark), as of
+    /// the last mouse event — what the dwell task reads when it fires.
+    var hoverTarget: (item: Item, profileID: String?, harnessID: String)?
     private var outsideClickMonitor: Any?
     private var resignActiveObserver: NSObjectProtocol?
     private var defaultsObserver: NSObjectProtocol?
@@ -70,7 +70,7 @@ final class StatusItemController: NSResponder {
     private var clock: Timer?
 
     /// The account the panel, the windows and the ⋯ menu answer for.
-    private var store: UsageStore { registry.focusedStore }
+    var store: UsageStore { registry.focusedStore }
 
     init(registry: ProviderRegistry) {
         self.registry = registry
@@ -179,7 +179,7 @@ final class StatusItemController: NSResponder {
         withObservationTracking {
             _ = registry.menuBarCells
             _ = registry.focusedID
-            _ = registry.shownProfiles.map(\.id)
+            _ = registry.shownProfiles.map(\.key)
             _ = observed.state
             _ = observed.predictions
             _ = observed.serviceStatus
@@ -201,9 +201,16 @@ final class StatusItemController: NSResponder {
         let model = MenuBarModelBuilder.model(registry: registry, prefs: prefs)
         let height = NSStatusBar.system.thickness
         let itemModels = StatusItemRenderer.itemModels(for: model)
+        // The shared item is always in the list, even when nothing is drawn
+        // in it (every account took its own): it is never created twice in a
+        // process, so it is never removed either — it hides instead.
         let wanted = itemModels.map(\.profileID)
-        if items.map(\.profileID) != wanted { reconcileItems(for: wanted) }
-        for (item, drawn) in zip(items, itemModels) {
+        let kept = wanted.contains(nil) ? wanted : [nil] + wanted
+        if items.map(\.profileID) != kept { reconcileItems(for: kept) }
+        if let shared = items.first(where: { $0.profileID == nil }) {
+            shared.statusItem.isVisible = wanted.contains(nil)
+        }
+        for (item, drawn) in zip(items.filter { wanted.contains($0.profileID) }, itemModels) {
             let ground = ground(of: item)
             guard item.model != drawn.model || item.ground != ground else { continue }
             item.model = drawn.model
@@ -264,7 +271,10 @@ final class StatusItemController: NSResponder {
     /// carries AppKit's auto-generated first name that every launch since
     /// 0.1 has used. Tearing it down and creating it afresh handed the bar
     /// a NEW item, which a menu bar manager (Bartender) filed under its
-    /// policy for new items — hidden — and remembered.
+    /// policy for new items — hidden — and remembered. Its caller therefore
+    /// always keeps nil in the list; an unwanted shared item is hidden by
+    /// `isVisible`, never removed (0.101.0: with harness groups, "every cell
+    /// took its own item" is a state a two-vendor bar reaches easily).
     private func reconcileItems(for wanted: [String?]) {
         isRebuildingItems = true
         defer { isRebuildingItems = false }
@@ -318,130 +328,6 @@ final class StatusItemController: NSResponder {
         }
     }
 
-    // MARK: - Hit testing
-
-    /// Which item's button the event came from, and which account's cell
-    /// the pointer sits on (nil id = the provider glyph).
-    private func target(for event: NSEvent) -> (item: Item, profileID: String?)? {
-        guard let item = items.first(where: { $0.statusItem.button?.window === event.window }),
-              let button = item.statusItem.button
-        else { return nil }
-        let point = button.convert(event.locationInWindow, from: nil)
-        return (item, cellID(at: point, in: item))
-    }
-
-    private func cellID(at point: CGPoint, in item: Item) -> String? {
-        guard let button = item.statusItem.button, let image = button.image else { return nil }
-        let originX = (button.bounds.width - image.size.width) / 2
-        return item.rects.first { $0.rect.offsetBy(dx: originX, dy: 0).contains(point) }?.profileID
-    }
-
-    /// The cell's rect in button coordinates — what the hover popover
-    /// anchors to, so a card points at the account it belongs to.
-    private func anchor(for profileID: String?, in item: Item) -> NSRect {
-        guard let button = item.statusItem.button else { return .zero }
-        guard let image = button.image,
-              let rect = item.rects.first(where: { $0.profileID == profileID })
-        else { return button.bounds }
-        let originX = (button.bounds.width - image.size.width) / 2
-        return rect.rect.offsetBy(dx: originX, dy: 0)
-    }
-
-    // MARK: - Hover graph
-
-    override func mouseEntered(with event: NSEvent) {
-        guard !popover.isShown else { return }
-        hoverTarget = target(for: event)
-        hoverTask?.cancel()
-        hoverTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(350))
-            guard let self, !Task.isCancelled, !self.popover.isShown, !self.hoverPopover.isShown
-            else { return }
-            self.showHoverPopover()
-        }
-    }
-
-    /// Moving between cells re-anchors the card immediately — the dwell is
-    /// for arriving at the bar, not for crossing it. Close-then-show, with
-    /// animation off, so the swap reads as one card moving.
-    override func mouseMoved(with event: NSEvent) {
-        guard !popover.isShown else { return }
-        let previous = hoverTarget?.profileID
-        hoverTarget = target(for: event)
-        guard hoverPopover.isShown, hoverTarget?.profileID != previous else { return }
-        showHoverPopover()
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        hoverTask?.cancel()
-        hoverTarget = nil
-        if hoverPopover.isShown { hoverPopover.performClose(nil) }
-    }
-
-    /// The hovered account's 5h meter card — the same view as clicking its
-    /// row in the panel, so it wakes with the span and frame pickers exactly
-    /// as last set (they share the per-account @AppStorage keys). The glyph
-    /// (or anywhere outside a cell) shows the focused account's.
-    ///
-    /// During an incident the panel's own banner rides on top (surface S5):
-    /// the same view, so the phrasing and the ticking duration can never
-    /// drift between the two popovers.
-    private func showHoverPopover() {
-        guard let (item, profileID) = hoverTarget, let button = item.statusItem.button else { return }
-        let store = profileID.flatMap { registry.store(for: $0) } ?? registry.focusedStore
-        guard let meter = store.state.snapshot?.meters.first(where: { $0.rank == 0 })
-            ?? store.state.snapshot?.meters.first
-        else { return }
-        let history = MeterHistoryView(
-            meter: meter, samples: store.samples,
-            timeline: store.tokenTimeline, pricing: store.pricing,
-            prediction: store.predictions[meter.label],
-            overshoot: store.forecastOvershoots[meter.label],
-            outcomes: store.windowOutcomes,
-            agentName: store.provider.agentName,
-            providerID: store.profile.scopeKey,
-            accountTitle: accountTitle(for: store),
-            outages: store.outages,
-            onOpenOutage: { [weak self] span in
-                guard let self,
-                      let url = self.store.provider.outageDestination(url: span.url)
-                else { return }
-                NSWorkspace.shared.open(url)
-            })
-        let incidentCard = store.serviceStatus.flatMap { $0.hasIncident ? $0 : nil }
-        let host = NSHostingController(
-            rootView: HoverPopoverContent(card: incidentCard, history: history))
-        host.sizingOptions = .preferredContentSize
-        if hoverPopover.isShown { hoverPopover.performClose(nil) }
-        hoverPopover.contentViewController = host
-        hoverPopover.show(
-            relativeTo: anchor(for: profileID, in: item), of: button, preferredEdge: .minY)
-        // The hover popover carries the incident banner, so showing it
-        // counts as seeing the ongoing outage — its epilogue will then
-        // read "ended" rather than recount the whole incident.
-        markNoticesSeen(onlyMenuBarSurfaces: true)
-    }
-
-    /// Whose card this is — shown only once more than one account is
-    /// metered, so a single-account popover is unchanged.
-    private func accountTitle(for store: UsageStore) -> MeterHistoryView.AccountTitle? {
-        guard registry.shownProfiles.count > 1 else { return nil }
-        return MeterHistoryView.AccountTitle(
-            monogram: registry.monogram(for: store.profile),
-            label: registry.label(for: store.profile))
-    }
-
-    /// Opening the panel marks every pending notice seen; the hover
-    /// popover marks only the ones it actually shows (the incident
-    /// banner). Seen is not dismissed — the dot stays until a click.
-    private func markNoticesSeen(onlyMenuBarSurfaces: Bool) {
-        guard let card = store.notices else { return }
-        let ids = card.items
-            .filter { !$0.seen && (!onlyMenuBarSurfaces || $0.ownsMenuBarSurface) }
-            .map(\.id)
-        store.markNoticesSeen(ids)
-    }
-
     // MARK: - Main panel
 
     /// A click on a cell focuses that account and opens the panel on it; a
@@ -451,7 +337,9 @@ final class StatusItemController: NSResponder {
         hoverTask?.cancel()
         if hoverPopover.isShown { hoverPopover.performClose(nil) }
         let clicked = NSApp.currentEvent.flatMap { target(for: $0) }
-        let clickedID = clicked?.profileID
+        // A click on a harness's mark focuses that harness's own account.
+        let clickedID = clicked.flatMap { account($0.profileID, inHarness: $0.harnessID) }
+        logClick(clicked: clicked.map { ($0.profileID, $0.harnessID) }, resolved: clickedID)
         if popover.isShown {
             if let clickedID, clickedID != registry.focusedID {
                 registry.focus(clickedID)
@@ -464,6 +352,40 @@ final class StatusItemController: NSResponder {
         let button = (clicked?.item ?? items.first)?.statusItem.button
         guard let button else { return }
         openPanel(from: button)
+    }
+
+    /// `--click-log <file>`: how a bar click resolved, one line each. The
+    /// status item can't be scripted and this app's OSLog lines never
+    /// surface in `log show`, so a click that lands wrong leaves no trace
+    /// otherwise. Inert without the flag.
+    private func logClick(clicked: (profileID: String?, harnessID: String)?, resolved: String?) {
+        let arguments = CommandLine.arguments
+        guard let flag = arguments.firstIndex(of: "--click-log"), arguments.indices.contains(flag + 1)
+        else { return }
+        let event = NSApp.currentEvent
+        let regions = items.map { item -> String in
+            let button = item.statusItem.button
+            let point = event.flatMap { e in button.map { $0.convert(pointerLocation(for: e, in: $0), from: nil) } }
+            let reported = event.flatMap { e in button?.convert(e.locationInWindow, from: nil) }
+            let sameWindow = button?.window === event?.window
+            let rects = item.rects.map {
+                "\($0.profileID ?? "glyph"):\($0.harnessID)[\(Int($0.rect.minX))…\(Int($0.rect.maxX))]"
+            }.joined(separator: " ")
+            return "item(\(item.profileID ?? "shared")) window=\(sameWindow) point=\(point.map { "\(Int($0.x)),\(Int($0.y))" } ?? "nil")"
+                + " eventSaid=\(reported.map { "\(Int($0.x)),\(Int($0.y))" } ?? "nil") bounds=\(Int(button?.bounds.width ?? -1)) image=\(Int(button?.image?.size.width ?? -1)) rects=\(rects)"
+        }.joined(separator: " | ")
+        let line = "\(Date()) event=\(event.map { String(describing: $0.type.rawValue) } ?? "nil")"
+            + " clicked=\(clicked.map { "\($0.profileID ?? "glyph")@\($0.harnessID)" } ?? "nil")"
+            + " resolved=\(resolved ?? "nil") focusedBefore=\(registry.focusedID) panelShown=\(popover.isShown)"
+            + " stores=\(registry.shownProfiles.map(\.key)) :: \(regions)\n"
+        let url = URL(fileURLWithPath: arguments[flag + 1])
+        if let handle = try? FileHandle(forWritingTo: url) {
+            handle.seekToEndOfFile()
+            handle.write(Data(line.utf8))
+            try? handle.close()
+        } else {
+            try? Data(line.utf8).write(to: url)
+        }
     }
 
     private func openPanel(from button: NSStatusBarButton) {

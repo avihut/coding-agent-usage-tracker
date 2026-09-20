@@ -253,6 +253,14 @@ extension ModelCatalog {
             case "other": 4
             default: 3
             }
+        },
+        claims: { id in
+            let lower = id.lowercased()
+            return lower == "unknown" || lower.hasPrefix("gemini") || lower.hasPrefix("gemma")
+        },
+        claimsFamily: { family in
+            ["gemini", "gemini pro", "gemini flash", "gemini lite", "gemini nano", "other"]
+                .contains(family.lowercased())
         }
     )
 }

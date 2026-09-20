@@ -127,8 +127,8 @@ struct MenuBarSettingsCard: View {
                         set: { registry.pin($0.isEmpty ? nil : $0) })
                     ) {
                         Text("Follows activity").tag("")
-                        ForEach(registry.shownProfiles) { profile in
-                            Text(registry.label(for: profile)).tag(profile.id)
+                        ForEach(registry.shownProfiles, id: \.key) { profile in
+                            Text(registry.qualifiedLabel(for: profile)).tag(profile.key)
                         }
                     }
                     .labelsHidden()
@@ -167,14 +167,14 @@ private struct AccountsInBarCard: View {
     private var enrolled: [Profile] { registry.profiles.filter(\.isEnrolled) }
 
     var body: some View {
-        if registry.activeProvider.supportsMultipleHomes, enrolled.count > 1 {
+        if !registry.multiHomeHarnesses.isEmpty, enrolled.count > 1 {
             SettingsCard(
                 "Accounts in the bar",
                 footer: uniform
                     ? "Turn off \"Same form for every account\" above to give each account its own form and elements."
                     : "Each account draws in its own form, with its own elements, as set here."
             ) {
-                ForEach(Array(enrolled.enumerated()), id: \.element.id) { index, profile in
+                ForEach(Array(enrolled.enumerated()), id: \.element.key) { index, profile in
                     if index > 0 { Divider() }
                     AccountInBarRow(registry: registry, profile: profile, uniform: uniform)
                 }
@@ -183,23 +183,40 @@ private struct AccountsInBarCard: View {
     }
 }
 
-private struct AccountInBarRow: View {
+/// Internal, not private: `--snapshot` renders the rows (0.101.0 — three
+/// harnesses' rows all read one account and nothing pictured them).
+struct AccountInBarRow: View {
     var registry: ProviderRegistry
     let profile: Profile
     let uniform: Bool
 
+    @AppStorage(MenuBarPreferences.expandsFocusKey) private var expandsFocus = true
+
     private var inBar: Bool { profile.enabled && profile.showInMenuBar }
+    private var focused: Bool { profile.key == registry.focusedID }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .center, spacing: 10) {
+                // Whose account this is, before which account it is: three
+                // harnesses' rows all read one email otherwise (0.101.0).
+                if registry.spansHarnesses {
+                    HarnessTile(
+                        style: HarnessStyle(registry.provider(for: profile)), focused: focused, size: 24)
+                }
                 MonogramTile(
-                    monogram: registry.monogram(for: profile),
-                    focused: profile.id == registry.focusedID, size: 24)
+                    monogram: registry.monogram(for: profile), focused: focused, size: 24)
                 Text(registry.label(for: profile))
                     .font(.body.weight(.semibold))
                     .lineLimit(1)
                     .truncationMode(.middle)
+                if let agent = registry.harnessCaption(for: profile) {
+                    Text(agent)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .layoutPriority(1)
+                }
                 if !profile.enabled {
                     Text("Not metered")
                         .font(.caption)
@@ -210,11 +227,11 @@ private struct AccountInBarRow: View {
             HStack(spacing: 16) {
                 Toggle("Show in menu bar", isOn: Binding(
                     get: { profile.showInMenuBar },
-                    set: { registry.setShowInMenuBar(id: profile.id, shown: $0) }))
+                    set: { registry.setShowInMenuBar(id: profile.key, shown: $0) }))
                     .disabled(!profile.enabled)
                 Toggle("Own menu bar item", isOn: Binding(
                     get: { profile.ownMenuBarItem },
-                    set: { registry.setOwnMenuBarItem(id: profile.id, own: $0) }))
+                    set: { registry.setOwnMenuBarItem(id: profile.key, own: $0) }))
                     .disabled(!inBar)
                     .help("A separate menu bar item for this account — ⌘-drag it anywhere along the bar")
                 Spacer()
@@ -224,14 +241,23 @@ private struct AccountInBarRow: View {
             if !uniform {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Form")
+                    // The pick is saved either way — but the focused account
+                    // is drawn spelled out, and a pick that changes nothing
+                    // on the bar reads as a broken control.
+                    if focused && expandsFocus && inBar && profile.menuBarForm != .digits {
+                        note(
+                            "This account has focus right now, so the bar spells it out as digits."
+                                + " Its form shows when focus moves — or turn off"
+                                + " \"Expand the focused account\" above.")
+                    }
                     MenuBarFormPicker(
                         cell: MenuBarModelBuilder.sampleCell(for: profile, registry: registry),
                         selection: profile.menuBarForm,
-                        onSelect: { registry.setMenuBarForm(id: profile.id, form: $0) })
+                        onSelect: { registry.setMenuBarForm(id: profile.key, form: $0) })
                     Text("Add to the bar")
                     MenuBarElementPalette(
                         registry: registry, profile: profile, elements: profile.menuBarElements,
-                        onChange: { registry.setMenuBarElements(id: profile.id, elements: $0) })
+                        onChange: { registry.setMenuBarElements(id: profile.key, elements: $0) })
                 }
                 .opacity(inBar ? 1 : 0.45)
                 .disabled(!inBar)

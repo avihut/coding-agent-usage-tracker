@@ -17,7 +17,9 @@ extension DigestQuery {
     static func runNotices(
         parsed: ParsedArgs, digest: LiveState, json: Bool, raw: Bool
     ) -> QueryOutput {
-        let card = digest.notices
+        // Every SHOWN harness's notices, not just the focused one's: what
+        // is listed is what `dismiss --all` dismisses (0.101.0).
+        let card = digest.pendingNotices()
 
         if parsed.flags["check"] != nil {
             let pending = (card?.pendingCount ?? 0) > 0

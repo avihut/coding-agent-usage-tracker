@@ -248,9 +248,18 @@ public struct PricingFeedClient: Sendable {
         }
     }
 
+    /// `cache` is the SHARED raw-feed cache (0.101.0): every metered harness
+    /// slices the same document, so the first one to need it downloads and
+    /// the rest decode the bytes it stored. `maxAge` is how old those bytes
+    /// may be — a day on the automatic path, a minute behind a click.
     public func fetch(
-        now: Date = Date(), selector: PricingFeedSelector = .claude
+        now: Date = Date(), selector: PricingFeedSelector = .claude,
+        cache: PricingFeedCache? = nil, maxAge: TimeInterval = PricingFeedCache.freshness
     ) async throws -> PricingTable {
+        if let cache, let cached = cache.bytes(now: now, maxAge: maxAge),
+           let table = try? Self.decode(feed: cached, now: now, selector: selector) {
+            return table
+        }
         var request = URLRequest(url: Self.endpoint)
         request.httpMethod = "GET"
         request.setValue(AppIdentity.userAgent, forHTTPHeaderField: "User-Agent")
@@ -268,7 +277,11 @@ public struct PricingFeedClient: Sendable {
         guard (200...299).contains(http.statusCode) else {
             throw PricingFeedError.http(http.statusCode)
         }
-        return try Self.decode(feed: data, now: now, selector: selector)
+        let table = try Self.decode(feed: data, now: now, selector: selector)
+        // Stored only after it decoded: bytes that fail to parse must not be
+        // handed to the next harness as if they were the feed.
+        cache?.store(data)
+        return table
     }
 
     /// The feed is a huge mixed-provider dictionary; entries that don't decode
@@ -335,15 +348,20 @@ public struct PricingService: Sendable {
     let fallback: PricingTable
     /// The provider's slice of the mixed-vendor feed.
     let selector: PricingFeedSelector
+    /// Shared across every metered harness — nil keeps the pre-0.101 one
+    /// download per service.
+    let feedCache: PricingFeedCache?
 
     public init(
         client: PricingFeedClient = PricingFeedClient(), cacheDirectory: URL,
-        fallback: PricingTable = .bundled, selector: PricingFeedSelector = .claude
+        fallback: PricingTable = .bundled, selector: PricingFeedSelector = .claude,
+        feedCache: PricingFeedCache? = nil
     ) {
         self.client = client
         self.fileURL = cacheDirectory.appending(path: "pricing.json")
         self.fallback = fallback
         self.selector = selector
+        self.feedCache = feedCache
     }
 
     /// Best table available without touching the network.
@@ -359,7 +377,8 @@ public struct PricingService: Sendable {
     /// nothing changed (still fresh, or the fetch failed).
     public func refreshIfStale(now: Date = Date()) async -> PricingTable? {
         guard current().isStale(now: now) else { return nil }
-        guard let table = try? await client.fetch(now: now, selector: selector) else { return nil }
+        guard let table = try? await client.fetch(
+            now: now, selector: selector, cache: feedCache) else { return nil }
         save(table)
         return table
     }
@@ -368,7 +387,11 @@ public struct PricingService: Sendable {
     /// automatic path stays daily) and throws so the button can say why it
     /// failed. Still the same single allowed destination, nothing attached.
     public func refreshNow(now: Date = Date()) async throws -> PricingTable {
-        let table = try await client.fetch(now: now, selector: selector)
+        // A click must reach the network — but its own fan-out across
+        // harnesses is one request, not one per harness.
+        let table = try await client.fetch(
+            now: now, selector: selector, cache: feedCache,
+            maxAge: PricingFeedCache.forcedFreshness)
         save(table)
         return table
     }

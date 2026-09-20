@@ -49,7 +49,10 @@ public final class ProviderServices {
         self.notices = NoticeLedgerStore(directory: directory)
         self.pricingService = PricingService(
             cacheDirectory: directory, fallback: provider.bundledRates,
-            selector: provider.pricingSelector)
+            selector: provider.pricingSelector,
+            // Every metered harness slices the SAME document, so they share
+            // one download of it (0.101.0).
+            feedCache: PricingFeedCache(bundleID: bundleID, roots: roots))
         self.pricing = pricingService.current()
         self.pollsStatus = pollsStatus
         notices.onChange = { [weak self] in self?.onChange?() }

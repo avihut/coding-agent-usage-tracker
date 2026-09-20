@@ -16,7 +16,11 @@ struct AuditWindowChart: View {
     /// The meter's limit window — how far back a hovered reset's own window
     /// reaches. Only used by the hover curtain.
     let window: TimeInterval
-    let accent: Color
+    /// The harness this chart belongs to — its accent tints every mark, and
+    /// its mark is what a vendor's own mid-window reset wears (0.101.0: it
+    /// used to take a bare accent and then reach for the active provider's
+    /// static for the reset rule, so the two could disagree).
+    let style: HarnessStyle
     /// Token moments behind the per-model overlay curves, and the palette
     /// they share with every other model surface. Empty timeline = no
     /// curves, and the chart is the percent trace alone.
@@ -27,6 +31,8 @@ struct AuditWindowChart: View {
     /// A click on an outage nub — the owner resolves the incident's page
     /// through the provider. Nil = the floor is hover-only.
     var onOpenOutage: ((OutageSpan) -> Void)? = nil
+
+    private var accent: Color { style.accentColor }
 
     /// Continuous-hover crosshair position, nil while the cursor is away.
     @State private var hoverDate: Date?
@@ -210,7 +216,8 @@ struct AuditWindowChart: View {
             }
             WindowPlot.resets(model.resets, hovered: hoveredReset, ceiling: ceiling)
             WindowPlot.midWindowResets(
-                model.midWindowResets.map(\.at), hovered: hoveredGrant?.at, ceiling: ceiling)
+                model.midWindowResets.map(\.at), hovered: hoveredGrant?.at, ceiling: ceiling,
+                style: style)
             // Per-model overlay curves in the shared palette, focused one
             // last so it draws on top. No legend to sync here — the day
             // drill's grid has one, the week's audit has none — so the tip

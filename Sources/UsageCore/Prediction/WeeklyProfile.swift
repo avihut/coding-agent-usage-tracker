@@ -50,7 +50,13 @@ public struct WeeklyProfile: Sendable, Equatable {
     /// Whole-history mean burn in %/hour — the normalizer of the structured
     /// prior (and the settings readout's headline number).
     public let globalRatePerHour: Double
-    /// Oldest-to-newest span of the samples that fed the profile.
+    /// How much time the samples actually WATCHED: the sum of the gaps
+    /// between consecutive samples, holes longer than `maximumGap` left out.
+    /// Not oldest-to-newest (0.101.0, user-reported): a harness sampled for
+    /// a day in August and a day in September spanned five weeks, read as
+    /// "ready", and a rhythm learned from almost nothing replaced a forecast
+    /// that had correctly seen the limit running out. A continuously running
+    /// install measures the same either way.
     public let historySpan: TimeInterval
     /// Consecutive-sample pairs that survived the filters.
     public let pairCount: Int
@@ -99,16 +105,18 @@ public struct WeeklyProfile: Sendable, Equatable {
                 }
             }
             .sorted { $0.t < $1.t }
-        guard let first = points.first, let last = points.last,
-              points.count >= 2
-        else { return nil }
+        guard points.count >= 2 else { return nil }
 
         var gainedByBucket = [Double](repeating: 0, count: bucketCount)
         var hoursByBucket = [Double](repeating: 0, count: bucketCount)
         var pairs = 0
+        var watched: TimeInterval = 0
         for (a, b) in zip(points, points.dropFirst()) {
             let dt = b.t.timeIntervalSince(a.t)
             guard dt > 0, dt <= maximumGap else { continue }
+            // Watched time counts even where the pair teaches no rate (a
+            // reset, a correction): the span is about coverage.
+            watched += dt
             guard b.percent >= a.percent else { continue }
             if let resetA = a.reset, let resetB = b.reset,
                ResetStamp.moved(resetA, resetB) { continue }
@@ -155,7 +163,7 @@ public struct WeeklyProfile: Sendable, Equatable {
         }
         return WeeklyProfile(
             rates: rates, observedHours: hoursByBucket, globalRatePerHour: global,
-            historySpan: last.t.timeIntervalSince(first.t), pairCount: pairs,
+            historySpan: watched, pairCount: pairs,
             calendar: calendar)
     }
 

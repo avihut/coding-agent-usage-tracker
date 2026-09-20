@@ -90,6 +90,12 @@ public protocol UsageProvider: Sendable {
     /// generically — display assumptions like Gemini's daily cap, never
     /// secrets. Empty by default.
     var preferences: [ProviderPreference] { get }
+    /// The label this provider writes TODAY for a meter it once wrote under
+    /// `stored` (0.101.0). Labels key the stored percent history, so a
+    /// provider that renames a meter answers here and the history follows
+    /// it — no migration, the file heals on its next append. Identity by
+    /// default; an answer must be a pure function of the old label.
+    func currentMeterLabel(forStored stored: String) -> String
     /// Where a notification leads when clicked — the incident's report, a
     /// vendor announcement, or (when the vendor keeps no public record of
     /// the event) the meter's own history with the moment lit. Nil = the
@@ -122,6 +128,7 @@ public protocol UsageProvider: Sendable {
 
 extension UsageProvider {
     public var preferences: [ProviderPreference] { [] }
+    public func currentMeterLabel(forStored stored: String) -> String { stored }
     /// Opt-in: a provider without a declared feed tracks no status.
     public var statusFeed: StatusFeed? { nil }
     /// Opt-in: a provider without a declared source tracks no accounts.
@@ -246,6 +253,10 @@ public protocol LocalActivitySource: Sendable {
     /// focus signal (D9 as amended: volume over a window, not the last
     /// write). Read-only stats; zero when nothing was written.
     func recentActivity(since cutoff: Date) -> Int
+    /// The same walk, whole: the file count above plus the local days those
+    /// files fall on — what ranks one HARNESS against another, whose file
+    /// volumes don't compare (v0.101.0).
+    func recentActivitySignal(since cutoff: Date) -> MTimeProbe.Signal
 }
 
 extension LocalActivitySource {
@@ -257,9 +268,10 @@ extension LocalActivitySource {
     }
     /// The same walk harness detection scores, over the probe's budget.
     public func recentActivity(since cutoff: Date) -> Int {
-        MTimeProbe.signal(
-            directories: watchDirectories, recentSince: cutoff, cap: ProfileActivity.statCap
-        ).recentFiles
+        recentActivitySignal(since: cutoff).recentFiles
+    }
+    public func recentActivitySignal(since cutoff: Date) -> MTimeProbe.Signal {
+        MTimeProbe.signal(directories: watchDirectories, recentSince: cutoff, cap: ProfileActivity.statCap)
     }
 }
 
@@ -291,15 +303,27 @@ public struct ModelCatalog: Sendable {
     /// Sort rank across families — capability tiers first. Ties fall back
     /// to alphabetical at the call site; unknowns should rank last.
     public let familyRank: @Sendable (String) -> Int
+    /// Whether this vendor's grammar covers a raw model id — what a UNION of
+    /// several harnesses' catalogs dispatches on (v0.101.0, several harnesses
+    /// metered at once). A catalog answering alone claims everything, which
+    /// is what it has always done.
+    public let claims: @Sendable (String) -> Bool
+    /// Whether a FAMILY name is one this catalog itself would produce — the
+    /// same dispatch for `familyRank`, whose argument is a family, not an id.
+    public let claimsFamily: @Sendable (String) -> Bool
 
     public init(
         displayName: @escaping @Sendable (String) -> String,
         familyName: @escaping @Sendable (String) -> String,
-        familyRank: @escaping @Sendable (String) -> Int
+        familyRank: @escaping @Sendable (String) -> Int,
+        claims: @escaping @Sendable (String) -> Bool = { _ in true },
+        claimsFamily: @escaping @Sendable (String) -> Bool = { _ in true }
     ) {
         self.displayName = displayName
         self.familyName = familyName
         self.familyRank = familyRank
+        self.claims = claims
+        self.claimsFamily = claimsFamily
     }
 
     /// Vendor-neutral fallback: ids display as themselves (minus a trailing

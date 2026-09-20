@@ -124,11 +124,15 @@ struct SkeletonBar: View {
     var width: CGFloat?
     var height: CGFloat = 9
     var accent = false
+    /// Deep inside the Sessions window, whose whole tree belongs to one
+    /// account — the harness comes down the environment rather than through
+    /// ten call sites (0.101.0).
+    @Environment(\.harnessStyle) private var harnessStyle
 
     var body: some View {
         RoundedRectangle(cornerRadius: 3, style: .continuous)
             .fill(accent
-                ? ProviderStyle.accentColor.opacity(0.14)
+                ? harnessStyle.accentColor.opacity(0.14)
                 : Color.primary.opacity(0.07))
             .frame(height: height)
             .frame(maxWidth: width, alignment: .leading)

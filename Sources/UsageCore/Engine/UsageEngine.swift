@@ -186,7 +186,8 @@ public final class UsageEngine {
         self.localActivity = provider.makeLocalActivity(cacheDirectory: support)
         self.service = service
             ?? UsageService(provider: provider, cache: UsageCache(directory: caches))
-        self.history = UsageHistory(directory: support)
+        self.history = UsageHistory(
+            directory: support, relabel: { provider.currentMeterLabel(forStored: $0) })
         self.windowLedger = WindowLedger(directory: support)
         self.identitySource = provider.accountIdentity
         self.presence = provider.accountIdentity == nil

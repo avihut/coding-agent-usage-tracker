@@ -81,6 +81,11 @@ public enum HarnessResolution {
         [ClaudeProvider(), CodexProvider(), GeminiProvider()]
     }
 
+    /// The bundled default — first of `standardProviders()`. Its accounts
+    /// keep their bare ids (`ProfileKey`), and it is the harness a machine
+    /// with none present on disk still meters.
+    public static let bundledProviderID: String = standardProviders()[0].id
+
     /// A manual choice must exist and be present on this machine; anything
     /// else falls back to detection, and an empty machine falls back to
     /// the bundled default.

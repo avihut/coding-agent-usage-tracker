@@ -1,6 +1,6 @@
 import Foundation
 
-/// One of the three menu bar positions: session, weekly-all, worst-scoped.
+/// One menu bar position: a limit the account has, or its worst scoped one.
 /// `tag` is the single-letter stat identifier shown before the number.
 public struct MenuBarSegment: Sendable, Equatable {
     public let tag: String
@@ -33,9 +33,11 @@ public struct MenuBarSegment: Sendable, Equatable {
 }
 
 public enum UsageFormatting {
-    /// The menu bar triple (spec §8): rank-0, rank-1, then the maximum of the
-    /// scoped percentages carrying the worst scoped level. Tags: S(ession),
-    /// W(eekly), and the scoped model's initial (e.g. F for Fable). With
+    /// The menu bar's segments (spec §8): one per unscoped limit the account
+    /// HAS, shortest window first, then the maximum of the scoped
+    /// percentages carrying the worst scoped level. Tags come from each
+    /// meter's own window (`tag(for:)` — S(ession), D(aily), W(eekly),
+    /// M(onthly)) and the scoped model's initial (e.g. F for Fable). With
     /// predictions, each segment also carries its meter's exhaustion-risk
     /// severity (the scoped slot: the worst among its meters).
     public static func menuBarSegments(
@@ -53,28 +55,37 @@ public enum UsageFormatting {
             else { return nil }
             return prediction.exhaustsAt
         }
-        let session = meters.first { $0.rank == 0 }
-        let weekly = meters.first { $0.rank == 1 }
+        // ONLY THE LIMITS THIS ACCOUNT HAS (0.101.0, user-reported: a Codex
+        // account with one weekly limit drew `S35·W–·M–`). A segment stands
+        // for a meter the provider reported — one with no number yet still
+        // draws its dash, a limit that doesn't exist draws nothing — and its
+        // letter comes from the meter's own window, never from the slot.
+        let unscoped = meters.enumerated()
+            .filter { $0.element.rank < 2 }
+            .sorted {
+                let (a, b) = ($0.element, $1.element)
+                if a.rank != b.rank { return a.rank < b.rank }
+                let (aWindow, bWindow) = (a.limitWindow ?? .infinity, b.limitWindow ?? .infinity)
+                return aWindow != bWindow ? aWindow < bWindow : $0.offset < $1.offset
+            }
+            .map(\.element)
+        var segments = unscoped.map { meter in
+            MenuBarSegment(
+                tag: tag(for: meter), percent: meter.percent, level: meter.level,
+                severity: severity(meter), exhaustsAt: exhaustsAt(meter),
+                resetsAt: meter.resetsAt)
+        }
         let scoped = meters.filter { $0.rank == 2 }
-        let topScoped = scoped.max { ($0.percent ?? -1) < ($1.percent ?? -1) }
-        return [
-            MenuBarSegment(
-                tag: "S", percent: session?.percent, level: session?.level ?? .normal,
-                severity: severity(session), exhaustsAt: exhaustsAt(session),
-                resetsAt: session?.resetsAt),
-            MenuBarSegment(
-                tag: "W", percent: weekly?.percent, level: weekly?.level ?? .normal,
-                severity: severity(weekly), exhaustsAt: exhaustsAt(weekly),
-                resetsAt: weekly?.resetsAt),
-            MenuBarSegment(
+        if let topScoped = scoped.max(by: { ($0.percent ?? -1) < ($1.percent ?? -1) }) {
+            segments.append(MenuBarSegment(
                 tag: scopedTag(for: topScoped),
                 percent: scoped.compactMap(\.percent).max(),
                 level: scoped.map(\.level).max() ?? .normal,
                 severity: scoped.compactMap { severity($0) }.max(),
                 exhaustsAt: scoped.compactMap { exhaustsAt($0) }.min(),
-                resetsAt: topScoped?.resetsAt
-            ),
-        ]
+                resetsAt: topScoped.resetsAt))
+        }
+        return segments
     }
 
     /// The scoped meter's one-letter menu bar tag, from its model name as

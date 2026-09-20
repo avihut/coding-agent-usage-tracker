@@ -26,6 +26,11 @@ struct MeterHistoryView: View {
     let outcomes: [WindowOutcome]
     /// Names whose local sessions feed the breakdown, in the footer note.
     let agentName: String
+    /// The harness this card belongs to (0.101.0). EXPLICIT, never an
+    /// environment: the meter popover is hoisted to the panel's wrapper and
+    /// the menu bar's hover card is its own hosting controller, so neither
+    /// sits inside the section whose harness it shows.
+    let style: HarnessStyle
 
     /// One-word span choices: a trailing window ending now, or the limit
     /// window itself, start to reset.
@@ -149,6 +154,7 @@ struct MeterHistoryView: View {
         overshoot: ForecastOvershoot? = nil,
         outcomes: [WindowOutcome] = [],
         agentName: String, providerID: String,
+        style: HarnessStyle = .bundled,
         accountTitle: AccountTitle? = nil,
         highlightReset: Date? = nil,
         outages: [OutageSpan] = [],
@@ -166,6 +172,7 @@ struct MeterHistoryView: View {
         self.overshoot = overshoot
         self.outcomes = outcomes
         self.agentName = agentName
+        self.style = style
         // Meter.id is positional within one provider's snapshot — the
         // provider prefix keeps two harnesses' "0-session" prefs apart.
         _span = AppStorage(
@@ -220,6 +227,8 @@ struct MeterHistoryView: View {
     /// Horizontal breathing room between two axis-row labels, in points:
     /// closer than this and the crossing's timestamp is crowding the tick.
     private static let xAxisLabelGap = 3.0
+    /// How far right of its gridline Charts starts a time-axis label.
+    private static let xAxisLabelInset = 4.0
     /// A caption2 axis label's drawn width, estimated the way `nowEclipsed`
     /// estimates the curve-tip name: that one measures an 8pt semibold label
     /// at 4.5pt per character plus 4pt of padding, i.e. 0.5625 × the point
@@ -284,7 +293,7 @@ struct MeterHistoryView: View {
     /// The limit window is provider data on the meter; the 7-day fallback
     /// only covers a meter whose provider didn't say (Claude always does).
     private var window: TimeInterval { meter.limitWindow ?? 7 * 86400 }
-    private var orange: Color { ProviderStyle.accentColor }
+    private var orange: Color { style.accentColor }
 
     /// A live future reset unlocks the Current span; without one (stale data,
     /// missing reset) the picker hides and the view stays on History.
@@ -619,7 +628,7 @@ struct MeterHistoryView: View {
 
     var body: some View {
         let rows = windowRows
-        let colors = ModelPalette.assignment(for: rows.map(\.model))
+        let colors = ModelPalette.assignment(for: rows.map(\.model), style: style)
         let scale = percentPerToken(rows: rows)
         let curves = modelCurves(rows: rows, colors: colors, percentPerToken: scale)
         // Resolved once here — see `crossingOvershoot`; the stats line and
@@ -852,7 +861,7 @@ struct MeterHistoryView: View {
             WindowPlot.resets(series.resets, hovered: hoveredReset, ceiling: ceiling)
             WindowPlot.midWindowResets(
                 series.midWindow.map(\.at), hovered: hoveredGrant?.at,
-                highlighted: pinnedMoment, ceiling: ceiling)
+                highlighted: pinnedMoment, ceiling: ceiling, style: style)
             // Reset hover: curtain-dim everything outside the limit window
             // that ended at this line — the undimmed stretch IS the window
             // — with a solid twin marking where that window began. The
@@ -1115,6 +1124,7 @@ struct MeterHistoryView: View {
                             if !tickLabelEclipsed(day, label: label) {
                                 Text(label)
                                     .fontWeight(.semibold)
+                                    .fixedSize()
                             }
                         }
                     }
@@ -1132,6 +1142,7 @@ struct MeterHistoryView: View {
                             if !tickLabelEclipsed(date, label: label) {
                                 Text(label)
                                     .fontWeight(.semibold)
+                                    .fixedSize()
                             }
                         }
                     }
@@ -1367,11 +1378,14 @@ struct MeterHistoryView: View {
             (crossingLeft, crossingRight) =
                 (crossingX - crossingWidth / 2, crossingX + crossingWidth / 2)
         }
-        // Base tick labels center on their own tick.
-        let half = Self.captionWidth(label) / 2
-        let tickX = x(tick)
-        return tickX - half < crossingRight + Self.xAxisLabelGap
-            && tickX + half > crossingLeft - Self.xAxisLabelGap
+        // A base tick's label HANGS RIGHT of its gridline — Charts' default
+        // for a time axis — it is not centred on it (user-reported: centred
+        // maths silenced "Wed", which was clear, and kept "Mon", which the
+        // crossing's label then overprinted).
+        let tickLeft = x(tick) + Self.xAxisLabelInset
+        let tickRight = tickLeft + Self.captionWidth(label)
+        return tickLeft < crossingRight + Self.xAxisLabelGap
+            && tickRight > crossingLeft - Self.xAxisLabelGap
     }
 
     /// The strip's stretches are `WindowPlot.Nub` — the same type the audit

@@ -144,12 +144,16 @@ struct FormattingTests {
         #expect(segments.allSatisfy { $0.level == .normal })
     }
 
-    @Test("segments tolerate missing meters")
+    @Test("a limit the account doesn't have draws no segment")
     func segmentsPartial() throws {
+        // 0.101.0: this used to pad to [nil, nil, 63] under S/W/L — two
+        // dashes for limits the payload never mentioned.
         let meters = MeterBuilder.meters(from: try UsageResponse.decode(from: loadFixture("unknown-kind")))
         let segments = UsageFormatting.menuBarSegments(from: meters)
-        #expect(segments.map(\.percent) == [nil, nil, 63])
-        #expect(segments.map(\.tag) == ["S", "W", "L"])
+        // The fixture's session limit EXISTS with no number yet: it keeps its
+        // dash. The weekly limit the payload never mentioned is gone.
+        #expect(segments.map(\.percent) == [nil, 63])
+        #expect(segments.map(\.tag) == ["S", "L"])
     }
 
     @Test("reset text under 24h is relative")

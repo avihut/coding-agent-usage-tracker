@@ -63,7 +63,14 @@ extension DeepQuery {
         // `.sorted` makes synthetic test input well-defined; a no-op on a
         // real file, whose own `UsageHistory.thinned` already emits
         // chronological order.
-        let samples = UsageHistory(directory: directory).load().sorted { $0.t < $1.t }
+        // Read the way the engine reads: a meter its provider renamed keeps
+        // its samples under the label asked for today.
+        let provider = HarnessResolution.standardProviders().first { $0.id == providerID }
+        let relabel: @Sendable (String) -> String = { stored in
+            provider?.currentMeterLabel(forStored: stored) ?? stored
+        }
+        let samples = UsageHistory(directory: directory, relabel: relabel)
+            .load().sorted { $0.t < $1.t }
 
         let label: String
         switch resolveLabel(selectorToken, digest: digest, samples: samples) {

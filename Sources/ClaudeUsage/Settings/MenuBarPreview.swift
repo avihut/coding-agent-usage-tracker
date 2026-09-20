@@ -59,7 +59,7 @@ struct MenuBarPreview: View {
     }
 
     private func current(for id: String?) -> [MenuBarElement] {
-        prefs.elements(for: registry.profiles.first { $0.id == id } ?? registry.focusedProfile)
+        prefs.elements(for: registry.profiles.first { $0.key == id } ?? registry.focusedProfile)
     }
 
     /// Where an arrangement lands: the bar-wide list while one arrangement
@@ -571,6 +571,7 @@ struct MenuBarFormPicker: View {
     let cell: StatusItemRenderer.Cell
     let selection: MenuBarForm?
     let onSelect: (MenuBarForm) -> Void
+    var style: HarnessStyle = .bundled
 
     var body: some View {
         // Each tile at its own width — the digits swatch is three times
@@ -579,7 +580,7 @@ struct MenuBarFormPicker: View {
             ForEach(MenuBarForm.allCases) { form in
                 FormTile(
                     cell: cell, form: form, selected: form == selection,
-                    onSelect: { onSelect(form) })
+                    onSelect: { onSelect(form) }, style: style)
                     .fixedSize()
             }
         }
@@ -591,6 +592,7 @@ private struct FormTile: View {
     let form: MenuBarForm
     let selected: Bool
     let onSelect: () -> Void
+    var style: HarnessStyle = .bundled
 
     @State private var hovering = false
 
@@ -604,7 +606,7 @@ private struct FormTile: View {
     var body: some View {
         Button(action: onSelect) {
             VStack(spacing: 4) {
-                MenuBarSwatch(image: thumbnail, selected: selected, hovering: hovering)
+                MenuBarSwatch(image: thumbnail, selected: selected, hovering: hovering, style: style)
                 Text(form.title)
                     .font(.caption2.weight(selected ? .semibold : .regular))
                     .foregroundStyle(selected ? .primary : .secondary)
@@ -629,6 +631,9 @@ struct MenuBarSwatch: View {
     let image: NSImage
     var selected = false
     var hovering = false
+    /// The harness whose account is being dressed — the selected border
+    /// wears its accent (0.101.0).
+    var style: HarnessStyle = .bundled
 
     var body: some View {
         Image(nsImage: image)
@@ -641,7 +646,7 @@ struct MenuBarSwatch: View {
             .overlay(
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .strokeBorder(
-                        selected ? Color(ProviderStyle.accent) : Color.primary.opacity(hovering ? 0.25 : 0.1),
+                        selected ? style.accentColor : Color.primary.opacity(hovering ? 0.25 : 0.1),
                         lineWidth: selected ? 1.5 : 1))
     }
 }

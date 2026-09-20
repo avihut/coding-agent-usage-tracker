@@ -3,51 +3,41 @@ import Foundation
 import Observation
 import UsageCore
 
-/// The one place a vendor is chosen — and, since 0.96.0, the one place
-/// this process decides whether it HOSTS metering or renders a daemon's
-/// digest, and which profiles (accounts) it shows. Knows every harness
-/// this build can meter, detects which one is actually in use, owns the
-/// engine lease and the host arbitration (the daemon wins; a client takes
-/// over only when the heartbeat is stale beyond doubt AND the lease is
-/// free), keeps one `UsageStore` face per enrolled profile of the active
-/// provider, and resolves the focused one. Exactly one provider is active
-/// at a time — switching retires the host and every face.
+/// Where this process decides whether it HOSTS metering or renders a
+/// daemon's digest, and which accounts of which harnesses it shows. It owns
+/// the engine lease and the host arbitration (the daemon wins; a client takes
+/// over only when the heartbeat is stale beyond doubt AND the lease is free),
+/// and keeps one `UsageStore` face per enrolled account of EVERY harness
+/// found on this machine, keyed by that account's flat `ProfileKey`.
+///
+/// Nothing is "the active provider" since 0.101.0 (user-directed: several
+/// harnesses the way several accounts already work). There is no selection,
+/// no switch and no teardown — a harness that appears is metered on the
+/// host's next reprobe, and a harness the person is not interested in is
+/// HIDDEN, which is a display choice only: it keeps being metered, forecast
+/// and priced.
 @MainActor
 @Observable
 final class ProviderRegistry {
-    static let selectionKey = HarnessResolution.selectionKey
-    static let automatic = HarnessResolution.automatic
-
-    /// A Metering picker row.
-    struct HarnessChoice: Identifiable, Equatable {
-        let id: String
-        let name: String
-    }
-
     /// Which side of the engine this process runs.
     enum Role {
         case hosting(MeteringHost)
         case client(DigestFeed)
     }
 
-    /// Every provider this build ships, bundled default first — the
-    /// tie-break order when detection sees an all-quiet machine.
+    /// Every provider this build ships, bundled default first — also the
+    /// order harnesses appear in on the bar and in the strip.
     let providers: [any UsageProvider]
     let bundleID: String
-    /// Presence + recency per harness, most-active first; refreshed by
-    /// every detection pass. Settings renders these.
-    private(set) var signals: [HarnessSignal]
-    /// "auto" or a provider id — the user's persisted Metering choice.
-    private(set) var selection: String
-    private(set) var activeID: String
     private(set) var role: Role
-    /// Every record for the active provider (enrolled and dismissed alike),
-    /// the implicit default first.
-    private(set) var profiles: [Profile] = []
-    /// One face per enrolled profile.
-    private(set) var stores: [String: UsageStore] = [:]
-    /// Homes found beside the standard one that nobody decided about.
-    private(set) var discoveredHomes: [DiscoveredHome] = []
+    /// Every record of every metered harness (enrolled and dismissed alike),
+    /// each harness's implicit default first.
+    var profiles: [Profile] = []
+    /// One face per enrolled account, keyed by its flat `ProfileKey`.
+    var stores: [String: UsageStore] = [:]
+    /// Homes found beside a harness's standard one that nobody decided
+    /// about, per harness.
+    var discoveredByHarness: [String: [DiscoveredHome]] = [:]
     /// A click's choice, shown the instant it is made: the pin it also set
     /// arrives from the host (or the daemon's next digest) a beat later,
     /// and the overlay lifts once they agree.
@@ -67,27 +57,18 @@ final class ProviderRegistry {
     @ObservationIgnored private var observationGeneration = 0
     @ObservationIgnored private var lastFocusedID: String?
 
-    /// `launchOverride` is the `--provider <id>` verification hatch: it
-    /// wins for this launch without touching the persisted choice.
-    init(bundleID: String, launchOverride: String? = nil) {
+    init(bundleID: String) {
         let providers = HarnessResolution.standardProviders()
         self.providers = providers
         self.bundleID = bundleID
-        let stored = UserDefaults.standard.string(forKey: Self.selectionKey) ?? Self.automatic
-        let selection = launchOverride ?? stored
-        self.selection = selection
-        let signals = HarnessDetector.rank(
-            candidates: HarnessResolution.candidates(providers: providers, bundleID: bundleID))
-        self.signals = signals
-        let activeID = HarnessResolution.resolve(
-            selection: selection, providers: providers, signals: signals)
-        self.activeID = activeID
-        // Catalog + style install before any UI renders or scan runs —
-        // display names and accent colors read them from everywhere.
-        let active = providers.first { $0.id == activeID } ?? providers[0]
-        ModelNames.catalog = active.modelCatalog
-        ProviderStyle.install(active)
-        MenuBarPreferences.migrateLegacyStyle(provider: active)
+        // The catalog spans every harness this build can meter and never
+        // changes again (0.101.0): with two vendors' models in one grid, a
+        // name must come from the vendor whose grammar the id belongs to.
+        // Installed before any UI renders or scan runs — display names are
+        // read from everywhere. The accent is no longer a global at all; it
+        // travels as `HarnessStyle`.
+        ModelNames.catalog = ModelCatalog.union(of: providers)
+        MenuBarPreferences.migrateLegacyStyle(provider: providers[0])
 
         self.lease = EngineLease(lockURL: EngineHostBroker.lockURL(bundleID: bundleID))
         let daemonAlive = Self.daemonMarkerAge(bundleID: bundleID)
@@ -99,15 +80,10 @@ final class ProviderRegistry {
             let previous = try? LiveState.decoder().decode(
                 LiveState.self, from: Data(contentsOf: LiveState.fileURL(bundleID: bundleID)))
             role = .hosting(Self.makeHost(
-                provider: active, bundleID: bundleID, gateSeeds: previous?.gateSeeds() ?? [:]))
+                providers: providers, bundleID: bundleID,
+                gateSeeds: previous?.gateSeeds() ?? [:]))
         } else {
-            let feed = DigestFeed(bundleID: bundleID)
-            role = .client(feed)
-            // An explicit Metering pick must reach the daemon; auto
-            // converges on its own (same selection key, same signals).
-            if selection != Self.automatic, selection == active.id {
-                feed.send(.setProvider(id: active.id))
-            }
+            role = .client(DigestFeed(bundleID: bundleID))
         }
         loadProfiles()
         syncStores()
@@ -142,7 +118,6 @@ final class ProviderRegistry {
             LaunchAgentInstaller.ensure(
                 binary: embedded, defaults: .standard, bundleID: bundleID)
         }
-        scheduleDailyRedetect()
     }
 
     // MARK: - Faces and focus
@@ -152,9 +127,137 @@ final class ProviderRegistry {
     var activeStore: UsageStore { focusedStore }
     var focusedStore: UsageStore {
         stores[focusedID] ?? stores[Profile.defaultID] ?? stores.values.first
-            ?? makeStore(for: Profile.standard(for: activeProvider, addedAt: Date()))
+            ?? makeStore(for: Profile.standard(for: providers[0], addedAt: Date()))
     }
-    var activeProvider: any UsageProvider { provider(for: activeID) }
+    /// The focused ACCOUNT's harness — what a surface that still speaks of
+    /// one provider (the ⋯ menu's links, the About card) answers for.
+    var activeProvider: any UsageProvider { focusedStore.provider }
+
+    /// Every harness this Mac has, as the WRITER resolved it: present,
+    /// shown, its recent activity and its own vendor cards. Empty until the
+    /// first digest lands, where a face falls back to what it holds.
+    var harnesses: [HarnessState] {
+        let published: [HarnessState]
+        switch role {
+        case .hosting(let host): published = host.digest?.harnesses ?? []
+        case .client(let feed): published = feed.digest?.harnesses ?? []
+        }
+        guard !fakeHarnesses.isEmpty else { return published }
+        return published.filter { row in !fakeHarnesses.contains { $0.id == row.id } }
+            + fakeHarnesses
+    }
+
+    /// The `--fake-harnesses` hatch: a second vendor's row, cell and face.
+    func installFakeHarness(
+        _ harness: HarnessState, cell: MenuBarCell, profile: Profile, store: UsageStore
+    ) {
+        fakeHarnesses.removeAll { $0.id == harness.id }
+        fakeHarnesses.append(harness)
+        fakeCells.removeAll { $0.profile == cell.profile }
+        fakeCells.append(cell)
+        installFakeProfile(profile, store: store)
+    }
+
+    /// Every SHOWN harness's pending notices in one card (0.101.0). The
+    /// panel used to list the focused harness's alone while "Dismiss all"
+    /// reached into every ledger — so a click would silently dismiss a
+    /// vendor's reset the person had never been shown. Both ends now span
+    /// the same set: what is listed is what "Dismiss all" dismisses.
+    ///
+    /// Ids arrive already qualified per harness (`NoticeRouting`), so a
+    /// dismissal still lands in exactly one ledger. A harness the person hid
+    /// is not listed — hiding is what "I'm not interested" means here.
+    var pendingNotices: NoticesCard? {
+        let cards = harnesses.filter(\.shown).compactMap(\.notices)
+        guard !cards.isEmpty else { return focusedStore.notices }
+        let items = cards.flatMap(\.items)
+        guard !items.isEmpty else { return nil }
+        return NoticesCard(
+            indicator: cards.contains { $0.indicator },
+            pendingCount: cards.reduce(0) { $0 + $1.pendingCount },
+            // Ongoing first, then newest first — the writer's own order,
+            // re-applied across harnesses.
+            items: items.sorted { a, b in
+                a.ongoing != b.ongoing ? a.ongoing : a.occurredAt > b.occurredAt
+            })
+    }
+
+    /// Which harness a listed notice belongs to — its rail takes that
+    /// vendor's accent.
+    func harnessOfNotice(_ id: String) -> String {
+        harnesses.first { ($0.notices?.items ?? []).contains { $0.id == id } }?.id
+            ?? focusedHarnessID
+    }
+
+    /// The harness the focused account belongs to.
+    var focusedHarnessID: String {
+        focusedProfile?.providerID ?? providers[0].id
+    }
+
+    /// One harness's face — its focused account's, else its first. What a
+    /// per-harness card (rates, preferences, retention) reads from.
+    func store(ofHarness providerID: String) -> UsageStore? {
+        let mine = profiles.filter { $0.providerID == providerID && $0.isEnrolled }
+        if let focused = mine.first(where: { $0.key == focusedID }), let store = stores[focused.key] {
+            return store
+        }
+        return mine.compactMap { stores[$0.key] }.first
+    }
+
+    /// The harnesses that can hold several homes — the ones with folders to
+    /// add and discover. It is "ANY metered harness", never the focused
+    /// one's: focus moves on its own, and a quiet week for Claude must not
+    /// take the person's Claude accounts off the screen (0.101.0).
+    var multiHomeHarnesses: [any UsageProvider] {
+        accountHarnesses.filter(\.supportsMultipleHomes)
+    }
+
+    /// What the Accounts pane lists, one card each: EVERY metered harness,
+    /// hidden ones included (hiding is display, not metering). A one-home
+    /// harness has exactly one account and it belongs there like any other
+    /// (user-reported the day 0.101.0 landed: the pane showed Claude's
+    /// accounts only, as if Codex's were a different kind of thing). Before
+    /// the first digest it is the multi-home providers, as it always was.
+    var accountHarnesses: [any UsageProvider] {
+        let listed = registry(of: harnesses.map(\.id))
+        return listed.isEmpty ? providers.filter(\.supportsMultipleHomes) : listed
+    }
+
+    private func registry(of ids: [String]) -> [any UsageProvider] {
+        ids.compactMap { id in providers.first { $0.id == id } }
+    }
+
+    /// The accounts of one harness, in bar order.
+    func profiles(ofHarness providerID: String) -> [Profile] {
+        profiles.filter { $0.providerID == providerID }
+    }
+
+    /// Hiding is a DISPLAY choice: the harness keeps being metered, and the
+    /// last shown one can't be hidden. False when the host refused.
+    @discardableResult
+    func setHarnessShown(id: String, shown: Bool) -> Bool {
+        switch role {
+        case .hosting(let host):
+            let ok = host.setHarnessShown(id: id, shown: shown)
+            if ok { onProfilesChange?() }
+            return ok
+        case .client(let feed):
+            // The host owns the floor rule; a client that can't ask must not
+            // strand the person with an empty bar, so it checks the same one.
+            var hidden = HarnessRoster.hidden(from: .standard)
+            if shown {
+                hidden.remove(id)
+            } else {
+                let shownNow = harnesses.filter(\.shown).map(\.id)
+                guard shownNow.count > 1 || !shownNow.contains(id) else { return false }
+                hidden.insert(id)
+            }
+            HarnessRoster.setHidden(hidden, in: .standard)
+            feed.send(.settingsChanged)
+            onProfilesChange?()
+            return true
+        }
+    }
 
     /// Which profile the panel and the expanded cell show: a click's
     /// choice until the host confirms it, else the host's (or the
@@ -166,7 +269,9 @@ final class ProviderRegistry {
         case .client(let feed): return feed.digest?.focusedProfile ?? Profile.defaultID
         }
     }
-    var focusedProfile: Profile? { profiles.first { $0.id == focusedID } }
+    /// By KEY: focus names an account across harnesses, and every harness's
+    /// standard account has the same storage id.
+    var focusedProfile: Profile? { profiles.first { $0.key == focusedID } }
     /// The host's (or the digest's) own word on focus, overlay aside.
     private var roleFocusedID: String {
         switch role {
@@ -181,14 +286,21 @@ final class ProviderRegistry {
     /// The digest's own cells — the writer's decision, whichever process
     /// wrote it.
     var menuBarCells: [MenuBarCell] {
+        let published: [MenuBarCell]
         switch role {
-        case .hosting(let host): host.digest?.menuBarCells ?? []
-        case .client(let feed): feed.digest?.menuBarCells ?? []
+        case .hosting(let host): published = host.digest?.menuBarCells ?? []
+        case .client(let feed): published = feed.digest?.menuBarCells ?? []
         }
+        return published + fakeCells
     }
+    /// `--fake-harnesses` only: a synthetic harness's row and cell, so the
+    /// bar, the strip and the Harnesses card can be verified on a Mac that
+    /// has just one agent installed. Empty in every ordinary run.
+    private(set) var fakeHarnesses: [HarnessState] = []
+    private(set) var fakeCells: [MenuBarCell] = []
     /// The strip: enrolled, enabled, awake.
     var shownProfiles: [Profile] {
-        profiles.filter { $0.isEnrolled && $0.enabled && !dormantIDs.contains($0.id) }
+        profiles.filter { $0.isEnrolled && $0.enabled && !dormantIDs.contains($0.key) }
     }
     /// The bar: shown ∧ wanted in the bar.
     var barProfiles: [Profile] { shownProfiles.filter(\.showInMenuBar) }
@@ -226,17 +338,6 @@ final class ProviderRegistry {
         return profiles?.first { $0.id == id }
     }
 
-    /// What a face calls a profile: the digest's word when it has one,
-    /// else the record's own.
-    func label(for profile: Profile) -> String {
-        section(for: profile.id)?.label ?? ProfileFacts.label(profile: profile, identity: nil)
-    }
-
-    func monogram(for profile: Profile) -> String {
-        section(for: profile.id)?.monogram
-            ?? ProfileFacts.monogram(profile: profile, label: label(for: profile))
-    }
-
     /// A cell or strip click chooses the account — for good, bar and
     /// panel, until "Auto" hands focus back to activity (0.97.0,
     /// user-reported: the earlier open-panel-only focus reverted the moment
@@ -267,187 +368,32 @@ final class ProviderRegistry {
         syncFacts()
     }
 
-    // MARK: - Profile edits (Settings)
+    // MARK: - Faces
 
-    func enroll(home: URL, nickname: String? = nil) {
-        let provider = activeProvider
-        guard provider.supportsMultipleHomes, let standard = provider.homeDirectory else { return }
-        let id = ProfileID.forHome(home, standard: standard)
-        var stored = ProfileStore.load(from: .standard)
-        if let index = stored.firstIndex(where: { $0.id == id && $0.providerID == provider.id }) {
-            // A dismissed discovery, adopted after all.
-            let old = stored[index]
-            stored[index] = Profile(
-                id: id, providerID: provider.id, home: home, nickname: nickname ?? old.nickname,
-                monogram: old.monogram, enabled: true, showInMenuBar: true, order: old.order,
-                addedAt: Date(), ignoredIdentityKey: nil)
-        } else {
-            let order = (stored.filter { $0.providerID == provider.id }.map(\.order).max() ?? 0) + 1
-            stored.append(Profile(
-                id: id, providerID: provider.id, home: home, nickname: nickname, order: order,
-                addedAt: Date()))
-        }
-        ProfileStore.save(stored, to: .standard)
-        profilesChanged()
-    }
-
-    /// Removes the record; `deletingData` also removes THIS APP's scoped
-    /// directories for the profile — never anything inside the home.
-    func remove(id: String, deletingData: Bool) {
-        guard id != Profile.defaultID else { return }
-        var stored = ProfileStore.load(from: .standard)
-        stored.removeAll { $0.id == id && $0.providerID == activeID }
-        ProfileStore.save(stored, to: .standard)
-        if deletingData {
-            for directory in [
-                StorageScope.supportDirectory(bundleID: bundleID, providerID: activeID, profileID: id),
-                StorageScope.cachesDirectory(bundleID: bundleID, providerID: activeID, profileID: id),
-            ] {
-                try? FileManager.default.removeItem(at: directory)
-            }
-        }
-        profilesChanged()
-    }
-
-    /// "Not now" on a discovered home: remembered as a record carrying the
-    /// sign-in it holds TODAY, so the offer stays silent until that
-    /// changes — never a permanent silence (D2).
-    func dismissDiscovered(_ home: DiscoveredHome) {
-        var stored = ProfileStore.load(from: .standard)
-        stored.removeAll { $0.id == home.profileID && $0.providerID == activeID }
-        stored.append(Profile(
-            id: home.profileID, providerID: activeID, home: home.home, enabled: false,
-            addedAt: Date(), ignoredIdentityKey: home.identity?.key ?? ""))
-        ProfileStore.save(stored, to: .standard)
-        discoveredHomes.removeAll { $0.profileID == home.profileID }
-        profilesChanged()
-    }
-
-    func setProfileEnabled(id: String, enabled: Bool) {
-        edit(id) { $0.enabled = enabled }
-    }
-
-    func setShowInMenuBar(id: String, shown: Bool) {
-        edit(id) { $0.showInMenuBar = shown }
-    }
-
-    func setMenuBarForm(id: String, form: MenuBarForm) {
-        edit(id) { $0.menuBarForm = form }
-    }
-
-    /// The account's own element list (0.98.0) — what its cell holds when
-    /// the bar draws each account its own way.
-    func setMenuBarElements(id: String, elements: [MenuBarElement]) {
-        edit(id) { $0.menuBarElements = MenuBarLayout.normalized(elements) }
-    }
-
-    func setOwnMenuBarItem(id: String, own: Bool) {
-        edit(id) { $0.ownMenuBarItem = own }
-    }
-
-    /// The bar's (and the strip's) order: `ids` in the order wanted; any
-    /// enrolled profile not named keeps its place after them.
-    func reorder(_ ids: [String]) {
-        let rest = profiles.filter { $0.isEnrolled && !ids.contains($0.id) }.map(\.id)
-        let order = ids + rest
-        editAll { profile in
-            if let index = order.firstIndex(of: profile.id) { profile.order = index }
-        }
-    }
-
-    func rename(id: String, nickname: String?) {
-        let trimmed = nickname?.trimmingCharacters(in: .whitespacesAndNewlines)
-        edit(id) { $0.nickname = (trimmed?.isEmpty ?? true) ? nil : trimmed }
-    }
-
-    private func edit(_ id: String, _ body: (inout Profile) -> Void) {
-        var stored = ProfileStore.load(from: .standard)
-        if let index = stored.firstIndex(where: { $0.id == id && $0.providerID == activeID }) {
-            body(&stored[index])
-        } else if let record = profiles.first(where: { $0.id == id }) {
-            var copy = record
-            body(&copy)
-            stored.append(copy)
-        } else {
+    func loadProfiles() {
+        let stored = ProfileStore.load(from: .standard)
+        if case .hosting(let host) = role, !host.profiles.isEmpty {
+            profiles = host.profiles
             return
         }
-        ProfileStore.save(stored, to: .standard)
-        profilesChanged()
-    }
-
-    /// One edit over every enrolled record of the active provider — the
-    /// implicit default gets a stored record the moment it differs.
-    private func editAll(_ body: (inout Profile) -> Void) {
-        var stored = ProfileStore.load(from: .standard)
-        for record in profiles where record.isEnrolled {
-            if let index = stored.firstIndex(where: { $0.id == record.id && $0.providerID == activeID }) {
-                body(&stored[index])
-            } else {
-                var copy = record
-                body(&copy)
-                stored.append(copy)
-            }
-        }
-        ProfileStore.save(stored, to: .standard)
-        profilesChanged()
-    }
-
-    /// Re-reads the store, tells the host (or the daemon), and rebuilds
-    /// the faces.
-    private func profilesChanged() {
-        loadProfiles()
-        switch role {
-        case .hosting(let host): host.reloadProfiles()
-        case .client(let feed): feed.send(.profilesChanged)
-        }
-        syncStores()
-        onProfilesChange?()
-    }
-
-    /// Looks for homes beside the standard one (read-only) — the Settings
-    /// card's "Found" rows. A hosting process already has the host's list.
-    func discover() {
-        if case .hosting(let host) = role {
-            discoveredHomes = host.discovered
-            return
-        }
-        let provider = activeProvider
-        let known = profiles
-        let bundleID = bundleID
-        Task.detached(priority: .utility) { [weak self] in
-            let found = ProfileDiscovery.discover(
-                provider: provider, known: known, bundleID: bundleID, now: Date())
-            await MainActor.run { [weak self] in self?.discoveredHomes = found }
-        }
-    }
-
-    /// The `--fake-profiles` hatch: a synthetic profile with a fixed face,
-    /// so the strip, the cells, and the Settings rows can be verified on a
-    /// one-account machine.
-    func installFakeProfile(_ profile: Profile, store: UsageStore) {
-        profiles.removeAll { $0.id == profile.id }
-        profiles.append(profile)
-        stores[profile.id] = store
-        syncFacts()
-        onProfilesChange?()
-    }
-
-    private func loadProfiles() {
-        profiles = ProfileStore.resolved(
-            ProfileStore.load(from: .standard), provider: activeProvider, now: Date())
+        let present = HarnessPresence.probe(
+            providers: providers, stored: stored, bundleID: bundleID)
+        profiles = HarnessRoster.build(
+            providers: providers, present: present, stored: stored,
+            hidden: HarnessRoster.hidden(from: .standard), now: Date()).profiles
     }
 
     /// One face per enrolled profile, every face in the process's current
     /// mode; retired faces shut down.
-    private func syncStores() {
+    func syncStores() {
         let enrolled = profiles.filter(\.isEnrolled)
-        let wanted = Set(enrolled.map(\.id))
-        for (id, store) in stores where !wanted.contains(id) {
+        let wanted = Set(enrolled.map(\.key))
+        for (key, store) in stores where !wanted.contains(key) {
             store.shutdown()
-            stores[id] = nil
+            stores[key] = nil
         }
         for profile in enrolled {
-            if let store = stores[profile.id] {
+            if let store = stores[profile.key] {
                 store.adopt(mode(for: profile))
             } else {
                 _ = makeStore(for: profile)
@@ -457,11 +403,11 @@ final class ProviderRegistry {
     }
 
     @discardableResult
-    private func makeStore(for profile: Profile) -> UsageStore {
+    func makeStore(for profile: Profile) -> UsageStore {
         let store = UsageStore(
             profile: profile, provider: provider(for: profile), bundleID: bundleID,
             mode: mode(for: profile))
-        stores[profile.id] = store
+        stores[profile.key] = store
         return store
     }
 
@@ -470,23 +416,30 @@ final class ProviderRegistry {
         case .hosting(let host):
             return .hosting(host)
         case .client(let feed):
+            // The digest's sections are keyed by the flat key, and several
+            // harnesses' standard accounts are all called `default` on disk —
+            // asking by the storage id would hand every harness's face the
+            // BUNDLED harness's section.
             return .client(DigestClient(
-                profileID: profile.id, provider: provider(for: profile), feed: feed,
+                profileID: profile.key, storageID: profile.id, provider: provider(for: profile), feed: feed,
                 bundleID: bundleID))
         }
     }
 
-    /// The active provider retargeted at one profile's home — what the
-    /// Settings rows read a home's credential chain and identity path from.
+    /// THIS profile's own harness, retargeted at its home — what the Settings
+    /// rows read a home's credential chain and identity path from. It reads
+    /// the record's own `providerID`, never the focused harness: a foreign
+    /// account retargeted at the wrong vendor would read another vendor's
+    /// credentials (0.101.0).
     func provider(for profile: Profile) -> any UsageProvider {
-        let base = activeProvider
+        let base = providers.first { $0.id == profile.providerID } ?? providers[0]
         if profile.isDefault { return base }
         return profile.home.map { base.withHome($0) } ?? base
     }
 
     /// Pushes focus/dormancy/last-write facts into every face, and tells
     /// the status item when the focused face changed.
-    private func syncFacts() {
+    func syncFacts() {
         // The click's overlay lifts once the host (or the digest) says the
         // same — from here on the persistent pin carries it.
         if let manualFocusID, manualFocusID == roleFocusedID { self.manualFocusID = nil }
@@ -517,7 +470,7 @@ final class ProviderRegistry {
     /// Tracks the host's (or the digest's) profile facts; re-arms itself.
     /// The generation guard keeps a stale registration from re-arming
     /// against a replaced role.
-    private func observeRole() {
+    func observeRole() {
         observationGeneration += 1
         let generation = observationGeneration
         withObservationTracking {
@@ -527,7 +480,8 @@ final class ProviderRegistry {
                 _ = host.dormant
                 _ = host.lastActivity
                 _ = host.profiles
-                _ = host.discovered
+                _ = host.discoveredByHarness
+                _ = host.digest
             case .client(let feed):
                 _ = feed.digest
             }
@@ -536,7 +490,7 @@ final class ProviderRegistry {
                 guard let self, generation == self.observationGeneration else { return }
                 switch self.role {
                 case .hosting(let host):
-                    self.discoveredHomes = host.discovered
+                    self.discoveredByHarness = host.discoveredByHarness
                     if host.profiles != self.profiles {
                         self.profiles = host.profiles
                         self.syncStores()
@@ -557,88 +511,23 @@ final class ProviderRegistry {
         }
     }
 
-    // MARK: - Harness selection
+    // MARK: - Harness presence
 
-    /// Rows for the Metering pickers: only harnesses that exist on this
-    /// machine are offered.
-    var presentChoices: [HarnessChoice] {
-        signals.filter(\.present).compactMap { signal in
-            providers.first { $0.id == signal.id }
-                .map { HarnessChoice(id: $0.id, name: $0.agentName) }
-        }
-    }
-
-    /// "Automatic (Claude Code)" — names what auto currently resolves to.
-    var automaticLabel: String {
-        let autoID = HarnessResolution.resolve(
-            selection: Self.automatic, providers: providers, signals: signals)
-        return "Automatic (\(provider(for: autoID).agentName))"
-    }
-
-    /// The user picked from a Metering menu. Persists and applies now.
-    func select(_ choice: String) {
-        selection = choice
-        UserDefaults.standard.set(choice, forKey: Self.selectionKey)
-        apply(deferrable: false)
-    }
-
-    /// Re-runs detection off-main (the stat walk is capped but a cold disk
-    /// shouldn't stall the main thread) and applies the outcome. Auto mode
-    /// may switch the active harness; an explicit choice only refreshes
-    /// the signals shown in Settings.
-    func redetect(deferrable: Bool) {
-        let candidates = HarnessResolution.candidates(providers: providers, bundleID: bundleID)
-        Task.detached(priority: .utility) {
-            let signals = HarnessDetector.rank(candidates: candidates)
-            await MainActor.run { [weak self] in
-                guard let self else { return }
-                self.signals = signals
-                self.apply(deferrable: deferrable)
-            }
-        }
-    }
-
-    /// A vendor switch retires the host (or tells the daemon) and every
-    /// face, then rebuilds both for the winner.
-    private func apply(deferrable: Bool) {
-        let winner = HarnessResolution.resolve(
-            selection: selection, providers: providers, signals: signals)
-        guard winner != activeID else { return }
-        activeID = winner
-        let active = provider(for: winner)
-        ModelNames.catalog = active.modelCatalog
-        ProviderStyle.install(active)
-        for store in stores.values { store.shutdown() }
-        stores = [:]
-        manualFocusID = nil
-        lastFocusedID = nil
+    /// A harness installed while the app ran joins the roster. The HOST does
+    /// this on its own reprobe clock; a client re-reads the roster the same
+    /// way the daemon built it. Nothing is torn down either way — there is no
+    /// switch to make (0.101.0, replacing `redetect` + `apply`).
+    func reconcilePresent() {
         switch role {
         case .hosting(let host):
-            host.shutdown()
-            role = .hosting(Self.makeHost(provider: active, bundleID: bundleID, gateSeeds: [:]))
-        case .client(let feed):
-            feed.send(.setProvider(id: winner))
+            host.reprobe()
+        case .client:
+            let before = profiles.map(\.key)
+            loadProfiles()
+            guard profiles.map(\.key) != before else { return }
+            syncStores()
+            onProfilesChange?()
         }
-        loadProfiles()
-        syncStores()
-        observeRole()
-        onActiveChange?(activeStore, deferrable)
-    }
-
-    private func provider(for id: String) -> any UsageProvider {
-        providers.first { $0.id == id } ?? providers[0]
-    }
-
-    private func scheduleDailyRedetect() {
-        let timer = Timer.scheduledTimer(withTimeInterval: 24 * 3600, repeats: true) {
-            [weak self] _ in
-            Task { @MainActor [weak self] in
-                guard let self, self.selection == Self.automatic else { return }
-                self.redetect(deferrable: true)
-            }
-        }
-        timer.tolerance = 3600
-        redetectTimer = timer
     }
 
     // MARK: - Host arbitration
@@ -648,10 +537,10 @@ final class ProviderRegistry {
     /// belongs to the registry here, and nobody shuts an app down over a
     /// socket.
     private static func makeHost(
-        provider: any UsageProvider, bundleID: String, gateSeeds: [String: Date]
+        providers: [any UsageProvider], bundleID: String, gateSeeds: [String: Date]
     ) -> MeteringHost {
         let host = MeteringHost(
-            provider: provider, defaults: .standard,
+            providers: providers, defaults: .standard,
             configuration: MeteringHost.Configuration(
                 bundleID: bundleID, kind: .app,
                 updateFeedURL: MeteringHost.Configuration.updateFeedURL(defaults: .standard)),
@@ -694,7 +583,7 @@ final class ProviderRegistry {
             let seeds = feed.digest?.gateSeeds() ?? [:]
             feed.shutdown()
             role = .hosting(Self.makeHost(
-                provider: activeProvider, bundleID: bundleID, gateSeeds: seeds))
+                providers: providers, bundleID: bundleID, gateSeeds: seeds))
         }
         loadProfiles()
         syncStores()

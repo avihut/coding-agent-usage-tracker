@@ -184,7 +184,8 @@ scope. There is no blending — two accounts are two meters, never one sum.
 This adds **no network destination**. Each enabled home polls the same
 usage endpoint with its own token, through the same 180-second floor and
 the same backoff; the pricing feed, the status page and the release feed
-stay one poll per provider, not one per home. Discovery is passive: the
+stay one poll per provider, not one per home — and since v0.101.0 the rate
+feed is one poll for ALL providers, shared. Discovery is passive: the
 app lists `~/.claude*` directories that look like homes, reads the one
 identity key it already reads to name the offer, and reads nothing
 credentialed — no `.credentials.json`, no Keychain — until you enable that
@@ -244,6 +245,43 @@ that home's own files. An unknown selector exits 20 and lists the accounts
 it knows; it never quietly answers for a different one, which is the whole
 point when a status line renders under one config dir and the daemon is
 metering another.
+
+### Every agent at once, none of them "active"
+
+Up to v0.100.1 the app metered ONE agent: it scored which harness had run
+recently and read that one, and a picker let you override the guess. Since
+**v0.101.0** it meters every harness it finds on this Mac — Claude Code,
+Codex and Gemini CLI together — the way it already metered several Claude
+accounts together. They sit alongside each other in the bar under their own
+marks in their own colours, one of them holds focus, and the panel, the
+charts and the CLI answer for whichever that is. There is no active harness
+to choose and no switch to make.
+
+A harness you aren't interested in can be **hidden** (Settings → General →
+Harnesses). Hiding stops it being DISPLAYED and nothing else: it keeps being
+polled, forecast and priced, and its models stay in the API Cost rates list,
+which lists every detected harness whether shown or not. The last shown
+harness can't be hidden — an empty bar isn't a state worth being able to
+reach.
+
+This adds **no network destination**. Each harness reads exactly what it
+always read: Claude its usage endpoint and its own homes, Codex and Gemini
+their local session files and no credentials at all. Metering them together
+grants none of them anything new, and whether a harness exists is decided by
+`stat` on the directories it already declares. It is in fact one request
+FEWER per day: the LiteLLM rate feed is a single mixed-vendor document that
+every harness slices differently, so its bytes are now fetched once and
+shared rather than once per harness. The privacy card lists every metered
+harness's hosts and files, one block each — what the app reads is the union,
+so the card that names it is too.
+
+Forecasts stay per harness and per account folder. A folder's learned
+history belongs to the folder, so signing into a different account inside
+one keeps that folder's rhythm — the usage being pulled changed, not the
+place it is kept.
+
+`usage-cli harnesses` is the scriptable view: every detected harness, what
+it has been doing lately, whether it is shown, and its own service health.
 
 ## Known risk: undocumented endpoint
 

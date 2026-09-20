@@ -178,14 +178,13 @@ struct GeneralSettingsPane: View {
     /// release flavor and before the probe lands.
     @State private var checkoutState: SourceCheckoutState?
 
-    private var meteringSelection: Binding<String> {
-        Binding(
-            get: { registry.selection },
-            set: { registry.select($0) })
-    }
-
-    private func harnessName(_ id: String) -> String {
-        registry.presentChoices.first { $0.id == id }?.name ?? id
+    /// Every harness this app actually meters, in roster order — the
+    /// privacy inventory's subjects, hidden ones included: hiding stops the
+    /// DISPLAY, never the reading.
+    private var meteredHarnesses: [any UsageProvider] {
+        let listed = registry.harnesses.map(\.id)
+        let ids = listed.isEmpty ? [registry.focusedHarnessID] : listed
+        return ids.compactMap { id in registry.providers.first { $0.id == id } }
     }
 
     /// Every account this app actually reads — the privacy inventory's
@@ -215,36 +214,9 @@ struct GeneralSettingsPane: View {
         return names.isEmpty ? nil : names.joined(separator: " → ") + " (read-only)"
     }
 
-    private func signalText(_ signal: HarnessSignal) -> String {
-        if signal.recentFiles > 0 {
-            return "\(signal.recentFiles) session files in the last 14 days"
-        }
-        if let newest = signal.newestActivity {
-            return "quiet — last active \(newest.formatted(date: .abbreviated, time: .omitted))"
-        }
-        return "no sessions found"
-    }
-
     var body: some View {
         SettingsPaneScroll {
-            SettingsCard("Metering") {
-                HStack(alignment: .firstTextBaseline) {
-                    Text("Harness")
-                    Spacer()
-                    Picker("Harness", selection: meteringSelection) {
-                        Text(registry.automaticLabel).tag(ProviderRegistry.automatic)
-                        ForEach(registry.presentChoices) { choice in
-                            Text(choice.name).tag(choice.id)
-                        }
-                    }
-                    .labelsHidden()
-                    .fixedSize()
-                }
-                ForEach(registry.signals.filter(\.present), id: \.id) { signal in
-                    infoRow(harnessName(signal.id), signalText(signal))
-                }
-                note("Automatic follows whichever agent actually ran on this Mac recently — scored on session files, since background daemons touch state files long after real use stops. One harness is metered at a time; switching re-reads everything from the other harness's own data.")
-            }
+            HarnessesCard(registry: registry)
             if !store.provider.preferences.isEmpty {
                 SettingsCard(store.provider.agentName) {
                     ForEach(store.provider.preferences) { preference in
@@ -377,62 +349,27 @@ struct GeneralSettingsPane: View {
                     Divider()
                     infoRow("Account", accountLine(presence))
                 }
-                Divider()
-                infoRow(
-                    "Network destinations",
-                    (store.provider.networkDestinations + ["raw.githubusercontent.com"])
-                        .joined(separator: " · "))
-                // Declared on its own line, not folded into the list above:
-                // the status feed is deliberately outside
-                // `networkDestinations` so a zero-network provider keeps its
-                // local-provider semantics (spec §10, amendment 2026-08-19).
-                if let statusFeed = store.provider.statusFeed {
+                // ONE BLOCK PER METERED HARNESS (0.101.0, spec §10 amendment
+                // 2026-09-20): the app reads every harness it finds, so the
+                // card that names what it reads has to be the union. A
+                // hidden harness is still metered, so it is still listed —
+                // the card is inventory, not display.
+                ForEach(meteredHarnesses, id: \.id) { harness in
                     Divider()
-                    infoRow("Status feed", statusFeed.host)
+                    HarnessPrivacyBlock(
+                        registry: registry, provider: harness,
+                        several: meteredHarnesses.count > 1)
                 }
-                // Same reasoning as the status feed: the update check is
-                // APP-scoped, not a provider destination, and runs for any
-                // install whose distribution channel declares a feed —
-                // both GitHub flavors (spec §10, amendment 2026-08-23).
+                Divider()
+                // APP-scoped, not any provider's — which is why they sit
+                // below the harness blocks rather than inside one. The rate
+                // feed is ONE document every harness slices, fetched once
+                // however many are metered (amendments 2026-08-13,
+                // 2026-09-20).
+                infoRow("Rate feed", "raw.githubusercontent.com")
                 if store.appUpdate != nil {
                     Divider()
                     infoRow("Update check", "api.github.com")
-                }
-                // The identity read is local and passive, but it's a read
-                // all the same — named here so the privacy card stays the
-                // complete inventory (spec §10, amendment 2026-08-25).
-                // With several accounts metered the inventory is per
-                // account (amendment 2026-09-06): every home this app
-                // reads is named, or the card would be incomplete.
-                // The credential chain per account too (0.97.0; it used to
-                // sit on the account's own row, where it read as a setting
-                // — it is inventory): the file looked for, then the
-                // keychain item it falls back to.
-                if meteredProfiles.count > 1 {
-                    ForEach(meteredProfiles) { profile in
-                        Divider()
-                        if let identity = registry.provider(for: profile).accountIdentity {
-                            infoRow(
-                                "\(registry.label(for: profile)) identity",
-                                "\(identity.displayPath) (read-only)")
-                        }
-                        if let chain = credentialLine(for: profile) {
-                            infoRow("\(registry.label(for: profile)) credential", chain)
-                        }
-                    }
-                    if !transcriptPaths.isEmpty {
-                        Divider()
-                        infoRow("Transcripts", transcriptPaths.joined(separator: " · ") + " (read-only)")
-                    }
-                } else {
-                    if let identity = store.provider.accountIdentity {
-                        Divider()
-                        infoRow("Account identity", "\(identity.displayPath) (read-only)")
-                    }
-                    if let profile = meteredProfiles.first, let chain = credentialLine(for: profile) {
-                        Divider()
-                        infoRow("Credential", chain)
-                    }
                 }
                 note(
                     (store.isLocalProvider
@@ -766,5 +703,77 @@ private struct MarkedSlider: View {
             get: { position(seconds) },
             set: { seconds = value($0) }
         )
+    }
+}
+
+/// One metered harness's block of the privacy inventory (0.101.0): the hosts
+/// it talks to, the local files it reads, and one line per account of it.
+/// Every metered harness gets one — the app reads them all, so naming only
+/// the focused one would make the card a partial truth.
+private struct HarnessPrivacyBlock: View {
+    var registry: ProviderRegistry
+    let provider: any UsageProvider
+    /// With one harness the rows keep their pre-0.101 titles; with several
+    /// each is prefixed by its agent, or the rows would be ambiguous.
+    let several: Bool
+
+    private var accounts: [Profile] {
+        registry.profiles(ofHarness: provider.id).filter { $0.isEnrolled && $0.enabled }
+    }
+
+    private func title(_ name: String) -> String {
+        several ? "\(provider.agentName) · \(name)" : name
+    }
+
+    var body: some View {
+        if several {
+            HStack(spacing: 6) {
+                Text(provider.menuBarGlyph)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(HarnessStyle(provider).accentColor)
+                Text(provider.agentName)
+                    .font(.caption.weight(.semibold))
+                Spacer(minLength: 0)
+            }
+        }
+        infoRow(
+            title("Network destinations"),
+            provider.networkDestinations.isEmpty
+                // A local harness reads files and nothing else; saying
+                // "none" is the honest row, not an empty one.
+                ? "none — local files only"
+                : provider.networkDestinations.joined(separator: " · "))
+        // Declared on its own line, never folded into the list above: the
+        // status feed sits outside `networkDestinations` so a zero-network
+        // provider keeps its local-provider semantics (amendment 2026-08-19).
+        if let statusFeed = provider.statusFeed {
+            infoRow(title("Status feed"), statusFeed.host)
+        }
+        // The identity read is local and passive, but it is a read all the
+        // same (amendment 2026-08-25), and so is the credential chain — per
+        // ACCOUNT, since v0.96.0 each home carries its own.
+        ForEach(accounts, id: \.key) { account in
+            let name = accounts.count > 1 ? registry.label(for: account) : provider.agentName
+            if let identity = registry.provider(for: account).accountIdentity {
+                infoRow(
+                    several || accounts.count > 1 ? "\(name) identity" : "Account identity",
+                    "\(identity.displayPath) (read-only)")
+            }
+            let chain = registry.provider(for: account).credentials.sources.map(\.name)
+            if !chain.isEmpty {
+                infoRow(
+                    several || accounts.count > 1 ? "\(name) credential" : "Credential",
+                    chain.joined(separator: " → ") + " (read-only)")
+            }
+            if let path = registry.provider(for: account)
+                .makeLocalActivity(cacheDirectory: StorageScope.supportDirectory(
+                    bundleID: registry.bundleID, providerID: account.providerID,
+                    profileID: account.id))?.displayPath
+            {
+                infoRow(
+                    several || accounts.count > 1 ? "\(name) sessions" : "Transcripts",
+                    "\(path) (read-only)")
+            }
+        }
     }
 }

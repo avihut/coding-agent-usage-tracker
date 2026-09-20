@@ -224,6 +224,14 @@ extension ModelCatalog {
             case "haiku": 3
             default: 4
             }
+        },
+        // The grammar is the prefix: every id this vendor has ever written
+        // carries it. `unknown` is the tallies' own placeholder and every
+        // catalog reads it as "Other" — the bundled one answers it in a union.
+        claims: { id in id.hasPrefix("claude-") || id == "unknown" },
+        claimsFamily: { family in
+            ["fable", "mythos", "opus", "sonnet", "haiku", "claude", "other"]
+                .contains(family.lowercased())
         }
     )
 }

@@ -105,8 +105,6 @@ final class DaemonHost {
     private var wake: WakeMonitor?
     private var markerTimer: Timer?
     private var leaseTimer: Timer?
-    private var redetectTimer: Timer?
-    private var activeProviderID = "claude"
 
     init(defaults: UserDefaults) {
         self.defaults = defaults
@@ -150,17 +148,19 @@ final class DaemonHost {
         wake = WakeMonitor { [weak self] in
             self?.host?.noteWake()
         }
-        scheduleDailyRedetect()
     }
 
-    /// The host binds the control socket, runs one engine per enrolled
-    /// profile beside the provider services, and folds the digest.
+    /// The host binds the control socket, meters EVERY harness found on this
+    /// machine — one `ProviderServices` per vendor, one engine per enrolled
+    /// account — and folds the digest. Nothing is "the active provider" any
+    /// more (0.101.0): the host probes presence itself and grows its roster on
+    /// its own reprobe clock, so there is no winner to resolve and nothing to
+    /// rebuild when the machine changes.
     private func startHost() {
-        let provider = resolveProvider()
-        activeProviderID = provider.id
-        // Model names in the digest come from the active catalog, exactly
-        // as the app's registry installs it.
-        ModelNames.catalog = provider.modelCatalog
+        let providers = HarnessResolution.standardProviders()
+        // Model names in the digest span every harness, exactly as the app's
+        // registry installs them.
+        ModelNames.catalog = ModelCatalog.union(of: HarnessResolution.standardProviders())
         // Seed each profile's refresh gate from the previous host's digest
         // so the handover cannot double-poll inside the floor.
         let previous = try? LiveState.decoder().decode(
@@ -172,18 +172,20 @@ final class DaemonHost {
         let accentChoice = UserDefaults.standard.object(
             forKey: SystemAccentPalette.defaultsKey) as? Int
         let host = MeteringHost(
-            provider: provider, defaults: defaults,
+            providers: providers, defaults: defaults,
             configuration: MeteringHost.Configuration(
                 bundleID: Usaged.bundleID, kind: .daemon,
                 updateFeedURL: MeteringHost.Configuration.updateFeedURL(defaults: defaults)),
             gateSeeds: previous?.gateSeeds() ?? [:],
             systemAccent: SystemAccentPalette.color(appleAccentColor: accentChoice))
         host.onLog = { [weak self] message in self?.log(message) }
+        // Kept decodable, and a no-op since 0.101.0: every harness is
+        // metered, so there is nothing to switch to. An old face's verb must
+        // not look like it worked.
         host.onSetProvider = { [weak self] id in
-            guard let self else { return ControlReply(ok: false, message: "host gone") }
-            self.defaults.set(id, forKey: HarnessResolution.selectionKey)
-            self.rebuildHost()
-            return ControlReply(ok: true, message: "provider \(self.activeProviderID)")
+            self?.log("setProvider \(id): ignored — every harness is metered")
+            return ControlReply(
+                ok: false, message: "every detected harness is metered; nothing to switch")
         }
         host.onShutdown = { [weak self] in
             guard let self else { return ControlReply(ok: false, message: "host gone") }
@@ -197,45 +199,6 @@ final class DaemonHost {
         }
         self.host = host
         host.start()
-    }
-
-    private func resolveProvider() -> any UsageProvider {
-        let providers = HarnessResolution.standardProviders()
-        let selection =
-            defaults.string(forKey: HarnessResolution.selectionKey)
-            ?? HarnessResolution.automatic
-        let signals = HarnessDetector.rank(
-            candidates: HarnessResolution.candidates(
-                providers: providers, bundleID: Usaged.bundleID))
-        let id = HarnessResolution.resolve(
-            selection: selection, providers: providers, signals: signals)
-        return providers.first { $0.id == id } ?? providers[0]
-    }
-
-    private func rebuildHost() {
-        host?.shutdown()
-        startHost()
-    }
-
-    /// Auto mode follows the machine: a daily pass re-ranks the harness
-    /// signals and rebuilds onto the winner when it changed.
-    private func scheduleDailyRedetect() {
-        let timer = Timer.scheduledTimer(withTimeInterval: 24 * 3600, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                let selection =
-                    self.defaults.string(forKey: HarnessResolution.selectionKey)
-                    ?? HarnessResolution.automatic
-                guard selection == HarnessResolution.automatic else { return }
-                let winner = self.resolveProvider()
-                if winner.id != self.activeProviderID {
-                    self.log("redetect: \(self.activeProviderID) → \(winner.id)")
-                    self.rebuildHost()
-                }
-            }
-        }
-        timer.tolerance = 3600
-        redetectTimer = timer
     }
 
     private func log(_ message: String) {

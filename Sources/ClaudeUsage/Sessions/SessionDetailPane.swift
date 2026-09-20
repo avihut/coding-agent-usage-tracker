@@ -125,7 +125,8 @@ struct SessionDetailPane: View {
                     hoveredRow: $hoveredRow,
                     hoveredModel: $hoveredModel,
                     showContext: $showContext,
-                    onSelectRow: { row in jump(to: row, proxy: proxy) })
+                    onSelectRow: { row in jump(to: row, proxy: proxy) },
+                    style: store.style)
                     // Session identity: zoom/pan state dies with a session
                     // switch but survives the live re-parses that grow the
                     // same session's rows.
@@ -374,7 +375,7 @@ struct SessionDetailPane: View {
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(
                     idCopied
-                        ? AnyShapeStyle(ProviderStyle.accentColor)
+                        ? AnyShapeStyle(store.style.accentColor)
                         : AnyShapeStyle(.tertiary))
                 .frame(width: 11)
             Text(String(summary.id.suffix(8)))
@@ -413,7 +414,7 @@ struct SessionDetailPane: View {
     private func statTiles(_ summary: SessionSummary) -> some View {
         HStack(spacing: 8) {
             StatTile(
-                symbol: "chevron.right", tint: ProviderStyle.accentColor,
+                symbol: "chevron.right", tint: store.style.accentColor,
                 value: summary.prompts.formatted(),
                 label: noun(summary.prompts, "prompt"))
             StatTile(
@@ -499,7 +500,7 @@ struct SessionDetailPane: View {
                 .frame(width: Column.time, alignment: .leading)
             switch row.kind {
             case .prompt(let preview):
-                (Text("❯ ").foregroundStyle(ProviderStyle.accentColor).bold()
+                (Text("❯ ").foregroundStyle(store.style.accentColor).bold()
                     + Text(preview))
                     .font(.caption)
                     .lineLimit(1)
@@ -576,7 +577,7 @@ struct SessionDetailPane: View {
         let calls = SessionSpanTally.calls(rows: rows, in: range)
         let reach = range.upperBound == rows.count ? "the session's end" : "the next prompt"
         return VStack(alignment: .leading, spacing: 6) {
-            (Text("❯ ").foregroundStyle(ProviderStyle.accentColor).bold() + Text(preview))
+            (Text("❯ ").foregroundStyle(store.style.accentColor).bold() + Text(preview))
                 .font(.callout)
                 .lineLimit(2)
             Text(calls == 0
@@ -678,7 +679,7 @@ struct SessionDetailPane: View {
     @ViewBuilder private func rowBackground(_ row: SessionEvent) -> some View {
         ZStack {
             if case .prompt = row.kind {
-                ProviderStyle.accentColor.opacity(0.06)
+                store.style.accentColor.opacity(0.06)
             }
             if hoveredSectionRange?.contains(row.id) == true {
                 Color.primary.opacity(0.045)
@@ -687,7 +688,7 @@ struct SessionDetailPane: View {
                 Color.primary.opacity(0.07)
             }
             if flashRow == row.id {
-                ProviderStyle.accentColor.opacity(0.3)
+                store.style.accentColor.opacity(0.3)
             }
         }
     }

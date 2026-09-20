@@ -535,7 +535,9 @@ struct LiveStateTests {
     @Test("menu bar segments arrive with resolved risk colors")
     func segments() {
         let state = buildFixture()
-        #expect(state.menuBar.count == 3)
+        // Two limits in the fixture, two segments — never a third dash for
+        // a scoped limit this account doesn't have (0.101.0).
+        #expect(state.menuBar.count == 2)
         #expect(state.menuBar[0].tag == "S")
         #expect(state.menuBar[0].percent == 53)
         #expect(state.menuBar[0].risk == RiskRamp.color(severity: 0.4))

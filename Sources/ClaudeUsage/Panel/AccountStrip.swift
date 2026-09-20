@@ -38,38 +38,76 @@ enum PanelAccountForm: String, CaseIterable, Identifiable {
     }
 }
 
-/// The account selector at the top of the panel: which accounts are
-/// metered, which one the panel is showing, and one glance at where each
-/// stands. Absent whenever fewer than two accounts show — a one-account Mac
-/// never sees it — and in the stacked form, where the meters themselves
-/// carry every account.
+/// The selector at the top of the panel: which accounts of which HARNESSES
+/// are metered, which one the panel is showing, and one glance at where each
+/// stands (v0.101.0 — the approved direction A, "one unified strip"). Absent
+/// whenever fewer than two rows show — a one-account, one-harness Mac never
+/// sees it — and in the stacked form, where the meters themselves carry
+/// every account.
+///
+/// A harness with SEVERAL accounts gets a heading carrying its mark once and
+/// its accounts under it as letters; a harness with one gets no heading and
+/// its row wears the mark itself. Hidden harnesses are not here at all —
+/// hiding is what "not interested" means — though they keep being metered.
 struct AccountStrip: View {
     let registry: ProviderRegistry
     let form: PanelAccountForm
     /// Flips rows ↔ chips (the panel's own `auditToggle` idiom: one icon,
     /// since a third segmented control does not fit 360pt).
-    let onToggleForm: () -> Void
+    let onSetForm: (PanelAccountForm) -> Void
     let onFocus: (String) -> Void
     /// Hands focus back to activity.
     var onAuto: () -> Void = {}
 
     private var profiles: [Profile] { registry.shownProfiles }
 
+    /// The shown accounts grouped by harness, in the roster's order — the
+    /// order the bar draws them in, so the strip reads top to bottom the way
+    /// the bar reads left to right.
+    private var groups: [(harness: HarnessStyle, name: String, profiles: [Profile])] {
+        var seen: [String] = []
+        for profile in profiles where !seen.contains(profile.providerID) {
+            seen.append(profile.providerID)
+        }
+        return seen.compactMap { id in
+            guard let provider = registry.providers.first(where: { $0.id == id }) else { return nil }
+            let mine = profiles.filter { $0.providerID == id }
+            guard !mine.isEmpty else { return nil }
+            return (HarnessStyle(provider), provider.agentName, mine)
+        }
+    }
+
     var body: some View {
-        if profiles.count > 1, form != .stacked {
+        if profiles.count > 1 {
             VStack(alignment: .leading, spacing: 6) {
+                // The header stays in the stacked form too: it holds the
+                // only in-panel way to another form (0.101.0 — it used to
+                // vanish with the strip, leaving Settings as the way back).
                 header
-                if form == .chips {
-                    chips
-                } else {
-                    VStack(spacing: 2) {
-                        ForEach(profiles) { profile in
-                            AccountStripRow(
-                                registry: registry, profile: profile,
-                                focused: profile.id == registry.focusedID,
-                                onFocus: { onFocus(profile.id) })
-                        }
-                    }
+                switch form {
+                case .chips: chips
+                case .stripRows: rows
+                case .stacked: EmptyView()
+                }
+            }
+        }
+    }
+
+    private var rows: some View {
+        VStack(spacing: 2) {
+            ForEach(groups, id: \.harness.providerID) { group in
+                // The heading exists to say whose letters these are, so a
+                // harness with one account — whose row carries the mark
+                // itself — has none.
+                if group.profiles.count > 1 {
+                    HarnessHeading(style: group.harness, name: group.name)
+                }
+                ForEach(group.profiles, id: \.key) { profile in
+                    AccountStripRow(
+                        registry: registry, profile: profile,
+                        lettered: group.profiles.count > 1,
+                        focused: profile.key == registry.focusedID,
+                        onFocus: { onFocus(profile.key) })
                 }
             }
         }
@@ -77,6 +115,8 @@ struct AccountStrip: View {
 
     private var header: some View {
         HStack(spacing: 6) {
+            // Always "Accounts": a row is an account whatever agent it
+            // belongs to, and the agent is said by its mark and its name.
             Text("Accounts")
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(.secondary)
@@ -98,15 +138,25 @@ struct AccountStrip: View {
                 .pointerStyle(.link)
                 .help("Follow activity again — the account this Mac has worked in most over the last two weeks")
             }
-            Button(action: onToggleForm) {
-                Image(systemName: form == .chips ? "list.bullet" : "square.grid.3x1.below.line.grid.1x2")
+            Menu {
+                ForEach(PanelAccountForm.allCases) { option in
+                    Button {
+                        onSetForm(option)
+                    } label: {
+                        if option == form { Label(option.title, systemImage: "checkmark") } else { Text(option.title) }
+                    }
+                }
+            } label: {
+                Image(systemName: "square.grid.3x1.below.line.grid.1x2")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
             .pointerStyle(.link)
-            .help(form == .chips ? "Show a row per account" : "Fold the accounts into chips")
+            .help("How the panel lists accounts: rows, chips, or every account's meters stacked")
         }
     }
 
@@ -118,10 +168,27 @@ struct AccountStrip: View {
                 set: { onFocus($0) }),
             options: profiles.map { profile in
                 let nickname = profile.nickname?.trimmingCharacters(in: .whitespacesAndNewlines)
-                let label = (nickname?.isEmpty ?? true)
-                    ? registry.monogram(for: profile) : nickname!
-                return (label, profile.id)
+                let named = !(nickname?.isEmpty ?? true)
+                // A lone account of a harness is named by its vendor's mark
+                // and short name ("⬡ Codex"); one of several keeps its own
+                // nickname or letter (NSSegmentedControl draws one string
+                // per segment, so the mark rides the label).
+                let alone = profiles.filter { $0.providerID == profile.providerID }.count == 1
+                let style = registry.store(for: profile.key)?.style
+                    ?? registry.providers.first { $0.id == profile.providerID }
+                        .map(HarnessStyle.init) ?? .bundled
+                let base = named ? nickname! : registry.monogram(for: profile)
+                let label = alone
+                    ? "\(style.glyph) \(shortName(of: profile))" : base
+                return (label, profile.key)
             })
+    }
+
+    /// The agent's first word — what a chip says when the mark stands for
+    /// the whole harness ("Gemini", not "Gemini CLI", which wraps a chip).
+    private func shortName(of profile: Profile) -> String {
+        let agent = registry.providers.first { $0.id == profile.providerID }?.agentName ?? ""
+        return agent.split(separator: " ").first.map(String.init) ?? agent
     }
 
     /// +1 = fingers left = the next account down the strip. The gesture
@@ -129,7 +196,7 @@ struct AccountStrip: View {
     /// view would render as a placeholder in every headless snapshot); this
     /// is the step it performs.
     static func step(_ direction: Int, in profiles: [Profile], focusedID: String) -> String? {
-        guard let index = profiles.firstIndex(where: { $0.id == focusedID }) else { return nil }
+        guard let index = profiles.firstIndex(where: { $0.key == focusedID }) else { return nil }
         let next = index + direction
         guard profiles.indices.contains(next) else { return nil }
         return profiles[next].id
@@ -141,12 +208,23 @@ struct AccountStrip: View {
 struct AccountStripRow: View {
     let registry: ProviderRegistry
     let profile: Profile
+    /// Its harness has several accounts, so the row is identified by a
+    /// LETTER under a heading that carries the mark; alone, it wears the mark
+    /// itself.
+    var lettered: Bool = true
     let focused: Bool
     let onFocus: () -> Void
 
     @State private var hovering = false
 
-    private var store: UsageStore? { registry.store(for: profile.id) }
+    private var store: UsageStore? { registry.store(for: profile.key) }
+    /// This ROW's harness — with several metered, the mark beside an account
+    /// is its own vendor's, not the focused one's (0.101.0).
+    private var style: HarnessStyle {
+        store?.style
+            ?? registry.providers.first { $0.id == profile.providerID }
+                .map(HarnessStyle.init) ?? .bundled
+    }
 
     var body: some View {
         HStack(spacing: 8) {
@@ -154,14 +232,15 @@ struct AccountStripRow: View {
             // edge — the panel's own "you are here" mark, and the one place
             // color says identity rather than risk.
             Capsule()
-                .fill(focused ? AnyShapeStyle(Color(ProviderStyle.accent)) : AnyShapeStyle(.clear))
+                .fill(focused ? AnyShapeStyle(style.accentColor) : AnyShapeStyle(.clear))
                 .frame(width: 2, height: 22)
-            MonogramTile(monogram: registry.monogram(for: profile), focused: focused)
+            if lettered {
+                MonogramTile(monogram: registry.monogram(for: profile), focused: focused)
+            } else {
+                HarnessTile(style: style, focused: focused)
+            }
             VStack(alignment: .leading, spacing: 1) {
-                Text(registry.label(for: profile))
-                    .font(.caption.weight(focused ? .semibold : .regular))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                AccountRowTitle(registry: registry, profile: profile, focused: focused)
                 caption
             }
             Spacer(minLength: 6)
@@ -251,6 +330,31 @@ struct MiniMeterBars: View {
         case .critical: return AnyShapeStyle(Color(nsColor: StatusItemRenderer.badgeRed))
         case .warning: return AnyShapeStyle(Color(nsColor: StatusItemRenderer.warningColor))
         case .normal: return AnyShapeStyle(.primary)
+        }
+    }
+}
+
+/// A row's name, by `registry.rowTitle`: the agent for a lone account (its
+/// sign-in beside it when known), the account's own label under a heading.
+struct AccountRowTitle: View {
+    var registry: ProviderRegistry
+    let profile: Profile
+    let focused: Bool
+
+    var body: some View {
+        let name = registry.rowTitle(for: profile)
+        HStack(alignment: .firstTextBaseline, spacing: 5) {
+            Text(name.title)
+                .font(.caption.weight(focused ? .semibold : .regular))
+                .lineLimit(1)
+                .layoutPriority(1)
+            if let detail = name.detail {
+                Text(detail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
         }
     }
 }

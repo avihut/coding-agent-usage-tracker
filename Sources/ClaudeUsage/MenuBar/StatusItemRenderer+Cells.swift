@@ -27,6 +27,10 @@ extension StatusItemRenderer {
     static let sentinelStroke: CGFloat = 1.5
     /// Between one account's cell and the next.
     static let cellGap: CGFloat = 6
+    /// Between one HARNESS's block and the next (0.101.0) — wider than any
+    /// gap inside a block, so the bar reads as vendors first, accounts
+    /// within them.
+    static let harnessGap: CGFloat = 9
     /// Between a monogram and the shape it labels.
     static let monogramGap: CGFloat = 2
     /// After the glyph, before the first cell.
@@ -47,12 +51,30 @@ extension StatusItemRenderer {
 
     // MARK: - Composition
 
-    /// Several cells under one glyph: glyph, then a cell per account, each
-    /// in its own form — the expanded one (focus, while focus expands) as
-    /// today's unlabeled digits.
-    static func composeCells(_ model: Model) -> [Tagged] {
-        var runs = glyphRuns(model, stale: model.stale)
-        for (index, cell) in model.cells.enumerated() {
+    /// Every harness in turn, `harnessGap` between two of them. With ONE
+    /// harness this is exactly the pre-0.101 composition — no leading gap,
+    /// nothing else added — which is what keeps a Claude-only bar's pixels.
+    static func composeGroups(_ model: Model) -> [Tagged] {
+        var runs: [Tagged] = []
+        for (index, group) in model.groups.enumerated() {
+            // The gap BEFORE a harness belongs to its mark, so a pointer
+            // between two vendors lands on the one it is moving toward.
+            if index > 0 {
+                runs.append(Tagged(run: .gap(harnessGap), harness: group.harnessID))
+            }
+            runs.append(contentsOf: groupRuns(group, in: model))
+        }
+        return runs
+    }
+
+    /// One harness's block: its mark, then a cell per account of that
+    /// harness, each in its own form — the expanded one (focus, while focus
+    /// expands) as today's unlabeled digits.
+    static func groupRuns(_ group: Model.Group, in model: Model) -> [Tagged] {
+        // A heading only where there are several harnesses to head: one
+        // harness with several accounts is the pinned pre-0.101 bar.
+        var runs = glyphRuns(group, stale: group.stale, heading: model.groups.count > 1)
+        for (index, cell) in group.cells.enumerated() {
             let expanded = isExpanded(cell, in: model)
             // Digits end flush against their `%`, so a digits cell of
             // either kind wants the wider spacing around it.
@@ -64,8 +86,11 @@ extension StatusItemRenderer {
             let gap: CGFloat = index == 0
                 ? (expanded ? glyphSpaceWidth : glyphGap)
                 : (wide ? expandedGap : cellGap)
-            runs.append(Tagged(run: .gap(gap), cell: cell.profileID))
-            runs.append(contentsOf: cellRuns(cell, expanded: expanded, now: model.now, ghosts: model.ghosts))
+            runs.append(Tagged(
+                run: .gap(gap), harness: group.harnessID, cell: cell.profileID))
+            runs.append(contentsOf: cellRuns(
+                cell, harness: group.harnessID, expanded: expanded, now: model.now,
+                ghosts: model.ghosts))
         }
         return runs
     }
@@ -81,7 +106,10 @@ extension StatusItemRenderer {
     /// verbatim — the whole point of expanding focus is that the number you
     /// check most stays exact; a cell whose OWN form is digits carries its
     /// letter like every other form, since it is not "the" account.
-    static func cellRuns(_ cell: Cell, expanded: Bool, now: Date, ghosts: Bool) -> [Tagged] {
+    static func cellRuns(
+        _ cell: Cell, harness: String = HarnessResolution.bundledProviderID, expanded: Bool,
+        now: Date, ghosts: Bool
+    ) -> [Tagged] {
         var runs: [Tagged] = []
         // A dot has never carried a letter (its color is the whole
         // reading); every other form does. The letter belongs to the
@@ -89,17 +117,21 @@ extension StatusItemRenderer {
         // account, not an element.
         if !expanded, cell.form != .dot {
             runs.append(contentsOf: monogramRuns(cell).map {
-                Tagged(run: $0, cell: cell.profileID, element: .meters)
+                Tagged(run: $0, harness: harness, cell: cell.profileID, element: .meters)
             })
         }
-        runs.append(contentsOf: elementRuns(cell, expanded: expanded, now: now, ghosts: ghosts))
+        runs.append(contentsOf: elementRuns(
+            cell, harness: harness, expanded: expanded, now: now, ghosts: ghosts))
         return runs
     }
 
     /// The cell's elements in their order, `elementGap` between two that
     /// draw; an element with nothing to say contributes nothing — not even
     /// its gap — unless the preview asked for ghosts.
-    static func elementRuns(_ cell: Cell, expanded: Bool, now: Date, ghosts: Bool) -> [Tagged] {
+    static func elementRuns(
+        _ cell: Cell, harness: String = HarnessResolution.bundledProviderID, expanded: Bool,
+        now: Date, ghosts: Bool
+    ) -> [Tagged] {
         var runs: [Tagged] = []
         var drawn = false
         for element in MenuBarLayout.normalized(cell.elements) {
@@ -108,9 +140,15 @@ extension StatusItemRenderer {
             case .runsOut(let scope): runsOutRuns(cell, scope: scope, now: now, ghosts: ghosts)
             }
             guard !body.isEmpty else { continue }
-            if drawn { runs.append(Tagged(run: .gap(elementGap), cell: cell.profileID, element: element)) }
+            if drawn {
+                runs.append(Tagged(
+                    run: .gap(elementGap), harness: harness, cell: cell.profileID,
+                    element: element))
+            }
             drawn = true
-            runs.append(contentsOf: body.map { Tagged(run: $0, cell: cell.profileID, element: element) })
+            runs.append(contentsOf: body.map {
+                Tagged(run: $0, harness: harness, cell: cell.profileID, element: element)
+            })
         }
         return runs
     }
@@ -124,16 +162,24 @@ extension StatusItemRenderer {
             return [.sentinel(
                 sentinelColor(cell), filled: (worstSeverity(cell) ?? 0) >= badgeSeverity)]
         case .rings:
+            // An account with ONE limit wears it as the outer ring: a lone
+            // inner ring reads as a gauge with its big half missing.
+            let lone = cell.segments?.count == 1
             return [.rings(
-                outer: slot(cell.segments, rank: 1, stale: cell.stale),
-                inner: slot(cell.segments, rank: 0, stale: cell.stale),
+                outer: slot(cell.segments, rank: lone ? 0 : 1, stale: cell.stale),
+                inner: lone ? nil : slot(cell.segments, rank: 0, stale: cell.stale),
                 stale: cell.stale)]
         case .compactDigits:
             return compactRuns(cell)
         case .bars:
             guard cell.segments != nil else { return [.text("–", quiet(cell), font)] }
+            // A LONE limit sits centred instead of top-aligned over two
+            // empty rows. Two limits keep the historical three-row frame:
+            // that is every pre-0.101 account without a scoped limit, and
+            // its pixels are pinned (`statusitem-form-bars.png`).
+            let rows = cell.segments?.count == 1 ? 1 : 3
             return [.bars(
-                (0...2).map { slot(cell.segments, rank: $0, stale: cell.stale) }, stale: cell.stale)]
+                (0..<rows).map { slot(cell.segments, rank: $0, stale: cell.stale) }, stale: cell.stale)]
         }
     }
 
@@ -189,7 +235,13 @@ extension StatusItemRenderer {
         case .meters: metersRuns(cell)
         case .runsOut(let scope): runsOutRuns(cell, scope: scope, now: Model.minute(now), ghosts: true)
         }
-        return image(runs: runs.map { Tagged(run: $0, cell: cell.profileID, element: element) }, height: height)
+        return image(
+            runs: runs.map {
+                Tagged(
+                    run: $0, harness: HarnessResolution.bundledProviderID,
+                    cell: cell.profileID, element: element)
+            },
+            height: height)
     }
 
     /// Identity is a letter, in the tags' own dim ink — never a color,
@@ -334,7 +386,13 @@ extension StatusItemRenderer {
     /// resolves to something (the glyph's own rect carries a nil id). The
     /// controller offsets these by the image's rect inside the button.
     struct CellRect: Equatable {
+        /// Nil = that harness's own mark, whose click and hover answer for
+        /// the harness's focused account (0.101.0 — with one harness it was
+        /// simply "the glyph").
         let profileID: String?
+        /// Which harness the region belongs to; a mark region is the only
+        /// way to name a harness with no cell under the pointer.
+        var harnessID: String = HarnessResolution.bundledProviderID
         let rect: NSRect
     }
 
@@ -342,15 +400,17 @@ extension StatusItemRenderer {
         let placed = layout(model)
         guard !placed.isEmpty else { return [] }
         let width = placed.reduce(0) { $0 + $1.width }
-        var starts: [(id: String?, x: CGFloat)] = []
+        var starts: [(id: String?, harness: String, x: CGFloat)] = []
         for item in placed {
-            if let last = starts.last, last.id == item.cell { continue }
-            starts.append((item.cell, item.x))
+            if let last = starts.last, last.id == item.cell, last.harness == item.harness {
+                continue
+            }
+            starts.append((item.cell, item.harness, item.x))
         }
         return starts.enumerated().map { index, group in
             let end = index + 1 < starts.count ? starts[index + 1].x : width
             return CellRect(
-                profileID: group.id,
+                profileID: group.id, harnessID: group.harness,
                 rect: NSRect(x: group.x, y: 0, width: max(0, end - group.x), height: height))
         }
     }
@@ -361,6 +421,7 @@ extension StatusItemRenderer {
     struct ElementRect: Equatable {
         let profileID: String?
         let element: MenuBarElement?
+        var harnessID: String = HarnessResolution.bundledProviderID
         let rect: NSRect
     }
 
@@ -368,15 +429,16 @@ extension StatusItemRenderer {
         let placed = layout(model)
         guard !placed.isEmpty else { return [] }
         let width = placed.reduce(0) { $0 + $1.width }
-        var starts: [(id: String?, element: MenuBarElement?, x: CGFloat)] = []
+        var starts: [(id: String?, element: MenuBarElement?, harness: String, x: CGFloat)] = []
         for item in placed {
-            if let last = starts.last, last.id == item.cell, last.element == item.element { continue }
-            starts.append((item.cell, item.element, item.x))
+            if let last = starts.last, last.id == item.cell, last.element == item.element,
+               last.harness == item.harness { continue }
+            starts.append((item.cell, item.element, item.harness, item.x))
         }
         return starts.enumerated().map { index, group in
             let end = index + 1 < starts.count ? starts[index + 1].x : width
             return ElementRect(
-                profileID: group.id, element: group.element,
+                profileID: group.id, element: group.element, harnessID: group.harness,
                 rect: NSRect(x: group.x, y: 0, width: max(0, end - group.x), height: height))
         }
     }
@@ -396,19 +458,34 @@ extension StatusItemRenderer {
 
     static func itemModels(for model: Model) -> [ItemModel] {
         var items: [ItemModel] = []
-        let shared = model.cells.filter { !$0.ownItem }
-        if !shared.isEmpty || model.cells.isEmpty {
-            items.append(ItemModel(profileID: nil, model: Model(
-                glyph: model.glyph, incident: model.incident, indicator: model.indicator,
-                cells: shared, expandsFocus: model.expandsFocus, now: model.now, ghosts: model.ghosts)))
+        // A harness's alarm belongs to the FIRST item that carries it; once
+        // placed it is stripped from the rest, or one incident would read as
+        // several outages.
+        var dressed: Set<String> = []
+        let shared = model.groups.compactMap { group -> Model.Group? in
+            let cells = group.cells.filter { !$0.ownItem }
+            guard !cells.isEmpty else { return nil }
+            dressed.insert(group.harnessID)
+            return group.replacingCells(cells)
         }
-        for cell in model.cells where cell.ownItem {
-            let first = items.isEmpty
-            items.append(ItemModel(profileID: cell.profileID, model: Model(
-                glyph: model.glyph,
-                incident: first ? model.incident : nil,
-                indicator: first ? model.indicator : false,
-                cells: [cell], expandsFocus: model.expandsFocus, now: model.now, ghosts: model.ghosts)))
+        if !shared.isEmpty {
+            items.append(ItemModel(profileID: nil, model: model.replacingGroups(shared)))
+        } else if model.cells.isEmpty {
+            // Nothing fetched anywhere yet: the marks and a dash, exactly as
+            // the one-harness item has always rendered an empty state.
+            items.append(ItemModel(profileID: nil, model: model))
+            for group in model.groups { dressed.insert(group.harnessID) }
+        }
+        for group in model.groups {
+            for cell in group.cells where cell.ownItem {
+                let placed = dressed.contains(group.harnessID)
+                dressed.insert(group.harnessID)
+                items.append(ItemModel(
+                    profileID: cell.profileID,
+                    model: model.replacingGroups([
+                        (placed ? group.quieted : group).replacingCells([cell])
+                    ])))
+            }
         }
         return items
     }

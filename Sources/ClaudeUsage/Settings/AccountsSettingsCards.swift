@@ -10,33 +10,64 @@ import UsageCore
 /// about.
 ///
 /// "Profile" in code, "Account" here: what a person sees is which sign-in a
-/// home carries (decision D1). The card renders for a provider that can
-/// have several homes; a one-home agent (Codex, Gemini) never shows it.
+/// home carries (decision D1). Every metered harness has a card (0.101.0);
+/// one that keeps a single home lists its one account and has no folders to
+/// add or discover.
 struct AccountsCard: View {
     var registry: ProviderRegistry
+    /// Which harness's accounts this card lists; nil = the focused one.
+    var harnessID: String? = nil
+
+    private var provider: any UsageProvider {
+        registry.providers.first { $0.id == (harnessID ?? registry.focusedHarnessID) }
+            ?? registry.activeProvider
+    }
+
+    /// With several harnesses the card says whose accounts these are; with
+    /// one it keeps the title it has always had.
+    private var title: String {
+        registry.accountHarnesses.count > 1 ? provider.agentName : "Accounts"
+    }
+
+    /// What an account IS for this harness, in words. A harness with no
+    /// declared identity source says why its row shows no sign-in — it is
+    /// the same kind of row, reading less.
+    private var footer: String {
+        let agent = provider.agentName
+        let inventory = " What is read from where is listed under General → About."
+        guard provider.supportsMultipleHomes else {
+            return "\(agent) keeps one configuration directory, so it is one account here."
+                + (provider.accountIdentity == nil
+                    ? " No sign-in is shown for it: this app reads none of \(agent)'s identity or"
+                        + " credential files."
+                    : "")
+                + inventory
+        }
+        return "Each account is one \(agent) configuration"
+            + " directory with its own sign-in. Everything is read from that directory the"
+            + " same way the default one is read, and nothing is read from an account until"
+            + " you meter it." + inventory
+    }
 
     var body: some View {
-        if registry.activeProvider.supportsMultipleHomes {
-            SettingsCard(
-                "Accounts",
-                footer: "Each account is one \(registry.activeProvider.agentName) configuration"
-                    + " directory with its own sign-in. Everything is read from that directory the"
-                    + " same way the default one is read, and nothing is read from an account until"
-                    + " you meter it. What is read from where is listed under General → About."
-            ) {
-                ForEach(Array(registry.profiles.filter(\.isEnrolled).enumerated()), id: \.element.id) { index, profile in
-                    if index > 0 { Divider() }
-                    AccountRow(registry: registry, profile: profile)
-                }
-                ForEach(registry.discoveredHomes, id: \.profileID) { home in
+        SettingsCard(title, footer: footer) {
+            ForEach(
+                Array(registry.profiles(ofHarness: provider.id).filter(\.isEnrolled).enumerated()),
+                id: \.element.key
+            ) { index, profile in
+                if index > 0 { Divider() }
+                AccountRow(registry: registry, profile: profile)
+            }
+            if provider.supportsMultipleHomes {
+                ForEach(registry.discoveredHomes(ofHarness: provider.id), id: \.profileID) { home in
                     Divider()
-                    DiscoveredAccountRow(registry: registry, home: home)
+                    DiscoveredAccountRow(registry: registry, home: home, providerID: provider.id)
                 }
                 Divider()
                 HStack {
                     Button("Add folder…") { addFolder() }
                     Button("Look again") { registry.discover() }
-                        .help("Scan for other \(registry.activeProvider.agentName) configuration directories")
+                        .help("Scan for other \(provider.agentName) configuration directories")
                     Spacer()
                 }
             }
@@ -52,10 +83,10 @@ struct AccountsCard: View {
         panel.allowsMultipleSelection = false
         panel.showsHiddenFiles = true
         panel.prompt = "Meter"
-        panel.message = "Choose a \(registry.activeProvider.agentName) configuration directory"
+        panel.message = "Choose a \(provider.agentName) configuration directory"
         panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        registry.enroll(home: url)
+        registry.enroll(home: url, providerID: provider.id)
     }
 }
 
@@ -77,7 +108,7 @@ private struct AccountRow: View {
         _nickname = State(initialValue: profile.nickname ?? "")
     }
 
-    private var store: UsageStore? { registry.store(for: profile.id) }
+    private var store: UsageStore? { registry.store(for: profile.key) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -102,7 +133,7 @@ private struct AccountRow: View {
             HStack(spacing: 16) {
                 Toggle("Meter this account", isOn: Binding(
                     get: { profile.enabled },
-                    set: { registry.setProfileEnabled(id: profile.id, enabled: $0) }))
+                    set: { registry.setProfileEnabled(id: profile.key, enabled: $0) }))
                 Spacer()
             }
             .toggleStyle(.switch)
@@ -116,16 +147,23 @@ private struct AccountRow: View {
     /// otherwise.
     private var identity: some View {
         HStack(alignment: .center, spacing: 10) {
+            // The same two tiles the Menu bar pane's rows wear: whose
+            // account, then which.
+            if registry.spansHarnesses {
+                HarnessTile(
+                    style: HarnessStyle(registry.provider(for: profile)),
+                    focused: profile.key == registry.focusedID, size: 28)
+            }
             MonogramTile(
                 monogram: registry.monogram(for: profile),
-                focused: profile.id == registry.focusedID, size: 28)
+                focused: profile.key == registry.focusedID, size: 28)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(registry.label(for: profile))
                         .font(.body.weight(.semibold))
                         .lineLimit(1)
                         .truncationMode(.middle)
-                    if profile.id == registry.focusedID {
+                    if profile.key == registry.focusedID {
                         Text("Focused")
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(.secondary)
@@ -148,9 +186,9 @@ private struct AccountRow: View {
                         "Stop metering \(registry.label(for: profile))?",
                         isPresented: $confirmingRemove, titleVisibility: .visible
                     ) {
-                        Button("Stop metering") { registry.remove(id: profile.id, deletingData: false) }
+                        Button("Stop metering") { registry.remove(id: profile.key, deletingData: false) }
                         Button("Stop metering and delete its data", role: .destructive) {
-                            registry.remove(id: profile.id, deletingData: true)
+                            registry.remove(id: profile.key, deletingData: true)
                         }
                         Button("Cancel", role: .cancel) {}
                     } message: {
@@ -163,9 +201,10 @@ private struct AccountRow: View {
         }
     }
 
-    /// The sign-in when a nickname stands in for it, then the home.
+    /// The sign-in when a nickname stands in for it, then the home — or,
+    /// for a harness that declares no home, the tree its numbers come from.
     private var secondaryLine: String {
-        let home = profile.displayHome() ?? "—"
+        let home = profile.displayHome() ?? store?.localActivity?.displayPath ?? "—"
         if let email = store?.accountPresence?.current?.email, email != registry.label(for: profile) {
             return "\(email) · \(home)"
         }
@@ -176,7 +215,7 @@ private struct AccountRow: View {
         let trimmed = nickname.trimmingCharacters(in: .whitespacesAndNewlines)
         let stored = profile.nickname?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard trimmed != stored else { return }
-        registry.rename(id: profile.id, nickname: trimmed.isEmpty ? nil : trimmed)
+        registry.rename(id: profile.key, nickname: trimmed.isEmpty ? nil : trimmed)
     }
 
     private var stateLine: String {
@@ -192,6 +231,7 @@ private struct AccountRow: View {
 private struct DiscoveredAccountRow: View {
     var registry: ProviderRegistry
     let home: DiscoveredHome
+    let providerID: String
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -206,8 +246,8 @@ private struct DiscoveredAccountRow: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button("Meter") { registry.enroll(home: home.home) }
-                Button("Not now") { registry.dismissDiscovered(home) }
+                Button("Meter") { registry.enroll(home: home.home, providerID: providerID) }
+                Button("Not now") { registry.dismissDiscovered(home, providerID: providerID) }
             }
             note(
                 "Found on this Mac. Nothing has been read from it beyond the folder listing and its"

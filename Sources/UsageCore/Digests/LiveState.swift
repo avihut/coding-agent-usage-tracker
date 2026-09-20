@@ -78,6 +78,14 @@ public struct LiveState: Codable, Sendable, Equatable {
     /// profiles — decided by the writer (0.96.0). Nil = a pre-profile
     /// writer; the bar then draws `menuBar` alone.
     public let menuBarCells: [MenuBarCell]?
+    /// Every harness metered on this machine, in the build's standard order
+    /// (0.101.0) — identity, whether the person shows it, its own service
+    /// health, notices and outages. Nil = a writer that metered exactly one
+    /// harness, whose facts are the top level's.
+    public let harnesses: [HarnessState]?
+    /// The account the person pinned focus to, if any (0.101.0) — nil means
+    /// focus follows activity. `focusedProfile` says who holds it either way.
+    public let pinnedProfile: String?
 
     public init(
         schemaVersion: Int = Self.schemaVersion,
@@ -87,7 +95,8 @@ public struct LiveState: Codable, Sendable, Equatable {
         serviceStatus: ServiceStatusCard? = nil, appUpdate: AppUpdateCard? = nil,
         accountPresence: AccountPresenceCard? = nil, notices: NoticesCard? = nil,
         outages: [OutageSpan]? = nil, focusedProfile: String? = nil,
-        profiles: [ProfileState]? = nil, menuBarCells: [MenuBarCell]? = nil
+        profiles: [ProfileState]? = nil, menuBarCells: [MenuBarCell]? = nil,
+        harnesses: [HarnessState]? = nil, pinnedProfile: String? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.sessionsCap = sessionsCap
@@ -105,6 +114,8 @@ public struct LiveState: Codable, Sendable, Equatable {
         self.focusedProfile = focusedProfile
         self.profiles = profiles
         self.menuBarCells = menuBarCells
+        self.harnesses = harnesses
+        self.pinnedProfile = pinnedProfile
     }
 
     /// `<App Support>/<bundleID>/live-state.json` — the bundle root, above
@@ -1177,13 +1188,7 @@ public enum LiveStateBuilder {
 
     /// Rank vocabulary as the menu bar speaks it: S, W, or the scoped
     /// model's initial.
-    static func tag(for meter: Meter) -> String {
-        switch meter.rank {
-        case 0: "S"
-        case 1: "W"
-        default: UsageFormatting.scopedTag(for: meter)
-        }
-    }
+    static func tag(for meter: Meter) -> String { UsageFormatting.tag(for: meter) }
 
     /// Every k-th point, endpoints kept — enough for a terminal cell grid.
     static func thin(_ points: [SeriesPoint], to cap: Int) -> [SeriesPoint] {

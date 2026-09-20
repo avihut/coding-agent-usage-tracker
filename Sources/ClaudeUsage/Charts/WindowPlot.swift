@@ -236,7 +236,7 @@ enum WindowPlot {
     /// the meter emptied but no window closed, so this is deliberately not
     /// the boundary's dash — a finer dotted rule that stops at 100, drawn in
     /// the VENDOR'S accent and capped by the vendor's own mark
-    /// (`ProviderStyle.glyph`, Claude's ✳︎; Codex/Gemini wear theirs): the
+    /// (`HarnessStyle.glyph`, Claude's ✳︎; Codex/Gemini wear theirs): the
     /// vendor emptied the meter, and its colour and mark say so without
     /// words — the one reset mark that is allowed to wear the accent, because
     /// here the accent IS the data. No curtain pairs with it: there is no
@@ -252,7 +252,8 @@ enum WindowPlot {
     /// mark.
     @ChartContentBuilder
     static func midWindowResets(
-        _ dates: [Date], hovered: Date?, highlighted: Date? = nil, ceiling: Double
+        _ dates: [Date], hovered: Date?, highlighted: Date? = nil, ceiling: Double,
+        style: HarnessStyle
     ) -> some ChartContent {
         ForEach(
             highlighted.map { dates.contains($0) ? dates : dates + [$0] } ?? dates,
@@ -263,19 +264,19 @@ enum WindowPlot {
                 yStart: .value("Usage", 0), yEnd: .value("Usage", min(100, ceiling)))
                 .foregroundStyle(
                     highlighted == reset
-                        ? ProviderStyle.accentHighlightColor
-                        : ProviderStyle.accentColor.opacity(hovered == reset ? 1 : 0.8))
+                        ? style.accentHighlightColor
+                        : style.accentColor.opacity(hovered == reset ? 1 : 0.8))
                 .lineStyle(StrokeStyle(
                     lineWidth: highlighted == reset ? 2 : 1.5, lineCap: .round, dash: [0.5, 3.5]))
                 .annotation(
                     position: .top, spacing: 1,
                     overflowResolution: .init(x: .fit(to: .plot), y: .fit(to: .plot))
                 ) {
-                    Text(ProviderStyle.glyph)
+                    Text(style.glyph)
                         .font(.system(size: 9, weight: .semibold))
                         // The mark keeps its everyday tint — only the line
                         // takes the highlight (user-directed).
-                        .foregroundStyle(ProviderStyle.accentColor.opacity(hovered == reset ? 1 : 0.85))
+                        .foregroundStyle(style.accentColor.opacity(hovered == reset ? 1 : 0.85))
                 }
         }
     }

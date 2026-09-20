@@ -54,135 +54,12 @@ enum StatusItemRenderer {
         var elements: [MenuBarElement] = MenuBarLayout.standard
     }
 
-    struct Model: Equatable {
-        /// The provider's mark ahead of the cells.
-        let glyph: String
-        /// The service's own health, when an incident is running: the glyph
-        /// then rides a capsule in this color instead of standing alone.
-        /// Nil whenever the service is fine, unknown, or under maintenance —
-        /// the menu bar alarms for incidents only (decision D2).
-        var incident: ServiceStatusCard.Indicator?
-        /// A pending notice with no menu bar surface of its own: a white
-        /// dot at the glyph's corner, no count (the panel counts). An
-        /// active outage alone lights nothing — the capsule already says
-        /// it — and the digest decides that (`NoticesCard.indicator`), so
-        /// the TUI's header dot and this one can't disagree.
-        var indicator = false
-        let cells: [Cell]
-        /// The focused cell draws as today's digits whatever its form.
-        let expandsFocus: Bool
-        /// The clock a countdown is phrased against, FLOORED TO THE MINUTE
-        /// (0.98.0): the text changes once a minute, so the model — which
-        /// the controller compares to skip a redraw — changes once a minute
-        /// too, on the tick that redraws it.
-        var now: Date = Model.minute(Date())
-        /// Preview only: an element that would compose nothing right now
-        /// (a runs-out element while every forecast is clean) draws as a
-        /// dashed placeholder, so a drop never looks like it failed. The
-        /// bar itself NEVER sets this.
-        var ghosts = false
-
-        init(
-            glyph: String, incident: ServiceStatusCard.Indicator? = nil, indicator: Bool = false,
-            cells: [Cell], expandsFocus: Bool = true, now: Date = Model.minute(Date()),
-            ghosts: Bool = false
-        ) {
-            self.glyph = glyph
-            self.incident = incident
-            self.indicator = indicator
-            self.cells = cells
-            self.expandsFocus = expandsFocus
-            self.now = Model.minute(now)
-            self.ghosts = ghosts
-        }
-
-        static func minute(_ date: Date) -> Date {
-            Date(timeIntervalSinceReferenceDate: floor(date.timeIntervalSinceReferenceDate / 60) * 60)
-        }
-
-        /// The one-account shape — today's model, unchanged for every
-        /// caller that meters one thing. A form other than the standard
-        /// one, or focus not expanded, is the person's own choice for
-        /// their one account and draws as such.
-        init(
-            segments: [MenuBarSegment]?, stale: Bool, glyph: String,
-            incident: ServiceStatusCard.Indicator? = nil, indicator: Bool = false,
-            form: MenuBarForm = .standard, expandsFocus: Bool = true,
-            elements: [MenuBarElement] = MenuBarLayout.standard, now: Date = Model.minute(Date())
-        ) {
-            self.init(
-                glyph: glyph, incident: incident, indicator: indicator,
-                cells: [Cell(
-                    profileID: Profile.defaultID, monogram: "", segments: segments, stale: stale,
-                    focused: true, form: form, elements: elements)],
-                expandsFocus: expandsFocus, now: now)
-        }
-
-        /// The first cell's triple — the one-account reading.
-        var segments: [MenuBarSegment]? { cells.first?.segments }
-        /// Every cell stale (or no cell at all): the glyph greys too.
-        var stale: Bool { cells.allSatisfy(\.stale) }
-    }
-
-    static func model(
-        for state: DisplayState, predictions: [String: UsagePrediction] = [:],
-        glyph: String = "✳︎", serviceStatus: ServiceStatusCard? = nil,
-        notices: NoticesCard? = nil, form: MenuBarForm = .standard, expandsFocus: Bool = true,
-        elements: [MenuBarElement] = MenuBarLayout.standard, now: Date = Date()
-    ) -> Model {
-        // Which impacts are loud enough to badge is decision D2, and it lives
-        // on the card so the TUI's rungs and this badge can't drift apart.
-        let alarming = serviceStatus?.alarmingImpact
-        let indicator = notices?.indicator ?? false
-        guard let snapshot = state.snapshot else {
-            return Model(
-                segments: nil, stale: true, glyph: glyph, incident: alarming,
-                indicator: indicator, form: form, expandsFocus: expandsFocus,
-                elements: elements, now: now)
-        }
-        return Model(
-            segments: UsageFormatting.menuBarSegments(
-                from: snapshot.meters, predictions: predictions),
-            stale: state.isStale,
-            glyph: glyph,
-            incident: alarming,
-            indicator: indicator,
-            form: form,
-            expandsFocus: expandsFocus,
-            elements: elements,
-            now: now
-        )
-    }
-
     /// How one account draws: its form, its elements, and whether it takes
     /// its own item.
     struct CellStyle: Equatable {
         var form: MenuBarForm = .standard
         var ownItem = false
         var elements: [MenuBarElement] = MenuBarLayout.standard
-    }
-
-    /// The several-accounts shape, from the digest's own cells (the WRITER
-    /// decides which accounts show and with which digits — so the app's
-    /// bar and the TUI's header can't disagree) in the order given, dressed
-    /// by each account's own style (the app's record, not the digest's).
-    static func model(
-        cells: [MenuBarCell], focusedID: String?, styles: [String: CellStyle], glyph: String,
-        expandsFocus: Bool, serviceStatus: ServiceStatusCard? = nil, notices: NoticesCard? = nil,
-        now: Date = Date()
-    ) -> Model {
-        Model(
-            glyph: glyph, incident: serviceStatus?.alarmingImpact,
-            indicator: notices?.indicator ?? false,
-            cells: cells.map { cell in
-                let style = styles[cell.profile] ?? CellStyle()
-                return Cell(
-                    profileID: cell.profile, monogram: cell.monogram,
-                    segments: cell.segments.isEmpty ? nil : cell.segments.map(MenuBarSegment.init),
-                    stale: cell.stale, focused: cell.profile == focusedID,
-                    form: style.form, ownItem: style.ownItem, elements: style.elements)
-            },
-            expandsFocus: expandsFocus, now: now)
     }
 
     /// How a segment's number wears its risk.
@@ -227,16 +104,12 @@ enum StatusItemRenderer {
         ink(dark: NSColor.white.withAlphaComponent(white), light: NSColor.black.withAlphaComponent(black))
     }
 
-    /// The active provider's brand accent (Anthropic terracotta #D97757
-    /// while Claude is metered) — charts derive from it.
-    static var accent: NSColor { ProviderStyle.accent }
-
-    /// The glyph's tint: the accent, deepened over a bright bar — the
-    /// vendors' accents are mid-tones picked for dark grounds (terracotta
+    /// The glyph's tint: the harness's accent, deepened over a bright bar —
+    /// the vendors' accents are mid-tones picked for dark grounds (terracotta
     /// on cream is under 3:1).
-    static var glyphInk: NSColor {
-        let accent = accent
-        return ink(dark: accent, light: accent.blended(withFraction: 0.3, of: .black) ?? accent)
+    static func glyphInk(_ accent: UsageCore.RGBColor) -> NSColor {
+        let base = NSColor(srgbRed: accent.red, green: accent.green, blue: accent.blue, alpha: 1)
+        return ink(dark: base, light: base.blended(withFraction: 0.3, of: .black) ?? base)
     }
 
     // Over a bright bar the neutrals are the system's own near-black, and
@@ -291,6 +164,12 @@ enum StatusItemRenderer {
 
     enum Run: Equatable {
         case text(String, NSColor, NSFont)
+        /// A harness's mark at a size of its own (0.101.0): centred on its
+        /// INK, not its line box — a scaled ⬡ sat visibly low — and drawn
+        /// with a stroke in its own colour, because an outline glyph's hair
+        /// stays a hair however large the font. The bundled mark at the
+        /// digits' size stays a plain `.text` run: those pixels are pinned.
+        case mark(String, NSColor, NSFont)
         case dot(NSColor)
         case badge(String)
         /// The provider glyph on an incident-colored capsule, drawn white —
@@ -322,11 +201,13 @@ enum StatusItemRenderer {
         let fill: NSColor
     }
 
-    /// A run tagged with the cell it belongs to (nil = the glyph's) and
-    /// the element within it (nil = the glyph's, or the space after it).
+    /// A run tagged with the harness it belongs to, the cell within it
+    /// (nil = that harness's mark) and the element within the cell (nil = the
+    /// mark, or the space after it).
     struct Tagged: Equatable {
         let run: Run
-        let cell: String?
+        let harness: String
+        var cell: String? = nil
         var element: MenuBarElement? = nil
     }
 
@@ -336,6 +217,7 @@ enum StatusItemRenderer {
         let run: Run
         let x: CGFloat
         let width: CGFloat
+        let harness: String
         let cell: String?
         let element: MenuBarElement?
     }
@@ -373,7 +255,8 @@ enum StatusItemRenderer {
         for tagged in runs {
             let width = runWidth(tagged.run)
             placed.append(Placed(
-                run: tagged.run, x: x, width: width, cell: tagged.cell, element: tagged.element))
+                run: tagged.run, x: x, width: width, harness: tagged.harness,
+                cell: tagged.cell, element: tagged.element))
             x += width
         }
         return placed
@@ -440,6 +323,10 @@ enum StatusItemRenderer {
                 NSGraphicsContext.current?.restoreGraphicsState()
                 bright.setFill()
                 NSBezierPath(ovalIn: ring.insetBy(dx: indicatorRing, dy: indicatorRing)).fill()
+            case .mark(let string, let color, let markFont):
+                drawMark(
+                    string, color: color, font: markFont, shadow: shadow, x: x,
+                    in: NSRect(x: 0, y: 0, width: 0, height: height))
             case .text(let string, let color, let font):
                 var attributes: [NSAttributedString.Key: Any] = [
                     .font: font, .foregroundColor: color,
@@ -522,20 +409,27 @@ enum StatusItemRenderer {
         }
     }
 
-    /// The invariance guard: a lone cell drawn as unlabeled digits IS
-    /// today's item — the one-account Mac's bar, and an expanded account in
-    /// an item of its own. A lone cell in any other dress (rings for one's
-    /// only account; an own item beside the shared one) composes like a
-    /// row of one.
+    /// The invariance guard: a lone cell of a lone HARNESS drawn as unlabeled
+    /// digits IS today's item — the one-account Mac's bar, and an expanded
+    /// account in an item of its own. A lone cell in any other dress (rings
+    /// for one's only account; an own item beside the shared one) composes
+    /// like a row of one. The guard reads the GROUP's cells, never the
+    /// model's total: two harnesses with one account each must draw two
+    /// marks, and a total of two cells would have sent them down this path.
     static func compose(_ model: Model) -> [Tagged] {
-        guard model.cells.count > 1 else {
-            guard let cell = model.cells.first else { return composeSingle(model, cell: nil) }
-            if isExpanded(cell, in: model) || cell.form == .digits && cell.monogram.isEmpty {
-                return composeSingle(model, cell: cell)
-            }
-            return composeCells(model)
+        guard model.groups.count == 1, let only = model.groups.first else {
+            return composeGroups(model)
         }
-        return composeCells(model)
+        guard only.cells.count > 1 else {
+            guard let cell = only.cells.first else {
+                return composeSingle(model, group: only, cell: nil)
+            }
+            if isExpanded(cell, in: model) || cell.form == .digits && cell.monogram.isEmpty {
+                return composeSingle(model, group: only, cell: cell)
+            }
+            return composeGroups(model)
+        }
+        return composeGroups(model)
     }
 
     /// The focused cell, while focus is expanded: today's digits, no letter.
@@ -548,15 +442,18 @@ enum StatusItemRenderer {
     /// each composing nothing while it has nothing to say, so a bar that
     /// holds the meters alone (or a quiet runs-out element) is byte-
     /// identical to the pre-0.98 one.
-    static func composeSingle(_ model: Model, cell: Cell?) -> [Tagged] {
+    static func composeSingle(_ model: Model, group: Model.Group, cell: Cell?) -> [Tagged] {
         let stale = cell?.stale ?? true
-        var runs = glyphRuns(model, stale: stale)
-        runs.append(Tagged(run: .text(" ", dim, font), cell: nil))
+        var runs = glyphRuns(group, stale: stale)
+        runs.append(Tagged(run: .text(" ", dim, font), harness: group.harnessID))
         guard let cell else {
-            runs.append(contentsOf: segmentRuns(nil, stale: stale).map { Tagged(run: $0, cell: nil) })
+            runs.append(contentsOf: segmentRuns(nil, stale: stale).map {
+                Tagged(run: $0, harness: group.harnessID)
+            })
             return runs
         }
-        runs.append(contentsOf: elementRuns(cell, expanded: true, now: model.now, ghosts: model.ghosts))
+        runs.append(contentsOf: elementRuns(
+            cell, harness: group.harnessID, expanded: true, now: model.now, ghosts: model.ghosts))
         return runs
     }
 
@@ -566,12 +463,16 @@ enum StatusItemRenderer {
     /// it: a stale usage number says nothing about the service's health.
     /// The dot rides the glyph (or its capsule) — declared right after the
     /// run it hugs, before any spacer, so it never adds width.
-    static func glyphRuns(_ model: Model, stale: Bool) -> [Tagged] {
+    static func glyphRuns(_ group: Model.Group, stale: Bool, heading: Bool = false) -> [Tagged] {
         var runs: [Tagged] = [Tagged(
-            run: model.incident.map { .glyphBadge(model.glyph, incidentFill($0)) }
-                ?? .text(model.glyph, stale ? staleColor : glyphInk, font),
-            cell: nil)]
-        if model.indicator { runs.append(Tagged(run: .indicator, cell: nil)) }
+            run: group.incident.map { .glyphBadge(group.glyph, incidentFill($0)) }
+                ?? markRun(
+                    group.glyph, stale ? staleColor : glyphInk(group.accent),
+                    glyphFont(for: group.glyph, heading: heading)),
+            harness: group.harnessID)]
+        if group.indicator {
+            runs.append(Tagged(run: .indicator, harness: group.harnessID))
+        }
         return runs
     }
 
@@ -614,6 +515,9 @@ enum StatusItemRenderer {
             return (string.trimmingCharacters(in: .whitespaces) as NSString)
                 .size(withAttributes: [.font: font]).width
         }
+        if case .mark(let string, _, let markFont) = run {
+            return (string as NSString).size(withAttributes: [.font: markFont]).width
+        }
         return runWidth(run)
     }
 
@@ -622,6 +526,10 @@ enum StatusItemRenderer {
         switch run {
         case .text(let string, _, let font):
             return (height + (string as NSString).size(withAttributes: [.font: font]).height) / 2
+        case .mark(let string, _, let markFont):
+            let ink = NSAttributedString(string: string, attributes: [.font: markFont])
+                .boundingRect(with: .zero, options: [.usesDeviceMetrics])
+            return (height + ink.height) / 2
         case .badge, .glyphBadge:
             return (height + badgeHeight) / 2
         case .ghost:
@@ -633,7 +541,7 @@ enum StatusItemRenderer {
 
     static func runWidth(_ run: Run) -> CGFloat {
         switch run {
-        case .text(let string, _, let font):
+        case .text(let string, _, let font), .mark(let string, _, let font):
             return (string as NSString).size(withAttributes: [.font: font]).width
         case .dot:
             return dotDiameter + 2 * dotGap

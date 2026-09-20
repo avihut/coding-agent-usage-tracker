@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UsageCore
 
 /// Owns the one settings window. An LSUIElement app gets no Settings scene
 /// wiring for free, so the window is created on first show, kept alive
@@ -31,7 +32,7 @@ final class SettingsWindowController {
                 rootView: SettingsView(
                     registry: registry, navigator: navigator, initialSection: pane))
             let window = NSWindow(contentViewController: host)
-            window.title = "Claude Usage Settings"
+            window.title = "\(AppIdentity.displayName) Settings"
             window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
             window.setContentSize(NSSize(width: 820, height: 700))
             window.isReleasedWhenClosed = false

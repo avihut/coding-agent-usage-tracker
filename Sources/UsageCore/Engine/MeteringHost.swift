@@ -2,84 +2,59 @@ import Foundation
 import Observation
 
 /// The process-level owner of metering (D3, the hybrid host): ONE lease
-/// holder runs one `UsageEngine` per enrolled profile beside one
-/// `ProviderServices`, folds their sections into ONE live-state.json, and
-/// answers the control socket. usaged runs it headless; the app runs it
-/// while no daemon does. Everything a single engine used to own that must
-/// exist once per process — the publisher, the socket, the network
-/// monitor, the update checker — lives here.
+/// holder runs one `UsageEngine` per metered account of every metered
+/// HARNESS (v0.101.0), beside one `ProviderServices` per harness, folds
+/// their sections into ONE live-state.json, and answers the control socket.
+/// usaged runs it headless; the app runs it while no daemon does. Everything
+/// a single engine used to own that must exist once per process — the
+/// publisher, the socket, the network monitor, the update checker — lives
+/// here.
 ///
-/// Profiles come from `ProfileStore` (the app's defaults domain, which the
-/// daemon reads too). D9 rules run here: a reprobe every ten minutes reads
-/// each profile's session-file volume over the trailing fortnight and its
-/// last write, declares dormant ones (no engine, hidden from bar and
-/// strip, an FSEvents watcher kept so the first write revives it), and
-/// focus follows that volume unless pinned — the newest write only breaks
-/// ties, and a switch is held while the panel is open. The host stamps the digest's heartbeat and its
-/// next-poll horizon, so an all-dormant machine never reads as a dead
-/// host to a client.
+/// Harnesses come from `HarnessPresence` (present on disk, latched for the
+/// process) crossed with the person's hidden set; accounts come from
+/// `ProfileStore` (the app's defaults domain, which the daemon reads too).
+/// Every runtime map here is keyed by `ProfileKey` — every harness's standard
+/// home is `default`, so bare profile ids stopped naming one account.
+///
+/// D9 rules run here: a reprobe every ten minutes reads each account's
+/// session-file volume over the trailing fortnight, the days it spans and
+/// its last write, declares dormant ones (no engine, hidden from bar and
+/// strip, an FSEvents watcher kept so the first write revives it), and focus
+/// follows — the harness used on the most days, then that harness's busiest
+/// account — unless pinned, with a switch held while the panel is open. The
+/// host stamps the digest's heartbeat and its next-poll horizon, so an
+/// all-dormant machine never reads as a dead host to a client.
 @MainActor
 @Observable
 public final class MeteringHost {
-    public struct Configuration: Sendable {
-        public var bundleID: String
-        public var kind: UsageEngine.Host
-        public var roots: StorageScope.Roots
-        /// False builds no status poller (tests, an offline host).
-        public var pollsStatus: Bool
-        /// The release feed to poll; nil = no update checker.
-        public var updateFeedURL: URL?
-        public var reprobeInterval: TimeInterval
-        /// The user home "~" and discovery are judged against.
-        public var userHome: URL
-        /// The span the launch polls of N engines spread across.
-        public var stagger: TimeInterval
-        /// Where the control socket binds; nil = the broker's standard path.
-        public var socketURL: URL?
-        public var bindsSocket: Bool
-
-        public init(
-            bundleID: String, kind: UsageEngine.Host, roots: StorageScope.Roots = .standard,
-            pollsStatus: Bool = true, updateFeedURL: URL? = nil, reprobeInterval: TimeInterval = 600,
-            userHome: URL = FileManager.default.homeDirectoryForCurrentUser,
-            stagger: TimeInterval = TriggerGate.floor, socketURL: URL? = nil, bindsSocket: Bool = true
-        ) {
-            self.bundleID = bundleID
-            self.kind = kind
-            self.roots = roots
-            self.pollsStatus = pollsStatus
-            self.updateFeedURL = updateFeedURL
-            self.reprobeInterval = reprobeInterval
-            self.userHome = userHome
-            self.stagger = stagger
-            self.socketURL = socketURL
-            self.bindsSocket = bindsSocket
-        }
-
-        /// The release feed a real host polls: both GitHub flavors, so a
-        /// source checkout still learns it is behind; the drill's override
-        /// both supplies the URL and forces the checker on.
-        public static func updateFeedURL(defaults: UserDefaults) -> URL? {
-            let channel = Distribution.channel(for: Bundle.main.bundleURL)
-            let override = defaults.string(forKey: UpdateChecker.feedOverrideKey)
-                .flatMap(URL.init(string:))
-            return override ?? channel?.updateFeedURL
-        }
-    }
-
-    public let provider: any UsageProvider
-    public let services: ProviderServices
+    /// Every harness this host may meter, in the build's standard order —
+    /// what presence is probed over. A one-harness host holds exactly one.
+    public let providers: [any UsageProvider]
     public let configuration: Configuration
+    /// One `ProviderServices` per metered harness: its pricing, its status
+    /// poller, its notice ledger.
+    public let serviceRegistry: ProviderServicesRegistry
 
-    /// Every record for this provider, the implicit default first —
-    /// enrolled AND dismissed-discovery records alike (`Profile.isEnrolled`).
+    /// The metered harnesses and their accounts, rebuilt whenever the stored
+    /// records, the hidden set or presence change.
+    public private(set) var roster = HarnessRoster(rows: [])
+    /// Harness ids found on disk — latched for the life of the process.
+    public private(set) var present: Set<String> = []
+    /// Harness ids the person turned off displaying. Still metered.
+    public private(set) var hidden: Set<String> = []
+
+    /// Every metered account, harness blocks in standard order — enrolled
+    /// AND dismissed-discovery records alike (`Profile.isEnrolled`).
     public private(set) var profiles: [Profile] = []
-    /// Running engines: enrolled ∧ enabled ∧ awake.
+    /// Running engines by `ProfileKey`: enrolled ∧ enabled ∧ awake.
     public private(set) var engines: [String: UsageEngine] = [:]
     public private(set) var lastActivity: [String: Date] = [:]
-    /// Session files each profile wrote inside `ProfileActivity.window`,
-    /// as of the last probe — what focus follows.
+    /// Session files each account wrote inside `ProfileActivity.window`, as
+    /// of the last probe — what focus follows WITHIN a harness.
     public private(set) var recentActivity: [String: Int] = [:]
+    /// The days those files fall on — what ranks harnesses against each
+    /// other, whose file counts don't compare.
+    public private(set) var activeDays: [String: Set<Date>] = [:]
     public private(set) var identities: [String: AccountIdentity] = [:]
     public private(set) var dormant: Set<String> = []
     public private(set) var focusedProfileID: String?
@@ -89,10 +64,39 @@ public final class MeteringHost {
     public private(set) var appUpdate: AppUpdateCard?
     public private(set) var notices: NoticesCard?
     public private(set) var outages: [OutageSpan] = []
-    /// Homes found beside the standard one that nobody decided about.
-    public private(set) var discovered: [DiscoveredHome] = []
+    /// Homes found beside a harness's standard one that nobody decided
+    /// about, by harness.
+    public private(set) var discoveredByHarness: [String: [DiscoveredHome]] = [:]
 
-    public var serviceStatus: ServiceStatusCard? { services.serviceStatus }
+    /// Every harness's offers in roster order — what the Accounts card lists.
+    public var discovered: [DiscoveredHome] {
+        roster.rows.flatMap { discoveredByHarness[$0.id] ?? [] }
+    }
+
+    /// The harness the focused account belongs to — whose vendor cards the
+    /// digest's top level carries.
+    public var focusedHarnessID: String {
+        focusedProfileID.flatMap { roster.profile(key: $0)?.providerID }
+            ?? roster.rows.first?.id ?? providers[0].id
+    }
+
+    /// The first metered harness — what a caller that knows of only one
+    /// means by "the provider".
+    public var provider: any UsageProvider { roster.rows.first?.provider ?? providers[0] }
+    /// That harness's services. A reader after one particular harness's
+    /// pricing or notices asks `services(forHarness:)`, which never builds
+    /// (and so never starts a poller for) a harness this host isn't metering.
+    public var services: ProviderServices {
+        serviceRegistry[provider.id] ?? serviceRegistry.services(for: provider)
+    }
+
+    /// One metered harness's services — nil for anything this host does not
+    /// meter.
+    public func services(forHarness providerID: String) -> ProviderServices? {
+        serviceRegistry[providerID]
+    }
+
+    public var serviceStatus: ServiceStatusCard? { serviceRegistry[focusedHarnessID]?.serviceStatus }
     public var focusedEngine: UsageEngine? { focusedProfileID.flatMap { engines[$0] } }
     public var enrolledProfiles: [Profile] { profiles.filter(\.isEnrolled) }
     public var activeInterval: TimeInterval {
@@ -100,13 +104,13 @@ public final class MeteringHost {
             ?? UsageEngine.activeInterval(from: defaults)
     }
 
-    /// The two process-lifecycle verbs belong to whoever owns the process:
-    /// usaged switches providers and exits; an app refuses both.
+    /// The two process-lifecycle verbs belong to whoever owns the process;
+    /// an app refuses both.
     @ObservationIgnored public var onSetProvider: ((String) -> ControlReply)?
     @ObservationIgnored public var onShutdown: (() -> ControlReply)?
     @ObservationIgnored public var onLog: ((String) -> Void)?
 
-    @ObservationIgnored private let defaults: UserDefaults
+    @ObservationIgnored let defaults: UserDefaults
     @ObservationIgnored private let serviceFactory: ((Profile) -> UsageService?)?
     @ObservationIgnored private let systemAccent: RGBColor?
     @ObservationIgnored private let gateSeeds: [String: Date]
@@ -116,31 +120,44 @@ public final class MeteringHost {
     @ObservationIgnored private var socket: ControlSocket?
     @ObservationIgnored private var networkMonitor: NetworkMonitor?
     @ObservationIgnored private var reprobeTimer: Timer?
-    @ObservationIgnored private var updateChecker: UpdateChecker?
+    @ObservationIgnored var updateChecker: UpdateChecker?
     @ObservationIgnored private var focusHeld = false
     @ObservationIgnored private var nextReprobeAt: Date?
     @ObservationIgnored private var isStarted = false
-    @ObservationIgnored private var isShutDown = false
+    @ObservationIgnored var isShutDown = false
     @ObservationIgnored private var isReprobing = false
 
-    /// `gateSeeds` are the previous host's per-profile fetch stamps
-    /// (`LiveState.gateSeeds()`), so a handover never double-polls inside
-    /// the floor. `serviceFactory` injects stubbed services per profile
-    /// (tests); nil builds the real pipeline against each home's own
-    /// credential chain.
-    public init(
+    /// One harness, the way every host built this before several were
+    /// metered at once.
+    public convenience init(
         provider: any UsageProvider, defaults: UserDefaults, configuration: Configuration,
         serviceFactory: ((Profile) -> UsageService?)? = nil,
         gateSeeds: [String: Date] = [:], systemAccent: RGBColor? = nil
     ) {
-        self.provider = provider
+        self.init(
+            providers: [provider], defaults: defaults, configuration: configuration,
+            serviceFactory: serviceFactory, gateSeeds: gateSeeds, systemAccent: systemAccent)
+    }
+
+    /// `gateSeeds` are the previous host's per-account fetch stamps
+    /// (`LiveState.gateSeeds()`, keyed by `ProfileKey`), so a handover never
+    /// double-polls inside the floor. `serviceFactory` injects stubbed usage
+    /// services per account (tests); nil builds the real pipeline against
+    /// each home's own credential chain.
+    public init(
+        providers: [any UsageProvider], defaults: UserDefaults, configuration: Configuration,
+        serviceFactory: ((Profile) -> UsageService?)? = nil,
+        gateSeeds: [String: Date] = [:], systemAccent: RGBColor? = nil
+    ) {
+        precondition(!providers.isEmpty, "a host meters at least one harness")
+        self.providers = providers
         self.defaults = defaults
         self.configuration = configuration
         self.serviceFactory = serviceFactory
         self.gateSeeds = gateSeeds
         self.systemAccent = systemAccent
-        self.services = ProviderServices(
-            provider: provider, bundleID: configuration.bundleID, roots: configuration.roots,
+        self.serviceRegistry = ProviderServicesRegistry(
+            bundleID: configuration.bundleID, roots: configuration.roots,
             pollsStatus: configuration.pollsStatus)
         self.publisher = StatePublisher(
             fileURL: LiveState.fileURL(bundleID: configuration.bundleID, roots: configuration.roots))
@@ -154,8 +171,8 @@ public final class MeteringHost {
     public func start() {
         guard !isStarted, !isShutDown else { return }
         isStarted = true
-        services.onChange = { [weak self] in self?.republish() }
-        services.start()
+        serviceRegistry.onChange = { [weak self] in self?.republish() }
+        serviceRegistry.start()
         if let feedURL = configuration.updateFeedURL {
             let checker = UpdateChecker(
                 feed: UpdateFeed(latestReleaseURL: feedURL),
@@ -168,6 +185,7 @@ public final class MeteringHost {
             updateChecker = checker
             checker.start()
         }
+        probePresence(stored: ProfileStore.load(from: defaults))
         loadProfiles()
         probeSynchronously(profiles.filter(\.isEnrolled))
         recomputeDormancy(now: Date())
@@ -200,17 +218,17 @@ public final class MeteringHost {
         revivalWatchers = [:]
         updateChecker?.stop()
         updateChecker = nil
-        services.stop()
+        serviceRegistry.stop()
     }
 
     /// The host process's wake impulse: every engine polls (gate-ruled),
-    /// the provider's status and history read once, the release check
+    /// every harness's status and history read once, the release check
     /// pokes, and a reprobe follows — a lid closed for a week is exactly
-    /// when dormancy and focus need re-reading.
+    /// when presence, dormancy and focus need re-reading.
     public func noteWake() {
         guard isStarted, !isShutDown else { return }
         for engine in engines.values { engine.noteWake() }
-        services.noteWake()
+        serviceRegistry.noteWake()
         updateChecker?.pokeIfStale()
         reprobe()
     }
@@ -222,14 +240,16 @@ public final class MeteringHost {
         if !held, recomputeFocus() { republish() }
     }
 
-    // MARK: - Profiles
+    // MARK: - Harnesses and accounts
 
-    /// The profile list changed (Settings, a socket verb, another process):
-    /// re-read it and reconcile — new engines start, removed or disabled
-    /// ones stop, focus re-resolves.
+    /// The record list, the hidden set or presence changed (Settings, a
+    /// socket verb, another process): re-read them and reconcile — new
+    /// engines start, removed or disabled ones stop, focus re-resolves.
     public func reloadProfiles() {
         loadProfiles()
-        let unprobed = profiles.filter { $0.isEnrolled && lastActivity[$0.id] == nil && identities[$0.id] == nil }
+        let unprobed = enrolledProfiles.filter {
+            lastActivity[$0.key] == nil && identities[$0.key] == nil
+        }
         probeSynchronously(unprobed)
         recomputeDormancy(now: Date())
         reconcileEngines()
@@ -238,14 +258,34 @@ public final class MeteringHost {
         republish()
     }
 
+    /// Show or hide a harness. Hiding is DISPLAY ONLY (user-decided): the
+    /// engines keep running, the forecasts keep learning, the rates keep
+    /// listing — the bar loses its cells and focus passes it by. The last
+    /// shown harness can't be hidden; there would be nothing to look at.
+    @discardableResult
+    public func setHarnessShown(id: String, shown: Bool) -> Bool {
+        guard roster.row(id) != nil else { return false }
+        guard shown || roster.canHide(id) else { return false }
+        var hidden = HarnessRoster.hidden(from: defaults)
+        if shown { hidden.remove(id) } else { hidden.insert(id) }
+        HarnessRoster.setHidden(hidden, in: defaults)
+        reloadProfiles()
+        return true
+    }
+
     /// An enrolled home answers its own offer — the row leaves the panel,
     /// whichever process enrolled it and whenever the ledger learns.
     private func dismissAnsweredOffers() {
-        let answered = enrolledProfiles.map { Notice.profileFoundID(profileID: $0.id) }
-        services.notices.mutate { ledger in
-            var changed = false
-            for id in answered { changed = ledger.dismiss(id: id) || changed }
-            return changed
+        for row in roster.rows {
+            let answered = row.profiles
+                .filter(\.isEnrolled)
+                .map { Notice.profileFoundID(profileID: $0.id) }
+            guard !answered.isEmpty else { continue }
+            serviceRegistry.services(for: row.provider).notices.mutate { ledger in
+                var changed = false
+                for id in answered { changed = ledger.dismiss(id: id) || changed }
+                return changed
+            }
         }
     }
 
@@ -261,110 +301,132 @@ public final class MeteringHost {
     }
 
     public func setProfileEnabled(id: String, enabled: Bool) {
+        guard let record = roster.profile(key: id) else { return }
         var stored = ProfileStore.load(from: defaults)
-        if let index = stored.firstIndex(where: { $0.id == id && $0.providerID == provider.id }) {
+        if let index = stored.firstIndex(where: {
+            $0.id == record.id && $0.providerID == record.providerID
+        }) {
             stored[index].enabled = enabled
-        } else if let record = profiles.first(where: { $0.id == id }) {
+        } else {
             var copy = record
             copy.enabled = enabled
             stored.append(copy)
-        } else {
-            return
         }
         ProfileStore.save(stored, to: defaults)
         reloadProfiles()
     }
 
+    private func probePresence(stored: [Profile]) {
+        present.formUnion(HarnessPresence.probe(
+            providers: providers, stored: stored, bundleID: configuration.bundleID,
+            roots: configuration.roots))
+    }
+
     private func loadProfiles() {
-        profiles = ProfileStore.resolved(ProfileStore.load(from: defaults), provider: provider, now: Date())
+        let stored = ProfileStore.load(from: defaults)
+        hidden = HarnessRoster.hidden(from: defaults)
+        roster = HarnessRoster.build(
+            providers: providers, present: present, stored: stored, hidden: hidden, now: Date())
+        for row in roster.rows { serviceRegistry.services(for: row.provider) }
+        profiles = roster.profiles
         pin = ProfileStore.pin(from: defaults)
     }
 
-    /// The provider retargeted at a profile's home; the default profile
-    /// keeps the host's own instance (and any injected client).
+    /// This account's harness, as the roster holds it.
+    func harnessProvider(_ providerID: String) -> any UsageProvider {
+        roster.row(providerID)?.provider
+            ?? providers.first { $0.id == providerID }
+            ?? providers[0]
+    }
+
+    /// The harness retargeted at an account's home; a standard home keeps
+    /// the host's own instance (and any injected client).
     private func provider(for profile: Profile) -> any UsageProvider {
-        if profile.isDefault { return provider }
-        return profile.home.map { provider.withHome($0) } ?? provider
+        let base = harnessProvider(profile.providerID)
+        if profile.isDefault { return base }
+        return profile.home.map { base.withHome($0) } ?? base
     }
 
     private func profileDirectory(_ profile: Profile) -> URL {
         StorageScope.supportDirectory(
-            bundleID: configuration.bundleID, providerID: provider.id, profileID: profile.id,
-            roots: configuration.roots)
+            bundleID: configuration.bundleID, providerID: profile.providerID,
+            profileID: profile.id, roots: configuration.roots)
     }
 
     // MARK: - Engines
 
     private func reconcileEngines(staggered: Bool = false) {
-        let wanted = enrolledProfiles.filter { $0.enabled && !dormant.contains($0.id) }
-        for (id, engine) in engines where !wanted.contains(where: { $0.id == id }) {
+        let wanted = enrolledProfiles.filter { $0.enabled && !dormant.contains($0.key) }
+        let wantedKeys = Set(wanted.map(\.key))
+        for (key, engine) in engines where !wantedKeys.contains(key) {
             engine.shutdown()
-            engines[id] = nil
-            sections[id] = nil
-            log("stopped: \(id)")
+            engines[key] = nil
+            sections[key] = nil
+            log("stopped: \(key)")
         }
-        let missing = wanted.filter { engines[$0.id] == nil }
+        let missing = wanted.filter { engines[$0.key] == nil }
         for (index, profile) in missing.enumerated() {
             let delay = staggered && missing.count > 1
                 ? Double(index) * configuration.stagger / Double(missing.count) : 0
             startEngine(for: profile, launchDelay: delay)
         }
         for profile in enrolledProfiles {
-            let needsWatcher = profile.enabled && dormant.contains(profile.id)
-            if needsWatcher, revivalWatchers[profile.id] == nil {
+            let key = profile.key
+            let needsWatcher = profile.enabled && dormant.contains(key)
+            if needsWatcher, revivalWatchers[key] == nil {
                 let directories = provider(for: profile)
                     .makeLocalActivity(cacheDirectory: profileDirectory(profile))?
                     .watchDirectories ?? []
-                let id = profile.id
-                revivalWatchers[id] = AgentActivityWatcher(directories: directories) { [weak self] in
-                    self?.revive(id)
+                revivalWatchers[key] = AgentActivityWatcher(directories: directories) { [weak self] in
+                    self?.revive(key)
                 }
             } else if !needsWatcher {
-                revivalWatchers[profile.id] = nil
+                revivalWatchers[key] = nil
             }
         }
-        let known = Set(profiles.map(\.id))
-        for id in revivalWatchers.keys where !known.contains(id) { revivalWatchers[id] = nil }
+        let known = Set(profiles.map(\.key))
+        for key in revivalWatchers.keys where !known.contains(key) { revivalWatchers[key] = nil }
     }
 
     private func startEngine(for profile: Profile, launchDelay: TimeInterval) {
-        let id = profile.id
+        let key = profile.key
         let engine = UsageEngine(
-            provider: provider(for: profile), profileID: id, services: services,
+            provider: provider(for: profile), profileID: profile.id,
+            services: serviceRegistry.services(for: harnessProvider(profile.providerID)),
             service: serviceFactory?(profile), defaults: defaults,
             bundleID: configuration.bundleID, roots: configuration.roots,
-            host: configuration.kind, gateSeed: gateSeeds[id], systemAccent: systemAccent,
+            host: configuration.kind, gateSeed: gateSeeds[key], systemAccent: systemAccent,
             launchDelay: launchDelay
         ) { [weak self] state in
-            self?.sink(id, state)
+            self?.sink(key, state)
         }
-        engine.onAgentActivity = { [weak self] at in self?.noteActivity(id, at: at) }
-        engines[id] = engine
-        log("engine: \(id)" + (launchDelay > 0 ? " (first poll in \(Int(launchDelay))s)" : ""))
+        engine.onAgentActivity = { [weak self] at in self?.noteActivity(key, at: at) }
+        engines[key] = engine
+        log("engine: \(key)" + (launchDelay > 0 ? " (first poll in \(Int(launchDelay))s)" : ""))
     }
 
-    private func sink(_ id: String, _ state: LiveState) {
-        guard !isShutDown, engines[id] != nil else { return }
-        sections[id] = state
+    private func sink(_ key: String, _ state: LiveState) {
+        guard !isShutDown, engines[key] != nil else { return }
+        sections[key] = state
         republish()
     }
 
     /// An engine's FSEvents push: the newest write is focus's tie-break
     /// (the window count that decides it refreshes on the next reprobe).
-    private func noteActivity(_ id: String, at: Date) {
-        if let known = lastActivity[id], known > at { return }
-        lastActivity[id] = at
+    private func noteActivity(_ key: String, at: Date) {
+        if let known = lastActivity[key], known > at { return }
+        lastActivity[key] = at
         if recomputeFocus() { republish() }
     }
 
-    /// A dormant profile's first write in a month: its engine comes back
+    /// A dormant account's first write in a month: its engine comes back
     /// at once, no stagger.
-    private func revive(_ id: String) {
-        guard !isShutDown, dormant.contains(id) else { return }
-        lastActivity[id] = Date()
-        dormant.remove(id)
-        revivalWatchers[id] = nil
-        log("revived: \(id)")
+    private func revive(_ key: String) {
+        guard !isShutDown, dormant.contains(key) else { return }
+        lastActivity[key] = Date()
+        dormant.remove(key)
+        revivalWatchers[key] = nil
+        log("revived: \(key)")
         reconcileEngines()
         _ = recomputeFocus()
         republish()
@@ -374,30 +436,54 @@ public final class MeteringHost {
 
     @discardableResult
     private func recomputeFocus(overridingHold: Bool = false) -> Bool {
-        let candidates = enrolledProfiles.map { profile in
-            FocusCandidate(
-                id: profile.id, order: profile.order,
-                recentActivity: recentActivity[profile.id] ?? 0,
-                lastActivity: lastActivity[profile.id],
-                eligible: profile.enabled && !dormant.contains(profile.id),
-                shown: profile.showInMenuBar)
+        let candidates = roster.rows.map { row -> HarnessFocusCandidate in
+            let accounts = row.profiles.filter(\.isEnrolled).map { profile in
+                FocusCandidate(
+                    id: profile.key, order: profile.order,
+                    recentActivity: recentActivity[profile.key] ?? 0,
+                    lastActivity: lastActivity[profile.key],
+                    eligible: profile.enabled && !dormant.contains(profile.key),
+                    shown: profile.showInMenuBar)
+            }
+            let days = accounts.filter(\.eligible).reduce(into: Set<Date>()) { union, account in
+                union.formUnion(activeDays[account.id] ?? [])
+            }
+            return HarnessFocusCandidate(
+                id: row.id, shown: row.shown, activeDays: days.count,
+                lastActivity: accounts.compactMap(\.lastActivity).max(), accounts: accounts)
         }
-        let next = FocusRule.focused(candidates, pin: pin)
+        let next = HarnessFocusRule.focused(candidates, pin: pin, current: focusedProfileID)
         guard next != focusedProfileID, !focusHeld || overridingHold else { return false }
         focusedProfileID = next
-        let counts = candidates.map { "\($0.id) \($0.recentActivity)" }.joined(separator: ", ")
-        log("focus → \(next ?? "none") (files in \(Int(ProfileActivity.window / 86400))d: \(counts))")
+        let window = Int(ProfileActivity.window / 86400)
+        let files = candidates.flatMap(\.accounts)
+            .map { "\($0.id) \($0.recentActivity)" }.joined(separator: ", ")
+        let days = candidates.count > 1
+            ? "; days in \(window)d: " + candidates.map { "\($0.id) \($0.activeDays)" }
+                .joined(separator: ", ")
+            : ""
+        log("focus → \(next ?? "none") (files in \(window)d: \(files)\(days))")
         return true
     }
 
+    /// A synthesized default record's enrolment stamp is "now" every time it
+    /// is resolved, so it must not feed the dormancy reference — otherwise a
+    /// harness nobody has touched in months would look freshly enrolled and
+    /// hold a cell forever ("I've not been using Codex for months; there's
+    /// no point showing it"). A STORED record's stamp is a fact and counts.
     private func recomputeDormancy(now: Date) {
         var fresh: Set<String> = []
-        for profile in enrolledProfiles
-        where Dormancy.isDormant(lastActivity: lastActivity[profile.id], addedAt: profile.addedAt, now: now) {
-            fresh.insert(profile.id)
+        for profile in enrolledProfiles {
+            let synthesized = profile.isDefault
+                && roster.row(profile.providerID)?.synthesizedDefault == true
+            guard Dormancy.isDormant(
+                lastActivity: lastActivity[profile.key],
+                addedAt: synthesized ? nil : profile.addedAt, now: now)
+            else { continue }
+            fresh.insert(profile.key)
         }
-        for id in fresh.subtracting(dormant) { log("dormant: \(id)") }
-        for id in dormant.subtracting(fresh) { log("awake: \(id)") }
+        for key in fresh.subtracting(dormant) { log("dormant: \(key)") }
+        for key in dormant.subtracting(fresh) { log("awake: \(key)") }
         dormant = fresh
     }
 
@@ -406,16 +492,17 @@ public final class MeteringHost {
         for profile in targets {
             apply(ProfileActivity.probe(
                 provider: provider(for: profile), cacheDirectory: profileDirectory(profile), now: now),
-                to: profile.id)
+                to: profile.key)
         }
     }
 
-    private func apply(_ probe: ProfileProbe, to id: String) {
-        if let seen = probe.lastActivityAt, lastActivity[id].map({ seen > $0 }) ?? true {
-            lastActivity[id] = seen
+    private func apply(_ probe: ProfileProbe, to key: String) {
+        if let seen = probe.lastActivityAt, lastActivity[key].map({ seen > $0 }) ?? true {
+            lastActivity[key] = seen
         }
-        recentActivity[id] = probe.recentFiles
-        identities[id] = probe.identity
+        recentActivity[key] = probe.recentFiles
+        activeDays[key] = probe.activeDays
+        identities[key] = probe.identity
     }
 
     private func scheduleReprobe() {
@@ -432,23 +519,39 @@ public final class MeteringHost {
         reprobeTimer = timer
     }
 
-    /// Off-main: the identity records and session mtimes of every enrolled
-    /// profile. Then dormancy transitions, engine reconciliation, focus,
-    /// discovery, and a republish so the digest's strip reads fresh.
+    /// Off-main: which harnesses are on disk, and the identity records and
+    /// session mtimes of every metered account. Then dormancy transitions,
+    /// engine reconciliation, focus, discovery, and a republish so the
+    /// digest's strip reads fresh. A harness installed since the last pass
+    /// joins here — within one reprobe, with no restart.
     public func reprobe() {
         guard isStarted, !isShutDown, !isReprobing else { return }
         isReprobing = true
-        let targets = enrolledProfiles.map { ($0.id, provider(for: $0), profileDirectory($0)) }
+        let targets = enrolledProfiles.map { ($0.key, provider(for: $0), profileDirectory($0)) }
+        let providers = providers
+        let stored = ProfileStore.load(from: defaults)
+        let configuration = configuration
         Task.detached(priority: .utility) { [weak self] in
             let now = Date()
-            let probes = targets.map { id, provider, directory in
-                (id, ProfileActivity.probe(provider: provider, cacheDirectory: directory, now: now))
+            let seen = HarnessPresence.probe(
+                providers: providers, stored: stored, bundleID: configuration.bundleID,
+                roots: configuration.roots)
+            let probes = targets.map { key, provider, directory in
+                (key, ProfileActivity.probe(provider: provider, cacheDirectory: directory, now: now))
             }
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.isReprobing = false
                 guard !self.isShutDown else { return }
-                for (id, probe) in probes { self.apply(probe, to: id) }
+                for (key, probe) in probes { self.apply(probe, to: key) }
+                if !seen.isSubset(of: self.present) {
+                    self.present.formUnion(seen)
+                    self.loadProfiles()
+                    self.probeSynchronously(self.enrolledProfiles.filter {
+                        self.lastActivity[$0.key] == nil && self.identities[$0.key] == nil
+                    })
+                    self.log("harnesses: \(self.roster.rows.map(\.id).joined(separator: ", "))")
+                }
                 self.recomputeDormancy(now: Date())
                 self.reconcileEngines()
                 _ = self.recomputeFocus()
@@ -461,23 +564,24 @@ public final class MeteringHost {
     // MARK: - Discovery (D2)
 
     private func discoverHomes() {
-        guard provider.supportsMultipleHomes else { return }
-        let provider = provider
-        let known = profiles
         let configuration = configuration
-        Task.detached(priority: .utility) { [weak self] in
-            let found = ProfileDiscovery.discover(
-                provider: provider, known: known, bundleID: configuration.bundleID,
-                roots: configuration.roots, now: Date(), userHome: configuration.userHome)
-            await MainActor.run { [weak self] in
-                guard let self, !self.isShutDown else { return }
-                self.discovered = found
-                let offers = ProfileDiscovery.offers(found, providerID: provider.id, now: Date())
-                guard !offers.isEmpty else { return }
-                self.services.notices.mutate { ledger in
-                    var changed = false
-                    for offer in offers { changed = ledger.record(offer) || changed }
-                    return changed
+        for row in roster.rows where row.provider.supportsMultipleHomes {
+            let provider = row.provider
+            let known = row.profiles
+            Task.detached(priority: .utility) { [weak self] in
+                let found = ProfileDiscovery.discover(
+                    provider: provider, known: known, bundleID: configuration.bundleID,
+                    roots: configuration.roots, now: Date(), userHome: configuration.userHome)
+                await MainActor.run { [weak self] in
+                    guard let self, !self.isShutDown else { return }
+                    self.discoveredByHarness[provider.id] = found
+                    let offers = ProfileDiscovery.offers(found, providerID: provider.id, now: Date())
+                    guard !offers.isEmpty else { return }
+                    self.serviceRegistry.services(for: provider).notices.mutate { ledger in
+                        var changed = false
+                        for offer in offers { changed = ledger.record(offer) || changed }
+                        return changed
+                    }
                 }
             }
         }
@@ -485,12 +589,12 @@ public final class MeteringHost {
 
     /// A dismissed offer is remembered as an ignored record: silent until
     /// the home's sign-in changes.
-    private func ignore(_ home: DiscoveredHome) {
+    func ignore(_ home: DiscoveredHome, providerID: String) {
         var stored = ProfileStore.load(from: defaults)
-        guard !stored.contains(where: { $0.id == home.profileID && $0.providerID == provider.id })
+        guard !stored.contains(where: { $0.id == home.profileID && $0.providerID == providerID })
         else { return }
         stored.append(Profile(
-            id: home.profileID, providerID: provider.id, home: home.home, enabled: false,
+            id: home.profileID, providerID: providerID, home: home.home, enabled: false,
             showInMenuBar: false, order: (stored.map(\.order).max() ?? 0) + 1, addedAt: Date(),
             ignoredIdentityKey: home.identity?.key ?? ""))
         ProfileStore.save(stored, to: defaults)
@@ -500,26 +604,39 @@ public final class MeteringHost {
 
     // MARK: - Digest
 
-    private func republish(now: Date = Date()) {
+    func republish(now: Date = Date()) {
         guard isStarted, !isShutDown else { return }
         let sectionList = enrolledProfiles.map { profile -> ProfileSection in
-            let id = profile.id
-            let label = ProfileFacts.label(profile: profile, identity: identities[id])
+            let key = profile.key
+            let label = ProfileFacts.label(
+                profile: profile, identity: identities[key],
+                fallback: harnessProvider(profile.providerID).agentName)
             return ProfileSection(
                 profile: profile, label: label,
                 monogram: ProfileFacts.monogram(profile: profile, label: label),
-                dormant: dormant.contains(id), lastActivityAt: lastActivity[id],
+                dormant: dormant.contains(key), lastActivityAt: lastActivity[key],
                 homeDisplayPath: profile.displayHome(relativeTo: configuration.userHome),
-                state: engines[id] != nil ? sections[id] : nil)
+                state: engines[key] != nil ? sections[key] : nil)
+        }
+        let harnessList = roster.rows.map { row -> HarnessSection in
+            let services = serviceRegistry.services(for: row.provider)
+            let keys = row.profiles.filter(\.isEnrolled).map(\.key)
+            let days = keys.reduce(into: Set<Date>()) { union, key in
+                union.formUnion(activeDays[key] ?? [])
+            }
+            return HarnessSection(
+                provider: row.provider, present: row.present, shown: row.shown,
+                recentFiles: keys.compactMap { recentActivity[$0] }.reduce(0, +),
+                activeDays: days.count,
+                serviceStatus: services.serviceStatus, notices: services.notices.pending,
+                outages: services.outageSpans(now: now))
         }
         let composed = MeteringDigest.compose(
-            sections: sectionList, focused: focusedProfileID, provider: provider,
-            host: configuration.kind.rawValue,
+            harnesses: harnessList, sections: sectionList, focused: focusedProfileID,
+            pinned: pin, host: configuration.kind.rawValue,
             pid: Int(ProcessInfo.processInfo.processIdentifier),
             appVersion: AppIdentity.version, systemAccent: systemAccent,
-            activeInterval: activeInterval,
-            serviceStatus: services.serviceStatus, appUpdate: appUpdate,
-            notices: services.notices.pending, outages: services.outageSpans(now: now),
+            activeInterval: activeInterval, appUpdate: appUpdate,
             nextReprobeAt: nextReprobeAt, now: now)
         digest = composed
         notices = composed.notices
@@ -527,70 +644,8 @@ public final class MeteringHost {
         publisher.publish(composed)
     }
 
-    // MARK: - Faces
-
-    public func refresh(_ reason: UsageEngine.RefreshReason, profile: String? = nil) {
-        (profile.flatMap { engines[$0] } ?? focusedEngine)?.refresh(reason)
-    }
-
-    public func thresholdsChanged() {
-        for engine in engines.values { engine.thresholdsChanged() }
-        if engines.isEmpty { republish() }
-    }
-
-    public func setActiveInterval(_ interval: TimeInterval) {
-        for engine in engines.values { engine.setActiveInterval(interval) }
-        if engines.isEmpty {
-            let clamped = min(max(TriggerGate.floor, interval), AdaptiveCadence.maxActiveInterval)
-            defaults.set(clamped, forKey: UsageEngine.intervalKey)
-            republish()
-        }
-    }
-
-    public func scanActivity(force: Bool = false) {
-        for engine in engines.values { engine.scanActivity(force: force) }
-    }
-
-    public func sessionDetail(id: String, profile: String? = nil) async -> SessionDetail? {
-        guard let engine = profile.flatMap({ engines[$0] }) ?? focusedEngine else { return nil }
-        return await engine.sessionDetail(id: id)
-    }
-
-    public func refreshPricingNow() { services.refreshPricingNow() }
-    public func refreshServiceStatus() { services.refreshServiceStatus() }
-    public func checkForUpdates() { updateChecker?.checkNow() }
-
-    /// A face rendered these pending notices. Seen is not dismissed.
-    public func markNoticesSeen(_ ids: [String]) {
-        guard !ids.isEmpty else { return }
-        services.notices.mutate { $0.markSeen(ids: ids) }
-    }
-
-    /// The person's ×. Refused for an ongoing notice. Dismissing a
-    /// discovered home's offer also ignores that home (D2).
-    @discardableResult
-    public func dismissNotice(id: String) -> Bool {
-        if let home = discovered.first(where: { Notice.profileFoundID(profileID: $0.profileID) == id }) {
-            ignore(home)
-        }
-        return services.notices.mutate { $0.dismiss(id: id) }
-    }
-
-    public func dismissAllNotices() {
-        for home in discovered
-        where services.notices.notices.contains(where: {
-            $0.id == Notice.profileFoundID(profileID: home.profileID) && $0.isPending
-        }) {
-            ignore(home)
-        }
-        services.notices.mutate { $0.dismissAll() }
-    }
-
-    public var statusSummary: String {
-        "\(configuration.kind.rawValue) pid \(ProcessInfo.processInfo.processIdentifier), "
-            + "provider \(provider.id), v\(AppIdentity.version), "
-            + "profiles \(enrolledProfiles.count) (focus \(focusedProfileID ?? "none"), "
-            + "dormant \(dormant.count))"
+    func log(_ message: String) {
+        onLog?(message)
     }
 
     // MARK: - Control socket
@@ -607,79 +662,5 @@ public final class MeteringHost {
         } catch {
             log("control socket failed to bind: \(error)")
         }
-    }
-
-    /// Every verb both hosts answer alike; the two process-lifecycle verbs
-    /// go to the owner's closures and are refused when none is installed.
-    public func handle(_ command: ControlCommand) async -> ControlReply {
-        guard !isShutDown else { return ControlReply(ok: false, message: "host shut down") }
-        switch command {
-        case .status:
-            return ControlReply(ok: true, message: statusSummary)
-        case .refresh:
-            guard let engine = focusedEngine else {
-                return ControlReply(ok: false, message: "no engine for the focused profile")
-            }
-            engine.refresh(.manual)
-            return ControlReply(ok: true, message: "refresh requested (gate may coalesce)")
-        case .refreshProfile(let id):
-            guard let engine = engines[id] else {
-                return ControlReply(ok: false, message: "no engine for profile \(id)")
-            }
-            engine.refresh(.manual)
-            return ControlReply(ok: true, message: "refresh requested for \(id) (gate may coalesce)")
-        case .setInterval(let seconds):
-            setActiveInterval(seconds)
-            return ControlReply(ok: true, message: "interval \(Int(activeInterval))s")
-        case .setProvider(let id):
-            return onSetProvider?(id)
-                ?? ControlReply(ok: false, message: "not while the app hosts — use the app's Metering menu")
-        case .settingsChanged:
-            thresholdsChanged()
-            return ControlReply(ok: true)
-        case .refreshPricing:
-            refreshPricingNow()
-            return ControlReply(ok: true)
-        case .scanNow:
-            scanActivity(force: true)
-            return ControlReply(ok: true)
-        case .refreshStatus:
-            refreshServiceStatus()
-            return ControlReply(ok: true)
-        case .checkUpdates:
-            checkForUpdates()
-            return ControlReply(ok: true)
-        case .markNoticesSeen(let ids):
-            markNoticesSeen(ids)
-            return ControlReply(ok: true)
-        case .dismissNotice(let id):
-            let ok = dismissNotice(id: id)
-            return ControlReply(ok: ok, message: ok ? nil : "not dismissable")
-        case .dismissAllNotices:
-            dismissAllNotices()
-            return ControlReply(ok: true)
-        case .focusProfile(let id):
-            if let id, !profiles.contains(where: { $0.id == id && $0.isEnrolled }) {
-                return ControlReply(ok: false, message: "no such profile \(id)")
-            }
-            setPin(id)
-            return ControlReply(ok: true, message: "focus \(id ?? "follows activity")")
-        case .setProfileEnabled(let id, let enabled):
-            guard profiles.contains(where: { $0.id == id && $0.isEnrolled }) else {
-                return ControlReply(ok: false, message: "no such profile \(id)")
-            }
-            setProfileEnabled(id: id, enabled: enabled)
-            return ControlReply(ok: true, message: "\(id) \(enabled ? "enabled" : "disabled")")
-        case .profilesChanged:
-            reloadProfiles()
-            return ControlReply(ok: true, message: "profiles \(enrolledProfiles.count)")
-        case .shutdown:
-            return onShutdown?()
-                ?? ControlReply(ok: false, message: "not while the app hosts — use the app's Metering menu")
-        }
-    }
-
-    private func log(_ message: String) {
-        onLog?(message)
     }
 }

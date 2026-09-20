@@ -33,7 +33,7 @@ enum MenuBarModelBuilder {
         for profile: Profile?, prefs: MenuBarPreferences.Values,
         draft: (id: String?, elements: [MenuBarElement])?, focused: Bool
     ) -> [MenuBarElement] {
-        let arranged = (draft != nil && (draft?.id == nil || draft?.id == profile?.id))
+        let arranged = (draft != nil && (draft?.id == nil || draft?.id == profile?.key))
             ? draft!.elements : prefs.elements(for: profile)
         return prefs.focusedElementsOnly && !focused ? MenuBarLayout.removingRunsOut(from: arranged) : arranged
     }
@@ -44,14 +44,15 @@ enum MenuBarModelBuilder {
     ) -> StatusItemRenderer.Model {
         let store = registry.focusedStore
         let cells = registry.menuBarCells
-        // One account (or a writer that meters one): today's model straight
-        // off the focused store — a one-account Mac keeps its exact
-        // pre-0.96 data path, not just its pixels — in that account's own
-        // form. Its letter would label nothing, so it has none.
-        guard cells.count > 1 else {
+        let harnesses = registry.harnesses.filter(\.shown)
+        // One account of one harness (or a writer that meters one): today's
+        // model straight off the focused store — a one-account Mac keeps its
+        // exact pre-0.96 data path, not just its pixels — in that account's
+        // own form. Its letter would label nothing, so it has none.
+        guard cells.count > 1 || harnesses.count > 1 else {
             return StatusItemRenderer.model(
                 for: store.state, predictions: store.predictions,
-                glyph: store.provider.menuBarGlyph,
+                glyph: store.provider.menuBarGlyph, accent: store.style.accent,
                 serviceStatus: store.serviceStatus, notices: store.notices,
                 form: prefs.form(for: registry.focusedProfile),
                 expandsFocus: prefs.expandsFocus,
@@ -60,25 +61,59 @@ enum MenuBarModelBuilder {
         }
         var styles: [String: StatusItemRenderer.CellStyle] = [:]
         for profile in registry.profiles {
-            styles[profile.id] = StatusItemRenderer.CellStyle(
+            styles[profile.key] = StatusItemRenderer.CellStyle(
                 form: prefs.form(for: profile), ownItem: profile.ownMenuBarItem,
                 elements: elements(
-                    for: profile, prefs: prefs, draft: draft, focused: profile.id == registry.focusedID))
+                    for: profile, prefs: prefs, draft: draft, focused: profile.key == registry.focusedID))
         }
         // The app's own order, applied here rather than waited for from the
-        // digest, so a reorder shows the instant it is made.
+        // digest, so a reorder shows the instant it is made. Accounts are
+        // ordered WITHIN their harness; harness order is the roster's.
         let ranks = Dictionary(
-            (order ?? registry.barProfiles.map(\.id)).enumerated().map { ($1, $0) },
+            (order ?? registry.barProfiles.map(\.key)).enumerated().map { ($1, $0) },
             uniquingKeysWith: { first, _ in first })
         let ordered = cells.enumerated().sorted { a, b in
             let ra = ranks[a.element.profile] ?? Int.max
             let rb = ranks[b.element.profile] ?? Int.max
             return ra != rb ? ra < rb : a.offset < b.offset
         }.map(\.element)
-        return StatusItemRenderer.model(
-            cells: ordered, focusedID: registry.focusedID, styles: styles,
-            glyph: store.provider.menuBarGlyph, expandsFocus: prefs.expandsFocus,
-            serviceStatus: store.serviceStatus, notices: store.notices, now: now)
+        // One block per SHOWN harness that has a cell, each carrying its own
+        // mark, accent and vendor-level alarms (0.101.0). A harness the
+        // person hid is metered but draws nothing, so it has no block.
+        let listed = harnesses.isEmpty
+            ? [HarnessState?.none] : harnesses.map { Optional($0) }
+        var groups: [StatusItemRenderer.Model.Group] = []
+        for harness in listed {
+            let id = harness?.id ?? store.provider.id
+            let mine = ordered.filter { $0.providerID == id }
+            guard !mine.isEmpty else { continue }
+            groups.append(StatusItemRenderer.Model.Group(
+                harnessID: id,
+                glyph: harness?.glyph ?? store.provider.menuBarGlyph,
+                accent: harness?.accent ?? store.style.accent,
+                incident: harness?.serviceStatus?.alarmingImpact
+                    ?? (harness == nil ? store.serviceStatus?.alarmingImpact : nil),
+                indicator: harness?.notices?.indicator
+                    ?? (harness == nil ? store.notices?.indicator ?? false : false),
+                cells: mine.map { cell in
+                    let style = styles[cell.profile] ?? StatusItemRenderer.CellStyle()
+                    return StatusItemRenderer.Cell(
+                        profileID: cell.profile, monogram: cell.monogram,
+                        segments: cell.segments.isEmpty
+                            ? nil : cell.segments.map(MenuBarSegment.init),
+                        stale: cell.stale, focused: cell.profile == registry.focusedID,
+                        form: style.form, ownItem: style.ownItem, elements: style.elements)
+                }))
+        }
+        guard !groups.isEmpty else {
+            return StatusItemRenderer.model(
+                for: store.state, predictions: store.predictions,
+                glyph: store.provider.menuBarGlyph, accent: store.style.accent,
+                serviceStatus: store.serviceStatus, notices: store.notices,
+                expandsFocus: prefs.expandsFocus, now: now)
+        }
+        return StatusItemRenderer.Model(
+            groups: groups, expandsFocus: prefs.expandsFocus, now: now)
     }
 
     /// The same bar with every account's session limit forecast to run out
@@ -106,8 +141,9 @@ enum MenuBarModelBuilder {
                 elements: cell.elements)
         }
         return StatusItemRenderer.Model(
-            glyph: model.glyph, incident: model.incident, indicator: model.indicator,
-            cells: cells, expandsFocus: model.expandsFocus, now: now, ghosts: model.ghosts)
+            glyph: model.glyph, accent: model.accent, incident: model.incident,
+            indicator: model.indicator, cells: cells, expandsFocus: model.expandsFocus,
+            now: now, ghosts: model.ghosts)
     }
 
     /// The palette's picture of the "Runs out" element on its own: the
@@ -126,7 +162,7 @@ enum MenuBarModelBuilder {
     /// the digest's cell when the writer published one, else the face's
     /// own reading. The letter shows only when the bar would show it.
     static func sampleCell(for profile: Profile?, registry: ProviderRegistry) -> StatusItemRenderer.Cell {
-        let id = profile?.id ?? Profile.defaultID
+        let id = profile?.key ?? Profile.defaultID
         let monogram = registry.barProfiles.count > 1
             ? profile.map { registry.monogram(for: $0) } ?? "" : ""
         if let cell = registry.menuBarCells.first(where: { $0.profile == id }) {

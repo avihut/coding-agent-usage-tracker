@@ -7,10 +7,10 @@ enum NoticeStyle {
     /// The row's rail. The vendor's own acts (a reset) wear the provider
     /// accent; a running incident wears its severity; an ended one goes
     /// grey — the severity is over, so the color is too.
-    static func tint(for card: NoticeCard) -> Color {
+    static func tint(for card: NoticeCard, style: HarnessStyle) -> Color {
         switch Notice.Kind(rawValue: card.kind) {
         case .reset:
-            return ProviderStyle.accentColor
+            return style.accentColor
         case .outage:
             guard card.ongoing, let severity = card.severity else { return .secondary }
             return ServiceStatusStyle.color(for: ServiceStatusCard.Indicator.parse(severity))
@@ -27,6 +27,11 @@ enum NoticeStyle {
 /// all" once two or more rows can go.
 struct NoticesSection: View {
     let card: NoticesCard
+    /// Whose notices these are — a vendor's own limit reset wears that
+    /// vendor's accent on its rail (0.101.0). With several harnesses metered
+    /// the list spans them all, so the style is resolved PER ROW.
+    var style: HarnessStyle = .bundled
+    var styleForNotice: ((NoticeCard) -> HarnessStyle)? = nil
     let onDismiss: (String) -> Void
     let onDismissAll: () -> Void
     /// Whether the provider has somewhere for this notice to lead — decides
@@ -54,7 +59,7 @@ struct NoticesSection: View {
             }
             ForEach(card.items) { item in
                 NoticeRow(
-                    card: item,
+                    card: item, style: styleForNotice?(item) ?? style,
                     onDismiss: item.dismissable ? { onDismiss(item.id) } : nil,
                     onTap: canOpen(item) ? { onOpen(item) } : nil)
                     // A dismissed row leaves visibly (user-directed): it
@@ -75,13 +80,14 @@ struct NoticesSection: View {
 /// row can be dismissed.
 struct NoticeRow: View {
     let card: NoticeCard
+    var style: HarnessStyle = .bundled
     let onDismiss: (() -> Void)?
     let onTap: (() -> Void)?
 
     @State private var hovering = false
 
     var body: some View {
-        let tint = NoticeStyle.tint(for: card)
+        let tint = NoticeStyle.tint(for: card, style: style)
         HStack(alignment: .top, spacing: 8) {
             RoundedRectangle(cornerRadius: 2)
                 .fill(tint)

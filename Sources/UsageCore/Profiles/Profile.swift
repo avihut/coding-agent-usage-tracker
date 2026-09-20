@@ -9,7 +9,7 @@ import Foundation
 /// pre-profile spelling. Further profiles are enrolled homes — a directory
 /// Claude Code was pointed at through `CLAUDE_CONFIG_DIR` — identified by
 /// `ProfileID.derive`, which doubles as Claude Code's Keychain suffix.
-public struct Profile: Codable, Sendable, Equatable, Identifiable {
+public struct Profile: Codable, Sendable, Equatable {
     public static let defaultID = StorageScope.defaultProfileID
 
     public let id: String
@@ -142,8 +142,13 @@ public struct Profile: Codable, Sendable, Equatable, Identifiable {
 /// monogram, the CLI's `accounts` table and the Settings card agree.
 public enum ProfileFacts {
     /// The nickname when set, else the signed-in email, else the home's
-    /// directory name without its leading dot, else the id.
-    public static func label(profile: Profile, identity: AccountIdentity?) -> String {
+    /// directory name without its leading dot, else `fallback` — the
+    /// harness's agent name, which is all a home-less provider has to go on
+    /// (its one account would otherwise read "default"). Nil falls back to
+    /// the id, as it did before harnesses were metered side by side.
+    public static func label(
+        profile: Profile, identity: AccountIdentity?, fallback: String? = nil
+    ) -> String {
         if let nickname = profile.nickname?.trimmingCharacters(in: .whitespacesAndNewlines),
            !nickname.isEmpty {
             return nickname
@@ -152,7 +157,7 @@ public enum ProfileFacts {
         if let name = profile.home?.lastPathComponent, !name.isEmpty {
             return name.hasPrefix(".") ? String(name.dropFirst()) : name
         }
-        return profile.id
+        return fallback ?? profile.id
     }
 
     /// The person's monogram when set; else, for a custom home, the first

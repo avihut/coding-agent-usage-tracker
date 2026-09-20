@@ -61,6 +61,17 @@ public struct CodexProvider: UsageProvider {
     }
 
     public var pricingSelector: PricingFeedSelector { .openAI }
+
+    /// Before 0.101.0 the `primary` slot was labelled "Session (Nh)"
+    /// whatever its length, so a week's samples sit under "Session (168h)".
+    /// They belong to the label that window wears now.
+    public func currentMeterLabel(forStored stored: String) -> String {
+        guard stored.hasPrefix("Session ("), stored.hasSuffix("h)"),
+              let hours = Int(stored.dropFirst("Session (".count).dropLast(2))
+        else { return stored }
+        let window = TimeInterval(hours * 3600)
+        return LimitWindowKind(window: window).label(window: window)
+    }
 }
 
 // MARK: - Rollout reading
@@ -217,23 +228,32 @@ enum CodexRollouts {
 
 // MARK: - Meters
 
-/// Codex payload → normalized meters. The one place its window vocabulary
-/// (primary = rolling session, secondary = weekly) becomes `Meter` data.
+/// Codex payload → normalized meters. Its two slots carry BARE WINDOWS, not
+/// named limits, so each is classified by its own length
+/// (`LimitWindowKind`): in 2026-09 the CLI began reporting one window of
+/// 10080 minutes in `primary` with `secondary` null, and the old
+/// "primary = session" reading called a week "Session (168h)".
 enum CodexMeterBuilder {
     static func snapshot(
         fromPayload body: Data, thresholds: Thresholds, now: Date = Date()
     ) throws -> Snapshot {
         let payload = try JSONDecoder().decode(CodexUsagePayload.self, from: body)
         var meters: [Meter] = []
-        if let primary = payload.primary {
+        for (slot, window) in [payload.primary, payload.secondary].enumerated() {
+            guard let window else { continue }
+            var shape = shape(of: window, slot: slot)
+            // Two long windows (a week beside a month) share a rank and
+            // would share an id; ids and labels both key stored state, so
+            // the later one says its length. "Weekly" and "Monthly" differ
+            // already — only two windows of one exact kind need the label.
+            let name = UsageFormatting.windowName(TimeInterval(window.windowMinutes * 60))
+            if meters.contains(where: { $0.id == shape.id }) { shape.id += "-" + name }
+            if meters.contains(where: { $0.label == shape.label }) {
+                shape.label = "Window (\(name)) · \(slot == 0 ? "primary" : "secondary")"
+            }
             meters.append(meter(
-                from: primary, id: "0-session", label: sessionLabel(minutes: primary.windowMinutes),
-                rank: 0, thresholds: thresholds, now: now))
-        }
-        if let secondary = payload.secondary {
-            meters.append(meter(
-                from: secondary, id: "1-weekly", label: weeklyLabel(minutes: secondary.windowMinutes),
-                rank: 1, thresholds: thresholds, now: now))
+                from: window, id: shape.id, label: shape.label, rank: shape.rank,
+                thresholds: thresholds, now: now))
         }
         let plan = payload.planType.map {
             PlanInfo(subscriptionType: $0, rateLimitTier: nil)
@@ -265,12 +285,20 @@ enum CodexMeterBuilder {
             scopedModelName: nil)
     }
 
-    private static func sessionLabel(minutes: Int) -> String {
-        minutes > 0 ? "Session (\(minutes / 60)h)" : "Session"
-    }
-
-    private static func weeklyLabel(minutes: Int) -> String {
-        minutes == 10080 || minutes == 0 ? "Weekly" : "Window (\(minutes / 1440)d)"
+    /// What a window IS, from its length. A window that states no length
+    /// (older CLIs) keeps the slot's historical reading — the only time the
+    /// slot decides anything. The ids stay the two the history files already
+    /// know, chosen by kind: a weekly window is "1-weekly" whichever slot
+    /// carried it.
+    private static func shape(
+        of window: CodexUsagePayload.Window, slot: Int
+    ) -> (id: String, label: String, rank: Int) {
+        guard window.windowMinutes > 0 else {
+            return slot == 0 ? ("0-session", "Session", 0) : ("1-weekly", "Weekly", 1)
+        }
+        let seconds = TimeInterval(window.windowMinutes * 60)
+        let kind = LimitWindowKind(window: seconds)
+        return (kind.rank == 0 ? "0-session" : "1-weekly", kind.label(window: seconds), kind.rank)
     }
 }
 
@@ -300,6 +328,19 @@ extension ModelCatalog {
             case "other": 3
             default: 2
             }
+        },
+        // OpenAI ids carry no single prefix: the gpt line, the o-series, and
+        // anything codex-tuned. `unknown` too, so a Codex-only Mac's union
+        // still reads it as "Other".
+        claims: { id in
+            let lower = id.lowercased()
+            if lower == "unknown" || lower.contains("codex") || lower.hasPrefix("gpt") {
+                return true
+            }
+            return ["o1", "o3", "o4"].contains { lower == $0 || lower.hasPrefix("\($0)-") }
+        },
+        claimsFamily: { family in
+            ["codex", "gpt", "other"].contains(family.lowercased())
         }
     )
 }

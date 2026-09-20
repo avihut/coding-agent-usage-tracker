@@ -286,7 +286,9 @@ Non-negotiable; flag rather than work around:
   No analytics, no crash reporting, no telemetry.
 - Adding a provider = a new `UsageProvider` implementation plus an amendment
   here naming its hosts and any local trees it reads. The settings privacy
-  card renders exactly the active provider's hosts plus the pricing feed's.
+  card renders exactly every METERED provider's hosts plus the pricing
+  feed's (each metered provider's, since v0.101.0 — before that, the one
+  active provider's).
 - Codex provider (amendment 2026-08-15): reads `~/.codex/sessions` strictly
   read-only — the rollout JSONLs where Codex itself records per-turn token
   usage and the server's rate-limit snapshots. `~/.codex/auth.json` is never
@@ -456,6 +458,40 @@ Non-negotiable; flag rather than work around:
   focused one projected onto its top level, and the same single-writer rule
   below governs all of them. Home paths appear in the digest and the UI
   tilde-abbreviated only; the full-path ban is untouched.
+- Several harnesses at once (amendment 2026-09-20, v0.101.0, user-directed —
+  "how I actually want multi harness support to look is like multi-account
+  support looks at the moment […] they are presented alongside each other
+  with an option to focus on a different one each time, and they are polled
+  and tracked simultaneously"): the app may meter EVERY harness it finds on
+  this Mac at the same time, rather than choosing one. There is no active
+  provider; a harness the person is not interested in is HIDDEN, which stops
+  it being displayed and nothing else.
+
+  This adds ZERO network destinations. Each harness reads exactly what its
+  own amendment above already grants it — Claude its OAuth endpoint and its
+  homes, Codex and Gemini their local trees and no credentials at all — and
+  metering them together grants nothing new to any of them. Presence is
+  decided by `stat` on the watch directories a provider already declares:
+  the app constructs a provider's local source to ask where it would read,
+  and never runs it for a harness it does not meter.
+
+  Fewer requests, not more: the LiteLLM feed is ONE mixed-vendor document
+  that every harness slices differently, so its raw bytes are cached once at
+  the bundle root and a day's refresh is one GET however many harnesses are
+  metered (`PricingFeedCache`) — still the same single destination, still no
+  credential and no account data attached. The release feed is polled by the
+  host, once, as before.
+
+  The privacy card lists EVERY metered harness's hosts and paths, one block
+  per harness, not the focused one's alone — what the app reads is now the
+  union, and the card that names it has to be too. A harness's own status
+  feed stays its own (`UsageProvider.statusFeed`), so a local-only harness
+  gains no host by sitting beside a networked one.
+
+  Storage is unchanged: `<bundle>/<provider>/<profile>/` as before. Accounts
+  are named on the wire by a flat key (the bare profile id for the bundled
+  provider, provider-qualified otherwise) because several harnesses' standard
+  accounts are all called `default`; that key never names a directory.
 - The token is never logged, persisted, or included in an error surface.
 - No sandbox entitlement, and no request for entitlements we don't need.
 - Don't install or register anything (login items, launch agents) without asking me

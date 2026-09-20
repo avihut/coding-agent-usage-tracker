@@ -49,11 +49,26 @@ public enum DeepQuery {
         return ProfileStore.resolved(ProfileStore.load(from: appDefaults()), provider: provider, now: now)
     }
 
+    /// Every harness's accounts, in the build's standard order — what the
+    /// selector matches a key, a name or a path against now that several
+    /// harnesses are metered at once.
+    public static func storedProfiles(now: Date) -> [Profile] {
+        let stored = ProfileStore.load(from: appDefaults())
+        return HarnessResolution.standardProviders().flatMap {
+            ProfileStore.resolved(stored, provider: $0, now: now)
+        }
+    }
+
     /// The provider's home facts for the selector — its variable and its
     /// standard home. `.none` for an unknown provider.
     public static func storedHomes(providerID: String) -> ProfileSelector.Homes {
         HarnessResolution.standardProviders().first { $0.id == providerID }
             .map { ProfileSelector.Homes(provider: $0) } ?? .none
+    }
+
+    /// Every harness's home facts, standard order.
+    public static func storedHomes() -> [ProfileSelector.Homes] {
+        HarnessResolution.standardProviders().map { ProfileSelector.Homes(provider: $0) }
     }
 
     /// One profile's scoped support directory — where its history.json and
@@ -102,44 +117,65 @@ public enum DeepQuery {
         environment: [String: String], now: Date,
         profiles: [Profile]? = nil, homes: ProfileSelector.Homes? = nil
     ) -> QueryOutput {
+        run(
+            noun: noun, arguments: arguments, digest: digest, environment: environment, now: now,
+            profiles: profiles, homes: homes.map { [$0] })
+    }
+
+    public static func run(
+        noun: String, arguments: [String], digest: LiveState?,
+        environment: [String: String], now: Date,
+        profiles: [Profile]?, homes: [ProfileSelector.Homes]?
+    ) -> QueryOutput {
         let parsed = DigestQuery.parseArgs(arguments)
         if let error = parsed.error { return DigestQuery.badQuery(error) }
         if let rejection = DigestQuery.rejectInapplicableFlags(noun: noun, parsed: parsed) {
             return rejection
         }
 
-        let providerID = resolveProviderID(flag: parsed.flags["provider"])
-        guard providerID == "claude" else {
+        // WHICH ACCOUNT FIRST, then whether this verb can read its harness's
+        // files: the account decides the harness now that several are metered
+        // (`--account codex`, or a Codex account holding focus), and reading
+        // one vendor's ledger under another's name would be a wrong answer,
+        // not an empty one. `prices`/`price` select nothing and answer for
+        // the harness named by `--provider`, else the focused one.
+        let account: DigestQuery.Account
+        switch DigestQuery.resolveAccount(
+            noun: noun, parsed: parsed, environment: environment, digest: digest,
+            profiles: profiles ?? storedProfiles(now: now),
+            homes: homes ?? storedHomes())
+        {
+        case .failure(let output): return output
+        case .success(let resolved): account = resolved
+        }
+        let providerID = parsed.flags["provider"] ?? account.providerID
+        guard providerID == HarnessResolution.bundledProviderID else {
             // Mirrors the guard `UsageCLI.runSessions`/`.runSyncDigest`
             // already use for a provider this surface isn't wired for —
-            // exit 11 is reserved for exactly this across the CLI.
+            // exit 11 is reserved for exactly this across the CLI. It comes
+            // BEFORE the projection: which harness a verb can read is not a
+            // question about whether that account's section landed yet.
             return QueryOutput(
                 stdout: "",
                 note: "deep query verbs are not wired for provider '\(providerID)' in the CLI yet",
                 exitCode: exitWrongProvider)
         }
-
-        // `history`/`windows` read one profile's files; the meter selectors
-        // resolve against that profile's section. `prices`/`price` are the
-        // vendor's and select nothing (`accountNouns`).
         let view: DigestQuery.ProfileView
-        switch DigestQuery.selectProfile(
-            noun: noun, parsed: parsed, environment: environment, digest: digest,
-            profiles: profiles ?? storedProfiles(providerID: providerID, now: now),
-            homes: homes ?? storedHomes(providerID: providerID))
-        {
+        switch DigestQuery.projectAccount(account, digest: digest) {
         case .failure(let output): return output
-        case .success(let selected): view = selected
+        case .success(let projected): view = projected
         }
         let digest = view.digest ?? digest
 
         switch noun {
         case "windows":
             return windowsVerb(
-                parsed: parsed, digest: digest, providerID: providerID, profileID: view.id, now: now)
+                parsed: parsed, digest: digest, providerID: providerID, profileID: view.accountID,
+                now: now)
         case "history":
             return historyVerb(
-                parsed: parsed, digest: digest, providerID: providerID, profileID: view.id, now: now)
+                parsed: parsed, digest: digest, providerID: providerID, profileID: view.accountID,
+                now: now)
         case "prices", "price":
             // Unlike windows/history, these two nouns share ONE handler —
             // `noun` travels in so it can enforce the plural/singular arity

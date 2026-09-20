@@ -95,8 +95,7 @@ struct UsagePanelView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     AccountStrip(
                         registry: registry, form: accountForm,
-                        onToggleForm: { accountFormRaw = accountForm == .chips
-                            ? PanelAccountForm.stripRows.rawValue : PanelAccountForm.chips.rawValue },
+                        onSetForm: { accountFormRaw = $0.rawValue },
                         onFocus: { registry.focus($0) },
                         onAuto: { registry.pin(nil) })
                         // Two fingers across the strip step through the
@@ -124,6 +123,7 @@ struct UsagePanelView: View {
                         activity: store.activity, pricing: store.pricing,
                         weeklyProfile: store.weeklyProfile,
                         agentName: store.provider.agentName,
+                        style: store.style,
                         focus: $activityFocus,
                         samples: store.samples,
                         timeline: store.tokenTimeline,
@@ -178,6 +178,9 @@ struct UsagePanelView: View {
                 // remember their own span and frame (identical to the old
                 // key for the default profile, so nothing resets).
                 providerID: owner.profile.scopeKey,
+                // Explicit, not an environment: this popover is hoisted onto
+                // the panel's wrapper, outside the section whose card it is.
+                style: owner.style,
                 accountTitle: accountTitle(for: owner),
                 highlightReset: litReset?.meter == selection.key ? litReset?.at : nil,
                 outages: owner.outages,
@@ -316,14 +319,32 @@ struct UsagePanelView: View {
     /// lifecycle (same rail, same message, a running clock, no ×), so the
     /// banner below yields to it rather than saying the same thing twice.
     @ViewBuilder private var noticesSection: some View {
-        if let card = store.notices, !card.items.isEmpty {
+        // Every SHOWN harness's pending notices, not just the focused one's:
+        // what the list shows is exactly what "Dismiss all" dismisses, and
+        // each row's rail wears its own vendor's accent.
+        if let card = registry.pendingNotices, !card.items.isEmpty {
             NoticesSection(
-                card: card,
+                card: card, style: store.style,
+                styleForNotice: { notice in
+                    registry.stores[registry.harnessOfNotice(notice.id)].map(\.style)
+                        ?? registry.providers
+                            .first { $0.id == registry.harnessOfNotice(notice.id) }
+                            .map(HarnessStyle.init) ?? store.style
+                },
                 onDismiss: { id in withAnimation { store.dismissNotice(id: id) } },
                 onDismissAll: { withAnimation { store.dismissAllNotices() } },
-                canOpen: { store.provider.noticeDestination(for: $0) != nil },
+                canOpen: { notice in
+                    self.provider(ofNotice: notice).noticeDestination(for: notice) != nil
+                },
                 onOpen: openNotice)
         }
+    }
+
+    /// Which vendor a listed notice belongs to — its click-through is that
+    /// provider's call, never the focused one's.
+    private func provider(ofNotice notice: NoticeCard) -> any UsageProvider {
+        let id = registry.harnessOfNotice(notice.id)
+        return registry.providers.first { $0.id == id } ?? store.provider
     }
 
     /// A click on a notice goes where the provider says: an official record
@@ -333,7 +354,8 @@ struct UsagePanelView: View {
     /// back to the weekly meter; an event the vendor emptied every meter
     /// for is the weekly story either way.
     private func openNotice(_ notice: NoticeCard) {
-        guard let destination = store.provider.noticeDestination(for: notice) else { return }
+        guard let destination = provider(ofNotice: notice).noticeDestination(for: notice)
+        else { return }
         switch destination {
         case .web(let url):
             NSWorkspace.shared.open(url)
@@ -525,10 +547,10 @@ struct UsagePanelView: View {
 
     @ViewBuilder private var content: some View {
         if isStacked {
-            ForEach(registry.shownProfiles) { profile in
-                if let owner = registry.store(for: profile.id) {
-                    accountHeader(profile, focused: profile.id == registry.focusedID)
-                    meterList(owner, profileID: profile.id)
+            ForEach(registry.shownProfiles, id: \.key) { profile in
+                if let owner = registry.store(for: profile.key) {
+                    accountHeader(profile, focused: profile.key == registry.focusedID)
+                    meterList(owner, profileID: profile.key)
                 }
             }
         } else {
@@ -539,17 +561,21 @@ struct UsagePanelView: View {
     /// The stacked form's per-account heading: whose meters follow.
     private func accountHeader(_ profile: Profile, focused: Bool) -> some View {
         HStack(spacing: 6) {
-            MonogramTile(monogram: registry.monogram(for: profile), focused: focused, size: 15)
-            Text(registry.label(for: profile))
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(focused ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
-                .lineLimit(1)
-                .truncationMode(.middle)
+            // The strip's own rule: a lone account wears its agent's mark
+            // and name, one of several its letter and label.
+            if registry.isLoneInHarness(profile) {
+                HarnessTile(
+                    style: HarnessStyle(registry.provider(for: profile)), focused: focused, size: 15)
+            } else {
+                MonogramTile(monogram: registry.monogram(for: profile), focused: focused, size: 15)
+            }
+            AccountRowTitle(registry: registry, profile: profile, focused: true)
+                .opacity(focused ? 1 : 0.7)
             Spacer()
         }
         .contentShape(Rectangle())
         .pointerStyle(.link)
-        .onTapGesture { registry.focus(profile.id) }
+        .onTapGesture { registry.focus(profile.key) }
     }
 
     @ViewBuilder private func meterList(_ owner: UsageStore, profileID: String?) -> some View {
@@ -594,7 +620,7 @@ struct UsagePanelView: View {
         Divider()
         HStack(spacing: 12) {
             HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text("Claude Usage")
+                Text(AppIdentity.displayName)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                 Text("v\(AppIdentity.version)")
@@ -645,16 +671,9 @@ struct UsagePanelView: View {
                         Text(UsageFormatting.duration(seconds)).tag(seconds)
                     }
                 }
-                // Hidden while only one harness exists on this machine —
-                // a picker with a single real row is noise.
-                if registry.presentChoices.count > 1 {
-                    Picker("Metering", selection: meteringSelection) {
-                        Text(registry.automaticLabel).tag(ProviderRegistry.automatic)
-                        ForEach(registry.presentChoices) { choice in
-                            Text(choice.name).tag(choice.id)
-                        }
-                    }
-                }
+                // No Metering picker since 0.101.0: every detected harness is
+                // metered at once, and whether one is DISPLAYED is a switch in
+                // Settings → General, not a choice of which to read.
                 Toggle("Launch at login", isOn: SettingsBindings.launchAtLogin())
                 Divider()
                 if let update = visibleUpdate {
@@ -678,7 +697,7 @@ struct UsagePanelView: View {
                 }
                 Button("Settings…") { onOpenSettings(nil) }
                     .keyboardShortcut(",", modifiers: .command)
-                Button("Quit Claude Usage") { NSApp.terminate(nil) }
+                Button("Quit \(AppIdentity.displayName)") { NSApp.terminate(nil) }
                     .keyboardShortcut("q", modifiers: .command)
             } label: {
                 Image(systemName: "ellipsis.circle")
@@ -693,12 +712,6 @@ struct UsagePanelView: View {
         .padding(.horizontal, 14)
         .padding(.top, 8)
         .padding(.bottom, 10)
-    }
-
-    private var meteringSelection: Binding<String> {
-        Binding(
-            get: { registry.selection },
-            set: { registry.select($0) })
     }
 
     /// The update chip's card, or nil while there is nothing to whisper
@@ -729,7 +742,7 @@ struct UsagePanelView: View {
                 } label: {
                     Image(systemName: "arrow.down.circle.fill")
                         .font(.caption)
-                        .foregroundStyle(ProviderStyle.accentColor)
+                        .foregroundStyle(store.style.accentColor)
                 }
                 .buttonStyle(.borderless)
                 .help("Version \(update.latestVersion) is available — this build updates from its checkout; click for how")
@@ -761,7 +774,7 @@ struct UsagePanelView: View {
                 } label: {
                     Image(systemName: "arrow.down.circle.fill")
                         .font(.caption)
-                        .foregroundStyle(ProviderStyle.accentColor)
+                        .foregroundStyle(store.style.accentColor)
                 }
                 .buttonStyle(.borderless)
                 .help("Version \(update.latestVersion) is available — one click installs and relaunches")
@@ -850,7 +863,7 @@ struct UsagePanelView: View {
     private var shortlistColors: [String: Color] {
         var models: Set<String> = []
         for session in store.sessions { models.formUnion(session.models.keys) }
-        return ModelPalette.assignment(for: models.sorted())
+        return ModelPalette.assignment(for: models.sorted(), style: store.style)
     }
 
     /// One shortlist entry: the sidebar's full session card, wrapped in the

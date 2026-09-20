@@ -35,6 +35,8 @@ struct RunningBreakdownChart: View {
     /// The toggle only renders when the model carries context data at all.
     @Binding var showContext: Bool
     var onSelectRow: (Int) -> Void
+    /// The harness these calls were made against (0.101.0) — its accent.
+    var style: HarnessStyle = .bundled
 
     /// The row this chart's own hover last claimed. Leaving the chart clears
     /// the shared hover only while it still holds this value — a list row the
@@ -57,7 +59,7 @@ struct RunningBreakdownChart: View {
     private var fullLength: Double { Double(max(count - 1, 1)) }
     private static let minVisible: Double = 8
 
-    private var accent: Color { ProviderStyle.accentColor }
+    private var accent: Color { style.accentColor }
     private var totals: [Double] { model.running(measure) }
     private var count: Int { model.runningTokens.count }
 
