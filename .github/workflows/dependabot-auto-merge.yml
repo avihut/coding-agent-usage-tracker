@@ -1,10 +1,11 @@
 name: Dependabot auto-merge
 
 # Lets Dependabot's pull requests land without a human once — and only once —
-# the `main: PR gate` ruleset is satisfied (after the daft repo's workflow of
+# the `main: merge requirements` ruleset is satisfied (after the daft repo's workflow of
 # the same name). This workflow merges nothing on its own authority: it turns
 # on GitHub's auto-merge (squash) for the PR, and GitHub performs the merge
-# when the rules hold — `gate` and `pr-title` green on an up-to-date branch.
+# when the rules hold — `ci-gate` and `conventional-title` green on an
+# up-to-date branch.
 # The ruleset is the gate; this is the button. No approval step: the ruleset
 # asks for none, and an approving bot would be a second thing to trust.
 #
@@ -19,7 +20,7 @@ name: Dependabot auto-merge
 #   - dependabot/fetch-metadata refuses PRs whose commits are not all
 #     Dependabot-authored and -signed, so a PR that merely LOOKS like
 #     Dependabot's gets nothing.
-#   - It fails closed: if `gate` is not a required status check on the base
+#   - It fails closed: if `ci-gate` is not a required status check on the base
 #     branch (someone loosened the ruleset), it refuses to arm auto-merge
 #     rather than let a PR merge on no checks at all.
 #
@@ -65,20 +66,20 @@ jobs:
       BASE_REF: ${{ github.event.pull_request.base.ref }}
     steps:
       # Fail closed. Auto-merge is only safe because the ruleset refuses to
-      # merge until `gate` passes; if that rule is ever removed, arming
+      # merge until `ci-gate` passes; if that rule is ever removed, arming
       # auto-merge would merge a PR on no checks at all.
-      - name: Require gate to be a required status check on the base branch
+      - name: Require ci-gate to be a required status check on the base branch
         run: |
           set -euo pipefail
           rules=$(gh api "repos/${GH_REPO}/rules/branches/${BASE_REF}")
           if ! echo "$rules" | jq -e '
               [ .[] | select(.type == "required_status_checks")
                     | .parameters.required_status_checks[]? | .context ]
-              | index("gate") != null' >/dev/null; then
-            echo "::error::gate is not a required status check on ${BASE_REF}; refusing to enable auto-merge. Restore .github/rulesets/main-pr-gate.json."
+              | index("ci-gate") != null' >/dev/null; then
+            echo "::error::ci-gate is not a required status check on ${BASE_REF}; refusing to enable auto-merge. Restore .github/rulesets/main-merge-requirements.json."
             exit 1
           fi
-          echo "gate is required on ${BASE_REF}"
+          echo "ci-gate is required on ${BASE_REF}"
 
       - name: Dependabot metadata
         id: metadata
@@ -132,4 +133,4 @@ jobs:
             exit 0
           fi
           gh pr merge --auto --squash "$PR_URL"
-          echo "auto-merge enabled (squash); GitHub merges when gate is green"
+          echo "auto-merge enabled (squash); GitHub merges when ci-gate is green"

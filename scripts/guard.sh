@@ -90,6 +90,36 @@ while IFS= read -r script; do
     fi
 done < <(git ls-files -- 'scripts/*')
 
+# 6. `ci-gate` is the ONE status check the ruleset requires, and it knows
+#    only the jobs its `needs:` lists: a job missing from that list can fail
+#    on a pull request that still merges. The same hole one level down — a
+#    half of `mise run gate` that no CI job runs.
+ci=.github/workflows/ci.yml
+if ci_text=$(show "$ci" 2>/dev/null); then
+    ci_jobs=$(awk '/^jobs:/ { j = 1; next }
+        j && /^  [A-Za-z0-9_-]+:[[:space:]]*$/ { sub(/:.*/, ""); sub(/^  /, ""); print }' <<<"$ci_text")
+    ci_needs=$(awk '/^  ci-gate:/ { g = 1; next }
+        g && /^  [A-Za-z0-9_-]+:/ { g = 0 }
+        g && /^    needs:/ { n = 1; next }
+        g && n && /^      - / { sub(/^      - /, ""); print; next }
+        g && n { n = 0 }' <<<"$ci_text")
+    for job in $ci_jobs; do
+        [ "$job" = ci-gate ] && continue
+        if ! grep -qxF "$job" <<<"$ci_needs"; then
+            fail "$ci: job '$job' is not in ci-gate's needs" \
+                "ci-gate is the only required check; a job it does not need cannot block a merge"
+        fi
+    done
+    gate_halves=$(show mise.toml | awk '/^\[tasks\.gate\]$/ { g = 1; next } /^\[/ { g = 0 } g && /^depends/' |
+        grep -oE '"[^"]+"' | tr -d '"' || true)
+    for half in $gate_halves; do
+        if ! grep -E '^[[:space:]]*run: mise run ' <<<"$ci_text" | grep -qE "[[:space:]]$half\$"; then
+            fail "$ci: no job runs 'mise run $half'" \
+                "every half of the gate task runs in CI, or a pull request is held to less than a local merge"
+        fi
+    done
+fi
+
 if [ "$failures" -gt 0 ]; then
     printf '\nguard: %d rule(s) tripped\n' "$failures" >&2
     exit 1

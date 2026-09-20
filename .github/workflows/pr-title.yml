@@ -16,8 +16,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  pr-title:
-    name: pr-title
+  conventional-title:
+    name: conventional-title
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

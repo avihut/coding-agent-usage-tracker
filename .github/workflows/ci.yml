@@ -1,6 +1,13 @@
-# The PR gate: the same `mise run gate` the git hooks and daft's merge gate
+# The PR checks: the same `mise run gate` the git hooks and daft's merge gate
 # run, on GitHub's runner — a merge made with GitHub's button never passes
 # through daft's pre-merge rings, so this is what stands in for them.
+#
+# One job per half of the gate, each named for what it verifies and each
+# running ONE mise task, so a red check is reproduced by the command in its
+# step. `ci-gate` fans them in and is the only CI check the ruleset requires
+# (.github/rulesets): a job can be added, split or renamed here without
+# touching branch protection — as long as `ci-gate` needs it, which
+# scripts/guard.sh holds.
 #
 # Hardening, deliberately:
 #   - `pull_request`, NEVER `pull_request_target`: a fork's code runs with a
@@ -24,8 +31,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  gate:
-    name: gate
+  lint:
+    name: Lint, format & repo rules
+    runs-on: xcode-27
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+
+      - name: Install daft (check-config validates daft.yml with it)
+        run: brew install avihut/tap/daft
+
+      # Every check runs to the end and reports under its own heading: one
+      # run names everything a contributor has to fix, and a fork's next run
+      # costs a maintainer's approval.
+      - name: mise run gate-lint
+        run: mise run --continue-on-error --output keep-order gate-lint
+
+  swift:
+    name: "Swift: strict build + tests"
     # The toolchain this repo is developed with (Swift 6.4). `check` builds
     # with warnings as errors, so an older compiler is a different gate.
     runs-on: xcode-27
@@ -39,11 +66,8 @@ jobs:
 
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
 
-      - name: Install daft (check-config validates daft.yml with it)
-        run: brew install avihut/tap/daft
-
-      - name: Gate
-        run: mise run gate
+      - name: mise run gate-swift
+        run: mise run gate-swift
 
       # The one check only a merge can make locally (daft.yml): this tree's
       # decoders still read the TARGET's digest goldens — additive-only.
@@ -51,4 +75,55 @@ jobs:
         if: github.event_name == 'pull_request'
         env:
           BASE_REF: ${{ github.base_ref }}
-        run: mise run digest-freeze -- "origin/$BASE_REF"
+        run: mise run digest-freeze-swift -- "origin/$BASE_REF"
+
+  tui:
+    name: "TUI (Rust): clippy + tests"
+    # macOS like the others: the TUI only ever runs beside the app.
+    runs-on: xcode-27
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The digest freeze reads the base branch's goldens.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+
+      - name: mise run gate-tui
+        run: mise run --continue-on-error --output keep-order gate-tui
+
+      - name: Digest freeze against the base branch
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: mise run digest-freeze-tui -- "origin/$BASE_REF"
+
+  # The one required status check. Fans in every job above and fails if any
+  # of them failed or was cancelled. `if: always()` is load-bearing — with
+  # `!cancelled()` a cancelled run would leave this job skipped, and a skipped
+  # required check is a green one. Nothing here runs the code under test; it
+  # only reads `needs`, and scripts/guard.sh keeps `needs:` complete.
+  ci-gate:
+    name: ci-gate
+    needs:
+      - lint
+      - swift
+      - tui
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every needed job succeeded
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          bad=$(echo "$RESULTS" | jq -r 'to_entries[] | select(.value.result != "success") | .key')
+          if [ -n "$bad" ]; then
+            echo "::error::ci-gate: jobs not green: $(echo "$bad" | tr '\n' ' ')"
+            exit 1
+          fi
+          echo "ci-gate: green"
