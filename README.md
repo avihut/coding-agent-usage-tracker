@@ -1,504 +1,63 @@
 # Agent Usage
 
-A macOS menu bar app that meters your coding agents' plan limits — Claude Code's
-session, weekly and per-model weekly limits (mirroring Settings → Usage in the
-Claude app), with Codex and Gemini CLI metered beside it from their local files
-— plus a terminal dashboard (`usage-tui`) and a scriptable CLI (`usage-cli`).
+[![CI](https://github.com/avihut/coding-agent-usage-tracker/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/avihut/coding-agent-usage-tracker/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/tag/avihut/coding-agent-usage-tracker?label=release&sort=semver)](https://github.com/avihut/coding-agent-usage-tracker/releases)
+![macOS 15+](https://img.shields.io/badge/macOS-15%2B-blue)
+![Swift 6](https://img.shields.io/badge/Swift-6-orange)
+[![License: MIT](https://img.shields.io/github/license/avihut/coding-agent-usage-tracker)](LICENSE)
 
-It is an independent, unofficial project: not affiliated with, endorsed by or
-supported by Anthropic, OpenAI or Google. It reads an undocumented endpoint
-with your own local sign-in (see [Known risk](#known-risk-undocumented-endpoint)
-and [Credential rules](#credential-rules-non-negotiable)), sends nothing
-anywhere else, and carries no analytics. MIT licensed — see [LICENSE](LICENSE).
+How much of your coding agents' plan limits you have used, and when you will
+run out — in the macOS menu bar, in a terminal dashboard, and from a script.
+It meters Claude Code's session, weekly and per-model limits (the numbers in
+the Claude app's Settings → Usage), with Codex and Gemini CLI beside it.
 
-## Install: build it yourself
+![usage-tui: limits, today's activity, per-model cost and the usage heatmap](docs/media/tui.gif)
 
-There is no download. A macOS app that strangers can open needs a paid Apple
-Developer ID and notarization, which this project doesn't have — so rather
-than ship a binary Gatekeeper rejects, it ships source, and the app you run is
-one your own Mac built and signed:
+- **Menu bar** — every limit at a glance, coloured by how likely you are to
+  hit it; a panel with reset times, run-out forecasts, a usage heatmap and a
+  per-model token and cost breakdown. Several accounts, one meter each.
+- **`usage-tui`** — the same dashboard in a terminal pane, down to a one-line
+  strip, plus `usage-tui --status` for the tmux status bar.
+- **`usage-cli`** — every number as text or JSON, for status lines and scripts.
+
+![usage-cli: limits, models, sessions and a status-line segment](docs/media/cli.gif)
+
+The recordings show synthetic data (`mise run media` re-records them).
+
+## Install
+
+There is no download: the app you run is one your own Mac built and signed.
+You need macOS 15+, Xcode (Swift 6) and [mise](https://mise.jdx.dev) — and no
+Apple developer account.
 
 ```sh
 git clone https://github.com/avihut/coding-agent-usage-tracker.git
 cd coding-agent-usage-tracker
 mise trust && mise run setup   # pinned tools, the TUI's crates, the git hooks
-mise run app                   # build + bundle + sign + launch
+mise run app                   # build, sign and launch the menu bar app
+mise run tui                   # the terminal dashboard
 ```
 
-Needs macOS 15+, Xcode (Swift 6) and [mise](https://mise.jdx.dev). No Apple
-account is required — with no certificate the build signs ad-hoc and works;
-[Code signing](#code-signing) covers the free certificate that makes rebuilds
-quieter. To update: `git pull`, then `mise run app` again — the app tells you
-when a new version is tagged (it checks this repo's releases; see
-[below](#fourth-network-destination-this-apps-own-releases)).
-
-Releases here are tags with notes, never binaries. Contributions are welcome —
-[CONTRIBUTING.md](CONTRIBUTING.md); security reports —
-[SECURITY.md](SECURITY.md).
-
-## Status
-
-Fully built: menu bar item (`✳︎ 6·17·22%`, per-segment severity colors),
-panel with per-limit meters and reset times (subscription type under the
-title), live client with cached fallback and readable error states, adaptive
-refresh (see below) plus wake/network-restore triggers, launch-at-login
-toggle (off by default), stable signing verified across rebuilds. Local
-transcript analytics: activity heatmap (7D per-model stacked bars with
-per-day totals / 30D calendar / all-time grid, each viewable by token
-volume or estimated cost) with one-line day tooltips, and click-to-drill
-day views — a model donut plus that day's usage table, animated push/pop with a
-back button; per-meter hover popovers graphing percent history overlaid
-with every model's cumulative token curve — a History/Current span picker
-switches between the trailing window and the limit window start-to-reset,
-where a vertical now rule separates measured usage from the prediction engine's
-dashed projected trajectory, a red mark pins the moment the current pace
-would spend the limit (hatching the unreachable region beyond it), and an
-iStat-style strip under the plot shows active-vs-idle stretches (short
-pauses bridge into one session per an adjustable grace period, default
-15 min, off = raw activity; the current session stays open until its
-idle time outlives the grace) — with
-per-poll-interval readouts and the same
-breakdown table as a legend (hovering a curve or a row focuses that model
-everywhere and dims the rest); a per-period model usage table
-(aligned input/cached/output/cost columns — cache re-reads of the
-conversation shown apart from fresh input — cost estimates at API list
-prices, pricing feed fetched daily with bundled fallback) whose rows
-double as a legend — hovering one filters the chart above to that model in its own
-color. A sidebar-navigated settings window (⋯ menu → Settings…) holds the
-general knobs — the refresh-pace slider, the session grace period, and
-Claude Code's own transcript retention (`cleanupPeriodDays`, the app's one
-sanctioned write into the metered home's `settings.json`, preserving every
-other key) — plus an API-cost page:
-pricing-feed status with a manual refresh, the list rates in use, a Claude
-Code-specific explainer of how transcripts turn into cost estimates (four
-token classes, the agentic loop, quadratic cache reads), and a
-session-cost playground that re-prices a simulated session live.
-Remaining: the §13 acceptance
-checklist items that need real-world time (sleep/wake, token expiry).
-
-## Adaptive refresh
-
-The poll rate follows actual Claude use instead of a fixed clock (supersedes
-spec §9's fixed interval). The "Refresh when active" setting (default 5 min)
-is the pace while Claude is in use; sustained quiet decays it ×2 after 15
-minutes, ×4 after an hour, ×8 after four hours, never slower than one poll
-per hour (or your chosen pace, when that's slower). Two signals snap it back: FSEvents on `~/.claude/projects` (Claude
-Code writing a transcript — this also polls immediately whenever the shown
-data is older than the active pace, so re-engaging catches the meters up at
-once), and usage percentages rising between polls (which is how Claude
-app/web use gets noticed). An HTTP 429 pauses polling — 5 minutes,
-doubling per repeat up to an hour, honoring `Retry-After` up to two hours —
-and heals automatically on the next success; the panel says so and shows the
-retry countdown. Manual refresh still works during a pause. The panel footer
-shows "idle ×N" whenever the cadence is decayed.
-
-Nothing ever polls faster than once per **180 seconds** (supersedes the spec's
-60s floor, and the app's own earlier 1-minute option). Field evidence: this
-endpoint rate-limits sustained sub-3-minute polling into sticky 429s — this
-app hit it at 60s, and community testing found the same
-([anthropics/claude-code#31637](https://github.com/anthropics/claude-code/issues/31637),
-[#31021](https://github.com/anthropics/claude-code/issues/31021)). The pace
-is set in the settings window with a logarithmic slider — 3 minutes to 2
-hours, snapping to marked stops at 3/5/15/30 minutes and 1/2 hours — while
-the panel's ⋯ menu keeps 3/5/15 quick picks. A request ledger tracks the trailing
-hour of calls against an estimated budget (20/hour to start, tightened
-whenever a real 429 reveals a lower ceiling and remembered across launches);
-the footer shows `API n/Nh` once half the budget is spent and the refresh
-button turns orange/red as manual clicks approach it.
-
-## Why this is OK (policy note)
-
-This app authenticates with my local Claude Code OAuth access token and calls
-`https://api.anthropic.com/api/oauth/usage` — the same undocumented endpoint the
-Claude app's own Usage screen uses. Reasoning for why this sits on the safe side
-of Anthropic's subscription-auth policy:
-
-- It consumes zero model capacity and makes no inference calls.
-- It is strictly read-only over my own account's usage state.
-- It has exactly one beneficiary: me, on my own machine.
-- It sends its own honest `User-Agent` (`coding-agent-usage-tracker/<version>`), never
-  impersonating Claude Code or the Claude app.
-
-If this app ever grows a feature that calls a model, it switches to API-key auth
-at that moment.
-
-### Second network destination: the pricing feed
-
-Cost estimates need current API list prices and Anthropic publishes no pricing
-API, so the app fetches LiteLLM's community-maintained
-`model_prices_and_context_window.json` from `raw.githubusercontent.com` — a
-plain unauthenticated GET carrying only the app's own User-Agent, at most once
-per day (attempted at most hourly while stale), filtered down to Anthropic
-models and cached in App Support. This deliberately amends spec §10's
-"api.anthropic.com only" rule (user-directed, 2026-08-13); nothing about the
-account, the token, or local usage is ever sent there. If the fetch fails, a
-pricing table bundled at build time keeps estimates rendering, marked as such.
-Estimates are list-price counterfactuals ("what would this have cost on the
-API") — subscription plans don't bill per token.
-
-### Third network destination: the status page
-
-The app shows whether Claude itself is up, so it reads Anthropic's own public
-status page — `status.claude.com` (an Atlassian Statuspage;
-`status.anthropic.com` redirects there). One endpoint,
-`/api/v2/summary.json`, roughly 2 KB, as a plain anonymous GET on a
-cookie-less session with an `If-None-Match` header and nothing else: no
-sign-in, no account data, no query parameters. It is the same page anyone can
-open in a browser, and the request says no more about me than opening it
-would.
-
-Polling idles at five minutes and tightens to one minute only while an
-incident is open, so the all-clear arrives promptly without ever asking more
-often than the page's own ten-second CDN cache could answer. Nothing fetched
-is written to disk. This amends spec §10 (2026-08-19); a status host is
-declared per provider and shown on the settings privacy card, and providers
-that declare none stay entirely offline.
-
-Since v0.93.0 the same host answers one more question, at start-up and on
-wake only: `/api/v2/incidents.json`, the page's public incident history, read
-the same anonymous way (no ETag needed — at most once per ten minutes). It
-exists so an outage that opened AND closed while the Mac slept still shows up
-as a dismissable "Outage overnight" notification the next morning; the
-summary feed only remembers the last hour. Same host, same terms, no new
-destination.
-
-### Fourth network destination: this app's own releases
-
-Every install checks this repository's newest GitHub release every six hours —
-one anonymous conditional GET of
-`api.github.com/repos/avihut/coding-agent-usage-tracker/releases/latest` on a
-cookie-less session, nothing identifying beyond the public repo path. When a
-newer version exists, a small accent arrow appears beside the version label
-in the panel footer, and Settings → General says how to get it: `git pull`
-and a rebuild. Settings → General governs the check: check now, automatic
-checks off, or skip a version.
-
-Releases carry no binary (2026-09-20 — see [Install](#install-build-it-yourself)),
-so that is the whole story today. The one-click path is still in the code and
-dormant: for an app living outside a git checkout, a release that DID carry a
-zip would be downloaded on a click (from `github.com`, redirecting to GitHub's
-asset CDN — never automatically), verified for code signature and version,
-and swapped in place. With no asset, the same click opens the release page. A
-build sitting inside a git checkout only ever informs, and swaps nothing
-(distribution channels, 2026-08-23). This amends spec §10 (2026-08-23).
-
-### One local identity read: which account is signed in
-
-Claude Code's transcripts carry no account identity, so switching accounts
-would silently blend two budgets into one history. The app therefore reads
-one key (`oauthAccount`) of `.claude.json` — the file `/login` itself
-maintains, `~/.claude.json` for the default home and its own copy inside
-every other metered home — strictly read-only, and keeps a small local
-ledger of which account was signed in when. Usage is attributed against that timeline
-honestly: exactly inside observed stretches, only by agreement across
-unobserved gaps, and never at all for history from before the ledger
-existed — ambiguity is shown as ambiguity, not guessed away. The identity
-never leaves the machine: it is not attached to any request, and this read
-adds no network destination. It is also deliberately NOT the Keychain — no
-new credential reads, so no consent prompts, ever. This amends spec §10
-(2026-08-25).
-
-`usage-cli transcript <path>` (2026-09-06, v0.95.0) reads exactly the
-transcript named on its command line plus the `<id>/subagents/**` files
-beside it — the same read-only parse the scanner runs over
-`~/.claude/projects` — so a session Claude Code wrote under another
-`CLAUDE_CONFIG_DIR` (which the daemon never indexes) can be priced too, by
-the same parser and the same rates. Nothing is cached and nothing leaves
-the machine; this extends the transcript-read amendment to a user-named
-path, not to any new tree the app walks on its own.
-
-### Several agent homes, one meter each
-
-Claude Code keeps one config home per `CLAUDE_CONFIG_DIR`, and this Mac
-runs two at once — work in `~/.claude`, personal in `~/.claude-personal`.
-Since v0.96.0 the app meters each of them as its own **account**: its own
-token, its own limits, its own history, its own directory under the app's
-scope. There is no blending — two accounts are two meters, never one sum.
-
-This adds **no network destination**. Each enabled home polls the same
-usage endpoint with its own token, through the same 180-second floor and
-the same backoff; the pricing feed, the status page and the release feed
-stay one poll per provider, not one per home — and since v0.101.0 the rate
-feed is one poll for ALL providers, shared. Discovery is passive: the
-app lists `~/.claude*` directories that look like homes, reads the one
-identity key it already reads to name the offer, and reads nothing
-credentialed — no `.credentials.json`, no Keychain — until you enable that
-home in Settings → General → Accounts. Dismiss an offer and it stays quiet
-until that home is signed in as somebody else. Each enabled home's
-Keychain item is `Claude Code-credentials-<first 8 hex of SHA-256 over the
-home's path>` — Claude Code's own naming rule — read through the same
-promptless `security` path, so a second account is still no consent
-dialog. Spec §10 amended 2026-09-06.
-
-The menu bar leads with whichever account you have actually been using:
-focus follows the volume of session files over the trailing fortnight
-(newest write breaks ties) — until you pick one, in the panel's account
-strip or in Settings, which pins it until you ask for Auto again. Each
-account draws in the menu bar in its own form — digits, bars, rings,
-compact digits, or a dot — set per account or for all of them at once,
-with the focused account optionally expanded to its full numbers whatever
-its form, and any account can take a menu bar item of its own. Settings →
-Menu bar shows the bar as it will draw, live, with every option pictured
-in your own numbers; drag the accounts across the preview to order them.
-Settings → Accounts is only about which sign-ins are metered.
-
-The bar can also carry more than the meters. Settings → Menu bar has a
-palette of elements to drag onto the preview (or click to add):
-today's one element is **Runs out**, the expected time until a limit is
-reached — `S 31m` in the same red capsule the digits alarm with, or once a
-limit is spent `S↺ 2h 10m`, counting down to its reset. It is conditional
-by design: while no limit is forecast to run out before it resets it draws
-nothing at all, and the bar is exactly what it was without it. One element,
-scoped — the earliest limit by default (any crossing cuts you off, so the
-first one is the answer), or every limit, or one meter — placed before or
-after the meters, per account or for all of them under the same "Same form
-for every account" switch. With several accounts it draws for the focused
-account only, so the bar carries one countdown; a switch gives every
-account its own. Because a quiet day would make the drop look
-like it failed, the preview draws a dashed placeholder where the element
-will appear, and "Preview as if a limit were running out" dresses the whole
-preview with a half-hour countdown so you can see the real rendering.
-The panel gains an account strip that doubles as the selector — rows,
-chips, or every account stacked. An account whose transcripts go quiet
-for 30 days goes dormant and stops polling entirely until it is used
-again.
-
-On the command line, an account is a selector rather than a mode:
-
-```sh
-usage-cli accounts                       # id, label, home, state, focus, limits
-usage-cli limits --account personal      # by id, nickname, label, or home path
-CLAUDE_CONFIG_DIR=~/.claude-personal usage-cli limits   # the same answer
-usage-cli state | jq '.profiles[] | {id, label, dormant, isFocused}'
-```
-
-`--account` wins over `$CLAUDE_CONFIG_DIR`, which wins over whichever
-account is focused. Every existing noun answers for the selected account —
-`limits`, `spend`, `sessions`, `history`, `windows`, `session` all read
-that home's own files. An unknown selector exits 20 and lists the accounts
-it knows; it never quietly answers for a different one, which is the whole
-point when a status line renders under one config dir and the daemon is
-metering another.
-
-### Every agent at once, none of them "active"
-
-Up to v0.100.1 the app metered ONE agent: it scored which harness had run
-recently and read that one, and a picker let you override the guess. Since
-**v0.101.0** it meters every harness it finds on this Mac — Claude Code,
-Codex and Gemini CLI together — the way it already metered several Claude
-accounts together. They sit alongside each other in the bar under their own
-marks in their own colours, one of them holds focus, and the panel, the
-charts and the CLI answer for whichever that is. There is no active harness
-to choose and no switch to make.
-
-A harness you aren't interested in can be **hidden** (Settings → General →
-Harnesses). Hiding stops it being DISPLAYED and nothing else: it keeps being
-polled, forecast and priced, and its models stay in the API Cost rates list,
-which lists every detected harness whether shown or not. The last shown
-harness can't be hidden — an empty bar isn't a state worth being able to
-reach.
-
-This adds **no network destination**. Each harness reads exactly what it
-always read: Claude its usage endpoint and its own homes, Codex and Gemini
-their local session files and no credentials at all. Metering them together
-grants none of them anything new, and whether a harness exists is decided by
-`stat` on the directories it already declares. It is in fact one request
-FEWER per day: the LiteLLM rate feed is a single mixed-vendor document that
-every harness slices differently, so its bytes are now fetched once and
-shared rather than once per harness. The privacy card lists every metered
-harness's hosts and files, one block each — what the app reads is the union,
-so the card that names it is too.
-
-Forecasts stay per harness and per account folder. A folder's learned
-history belongs to the folder, so signing into a different account inside
-one keeps that folder's rhythm — the usage being pulled changed, not the
-place it is kept.
-
-`usage-cli harnesses` is the scriptable view: every detected harness, what
-it has been doing lately, whether it is shown, and its own service health.
-
-## Known risk: undocumented endpoint
-
-`/api/oauth/usage` is not in the public API docs and may change shape or go away
-without notice. Consequences for the code: every response field is optional,
-unknown limit kinds render generically, and schema changes degrade to a readable
-error state — never a crash or a blank menu bar item. The network layer is
-isolated so a migration to a supported endpoint, if one ships, is a one-file
-change.
-
-## Credential rules (non-negotiable)
-
-- Read the home's own `.credentials.json` first, fall back to its login
-  Keychain item — `Claude Code-credentials` for `~/.claude`, suffixed with
-  the first 8 hex of SHA-256 over the home's path for any other (Claude
-  Code's own rule) — read via `/usr/bin/security find-generic-password`,
-  the same Apple tool Claude Code writes it with, so the read never trips the
-  Keychain consent dialog (Claude Code rewrites the item on every token refresh,
-  which resets any per-app "Always Allow" a native read had earned).
-- Access token only. The refresh token is never read or used.
-- Never write to the Keychain. Never cache the token in memory or on disk —
-  re-read every refresh cycle so Claude Code's own token refresh is picked up.
-- The token is never logged, persisted, put in a URL, or included in any error.
-- No feature may require entering system credentials (Keychain consent, admin
-  authorization) for the app's regular operation — the promptless read above
-  is the standing mechanism. Any narrowly-scoped exception needs its own
-  documented spec §10 amendment reasoning out why no promptless path exists.
-
-## Build / run
-
-```sh
-mise run app    # build + bundle + sign + launch the menu bar app
-mise run test   # unit tests
-mise run cli    # build + sign + run the CLI debug tool (prints raw JSON)
-mise run bundle # assemble + sign the .app without launching it
-```
-
-Every lifecycle script in `scripts/` has a matching mise task — `mise tasks`
-lists the full catalog, including the AX verification pair
-(`axdump` / `axpress`).
-
-### Code signing
-
-Nothing in the repo names a developer account. Every build signs with an
-identity resolved on the machine doing the building (`scripts/sign.sh`), in
-this order:
-
-1. `CODESIGN_IDENTITY`, if set — pin one per checkout by copying
-   `mise.local.toml.example` to `mise.local.toml` (git-ignored) and running
-   `mise trust`.
-2. The login keychain's first code-signing identity, preferring
-   `Developer ID Application` > `Apple Development` > `Mac Developer`.
-3. Ad-hoc (`-`), with a warning.
-
-```sh
-mise run identity   # which identity builds will use, and where it came from
-```
-
-A fresh clone with no certificate at all builds and runs ad-hoc: the app,
-daemon, and CLI all work, since the Keychain read goes through Apple's
-`security` tool rather than our own signature. What ad-hoc costs is
-*stability* — every rebuild is a new identity to macOS, so Gatekeeper and
-launchd re-evaluate the bundle each time. A real certificate fixes that and
-needs no paid membership: sign into Xcode with any Apple ID (Settings →
-Accounts), then Manage Certificates → **+** → Apple Development. Those
-certificates last a year; when one expires, `mise run identity` falls back to
-ad-hoc and signing warns — renew it in the same place, and the identity
-survives because its name does.
-
-`mise run dist` — a universal, zipped copy for carrying to another Mac of your
-own — refuses ad-hoc outright (`CODESIGN_REQUIRE_IDENTITY`): a build that
-leaves the machine that made it must carry a timestamped signature from a real
-identity. It is a private convenience, not a release step: nothing it builds
-is published (`mise run publish` creates the GitHub release from the tag's
-notes alone).
-
-## The terminal dashboard (usage-tui)
-
-A full-screen TUI face for tmux panes (`tui/`, Rust + ratatui): reads the
-engine's `live-state.json`, computes nothing, and re-plans its layout from
-the pane's shape — portrait stacks the sections, landscape splits into
-columns, and anything under ~10×40 collapses to a one-line strip
-(`✳︎ S 34 · W 59 · F 92`). Keys: `q` quit, `r` ask the engine to refresh
-(over the control socket), `?` help. Works against the app-hosted engine
-or the daemon interchangeably.
-
-```sh
-mise run tui        # build + run in this terminal
-mise run tui-test   # digest contract + layout tests
-```
-
-Detail surfaces open from the dashboard: click a meter (or `1-3`) for its
-window chart — measured percent in braille, forecast trajectory, session
-stretches, `←→` scrub, time and percent axis labels once the pane affords
-them — and click a heatmap day to drill into hourly bars and per-model
-rows (`[ ]` pages the calendar; everything hovers — a model row re-colors
-the heatmap to that model alone, as in the app). No mouse needed: the
-arrow keys drive a focus cursor across whatever is interactive — it wears
-the same lift (bold + brightened color) and readouts as hover — and
-`enter` opens it. For the tmux
-status bar, `usage-tui --status` prints one colored segment line:
-
-```tmux
-set -g status-right '#(usage-tui --status)'
-```
-
-`NO_COLOR` switches risk to `!` markers and the heat ramp to ░▒▓█ density;
-non-UTF-8 locales (or `USAGE_TUI_ASCII=1`) drop to a plain-ASCII alphabet.
-
-The digest schema is pinned on both sides of the language boundary: the
-Swift tests and the TUI's serde tests decode the same golden fixtures in
-`Tests/UsageCoreTests/Fixtures/digest/`.
-
-## The headless engine (usaged)
-
-The metering engine runs as a launchd user agent, `usaged` (embedded in
-the app bundle), so consumer interfaces — the TUI, or the menu bar app
-itself — render with nothing else open. The daemon wins: while it runs,
-the app renders its published `live-state.json` digest and sends commands
-over a local socket; quit the daemon and the app hosts the engine embedded
-again within moments (`docs/DAEMON.md` has the full design).
-
-Installation is automatic: the app sets the agent up at launch (and heals
-it — a moved bundle is repointed, an outdated daemon restarted), and the
-TUI does the same when it finds no engine running. There is nothing to
-approve: the daemon reads the Claude Code token through Apple's own
-`security` tool — the same client Claude Code stores it with — so no
-Keychain consent dialog ever appears.
-
-```sh
-mise run daemon -- status     # launchd state, digest age, socket ping, accounts
-mise run daemon -- stop       # boot it out (plist kept)
-mise run daemon -- uninstall  # remove it AND disarm auto-install (sticky)
-mise run daemon -- install    # re-arm + reinstall by hand
-usage-cli state | jq          # inspect the live digest
-```
-
-Opting out is deliberate and sticky: `uninstall` (or the Settings toggle
-"Background metering engine") removes the agent and sets
-`daemonAutoInstall=false`, which every auto-install path honors — the app
-then simply hosts the engine embedded whenever it runs, exactly as before
-v0.66.0.
-
-## Install on another Mac
-
-The easy path: grab `AgentUsage-<version>.zip` from the [releases
-page](https://github.com/avihut/coding-agent-usage-tracker/releases) —
-`mise run publish` puts one there per tagged version. From then on the app
-updates itself: it notices the next release and installs it in one click.
-
-To build the artifact locally instead:
-
-```sh
-mise run dist   # universal (arm64 + x86_64), signed with a timestamp, zipped
-```
-
-That writes `dist/AgentUsage-<version>.zip` and verifies the signature survives
-the round trip. On the target Mac:
-
-```sh
-ditto -x -k AgentUsage-<version>.zip /Applications
-xattr -dr com.apple.quarantine /Applications/AgentUsage.app
-open /Applications/AgentUsage.app
-```
-
-The `xattr` step only matters when the transfer set the quarantine bit — AirDrop,
-browser downloads, and Messages do; `scp`, `rsync`, and USB sticks don't. Strip
-it *before* the first launch: this app is signed with an Apple Development
-certificate rather than a notarized Developer ID one, so Gatekeeper rejects it
-(`spctl -a` says so here too), and the "Open Anyway" button only appears under
-System Settings → Privacy & Security *after* a launch has already been blocked.
-
-The target Mac needs macOS 15+ and Claude Code installed **and signed in**: the
-app carries no token, it reads that machine's own login Keychain item, so nothing
-of mine travels inside the zip. There is no Keychain dialog to approve — the
-item is read through Apple's `security` tool, the same client Claude Code
-stores it with. The first launch sets up the background engine (`usaged`) by
-itself — that's the whole install.
-
-Keep the bundle in `/Applications`: `SMAppService` registers the launch-at-login
-item by path, so moving the app afterwards breaks that toggle.
-
-The signature is timestamped, so it stays valid after the signing certificate
-expires. Rebuilding on the target Mac (`daft clone` + `mise run app`, signing
-with that machine's own identity — see [Code signing](#code-signing)) is the
-other route, and sidesteps Gatekeeper entirely.
+Sign in to Claude Code first; the app finds that sign-in on its own and never
+asks for a password or a Keychain approval. To update, `git pull` and
+`mise run app` again — the app tells you when a new version is tagged.
+[Signing](docs/WORKFLOW.md#signing) covers the free certificate that makes
+rebuilds quieter.
+
+## Privacy
+
+Unofficial and independent — not affiliated with, endorsed by or supported by
+Anthropic, OpenAI or Google. It reads your usage with your own local Claude
+Code sign-in (access token only; never stored, never logged) from an
+undocumented endpoint that may change without notice. It talks to four hosts
+and no others, carries no analytics and no telemetry, and meters Codex and
+Gemini CLI from their local files alone. Every destination, every file read
+and the reasoning behind each is in [docs/PRIVACY.md](docs/PRIVACY.md); the
+app lists the same inventory live under Settings → General → About.
+
+## More
+
+[CLI reference](docs/CLI.md) · [Terminal dashboard](docs/TUI.md) ·
+[Background engine](docs/DAEMON.md) · [Accounts and harnesses](docs/HARNESSES.md) ·
+[Architecture](docs/ARCHITECTURE.md) · [Contributing](CONTRIBUTING.md) ·
+[Security](SECURITY.md) · [MIT license](LICENSE)

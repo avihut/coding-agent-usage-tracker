@@ -8,7 +8,9 @@ source (MIT) and SOURCE-ONLY: no binary is published, every install is built
 and signed by the Mac that runs it, so whoever runs your change is trusting
 it with their own sign-in. The build contract is `docs/SPEC.md` (§10 is the
 hard rules). Push back on the spec when reality disagrees with it; record
-corrections in the README rather than silently deviating.
+corrections in the doc for that area (a §10 amendment: `docs/PRIVACY.md`)
+rather than silently deviating. The README is the USER'S page — what it is,
+install, privacy in a paragraph — and stays that short.
 
 This file is for anyone's agent working in this repo — contributor or
 maintainer. The docs carry the project's history in the maintainer's voice
@@ -37,7 +39,7 @@ was learned the hard way.
 - Four network destinations, and no others: `api.anthropic.com` (usage, with
   the OAuth token), `raw.githubusercontent.com` (LiteLLM pricing feed — plain
   GET, never any credential or account data attached; user-directed spec §10
-  amendment, 2026-08-13, see README), the active provider's declared
+  amendment, 2026-08-13, see `docs/PRIVACY.md`), the active provider's declared
   status feed (`status.claude.com` for Claude; §10 amendment 2026-08-19,
   v0.86.0 — anonymous conditional GET, ephemeral cookie-less session), and
   this app's own release feed (`api.github.com` releases/latest, §10
@@ -99,6 +101,7 @@ was learned the hard way.
 | Touching… | Read first |
 | --- | --- |
 | the build contract itself | `docs/SPEC.md` (§10 hard rules, §12 milestones, §13 acceptance) |
+| a network destination, a file the app reads, a credential rule | `docs/PRIVACY.md` (the §10 amendment record, user-readable) |
 | how data reaches a face, engine landing points, refresh, storage | `docs/ARCHITECTURE.md` |
 | the daemon, the digest, host arbitration | `docs/DAEMON.md` |
 | a provider, an account, focus, identity, storage scopes | `docs/HARNESSES.md` |
@@ -108,7 +111,7 @@ was learned the hard way.
 | `usage-cli` nouns, fields, flags, exit codes | `docs/CLI.md` |
 | `tui/` | `docs/TUI.md`, then `docs/TUI-PARITY.md` |
 | notices, outages, the status feed | `docs/NOTICES.md` |
-| committing, merging, releasing, scripts, lint, signing | `docs/WORKFLOW.md` |
+| committing, merging, releasing, scripts, lint, signing, the README's media | `docs/WORKFLOW.md` |
 | CloudKit sync (designed, NOT shipped) | `docs/SYNC.md` |
 
 Five targets: `UsageCore` (the headless library — every rule that says

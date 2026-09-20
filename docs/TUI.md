@@ -9,6 +9,43 @@ The parity program — what the TUI still owes the menu bar app, and what
 is deliberately different — is in [TUI-PARITY.md](TUI-PARITY.md). The
 digest it reads is in [DAEMON.md](DAEMON.md).
 
+## Using it
+
+A full-screen TUI face for tmux panes (`tui/`, Rust + ratatui): reads the
+engine's `live-state.json`, computes nothing, and re-plans its layout from
+the pane's shape — portrait stacks the sections, landscape splits into
+columns, and anything under ~10×40 collapses to a one-line strip
+(`✳︎ S 34 · W 59 · F 92`). Keys: `q` quit, `r` ask the engine to refresh
+(over the control socket), `?` help. Works against the app-hosted engine
+or the daemon interchangeably.
+
+```sh
+mise run tui        # build + run in this terminal
+mise run tui-test   # digest contract + layout tests
+```
+
+Detail surfaces open from the dashboard: click a meter (or `1-3`) for its
+window chart — measured percent in braille, forecast trajectory, session
+stretches, `←→` scrub, time and percent axis labels once the pane affords
+them — and click a heatmap day to drill into hourly bars and per-model
+rows (`[ ]` pages the calendar; everything hovers — a model row re-colors
+the heatmap to that model alone, as in the app). No mouse needed: the
+arrow keys drive a focus cursor across whatever is interactive — it wears
+the same lift (bold + brightened color) and readouts as hover — and
+`enter` opens it. For the tmux
+status bar, `usage-tui --status` prints one colored segment line:
+
+```tmux
+set -g status-right '#(usage-tui --status)'
+```
+
+`NO_COLOR` switches risk to `!` markers and the heat ramp to ░▒▓█ density;
+non-UTF-8 locales (or `USAGE_TUI_ASCII=1`) drop to a plain-ASCII alphabet.
+
+The digest schema is pinned on both sides of the language boundary: the
+Swift tests and the TUI's serde tests decode the same golden fixtures in
+`Tests/UsageCoreTests/Fixtures/digest/`.
+
 ## Architecture and standing rules
 
 - RUST TUI (2026-08-16 v0.67.0, phase T1; tui/ cargo crate, usage-tui):

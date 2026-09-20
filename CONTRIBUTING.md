@@ -16,7 +16,7 @@ mise run gate                  # every check CI and the hooks run, in one go
 ```
 
 No Apple developer account is needed — without a certificate the build signs
-ad-hoc (README → Code signing). `mise tasks` is the catalog of everything else.
+ad-hoc (`docs/WORKFLOW.md` → Signing). `mise tasks` is the catalog of everything else.
 
 The git hooks (lefthook) format and lint what you stage, check the commit
 message, and run the test suite before a push. Two of them validate

@@ -9,6 +9,36 @@ amendment is IN FORCE (docs/SPEC.md). Design decided 2026-08-16
 sticky `daemonAutoInstall` opt-out (Settings toggle,
 `usage-cli daemon uninstall`) keeps it away deliberately.
 
+## Using it
+
+The metering engine runs as a launchd user agent, `usaged` (embedded in
+the app bundle), so consumer interfaces — the TUI, or the menu bar app
+itself — render with nothing else open. The daemon wins: while it runs,
+the app renders its published `live-state.json` digest and sends commands
+over a local socket; quit the daemon and the app hosts the engine embedded
+again within moments (`docs/DAEMON.md` has the full design).
+
+Installation is automatic: the app sets the agent up at launch (and heals
+it — a moved bundle is repointed, an outdated daemon restarted), and the
+TUI does the same when it finds no engine running. There is nothing to
+approve: the daemon reads the Claude Code token through Apple's own
+`security` tool — the same client Claude Code stores it with — so no
+Keychain consent dialog ever appears.
+
+```sh
+mise run daemon -- status     # launchd state, digest age, socket ping, accounts
+mise run daemon -- stop       # boot it out (plist kept)
+mise run daemon -- uninstall  # remove it AND disarm auto-install (sticky)
+mise run daemon -- install    # re-arm + reinstall by hand
+usage-cli state | jq          # inspect the live digest
+```
+
+Opting out is deliberate and sticky: `uninstall` (or the Settings toggle
+"Background metering engine") removes the agent and sets
+`daemonAutoInstall=false`, which every auto-install path honors — the app
+then simply hosts the engine embedded whenever it runs, exactly as before
+v0.66.0.
+
 ## Why
 
 The app grew a second consumer: a full-screen TUI pane (Rust/ratatui) for

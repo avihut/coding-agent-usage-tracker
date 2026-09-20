@@ -10,6 +10,19 @@ Every check is a mise task that both lefthook and daft call — one
 definition each. `mise run gate` is the whole set by hand; run it before
 showing work.
 
+## Day-to-day tasks
+
+```sh
+mise run app    # build + bundle + sign + launch the menu bar app
+mise run test   # unit tests
+mise run cli    # build + sign + run the CLI debug tool (prints raw JSON)
+mise run bundle # assemble + sign the .app without launching it
+```
+
+Every lifecycle script in `scripts/` has a matching mise task — `mise tasks`
+lists the full catalog, including the AX verification pair
+(`axdump` / `axpress`).
+
 ## Hooks and the merge gate
 
 - HOOKS AND THE MERGE GATE (2026-09-19): git hooks are lefthook
@@ -172,6 +185,39 @@ showing work.
 
 ## Signing
 
+Nothing in the repo names a developer account. Every build signs with an
+identity resolved on the machine doing the building (`scripts/sign.sh`), in
+this order:
+
+1. `CODESIGN_IDENTITY`, if set — pin one per checkout by copying
+   `mise.local.toml.example` to `mise.local.toml` (git-ignored) and running
+   `mise trust`.
+2. The login keychain's first code-signing identity, preferring
+   `Developer ID Application` > `Apple Development` > `Mac Developer`.
+3. Ad-hoc (`-`), with a warning.
+
+```sh
+mise run identity   # which identity builds will use, and where it came from
+```
+
+A fresh clone with no certificate at all builds and runs ad-hoc: the app,
+daemon, and CLI all work, since the Keychain read goes through Apple's
+`security` tool rather than our own signature. What ad-hoc costs is
+*stability* — every rebuild is a new identity to macOS, so Gatekeeper and
+launchd re-evaluate the bundle each time. A real certificate fixes that and
+needs no paid membership: sign into Xcode with any Apple ID (Settings →
+Accounts), then Manage Certificates → **+** → Apple Development. Those
+certificates last a year; when one expires, `mise run identity` falls back to
+ad-hoc and signing warns — renew it in the same place, and the identity
+survives because its name does.
+
+`mise run dist` — a universal, zipped copy for carrying to another Mac of your
+own — refuses ad-hoc outright (`CODESIGN_REQUIRE_IDENTITY`): a build that
+leaves the machine that made it must carry a timestamped signature from a real
+identity. It is a private convenience, not a release step: nothing it builds
+is published (`mise run publish` creates the GitHub release from the tag's
+notes alone).
+
 - Binaries are signed via `scripts/sign.sh` BEFORE first run with a
   MACHINE-LOCAL identity — NO developer account is named anywhere in the
   repo (2026-09-03; a second contributor's clone failed on the old
@@ -259,6 +305,72 @@ showing work.
   override, which forces both the checker and install-mode on in a source
   build.
 
+
+## Carrying a build to another Mac of your own
+
+Releases carry no binary, so there is nothing to download: the ordinary
+route on any Mac is the [README's install](../README.md#install) — clone,
+`mise run app`, signed with that machine's own identity — which sidesteps
+Gatekeeper entirely. `mise run dist` is the private alternative for a Mac
+you would rather not put a toolchain on:
+
+```sh
+mise run dist   # universal (arm64 + x86_64), signed with a timestamp, zipped
+```
+
+That writes `dist/AgentUsage-<version>.zip` and verifies the signature survives
+the round trip. On the target Mac:
+
+```sh
+ditto -x -k AgentUsage-<version>.zip /Applications
+xattr -dr com.apple.quarantine /Applications/AgentUsage.app
+open /Applications/AgentUsage.app
+```
+
+The `xattr` step only matters when the transfer set the quarantine bit — AirDrop,
+browser downloads, and Messages do; `scp`, `rsync`, and USB sticks don't. Strip
+it *before* the first launch: this app is signed with an Apple Development
+certificate rather than a notarized Developer ID one, so Gatekeeper rejects it
+(`spctl -a` says so here too), and the "Open Anyway" button only appears under
+System Settings → Privacy & Security *after* a launch has already been blocked.
+
+The target Mac needs macOS 15+ and Claude Code installed **and signed in**: the
+app carries no token, it reads that machine's own login Keychain item, so nothing
+of mine travels inside the zip. There is no Keychain dialog to approve — the
+item is read through Apple's `security` tool, the same client Claude Code
+stores it with. The first launch sets up the background engine (`usaged`) by
+itself — that's the whole install.
+
+Keep the bundle in `/Applications`: `SMAppService` registers the launch-at-login
+item by path, so moving the app afterwards breaks that toggle.
+
+The signature is timestamped, so it stays valid after the signing certificate
+expires. A build carried this way never self-updates — it is told when a
+newer version is tagged, and the way to get it is another `mise run dist`.
+
+## The README's media
+
+- THE README IS THE USER'S PAGE (2026-09-20, user-directed "more user
+  facing… much more succinct"): what it is, the recordings, install, privacy
+  in a paragraph, links. It was 500 lines of amendment history and face
+  manuals; those moved to the doc for their area ([PRIVACY.md](PRIVACY.md)
+  for every §10 amendment) and new ones land there, not back in the README.
+- RECORDINGS NEVER SHOW REAL USAGE. `mise run media` (`scripts/media.sh`)
+  re-records `docs/media/*.gif` from the `.tape` beside each, against a
+  synthetic digest from `scripts/demo-digest.py` (`mise run demo-digest --
+  out.json` on its own, for a demo by hand) — the contract golden as the
+  template, filled with a seeded, plausible twelve weeks laid out relative
+  to now, since a digest whose resets are past renders stale. A throwaway
+  PATH fronts `usage-tui`/`usage-cli` with wrappers that add `--digest`, so
+  a tape types what a user would. vhs (0.12) only CAPTURES: its own encode
+  fails silently against ffmpeg 8+ (exit 0, no file), so the script
+  assembles the GIF from the text and cursor frame layers itself. vhs and
+  ffmpeg are brew installs, deliberately not pinned in `mise.toml`.
+- The menu bar app has no recording yet: its fake-data hatches borrow the
+  LIVE digest and `--snapshot` cannot render the panel's ScrollView, so a
+  fixture-only picture of it needs a hatch that renders every face from a
+  digest file. Until that exists, do not hand-capture one from a real
+  account.
 
 ## The app icon
 

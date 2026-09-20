@@ -100,6 +100,14 @@ run = [
 description = "Render the app icon to .build/icon/AppIcon.icns (cached until scripts/icon.swift changes)"
 run = "scripts/icon.sh"
 
+[tasks.media]
+description = "Re-record the README's terminal GIFs against a synthetic digest (needs vhs + ffmpeg; arg: tapes)"
+run = "scripts/media.sh"
+
+[tasks.demo-digest]
+description = "Write a synthetic live-state.json for demos (arg: out.json) — read it with usage-tui/usage-cli --digest"
+run = "scripts/demo-digest.py"
+
 [tasks.axdump]
 description = "Dump the app's AX tree with frames (arg: pid, default newest AgentUsage)"
 run = "swift scripts/axdump.swift"

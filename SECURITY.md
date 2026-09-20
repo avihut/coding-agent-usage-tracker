@@ -13,7 +13,7 @@ expect an acknowledgement within a week.
 ## What counts
 
 The app's hard rules are written down in `docs/SPEC.md` §10 and summarized in
-the README's "Credential rules". A way to make the app break one of them is a
+`docs/PRIVACY.md` ("Credential rules"). A way to make the app break one of them is a
 vulnerability — for example:
 
 - the access token (or any credential) being logged, persisted, placed in a

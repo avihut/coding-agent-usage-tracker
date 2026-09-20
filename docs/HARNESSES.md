@@ -11,6 +11,98 @@ The extension point itself — `UsageProvider` and what may name a vendor —
 is in [ARCHITECTURE.md](ARCHITECTURE.md#the-provider-seam). Adding a
 provider also needs a spec §10 amendment for its hosts and local trees.
 
+## What the user sees
+
+### Several agent homes, one meter each
+
+Claude Code keeps one config home per `CLAUDE_CONFIG_DIR`, and this Mac
+runs two at once — work in `~/.claude`, personal in `~/.claude-personal`.
+Since v0.96.0 the app meters each of them as its own **account**: its own
+token, its own limits, its own history, its own directory under the app's
+scope. There is no blending — two accounts are two meters, never one sum.
+
+What this reads, and why it adds no network destination, is in
+[PRIVACY.md](PRIVACY.md#several-agent-homes-no-new-destination).
+
+The menu bar leads with whichever account you have actually been using:
+focus follows the volume of session files over the trailing fortnight
+(newest write breaks ties) — until you pick one, in the panel's account
+strip or in Settings, which pins it until you ask for Auto again. Each
+account draws in the menu bar in its own form — digits, bars, rings,
+compact digits, or a dot — set per account or for all of them at once,
+with the focused account optionally expanded to its full numbers whatever
+its form, and any account can take a menu bar item of its own. Settings →
+Menu bar shows the bar as it will draw, live, with every option pictured
+in your own numbers; drag the accounts across the preview to order them.
+Settings → Accounts is only about which sign-ins are metered.
+
+The bar can also carry more than the meters. Settings → Menu bar has a
+palette of elements to drag onto the preview (or click to add):
+today's one element is **Runs out**, the expected time until a limit is
+reached — `S 31m` in the same red capsule the digits alarm with, or once a
+limit is spent `S↺ 2h 10m`, counting down to its reset. It is conditional
+by design: while no limit is forecast to run out before it resets it draws
+nothing at all, and the bar is exactly what it was without it. One element,
+scoped — the earliest limit by default (any crossing cuts you off, so the
+first one is the answer), or every limit, or one meter — placed before or
+after the meters, per account or for all of them under the same "Same form
+for every account" switch. With several accounts it draws for the focused
+account only, so the bar carries one countdown; a switch gives every
+account its own. Because a quiet day would make the drop look
+like it failed, the preview draws a dashed placeholder where the element
+will appear, and "Preview as if a limit were running out" dresses the whole
+preview with a half-hour countdown so you can see the real rendering.
+The panel gains an account strip that doubles as the selector — rows,
+chips, or every account stacked. An account whose transcripts go quiet
+for 30 days goes dormant and stops polling entirely until it is used
+again.
+
+On the command line, an account is a selector rather than a mode:
+
+```sh
+usage-cli accounts                       # id, label, home, state, focus, limits
+usage-cli limits --account personal      # by id, nickname, label, or home path
+CLAUDE_CONFIG_DIR=~/.claude-personal usage-cli limits   # the same answer
+usage-cli state | jq '.profiles[] | {id, label, dormant, isFocused}'
+```
+
+`--account` wins over `$CLAUDE_CONFIG_DIR`, which wins over whichever
+account is focused. Every existing noun answers for the selected account —
+`limits`, `spend`, `sessions`, `history`, `windows`, `session` all read
+that home's own files. An unknown selector exits 20 and lists the accounts
+it knows; it never quietly answers for a different one, which is the whole
+point when a status line renders under one config dir and the daemon is
+metering another.
+
+### Every agent at once, none of them "active"
+
+Up to v0.100.1 the app metered ONE agent: it scored which harness had run
+recently and read that one, and a picker let you override the guess. Since
+**v0.101.0** it meters every harness it finds on this Mac — Claude Code,
+Codex and Gemini CLI together — the way it already metered several Claude
+accounts together. They sit alongside each other in the bar under their own
+marks in their own colours, one of them holds focus, and the panel, the
+charts and the CLI answer for whichever that is. There is no active harness
+to choose and no switch to make.
+
+A harness you aren't interested in can be **hidden** (Settings → General →
+Harnesses). Hiding stops it being DISPLAYED and nothing else: it keeps being
+polled, forecast and priced, and its models stay in the API Cost rates list,
+which lists every detected harness whether shown or not. The last shown
+harness can't be hidden — an empty bar isn't a state worth being able to
+reach.
+
+Metering them together adds no network destination either —
+[PRIVACY.md](PRIVACY.md#every-harness-at-once-no-new-destination).
+
+Forecasts stay per harness and per account folder. A folder's learned
+history belongs to the folder, so signing into a different account inside
+one keeps that folder's rhythm — the usage being pulled changed, not the
+place it is kept.
+
+`usage-cli harnesses` is the scriptable view: every detected harness, what
+it has been doing lately, whether it is shown, and its own service health.
+
 ## Multi-account metering (v0.96.0)
 
 - MULTI-ACCOUNT METERING (2026-09-06 v0.96.0, user-directed "meter my
