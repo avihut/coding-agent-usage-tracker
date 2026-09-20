@@ -27,6 +27,20 @@ public protocol DistributionChannel: Sendable {
     var manualUpdateHint: String? { get }
 }
 
+extension DistributionChannel {
+    /// How to get `release` when it can't be one-click installed. Releases
+    /// are source-only (2026-09-20) — a tag and its notes, no binary — so a
+    /// standalone install (outside any checkout) faces a release with
+    /// nothing to download and no checkout to pull: the way forward is the
+    /// source itself. The pipeline stays for the day a notarized asset exists.
+    public func manualUpdateHint(for release: AppUpdateCard) -> String? {
+        if canSelfInstall, release.assetURL == nil {
+            return "Releases ship as source, not as a download: get v\(release.latestVersion) from the repository and rebuild the app (README → Install)."
+        }
+        return manualUpdateHint
+    }
+}
+
 /// The GitHub stream — currently the only one. One channel, two install
 /// flavors, both auto-detected: a release zip installed by hand (typically
 /// /Applications) self-updates with the one-click swap, while a bundle

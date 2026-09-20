@@ -201,6 +201,31 @@ struct DistributionChannelTests {
             == UpdateFeed.latestURL(repository: AppIdentity.repository))
     }
 
+    private func offer(asset: String?) -> AppUpdateCard {
+        AppUpdateCard(
+            latestVersion: "9.9.9", url: "\(AppIdentity.releasesPage)/tag/v9.9.9",
+            publishedAt: nil, assetName: asset, assetURL: asset, assetBytes: nil,
+            checkedAt: Date(), updateAvailable: true)
+    }
+
+    @Test("a source-only release tells a standalone install to rebuild — there is nothing to download")
+    func sourceOnlyHint() {
+        let standalone = GitHubChannel(flavor: .releaseInstall)
+        let hint = standalone.manualUpdateHint(for: offer(asset: nil))
+        #expect(hint?.contains("v9.9.9") == true)
+        #expect(hint?.contains("rebuild") == true)
+        // A release that does carry an asset is the one-click path: no hint.
+        #expect(standalone.manualUpdateHint(for: offer(asset: "https://github.com/x.zip")) == nil)
+    }
+
+    @Test("a checkout keeps its own pull-and-rebuild hint whatever the release carries")
+    func checkoutHintUnchanged() {
+        let checkout = GitHubChannel(flavor: .sourceCheckout(root: URL(filePath: "/nonexistent")))
+        #expect(checkout.manualUpdateHint(for: offer(asset: nil)) == checkout.manualUpdateHint)
+        #expect(checkout.manualUpdateHint(for: offer(asset: "https://github.com/x.zip"))
+            == checkout.manualUpdateHint)
+    }
+
     @Test("bare executables belong to no channel at all")
     func noChannel() {
         #expect(Distribution.channel(for: URL(fileURLWithPath: "/tmp/x/debug")) == nil)

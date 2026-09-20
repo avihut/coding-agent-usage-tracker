@@ -677,15 +677,16 @@ struct UsagePanelView: View {
                 Toggle("Launch at login", isOn: SettingsBindings.launchAtLogin())
                 Divider()
                 if let update = visibleUpdate {
-                    if store.updateCanSelfInstall {
+                    if store.canSelfInstall(update) {
                         Button("Update to \(update.latestVersion)…") {
                             AppUpdater.shared.resetFailure()
                             AppUpdater.shared.install(update)
                         }
                         .disabled(AppUpdater.shared.isBusy)
                     } else {
-                        // A checkout build can't swap itself; the Settings
-                        // card carries the how.
+                        // A checkout build can't swap itself, and a
+                        // source-only release has nothing to swap in; the
+                        // Settings card carries the how.
                         Button("Version \(update.latestVersion) available…") {
                             onOpenSettings(nil)
                         }
@@ -734,7 +735,7 @@ struct UsagePanelView: View {
     /// Settings, where the card says how updating works here.
     @ViewBuilder private var updateControl: some View {
         if let update = visibleUpdate {
-            if store.updateCanSelfInstall {
+            if store.canSelfInstall(update) {
                 installUpdateControl(update)
             } else {
                 Button {
