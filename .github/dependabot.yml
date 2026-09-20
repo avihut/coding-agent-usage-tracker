@@ -1,4 +1,6 @@
-# Version bumps arrive as PRs through the same gate as any other change.
+# Version bumps arrive as PRs through the same gate as any other change, and
+# the safe ones merge themselves once it is green
+# (.github/workflows/dependabot-auto-merge.yml says which, and why).
 # The cooldown mirrors mise.toml's minimum_release_age: nothing younger than
 # a week. scripts/guard.sh still holds the TUI to its four crates — this only
 # ever moves their versions.
