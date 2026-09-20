@@ -209,12 +209,16 @@ passes test "$(git rev-parse HEAD)" = "$landed"
 
 # The notes fragment is the annotation, and the release commit spends it.
 mkdir -p .release-notes
-printf 'Prose the fragment carried.\n' >.release-notes/next.md
+# Written UNDER the template comment, as a real fragment is: the comment is
+# scaffolding and must not reach the annotation (it once became its subject).
+printf '<!-- What shipped, in prose.\n     Second comment line. -->\n\nA short title\n\nProse the fragment carried.\n' >.release-notes/next.md
 git add -A
 git commit -qm 'feat(panel): something worth a minor'
 passes "$scripts/release.sh"
 passes test "$(git log -1 --format=%s)" = 'release: v0.3.0'
 passes sh -c "git tag -l --format='%(contents)' v0.3.0 | grep -q 'Prose the fragment carried'"
+passes test "$(git tag -l --format='%(contents:subject)' v0.3.0)" = 'A short title'
+passes sh -c "! git tag -l --format='%(contents)' v0.3.0 | grep -q -e '<!--' -e 'comment line'"
 passes sh -c "! grep -q 'Prose the fragment carried' .release-notes/next.md"
 
 # ── digest-baseline.sh ──────────────────────────────────────────────────────
