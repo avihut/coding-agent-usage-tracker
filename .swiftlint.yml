@@ -40,7 +40,7 @@ custom_rules:
     name: "Headless core"
     included: "Sources/(UsageCore|usaged|usage-cli)/.*\\.swift"
     regex: '^\s*(@\w+\s+)*import\s+(AppKit|SwiftUI|Cocoa)\b'
-    message: "UsageCore, usaged and usage-cli import no UI framework — all logic stays headlessly testable (CLAUDE.md, Architecture)."
+    message: "UsageCore, usaged and usage-cli import no UI framework — all logic stays headlessly testable (docs/ARCHITECTURE.md)."
     severity: error
   native_keychain_call:
     name: "Native Keychain call"
@@ -58,5 +58,5 @@ custom_rules:
     name: "chartScrollableAxes"
     regex: '\.chartScrollableAxes\b'
     excluded_match_kinds: [comment, doccomment]
-    message: "chartScrollableAxes never responded to trackpad scrolls here — pan through HorizontalPanCatcher (chart contract, clause 9)."
+    message: "chartScrollableAxes never responded to trackpad scrolls here — pan through HorizontalPanCatcher (docs/CHARTS.md, chart contract clause 9)."
     severity: error

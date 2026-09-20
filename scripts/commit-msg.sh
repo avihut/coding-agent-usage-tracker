@@ -34,6 +34,6 @@ if [[ "$subject" =~ ^release: ]]; then
     fi
 elif [ -n "$committed" ] && [ "$staged" != "$committed" ]; then
     echo "commit-msg: this commit moves AppIdentity.version $committed → $staged," >&2
-    echo "  so its subject must be 'release: v$staged' (CLAUDE.md: release ritual)" >&2
+    echo "  so its subject must be 'release: v$staged' (docs/WORKFLOW.md: release ritual)" >&2
     exit 1
 fi

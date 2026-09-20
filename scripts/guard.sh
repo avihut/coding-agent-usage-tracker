@@ -39,7 +39,7 @@ fi
 #    ID; the example file's "(TEAMID)" placeholder does not.
 identity='(Developer ID Application|Apple Development|Apple Distribution|Mac Developer): [^"()]*\([A-Z0-9]{10}\)'
 if hits=$("${grep_tree[@]}" -nE "$identity"); then
-    fail "a code-signing identity is hardcoded (CLAUDE.md: machine-local identity only)" \
+    fail "a code-signing identity is hardcoded (docs/WORKFLOW.md: machine-local identity only)" \
         "$(cut -d: -f1,2 <<<"$hits")"
 fi
 

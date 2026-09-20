@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# pre-push hook body: every release being pushed is a whole one. CLAUDE.md:
+# pre-push hook body: every release being pushed is a whole one. See
+# docs/WORKFLOW.md:
 # "Every commit that bumps AppIdentity.version gets a matching annotated tag
 # (vX.Y.Z) on that commit, pushed alongside it" — and publish.sh reads the
 # tag's annotation as the GitHub release notes, so a lightweight tag ships

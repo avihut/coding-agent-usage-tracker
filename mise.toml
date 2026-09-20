@@ -165,7 +165,7 @@ description = "Every linter over the whole tree: SwiftLint + shell"
 depends = ["lint-swift", "lint-shell"]
 
 [tasks.lint-swift]
-description = "SwiftLint: the correctness-only rule set + CLAUDE.md's never-again rules (args: files, default the whole tree)"
+description = "SwiftLint: the correctness-only rule set + the repo's never-again rules (args: files, default the whole tree)"
 run = "swiftlint lint --strict --quiet"
 
 [tasks.lint-shell]
