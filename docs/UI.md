@@ -438,3 +438,42 @@ per-harness geometry of the bar is in [HARNESSES.md](HARNESSES.md).
   padding, never .offset), and a popover whose anchor view is
   inserted in the same transaction that flips isPresented is silently
   dropped.
+
+## The demo hatch
+
+- `--demo-digest <live-state.json>` (2026-09-20, for the README's pictures,
+  user-directed "use fixture data"): every face renders THAT file and
+  nothing of this Mac. The registry becomes a client of a fixed
+  `DigestFeed` and stays one — no lease, no engine, no role timer, no
+  `LaunchAgentInstaller.ensure` (so a demo launched from a worktree cannot
+  repoint the real launch agent, the hatch-launch lesson), and an
+  unreadable file exits 2 rather than falling through to real data under a
+  flag that promised none. Three leaks had to be closed, and any new
+  client-side read is a fourth: (1) a client face SCANS TRANSCRIPTS itself
+  for the heatmap, the model table and the shortlist — the digest carries
+  rollups, not those — so a demo `DigestClient` makes no local activity
+  source (`scansLocally: false`) and takes `DigestActivity.daily/sessions`
+  (core, tested) from the digest instead; (2) a client reads per-account
+  HISTORY beside the digest, so the demo registry is handed
+  `<bundleID>.demo`, a storage scope with nothing in it (nothing is
+  written there either — checked: the directory is never created);
+  (3) the account list comes from the digest's sections, not
+  `ProfileStore`. The one thing deliberately taken from this Mac is how
+  the person DRAWS an account they also have (`menuBarForm`,
+  `menuBarElements`), so the bar in the picture is the one they chose.
+  What a demo can't show follows from (1): no minute timeline, no
+  per-session model split, and the forecast caption reads as a fresh
+  install's.
+- `--snapshot` gained `panel-dark.png` / `panel-light.png` and
+  `menubar-preview@2x.png`. The panel could never be snapshotted before —
+  ImageRenderer blanks a ScrollView and the live popover closes the moment
+  the app resigns active — so the real `UsagePanelView` is hosted in a
+  borderless window parked off every screen, sized by an
+  `NSHostingController` with `.preferredContentSize` exactly as the popover
+  sizes it (`fittingSize` on a bare hosting view collapses the ScrollView
+  to nothing), and drawn with `cacheDisplay` into a bitmap made at 2x by
+  hand: an off-screen window's backing scale is 1. It draws a beat after
+  staging and again after the resize — a hosted SwiftUI tree lays out over
+  the next run-loop turns, not on insertion. No screen capture, so no
+  Screen Recording consent and no desktop in the picture. Existing
+  snapshot files are untouched (the baselines `cmp` them).

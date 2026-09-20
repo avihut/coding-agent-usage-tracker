@@ -355,22 +355,34 @@ newer version is tagged, and the way to get it is another `mise run dist`.
   in a paragraph, links. It was 500 lines of amendment history and face
   manuals; those moved to the doc for their area ([PRIVACY.md](PRIVACY.md)
   for every §10 amendment) and new ones land there, not back in the README.
-- RECORDINGS NEVER SHOW REAL USAGE. `mise run media` (`scripts/media.sh`)
-  re-records `docs/media/*.gif` from the `.tape` beside each, against a
-  synthetic digest from `scripts/demo-digest.py` (`mise run demo-digest --
-  out.json` on its own, for a demo by hand) — the contract golden as the
-  template, filled with a seeded, plausible twelve weeks laid out relative
-  to now, since a digest whose resets are past renders stale. A throwaway
-  PATH fronts `usage-tui`/`usage-cli` with wrappers that add `--digest`, so
-  a tape types what a user would. vhs (0.12) only CAPTURES: its own encode
+- THE MEDIA NEVER SHOWS REAL USAGE. `mise run media` (`scripts/media.sh`)
+  re-makes everything in `docs/media/` against a synthetic digest from
+  `scripts/demo-digest.py` (`mise run demo-digest -- out.json` on its own,
+  for a demo by hand) — the multi-harness contract golden as the template,
+  filled with a seeded, plausible twelve weeks for Claude Code AND Codex
+  (user-directed: "Claude Code and Codex at least"), laid out relative to
+  now, since a digest whose resets are past renders stale. Codex carries
+  ONE meter, the week-long window it actually publishes today. Costs use
+  blended rates tuned to what the app's own list-price arithmetic makes of
+  the same tallies, so the three faces agree in the pictures.
+- THE TERMINAL GIFS come from the `.tape` beside each: a throwaway PATH
+  fronts `usage-tui`/`usage-cli` with wrappers that add `--digest`, so a
+  tape types what a user would. vhs (0.12) only CAPTURES: its own encode
   fails silently against ffmpeg 8+ (exit 0, no file), so the script
   assembles the GIF from the text and cursor frame layers itself. vhs and
-  ffmpeg are brew installs, deliberately not pinned in `mise.toml`.
-- The menu bar app has no recording yet: its fake-data hatches borrow the
-  LIVE digest and `--snapshot` cannot render the panel's ScrollView, so a
-  fixture-only picture of it needs a hatch that renders every face from a
-  digest file. Until that exists, do not hand-capture one from a real
-  account.
+  ffmpeg are brew installs, deliberately not pinned in `mise.toml`. In a
+  zsh script, brace a variable that a `:` follows inside an ffmpeg filter —
+  `$gap:color` is a history modifier, not a separator.
+- THE MENU BAR PICTURES come from the app: `--demo-digest <file>
+  --snapshot <dir>` ([UI.md](UI.md#the-demo-hatch)). The script runs the
+  bundle's binary directly rather than `mise run hatch`, so the app that is
+  already running is never killed; the demo takes no lease and installs no
+  launch agent, so it cannot repoint the real one. `media.sh` composes
+  `menubar-preview@2x.png` over `panel-<theme>.png` and rounds the panel's
+  corners (the popover that rounds them on screen didn't draw it). The bar
+  draws with the RECORDING Mac's own menu bar settings — that is where
+  "Codex as a ring" comes from — so re-record on a Mac set up the way the
+  picture should look.
 
 ## The app icon
 

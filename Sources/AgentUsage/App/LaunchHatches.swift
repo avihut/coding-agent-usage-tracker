@@ -9,6 +9,22 @@ import UsageCore
 /// card through the real phrasing and hands it to the face.
 @MainActor
 extension AppDelegate {
+    /// `--demo-digest <path>`: the digest every face renders instead of
+    /// this Mac's. An unreadable file is no demo at all — the app must not
+    /// fall through to real data under a flag that promised none.
+    static func launchDemoDigest() -> LiveState? {
+        let arguments = CommandLine.arguments
+        guard let flag = arguments.firstIndex(of: "--demo-digest") else { return nil }
+        guard arguments.indices.contains(flag + 1),
+              let data = try? Data(contentsOf: URL(fileURLWithPath: arguments[flag + 1])),
+              let live = try? LiveState.decoder().decode(LiveState.self, from: data)
+        else {
+            FileHandle.standardError.write(Data("--demo-digest: no readable digest\n".utf8))
+            exit(2)
+        }
+        return live
+    }
+
     /// The synthetic second account. Its digest is the live one with two
     /// meters rewritten and the third dropped — the absent scoped bar is
     /// exactly the case a one-account Mac can't otherwise produce.

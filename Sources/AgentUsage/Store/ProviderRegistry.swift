@@ -29,6 +29,9 @@ final class ProviderRegistry {
     /// order harnesses appear in on the bar and in the strip.
     let providers: [any UsageProvider]
     let bundleID: String
+    /// `--demo-digest`: every face renders one fixed digest and the process
+    /// touches nothing real — see `init`.
+    let isDemo: Bool
     private(set) var role: Role
     /// Every record of every metered harness (enrolled and dismissed alike),
     /// each harness's implicit default first.
@@ -57,10 +60,17 @@ final class ProviderRegistry {
     @ObservationIgnored private var observationGeneration = 0
     @ObservationIgnored private var lastFocusedID: String?
 
-    init(bundleID: String) {
+    /// `demo` is the `--demo-digest` hatch (screenshots that show nobody's
+    /// real usage): the process is a client of that fixed digest and stays
+    /// one. It takes no lease, hosts no engine, reads no credential and no
+    /// profile record, installs no launch agent — and the caller hands it a
+    /// `bundleID` of its own, so the per-account history a client reads
+    /// beside the digest comes up empty instead of real.
+    init(bundleID: String, demo: LiveState? = nil) {
         let providers = HarnessResolution.standardProviders()
         self.providers = providers
         self.bundleID = bundleID
+        self.isDemo = demo != nil
         // The catalog spans every harness this build can meter and never
         // changes again (0.101.0): with two vendors' models in one grid, a
         // name must come from the vendor whose grammar the id belongs to.
@@ -76,7 +86,9 @@ final class ProviderRegistry {
         let decided = EngineHostBroker.role(
             leaseHeldByOther: EngineLease.isHeld(at: lease.lockURL),
             daemonAlive: daemonAlive)
-        if decided == .host, lease.acquire() {
+        if let demo {
+            role = .client(DigestFeed(fixed: demo))
+        } else if decided == .host, lease.acquire() {
             let previous = try? LiveState.decoder().decode(
                 LiveState.self, from: Data(contentsOf: LiveState.fileURL(bundleID: bundleID)))
             role = .hosting(Self.makeHost(
@@ -88,6 +100,9 @@ final class ProviderRegistry {
         loadProfiles()
         syncStores()
         observeRole()
+        // No role to re-evaluate and no agent to converge: a demo never
+        // becomes a host, and must not repoint the real launch agent.
+        guard demo == nil else { return }
 
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
@@ -371,6 +386,24 @@ final class ProviderRegistry {
     // MARK: - Faces
 
     func loadProfiles() {
+        // A demo's accounts are the digest's sections, not this Mac's. The
+        // one thing taken from here is how the person DRAWS an account they
+        // also have — its form and elements — so the picture is the bar
+        // they actually chose; no home, nickname or identity comes along.
+        if isDemo, case .client(let feed) = role {
+            let stored = ProfileStore.load(from: .standard)
+            profiles = (feed.digest?.profiles ?? []).compactMap { section in
+                guard let provider = providers.first(where: { $0.id == section.providerID })
+                else { return nil }
+                var profile = Profile.standard(for: provider, addedAt: Date())
+                if let own = stored.first(where: { $0.key == profile.key }) {
+                    profile.menuBarForm = own.menuBarForm
+                    profile.menuBarElements = own.menuBarElements
+                }
+                return profile
+            }
+            return
+        }
         let stored = ProfileStore.load(from: .standard)
         if case .hosting(let host) = role, !host.profiles.isEmpty {
             profiles = host.profiles
@@ -422,7 +455,7 @@ final class ProviderRegistry {
             // BUNDLED harness's section.
             return .client(DigestClient(
                 profileID: profile.key, storageID: profile.id, provider: provider(for: profile), feed: feed,
-                bundleID: bundleID))
+                bundleID: bundleID, scansLocally: !isDemo))
         }
     }
 

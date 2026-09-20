@@ -11,18 +11,27 @@ run out — in the macOS menu bar, in a terminal dashboard, and from a script.
 It meters Claude Code's session, weekly and per-model limits (the numbers in
 the Claude app's Settings → Usage), with Codex and Gemini CLI beside it.
 
-![usage-tui: limits, today's activity, per-model cost and the usage heatmap](docs/media/tui.gif)
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: light)" srcset="docs/media/menubar-light.png">
+    <img src="docs/media/menubar-dark.png" width="400"
+         alt="The menu bar item — Claude Code's three limits as digits, Codex's weekly limit as a ring — and the panel it opens: every limit with its reset time, a week of activity by model, and cost at API list prices">
+  </picture>
+</p>
 
 - **Menu bar** — every limit at a glance, coloured by how likely you are to
-  hit it; a panel with reset times, run-out forecasts, a usage heatmap and a
-  per-model token and cost breakdown. Several accounts, one meter each.
+  hit it, each agent drawn the way you choose (digits, bars, rings, a dot); a
+  panel with reset times, run-out forecasts, a usage heatmap and a per-model
+  token and cost breakdown. Several accounts, one meter each.
 - **`usage-tui`** — the same dashboard in a terminal pane, down to a one-line
   strip, plus `usage-tui --status` for the tmux status bar.
 - **`usage-cli`** — every number as text or JSON, for status lines and scripts.
 
+![usage-tui: limits, today's activity, per-model cost and the usage heatmap](docs/media/tui.gif)
+
 ![usage-cli: limits, models, sessions and a status-line segment](docs/media/cli.gif)
 
-The recordings show synthetic data (`mise run media` re-records them).
+Everything pictured is synthetic data (`mise run media` re-makes it all).
 
 ## Install
 
