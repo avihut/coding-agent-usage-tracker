@@ -166,7 +166,10 @@ a face is in [ARCHITECTURE.md](ARCHITECTURE.md).
   not bind; narrower lockouts still respected) beside the clamped
   `projectedAtReset`; `ForecastOvershoot.estimate` (Prediction/) turns the
   points over 100 into tokens through the popover's own conversion
-  (`ModelCurves.windowPercentPerToken` over the window's gains) and into
+  (`ModelCurves.windowPercentPerToken` over the window's gains, read off the
+  window's OWN samples — `WindowSamples.percents`, picked by reset stamp, so
+  the boundary poll still reporting the previous window's percent never
+  enters this one's gains) and into
   dollars through the window's priced rows only (Anthropic bills extra
   usage at API list rates, which is what the app prices at) — tokens and
   cost are nil, never 0/$0, without token data or a priced model. Phrased
