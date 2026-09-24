@@ -113,6 +113,24 @@ struct ForecastOvershootTests {
         #expect(overshoot.tokens == 110_000)
     }
 
+    /// The poll that lands on the window's boundary still reports the OLD
+    /// window's percent (user-reported 2026-09-24). Counted as this
+    /// window's entry height it inflates the gains — 0 → 79 → 20 → 70 reads
+    /// 129 points, not 70 — and the same overshoot would be quoted at
+    /// ~59,700 tokens. Picked by stamp, the estimate is the plain fixture's
+    /// to the token.
+    @Test("the poll on the window's boundary is not this window's first")
+    func boundarySampleIsExcluded() throws {
+        let stale = [
+            UsageSample(
+                t: windowStart, percents: ["Session (5h)": 79],
+                resets: ["Session (5h)": windowStart]),
+        ] + samples
+        let overshoot = try #require(estimate(samples: stale))
+        #expect(overshoot.tokens == 110_000)
+        #expect(abs(try #require(overshoot.cost) - 110_000 * (2.05 / 700_000)) < 1e-9)
+    }
+
     @Test("cost prices those tokens at the window's own model mix")
     func costFromPricedRows() throws {
         // 550,000 input at $1/MTok + 150,000 output at $10/MTok = $2.05 over

@@ -48,7 +48,10 @@ public struct ForecastOvershoot: Codable, Sendable, Equatable {
     ///    so a vendor grant inside it counts what was bought before AND
     ///    after) over the tokens spent in it. That is the popover chart's
     ///    own Y-axis conversion, so the dollars quoted here and the curves
-    ///    drawn there price a token identically.
+    ///    drawn there price a token identically — down to WHICH samples are
+    ///    the window's: `WindowSamples` picks them by reset stamp, because
+    ///    the poll that lands on the boundary still reports the OLD window's
+    ///    percent and would otherwise open this one at that height.
     /// 2. TOKENS → DOLLARS through the window's own priced model mix: the
     ///    dollars those rows cost (via `ModelRates.dollarBreakdown`, the one
     ///    costing source) over their tokens. An UNPRICED model's tokens are
@@ -71,10 +74,8 @@ public struct ForecastOvershoot: Codable, Sendable, Equatable {
         let all = WindowTokens.breakdown(timeline: timeline, from: start, to: now)
         let rows = meter.scopedModelName.map { WindowTokens.scoped(all, name: $0) } ?? all
         let spent = WindowTokens.total(rows).total
-        let percents = samples
-            .sorted { $0.t < $1.t }
-            .filter { $0.t >= start && $0.t <= now }
-            .compactMap { $0.percents[meter.label] }
+        let percents = WindowSamples.percents(
+            samples, label: meter.label, start: start, end: now, reset: reset)
 
         guard
             let percentPerToken = ModelCurves.windowPercentPerToken(

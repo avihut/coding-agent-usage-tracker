@@ -514,16 +514,32 @@ struct MeterHistoryView: View {
         let percent: Int
     }
 
+    /// The samples the token normalization and the grant test read — NOT
+    /// the drawn line (`percentSeries`, which keeps the sample before the
+    /// frame so the reset cliff has a height to fall from).
+    ///
+    /// On the Current span the page IS one limit window, so its samples are
+    /// picked by reset stamp (`WindowSamples`): the poll that lands on the
+    /// boundary still reports the OLD window's percent, and taking it on
+    /// time alone opened the window at that height — priced through
+    /// `ModelCurves.windowPercentPerToken` it counted as spend and drew
+    /// every curve a multiple too tall (user-reported 2026-09-24). The
+    /// page's own end is the stamp to match: the live reset for the live
+    /// page, and for a past page the observed stamp `LimitWindows` built it
+    /// from — the very stamp its samples carry. A History frame straddles
+    /// many windows and belongs to none, so it stays on time alone.
     private var points: [Point] {
         let (start, end) = domain
         let measuredEnd = min(end, Date())
-        return samples
-            .filter { $0.t >= start && $0.t <= measuredEnd }
-            .compactMap { sample in
-                sample.percents[meter.label].map {
-                    Point(id: sample.t.timeIntervalSince1970, t: sample.t, percent: $0)
-                }
+        let own: [UsageSample] = effectiveSpan == .current
+            ? WindowSamples.own(
+                samples, label: meter.label, start: start, end: measuredEnd, reset: end)
+            : samples.filter { $0.t >= start && $0.t <= measuredEnd }
+        return own.compactMap { sample in
+            sample.percents[meter.label].map {
+                Point(id: sample.t.timeIntervalSince1970, t: sample.t, percent: $0)
             }
+        }
     }
 
     private struct PercentSeries {
@@ -1665,16 +1681,17 @@ struct MeterHistoryView: View {
     /// Current span, so a grant inside the live window prices tokens the
     /// same on both spans. Curves normalized by it read as fractions of a
     /// single limit — and may honestly exceed it across a frame longer
-    /// than one window.
+    /// than one window. The live window's own samples are picked by stamp
+    /// (`WindowSamples`), like the Current span's: the poll on the boundary
+    /// still reads the window before it.
     private var historyPercentPerToken: Double? {
         guard let reset = liveReset else { return nil }
         let now = Date()
         let windowStart = reset.addingTimeInterval(-window)
         let all = WindowTokens.breakdown(timeline: timeline, from: windowStart, to: now)
         let scoped = scopeName.map { WindowTokens.scoped(all, name: $0) } ?? all
-        let percents = samples
-            .filter { $0.t >= windowStart && $0.t <= now }
-            .compactMap { $0.percents[meter.label] }
+        let percents = WindowSamples.percents(
+            samples, label: meter.label, start: windowStart, end: now, reset: reset)
         return ModelCurves.windowPercentPerToken(
             percents: percents, tokens: WindowTokens.total(scoped).total)
     }

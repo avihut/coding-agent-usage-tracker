@@ -207,7 +207,22 @@ are produced is in [MEASUREMENT.md](MEASUREMENT.md).
   where the forgiven spend still happened: `ModelCurves.holdsGrant` lifts
   the Current span's cap and the curve tip stays the window's token total
   (fallback: busiest-model spans the plot, only when percent data is
-  missing/flat);
+  missing/flat). WHICH samples are the window's is a stamp question, never
+  a time one: `WindowSamples.own/.percents` (core, Audit/) keeps a sample
+  only when its reset stamp — carried through the polls the API blanked
+  (`ResetCarry.fill`), and on the boundary itself the last stamp seen
+  before it — names the window being drawn, within `ResetStamp.tolerance`.
+  The poll that lands ON the boundary still reports the OLD window's
+  percent, so a `t >= windowStart` filter opened the new window at that
+  height: user-reported 2026-09-24, a 5h window whose first in-window poll
+  read the previous window's 79% counted 79 + 13 points of gain instead of
+  13, priced every token ~7× high, drew the window's busiest model near
+  100 over a percent line at 13, and made the same 79 → 0 read as a grant
+  that lifted the cap. History from before samples carried stamps still
+  selects on time alone. `points` uses it on the Current span only — a
+  History frame straddles many windows and belongs to none — while the
+  DRAWN percent line (`percentSeries`) deliberately keeps the pre-window
+  sample, which is what gives the reset cliff a height to fall from;
   one `focusedModel` state drives both the chart (focused curve full
   opacity + area, rest dimmed) and the legend rows — hover either surface
   and both light, since they render from the same binding. While focused,

@@ -153,6 +153,9 @@ may not realise you are standing. The doc named beside each says why.
 - Compare reset stamps through `ResetStamp`, never `Date` equality — the
   API restates `resets_at` with sub-second jitter on every poll.
   (`docs/ARCHITECTURE.md`)
+- A window's samples are picked by reset stamp (`WindowSamples`), never by
+  time alone — the poll that lands on the boundary still reads the old
+  window. (`docs/CHARTS.md`)
 - Absent ≠ zero, everywhere it is rendered or printed: an unpriced cost
   or an unreported percent is null, never 0. (`docs/DAEMON.md`)
 - The digest is additive-only forever, and its goldens are decoded by
