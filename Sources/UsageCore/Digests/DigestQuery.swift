@@ -5,7 +5,9 @@ import Foundation
 /// single place); `note` is commentary for stderr, in the existing `note()`
 /// pattern; `exitCode` is part of the API (spec: 0 ok, 13 no digest — the
 /// CLI's own concern, before a `DigestQuery` call happens — 19 bad query,
-/// 20 selector matched nothing, 21 stale beyond `--max-age`).
+/// 20 selector matched nothing, 21 stale beyond `--max-age` or
+/// `--max-data-age`; `headroom`'s own 24 at or over the cap, 25 a forecast
+/// fails `--forecast`, 26 nothing to judge).
 public struct QueryOutput: Sendable, Equatable {
     public let stdout: String
     public let note: String?
@@ -39,6 +41,9 @@ public enum DigestQuery {
     static let exitBadQuery: Int32 = 19
     static let exitNoMatch: Int32 = 20
     static let exitStale: Int32 = 21
+    static let exitOverCap: Int32 = 24
+    static let exitForecast: Int32 = 25
+    static let exitNoData: Int32 = 26
 
     /// The grammar's own noun vocabulary — `run` below validates argv's
     /// noun position against this set directly (bad-query exit for
@@ -46,7 +51,7 @@ public enum DigestQuery {
     /// second copy of the list.
     public static let nouns: Set<String> = [
         "status", "health", "account", "accounts", "harnesses", "notices", "limits", "limit",
-        "budget", "spend",
+        "headroom", "budget", "spend",
         "activity", "cost", "models", "model",
         "sessions", "session", "prompt", "get",
     ]
@@ -58,8 +63,8 @@ public enum DigestQuery {
     /// never consult the environment — a status line under an unenrolled
     /// `CLAUDE_CONFIG_DIR` still gets its prices and its health.
     static let accountNouns: Set<String> = [
-        "status", "accounts", "account", "limits", "limit", "budget", "spend", "activity", "cost",
-        "models", "model", "sessions", "session", "prompt", "get", "history", "windows",
+        "status", "accounts", "account", "limits", "limit", "headroom", "budget", "spend", "activity",
+        "cost", "models", "model", "sessions", "session", "prompt", "get", "history", "windows",
     ]
 
     /// `all`/`background`/`no-background` are M2 deep-verb flags —
@@ -81,10 +86,12 @@ public enum DigestQuery {
     /// provider-level noun it stays inert rather than exiting 19, so every
     /// documented invocation keeps parsing. `last` is the deep list
     /// verbs' count-or-duration flag (`DeepQuery.parseLast`), registered
-    /// here for the same one-shared-parser reason as the booleans above.
+    /// here for the same one-shared-parser reason as the booleans above;
+    /// `cap`, `forecast` and `max-data-age` are `headroom`'s, the last shared
+    /// with the nouns that read a measurement (`dataAgeNouns`).
     private static let valueFlags: Set<String> = [
         "max-age", "digest", "provider", "day", "range", "since", "limit",
-        "project", "branch", "last", "fields", "account",
+        "project", "branch", "last", "fields", "account", "max-data-age", "cap", "forecast",
     ]
 
     /// Which nouns each M2 flag is real for. Everything else gets the
@@ -103,6 +110,9 @@ public enum DigestQuery {
         // where the noun actually renders one (`multiFieldNouns`).
         "fields": multiFieldNouns,
         "account": accountNouns,
+        "max-data-age": dataAgeNouns,
+        "cap": ["headroom"],
+        "forecast": ["headroom"],
     ]
 
     static func rejectInapplicableFlags(noun: String, parsed: ParsedArgs) -> QueryOutput? {
@@ -147,9 +157,9 @@ public enum DigestQuery {
         if let rejection = rejectInapplicableFlags(noun: noun, parsed: parsed) { return rejection }
 
         // Which account answers — decided BEFORE the freshness gate, so
-        // `--max-age` judges the view that will be read. `get` walks the
-        // re-encoded view when a section was lifted; the focused profile's
-        // bytes stay the writer's own.
+        // `--max-age` and `--max-data-age` judge the view that will be
+        // read. `get` walks the re-encoded view when a section was lifted;
+        // the focused profile's bytes stay the writer's own.
         let view: ProfileView
         switch selectProfile(
             noun: noun, parsed: parsed, environment: environment, digest: digest,
@@ -160,25 +170,28 @@ public enum DigestQuery {
         }
         let digest = view.digest ?? digest
         let rawDigest = view.projected ? ((try? LiveState.encoder().encode(digest)) ?? rawDigest) : rawDigest
+        let json = parsed.flags["json"] != nil
+        let raw = parsed.flags["raw"] != nil
 
-        if let maxAgeText = parsed.flags["max-age"] {
-            guard let maxAge = parseDuration(maxAgeText) else {
-                return badQuery("bad --max-age duration '\(maxAgeText)' — e.g. 90s, 5m, 2h, 7d")
-            }
-            let age = now.timeIntervalSince(digest.engine.generatedAt)
-            if age > maxAge {
-                // No stderr note here (unlike badQuery/noMatch elsewhere):
-                // a prompt recipe re-invokes this on every render (design
-                // §15's starship example carries no `2>/dev/null`), and the
-                // exit code alone already carries the guard's meaning —
-                // the segment should just disappear, not narrate why.
-                return QueryOutput(stdout: "", exitCode: exitStale)
-            }
+        // `headroom` prints its answer for EVERY verdict, a stale one
+        // included — a refused caller logs why — so it judges the freshness
+        // guards itself rather than going silent here.
+        if noun == "headroom" {
+            return runHeadroom(parsed: parsed, view: view, digest: digest, now: now, json: json, raw: raw)
+        }
+        switch staleness(parsed: parsed, engine: digest.engine, generatedAt: digest.engine.generatedAt, now: now) {
+        case .failure(let output): return output
+        case .success(.some):
+            // No stderr note here (unlike badQuery/noMatch elsewhere):
+            // a prompt recipe re-invokes this on every render (design
+            // §15's starship example carries no `2>/dev/null`), and the
+            // exit code alone already carries the guard's meaning —
+            // the segment should just disappear, not narrate why.
+            return QueryOutput(stdout: "", exitCode: exitStale)
+        case .success(.none): break
         }
 
         let calendar = digestCalendar(digest)
-        let json = parsed.flags["json"] != nil
-        let raw = parsed.flags["raw"] != nil
 
         switch noun {
         case "status":

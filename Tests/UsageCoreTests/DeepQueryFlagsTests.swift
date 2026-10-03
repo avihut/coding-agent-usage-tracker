@@ -33,8 +33,8 @@ struct DeepQueryFlagsTests {
         #expect(rejection("session", ["x", "--all"]) == nil)
         #expect(rejection("windows", ["w", "--last", "8"]) == nil)
         #expect(rejection("history", ["w", "--last", "24h"]) == nil)
-        for noun in ["status", "accounts", "account", "limits", "limit", "budget", "spend", "activity", "cost",
-                     "models", "model", "sessions", "session", "prompt", "get", "history", "windows"] {
+        for noun in ["status", "accounts", "account", "limits", "limit", "headroom", "budget", "spend", "activity",
+                     "cost", "models", "model", "sessions", "session", "prompt", "get", "history", "windows"] {
             #expect(rejection(noun, ["--account", "c982130e"]) == nil, "\(noun)")
         }
     }

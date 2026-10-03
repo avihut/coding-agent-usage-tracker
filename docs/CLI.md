@@ -8,8 +8,10 @@ from a credential.
 
 Exit codes are API: 0 ok (an absent VALUE is still 0), 11 non-claude
 provider, 13 no digest, 19 bad query, 20 selector matched nothing, 21
-stale under `--max-age`, 22 `health --check` while an incident is open,
-23 `notices --check` while anything is pending.
+stale under `--max-age` or `--max-data-age`, 22 `health --check` while an
+incident is open, 23 `notices --check` while anything is pending, and
+`headroom`'s answers: 24 at or over the cap, 25 a forecast fails
+`--forecast`, 26 nothing to judge.
 
 ## The query surface (v0.81.0)
 
@@ -153,6 +155,76 @@ stale under `--max-age`, 22 `health --check` while an incident is open,
   nothing cached, nothing sent. NOT done here: making the daemon index
   other config dirs — the account timeline (v0.89.0) is time-based, and
   two dirs active at once would need root-based attribution first.
+
+## headroom and the data-age guard
+
+- HEADROOM (2026-10-03, issue #8): `usage-cli headroom [<meter>] --cap
+  <percent> [--forecast yellow|red] [--max-data-age <dur>] [--provider
+  <id>] [--account <sel>] [--raw|--json] [--fields …]` answers the one
+  question a caller deciding whether it may spend on a harness needs: is
+  there room under a cap THE CALLER chose, and can the number be trusted?
+  The motivating caller is an agent-to-agent delegation layer that runs it
+  from `/` with only PATH and HOME set, so it answers from the digest
+  alone, like every noun here — and nothing stores a cap or names a
+  vendor. Query logic: Digests/DigestQueryHeadroom.swift (core, pure).
+  THE EXIT CODE IS THE ANSWER, in every register: 0 room · 24 at or over
+  the cap · 25 under it, but a forecast fails `--forecast` · 26 nothing
+  to judge · 21 older than `--max-data-age`/`--max-age` allows — and every
+  register prints the answer for EVERY verdict (`--json` one object, every
+  key present, null when absent), so a refused caller can log why. ORDER:
+  bad query (19: `--cap` missing or not a whole number 0–100, `--forecast`
+  not yellow|red, a bad duration, two positionals, an empty `--provider`)
+  → account selection (the shared selector's 19/20) → the freshness guards
+  (21, before any number is judged — a stale verdict judges no meter, so
+  its `percent` is null) → nothing to judge (26) → the selector (`limit`'s
+  grammar: 20 no match, 19 ambiguous) → the meters.
+  FAIL CLOSED, case by case. (1) With no selector EVERY meter is judged and
+  the worst verdict wins — over the cap, then a failing forecast, then an
+  unreported percent, then room — and inside one verdict the least
+  headroom (a tie on percent → the riskier forecast → digest order). An
+  unreported percent is 26, never room; a known refusal outranks it. (2)
+  `--forecast` refuses on ANY judged meter, not only the one nearest the
+  cap: a weekly limit on course to run out binds while the session sits
+  nearer it, and the run reports the meter that failed (the issue named
+  the binding meter's forecast; refusing on any is the fail-closed
+  reading). A meter with NO forecast passes the gate — it projects
+  nothing, right after a reset there are too few samples to fit a rate,
+  refusing then would block the freshest window, and the cap still binds
+  — while a verdict outside green|yellow|red fails it. (3) A rolled window
+  (`resetsAt < now`) judges as 0% with no reset and no forecast: the
+  engine's own aging rule ([HARNESSES.md](HARNESSES.md) → Codex), applied
+  at the moment of asking, so a spent window's red forecast never refuses
+  the fresh one. (4) `--provider` for a harness nobody meters here is 26.
+  The shared selector lets such an id fall through to the focus so that a
+  verb's own gate speaks for it; this is headroom's, and the focused
+  harness's numbers NEVER stand in. The harness compared is the one the
+  view's engine MEASURED (`engine.providerID`), which a pre-profile writer
+  states where the selector can only assume.
+  Fields, through `--fields` only (the one positional is the meter
+  selector, so the catalog walk lives in DigestQueryHeadroomTests, not
+  DigestQueryFieldsTests): verdict (ok · over-cap · forecast · stale ·
+  no-data), cap, percent, headroom (cap − percent, negative when over),
+  label, tag, resets-at, resets-in, forecast.verdict, forecast.projected,
+  forecast.exhausts-at, fetched-at, data-age, plan, plan-type, provider,
+  account. `--raw` is one TSV row (`headroomColumns`; `--header` names
+  it). A `--fields` row carries the verdict's code too — `multiFieldOutput`
+  stamps 0, and headroom re-stamps it.
+- DATA-AGE GUARD (2026-10-03, issue #8): `--max-age` judges
+  `engine.generatedAt`, when the engine last PUBLISHED. A local provider's
+  meters come from the newest snapshot in its files, so its digest is
+  republished every few minutes around numbers that can be days old, and
+  `--max-age` passed on exactly what it exists to refuse (observed: a Codex
+  `fetchedAt` 14.5 h behind `generatedAt`, `stale: false`, exit 0).
+  `--max-data-age <dur>` judges `now − engine.fetchedAt` of the SELECTED
+  view: exit 21 with silent stdout (headroom's object excepted), the same
+  duration grammar. An absent `fetchedAt` fails it (absent ≠ fresh); so
+  does one more than `clockTolerance` (60 s) AHEAD of now — both stamps
+  come off this Mac's clock, so that gap is the clock having been set back,
+  and an age read across it would pass any guard. Both durations parse
+  before either is judged; `--max-age` itself is unchanged and still judged
+  first. Registered per noun (`dataAgeNouns`: status limits limit headroom
+  spend prompt get — the nouns whose answer IS the measurement); anywhere
+  else it is an unknown flag (19), never accepted and inert.
 
 ## Daemon verbs
 

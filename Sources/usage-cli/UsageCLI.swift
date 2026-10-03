@@ -13,9 +13,10 @@ import UsageCore
 /// (docs/DAEMON.md) exactly as it sits on disk — the file every consumer
 /// interface renders from.
 ///
-/// `usage-cli <noun> …` for any noun in `DigestQuery.nouns` (status, limits,
-/// limit, budget, spend, activity, cost, models, model, sessions, session,
-/// prompt, get) is the v0.81.0 query surface — the WHOLE grammar lives in
+/// `usage-cli <noun> …` for any noun in `DigestQuery.nouns` (status, health,
+/// account, accounts, harnesses, notices, limits, limit, headroom, budget,
+/// spend, activity, cost, models, model, sessions, session, prompt, get) is
+/// the v0.81.0 query surface — the WHOLE grammar lives in
 /// core `DigestQuery`, this target only does file IO + process exit.
 /// M2 adds a SECOND noun vocabulary, `DeepQuery.nouns` (windows, history,
 /// prices, price) — same grammar, but `DeepQuery.run` takes an OPTIONAL
@@ -400,9 +401,10 @@ struct UsageCLI {
     }
 
     /// Shared by both query layers: several exits are pinned to EMPTY
-    /// stdout (`--check`, a `--max-age` miss) — the line terminator rides
-    /// ALONG with real content instead of unconditionally, so those stay
-    /// genuinely silent rather than silent-plus-one-newline-byte.
+    /// stdout (`--check`, a `--max-age` or `--max-data-age` miss) — the
+    /// line terminator rides ALONG with real content instead of
+    /// unconditionally, so those stay genuinely silent rather than
+    /// silent-plus-one-newline-byte.
     private static func emit(_ output: QueryOutput) {
         if !output.stdout.isEmpty {
             FileHandle.standardOutput.write(Data(output.stdout.utf8))

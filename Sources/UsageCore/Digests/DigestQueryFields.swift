@@ -45,6 +45,13 @@ extension DigestQuery {
             "forecast.verdict", "forecast.raw-verdict", "forecast.rate", "forecast.baseline", "forecast.pace",
             "forecast.basis", "forecast.caption",
         ]).merging(tables(["series", "curve", "stretches", "models"])) { lhs, _ in lhs },
+        // Named only through `--fields`: the one positional is the meter
+        // selector, so a field there would read as one.
+        "headroom": scalars([
+            "verdict", "cap", "percent", "headroom", "label", "tag", "resets-at", "resets-in",
+            "forecast.verdict", "forecast.projected", "forecast.exhausts-at", "fetched-at", "data-age",
+            "plan", "plan-type", "provider", "account",
+        ]),
         "health": scalars([
             "indicator", "description", "page", "page-url", "ok", "stale", "checked", "age",
             "incident", "impact", "phase", "started", "duration", "message", "message-at",
