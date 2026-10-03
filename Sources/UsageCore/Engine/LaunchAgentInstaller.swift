@@ -68,9 +68,39 @@ public enum LaunchAgentInstaller {
         } catch {
             throw InstallError.plistWrite("\(plistURL.path): \(error)")
         }
-        let uid = getuid()
-        _ = runner(["bootout", "gui/\(uid)/\(label)"])
-        let result = runner(["bootstrap", "gui/\(uid)", plistURL.path])
+        try installRegisteredAgent(uid: getuid(), label: label, plistURL: plistURL, runner: runner)
+    }
+
+    /// Replaces an agent registration after launchd has finished processing bootout.
+    /// `launchctl bootout` can return before the old process exits, so a following
+    /// bootstrap may transiently fail with EIO (status 5).
+    static func installRegisteredAgent(
+        uid: uid_t,
+        label: String,
+        plistURL: URL,
+        runner: CommandRunner,
+        sleep: (TimeInterval) -> Void = { Thread.sleep(forTimeInterval: $0) }
+    ) throws {
+        let service = "gui/\(uid)/\(label)"
+        _ = runner(["bootout", service])
+
+        // Wait up to one second for launchd to remove the old registration.
+        // The following bounded retry handles the narrow teardown interval if
+        // launchd still reports EIO while removing the service from its domain.
+        for _ in 0..<20 {
+            guard runner(["print", service]).status == 0 else { break }
+            sleep(0.05)
+        }
+
+        let bootstrap = ["bootstrap", "gui/\(uid)", plistURL.path]
+        var result = runner(bootstrap)
+        if result.status == 5 {
+            for _ in 0..<20 {
+                sleep(0.05)
+                result = runner(bootstrap)
+                if result.status != 5 { break }
+            }
+        }
         guard result.status == 0 else {
             throw InstallError.bootstrap(result.output)
         }
