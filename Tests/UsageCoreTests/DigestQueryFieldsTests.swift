@@ -50,9 +50,11 @@ struct DigestQueryFieldsTests {
     /// M2 nouns whose walk lives with the fixture that can answer it
     /// hermetically: `price` needs an injected pricing cache
     /// (DeepQueryPricesTests), `windows` a ledger directory
-    /// (DeepQueryWindowsTests). Named here so a NEW catalogued noun can't
-    /// slip past the walk below by simply having no prefix.
-    static let coveredElsewhere: Set<String> = ["price", "windows", "transcript"]
+    /// (DeepQueryWindowsTests). `headroom` names its fields through
+    /// `--fields` only — its one positional is the meter selector — so its
+    /// walk is DigestQueryHeadroomTests'. Named here so a NEW catalogued noun
+    /// can't slip past the walk below by simply having no prefix.
+    static let coveredElsewhere: Set<String> = ["price", "windows", "transcript", "headroom"]
 
     // MARK: - The catalog is the vocabulary
 

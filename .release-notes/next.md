@@ -4,6 +4,23 @@
      blank line. This comment is stripped. -->
 the model curves stay inside the window they belong to
 
+New
+- `usage-cli headroom --cap <percent>` answers what a script, or another
+  coding agent deciding whether to hand a harness work, asks before
+  spending: is there room under the cap you chose, and can the number be
+  trusted? The exit code is the answer (0 room, 24 at or over the cap, 25
+  on course to run out under `--forecast red|yellow`, 26 nothing to judge,
+  21 too old), and `--json` prints the same object for every verdict, so a
+  refusal can be logged. With no meter named it judges every limit and
+  reports the one that decides; a limit nobody reports a number for is
+  never read as room.
+- `--max-data-age <duration>` on `status`, `limits`, `limit`, `spend`,
+  `prompt`, `get` and `headroom` refuses (exit 21) numbers MEASURED longer
+  ago than that. `--max-age` only ever judged when the digest was last
+  written, and a Codex digest is rewritten every few minutes around a
+  snapshot that can be hours old — so it passed on exactly the numbers it
+  exists to refuse.
+
 Fixes
 - Meter popover: a model's token curve no longer towers over the percent
   line for the first hours after a session window resets. The poll that
