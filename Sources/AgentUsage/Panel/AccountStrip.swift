@@ -196,10 +196,7 @@ struct AccountStrip: View {
     /// view would render as a placeholder in every headless snapshot); this
     /// is the step it performs.
     static func step(_ direction: Int, in profiles: [Profile], focusedID: String) -> String? {
-        guard let index = profiles.firstIndex(where: { $0.key == focusedID }) else { return nil }
-        let next = index + direction
-        guard profiles.indices.contains(next) else { return nil }
-        return profiles[next].id
+        ProfileKey.step(direction, in: profiles, from: focusedID)
     }
 }
 

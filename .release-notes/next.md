@@ -34,3 +34,7 @@ Fixes
 - The "extra usage" estimate on a forecast past its limit is measured on
   the same samples, so the tokens and dollars it quotes match the curves
   the popover draws.
+- Panel: a two-finger swipe across the account strip reaches another
+  harness's account. It named the account it landed on by its storage
+  folder, and every harness's standard home is called `default`, so a swipe
+  from Claude Code toward Codex landed back on Claude Code.
