@@ -4,8 +4,7 @@ name: Dependabot auto-merge
 # the `main: merge requirements` ruleset is satisfied (after the daft repo's workflow of
 # the same name). This workflow merges nothing on its own authority: it turns
 # on GitHub's auto-merge (squash) for the PR, and GitHub performs the merge
-# when the rules hold — `ci-gate` and `conventional-title` green on an
-# up-to-date branch.
+# when the rules hold — `ci-gate` and `conventional-title` green.
 # The ruleset is the gate; this is the button. No approval step: the ruleset
 # asks for none, and an approving bot would be a second thing to trust.
 #

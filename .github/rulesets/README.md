@@ -14,7 +14,10 @@ gh api -X POST repos/{owner}/{repo}/rulesets --input .github/rulesets/main-integ
   the ruleset on purpose, in the UI.
 - **main: merge requirements** — a PR, squash only, threads resolved, the
   `ci-gate` and `conventional-title` checks (pinned to GitHub Actions as
-  their source) green on a branch that is up to date, signed commits.
+  their source) green, signed commits. The branch need NOT be up to date
+  with main (user-directed 2026-10-05): rebasing every open PR after each
+  merge cost a CI round apiece. What that gives up — two PRs green apart and
+  broken together — CI catches on the squash's own push to main.
   `ci-gate` is CI's roll-up (`.github/workflows/ci.yml`): it is the only CI
   check named here, so the jobs behind it can be added, split or renamed
   without touching this ruleset. The repository admin bypasses it,
