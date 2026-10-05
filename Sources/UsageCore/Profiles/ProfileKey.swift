@@ -31,3 +31,18 @@ extension Profile {
     /// This account's name across every harness (`ProfileKey`).
     public var key: String { ProfileKey.make(providerID: providerID, profileID: id) }
 }
+
+extension ProfileKey {
+    /// The account `direction` places away from `focused` in `profiles` (the
+    /// strip's order; +1 is the next one down), or nil past either end or
+    /// for a focus the list doesn't hold. Named by its KEY, which is what
+    /// focus takes: every harness's standard home is `default`, so its
+    /// storage id would step the person onto the bundled harness's account
+    /// instead of the next one.
+    public static func step(_ direction: Int, in profiles: [Profile], from focused: String) -> String? {
+        guard let index = profiles.firstIndex(where: { $0.key == focused }) else { return nil }
+        let next = index + direction
+        guard profiles.indices.contains(next) else { return nil }
+        return profiles[next].key
+    }
+}

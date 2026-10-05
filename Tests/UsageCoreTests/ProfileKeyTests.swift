@@ -69,4 +69,28 @@ struct ProfileKeyTests {
             home: URL(filePath: "/x/.claude"), addedAt: added)
         #expect(ProfileFacts.label(profile: claude, identity: nil, fallback: "Claude Code") == "claude")
     }
+
+    /// The strip's swipe names the account it lands on by KEY. Every
+    /// harness's standard home is `default`, so a storage id would send a
+    /// swipe from the bundled harness toward Codex straight back where it
+    /// started — the swipe could never reach another harness's account.
+    @Test("a step across the strip lands on the next account's key")
+    func stepNamesKeys() {
+        let strip = [
+            Profile(
+                id: "default", providerID: HarnessResolution.bundledProviderID, home: nil,
+                addedAt: added),
+            Profile(id: "default", providerID: "codex", home: nil, addedAt: added),
+            Profile(id: "ab12cd34", providerID: "codex", home: nil, addedAt: added),
+        ]
+        #expect(ProfileKey.step(1, in: strip, from: "default") == "codex")
+        #expect(ProfileKey.step(1, in: strip, from: "codex") == "codex.ab12cd34")
+        #expect(ProfileKey.step(-1, in: strip, from: "codex.ab12cd34") == "codex")
+        #expect(ProfileKey.step(-1, in: strip, from: "codex") == "default")
+        // The gesture stops at either end rather than wrapping.
+        #expect(ProfileKey.step(-1, in: strip, from: "default") == nil)
+        #expect(ProfileKey.step(1, in: strip, from: "codex.ab12cd34") == nil)
+        // A focus the strip doesn't hold (a dormant account) steps nowhere.
+        #expect(ProfileKey.step(1, in: strip, from: "gemini") == nil)
+    }
 }
