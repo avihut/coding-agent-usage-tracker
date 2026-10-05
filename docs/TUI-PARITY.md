@@ -221,6 +221,32 @@ gives each stack band its own density glyph.
     `state::next_pace` picks the next preset ABOVE the pace in force
     (a slider-set in-between value never snaps backwards to 3m). The
     engine persists it exactly as the ⋯ menu's picks do.
+34. [S][✓] Account focus — the panel strip and the menu bar's click on
+    a mark, as keys (user-requested 2026-10-05). `a` pins the next
+    account, `A` is Auto; another harness's header cell is a
+    `Hit::Account` (click/enter), registered only when painted whole and
+    only for an account the engine will focus. It moves the ENGINE's pin
+    (`focusProfile` over the socket), shared with the menu bar — never a
+    pane-local view, which would mean porting `viewing(profile:)` into
+    Rust. Rules worth keeping:
+    - Candidates = `HarnessFocusRule`'s pin test (`state::
+      focus_candidates`): enabled ∧ ¬dormant ∧ harness shown. The engine
+      answers `ok` for any ENROLLED account and silently ignores a pin
+      it won't honour, so the reply never confirms a pin — the digest's
+      `focusedProfile` does (8s grace, then "focus stayed on X").
+    - ONE request in flight (`FocusRequest`): presses meanwhile move the
+      target, and the reply sends the latest. A starved engine never
+      gets a burst of connections it would answer into sockets already
+      closed by the 3s client timeout (the SIGPIPE path of 2026-10-04).
+    - `socket::ask` tells `NotListening` (ends the switch) from
+      `NoAnswer` (the engine may still apply it: wait on the digest,
+      say it's slow).
+    - Any focus change — key, menu bar, activity — returns the pane to
+      the dashboard: surfaces, scrub, cursor and page index the OLD
+      account's data.
+    - Engine: `setPin` republishes when the pin changes even if focus
+      doesn't, or the digest's `pinnedProfile` (the `pinned` marker)
+      lagged until the next unrelated publish.
 
 ### Intentionally different (do NOT "fix")
 32. Push/pop animation, pointer cursors, hover popovers — GUI idioms;
@@ -293,7 +319,8 @@ gives each stack band its own density glyph.
   (auto-install nudge, once, when EngineOffline). v0.76.0 added
   **s span / z zoom** (meter surface only — on the dashboard they
   say "open a meter first") and **p pace** (3/5/15m over the socket).
-  FREE KEYS still: m, d.
+  **a / A** account focus (item 34; replies ride the typed `Echo`
+  channel). FREE KEYS still: m, d.
 - activity.rs (v0.74.0): the period math — `span`, `day_value`,
   `model_totals`, `active_days`, `total_value`, `segments`,
   `model_horizon_truncates`. Pure, tested; every activity surface
@@ -338,7 +365,9 @@ gives each stack band its own density glyph.
   (landscape ≥84 cols side-by-side, else push with back).
 - socket.rs: NDJSON one-shot; `refresh` + `set_interval` (wire shape
   `{"setInterval":{"seconds":300}}`, reply {ok,message} — verified
-  against the live daemon).
+  against the live daemon); `focus_profile` (`{"focusProfile":{"id":k}}`,
+  `{"focusProfile":{}}` = Auto) through `ask`, whose `Silence` says
+  whether anything was listening.
 - status.rs: --status tmux line.
 
 ### App-side reference code (READ these to copy presentation)

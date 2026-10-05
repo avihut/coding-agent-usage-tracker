@@ -23,11 +23,20 @@ use ratatui::crossterm::event::{
     MouseEventKind,
 };
 use ratatui::crossterm::execute;
-use state::{App, Freshness, Hit, Surface};
+use state::{App, FocusAnswer, FocusAsk, Freshness, Hit, Surface};
 use std::path::PathBuf;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 use time::{OffsetDateTime, UtcOffset};
+
+/// What a socket or installer thread hands back to the loop.
+enum Echo {
+    /// A line for the footer's echo.
+    Notice(String),
+    /// The engine's answer to the focus request on the wire: the loop sends
+    /// the person's newer ask, or waits for the digest to show this one.
+    Focus(FocusAnswer),
+}
 
 fn support_root() -> PathBuf {
     let home = std::env::var_os("HOME")
@@ -67,7 +76,7 @@ fn find_usaged() -> Option<PathBuf> {
 /// the user's sticky opt-out, so this is an idempotent nudge, not a
 /// policy decision — and the TUI itself still writes nothing: the
 /// engine's own installer does. Once per TUI run, off-thread.
-fn ensure_engine(reply_tx: &mpsc::Sender<String>) {
+fn ensure_engine(reply_tx: &mpsc::Sender<Echo>) {
     let tx = reply_tx.clone();
     std::thread::spawn(move || {
         let reply = match find_usaged() {
@@ -86,7 +95,7 @@ fn ensure_engine(reply_tx: &mpsc::Sender<String>) {
                 Err(error) => format!("usaged ensure failed: {error}"),
             },
         };
-        let _ = tx.send(reply);
+        let _ = tx.send(Echo::Notice(reply));
     });
 }
 
@@ -119,7 +128,8 @@ fn parse_args() -> Result<(PathBuf, PathBuf), String> {
                     "  --digest <path>   read this live-state.json (default: app support)\n",
                     "  --socket <path>   control socket for commands (default: app support)\n",
                     "\nkeys: q quit · r refresh · arrows move the cursor, enter opens · 1-3 meters · [ ] page\n",
-                    "      v span · c cost · p pace · s/z span+zoom on a meter · n/x/X notices · esc back · ? help"
+                    "      v span · c cost · p pace · a/A account/auto · s/z span+zoom on a meter · n/x/X notices\n",
+                    "      esc back · ? help"
                 )
                 .to_owned());
             }
@@ -166,7 +176,7 @@ fn main() {
 }
 
 fn run(mut terminal: ratatui::DefaultTerminal, mut app: App) -> std::io::Result<()> {
-    let (reply_tx, reply_rx) = mpsc::channel::<String>();
+    let (reply_tx, reply_rx) = mpsc::channel::<Echo>();
     let mut last_draw = Instant::now() - Duration::from_secs(1);
     let mut last_stat = Instant::now() - Duration::from_secs(1);
     let mut seen_sent = std::collections::HashSet::<String>::new();
@@ -191,8 +201,22 @@ fn run(mut terminal: ratatui::DefaultTerminal, mut app: App) -> std::io::Result<
             dismiss_notice(&mut app, id, &reply_tx);
             dirty = true;
         }
-        while let Ok(reply) = reply_rx.try_recv() {
-            app.notice = Some(reply);
+        if let Some(ask) = app.pending_focus.take() {
+            request_focus(&mut app, ask, &reply_tx);
+            dirty = true;
+        }
+        while let Ok(echo) = reply_rx.try_recv() {
+            match echo {
+                Echo::Notice(reply) => app.notice = Some(reply),
+                Echo::Focus(answer) => {
+                    if let Some(next) = app.focus_answered(answer, Instant::now()) {
+                        send_focus(&app, next, &reply_tx);
+                    }
+                }
+            }
+            dirty = true;
+        }
+        if app.focus_tick(Instant::now()) {
             dirty = true;
         }
         // A 1s tick redraws clocks and countdowns even when nothing moved.
@@ -240,7 +264,7 @@ fn run(mut terminal: ratatui::DefaultTerminal, mut app: App) -> std::io::Result<
     Ok(())
 }
 
-fn handle_key(app: &mut App, code: KeyCode, reply_tx: &mpsc::Sender<String>) {
+fn handle_key(app: &mut App, code: KeyCode, reply_tx: &mpsc::Sender<Echo>) {
     match code {
         KeyCode::Char('q') => app.quit = true,
         KeyCode::Esc | KeyCode::Backspace => {
@@ -278,7 +302,7 @@ fn handle_key(app: &mut App, code: KeyCode, reply_tx: &mpsc::Sender<String>) {
                     }),
                     None => "engine socket not listening".into(),
                 };
-                let _ = tx.send(reply);
+                let _ = tx.send(Echo::Notice(reply));
             });
         }
         // The panel's quick pace picks, as one cycling key. The engine
@@ -306,9 +330,19 @@ fn handle_key(app: &mut App, code: KeyCode, reply_tx: &mpsc::Sender<String>) {
                     }),
                     None => "engine socket not listening".into(),
                 };
-                let _ = tx.send(reply);
+                let _ = tx.send(Echo::Notice(reply));
             });
         }
+        // The panel's account strip, as two keys: `a` pins focus on the
+        // next account, `A` hands it back to activity (the strip's Auto).
+        // Focus is the engine's, shared with the menu bar. Auto is its own
+        // key because what activity picks is often the account just left,
+        // and inside one cycle that would read as a press that did nothing.
+        KeyCode::Char('a') => match app.next_focus() {
+            Some(key) => request_focus(app, FocusAsk::Pin(key), reply_tx),
+            None => app.notice = Some("no other account to focus".into()),
+        },
+        KeyCode::Char('A') => request_focus(app, FocusAsk::Auto, reply_tx),
         KeyCode::Char(digit @ '1'..='4') => {
             if let Some(digest) = &app.digest
                 && let Some(index) = surfaces::meter_index_matching(&digest.meters, digit)
@@ -349,7 +383,9 @@ fn handle_key(app: &mut App, code: KeyCode, reply_tx: &mpsc::Sender<String>) {
             let tx = reply_tx.clone();
             app.notice = Some("dismissing all…".into());
             std::thread::spawn(move || {
-                let _ = tx.send(reply_word(socket::dismiss_all_notices(&socket_path)));
+                let _ = tx.send(Echo::Notice(reply_word(socket::dismiss_all_notices(
+                    &socket_path,
+                ))));
             });
         }
         // The app's activity pills and Tokens/Cost picker, as keys. Pages
@@ -485,14 +521,38 @@ fn reply_word(reply: Option<socket::Reply>) -> String {
     }
 }
 
-fn dismiss_notice(app: &mut App, id: String, reply_tx: &mpsc::Sender<String>) {
+fn dismiss_notice(app: &mut App, id: String, reply_tx: &mpsc::Sender<Echo>) {
     let socket_path = app.socket_path.clone();
     let tx = reply_tx.clone();
     app.notice = Some("dismissing…".into());
     // The cursor's target is about to vanish; drop it rather than ghost it.
     app.focus_hit = None;
     std::thread::spawn(move || {
-        let _ = tx.send(reply_word(socket::dismiss_notice(&socket_path, &id)));
+        let _ = tx.send(Echo::Notice(reply_word(socket::dismiss_notice(
+            &socket_path,
+            &id,
+        ))));
+    });
+}
+
+/// Ask for a focus switch; the request goes out now unless one already is.
+fn request_focus(app: &mut App, ask: FocusAsk, reply_tx: &mpsc::Sender<Echo>) {
+    if let Some(send) = app.ask_focus(ask) {
+        send_focus(app, send, reply_tx);
+    }
+}
+
+fn send_focus(app: &App, ask: FocusAsk, reply_tx: &mpsc::Sender<Echo>) {
+    let socket_path = app.socket_path.clone();
+    let tx = reply_tx.clone();
+    std::thread::spawn(move || {
+        let answer = match socket::focus_profile(&socket_path, ask.key()) {
+            Ok(reply) if reply.ok => FocusAnswer::Accepted,
+            Ok(reply) => FocusAnswer::Refused(reply_word(Some(reply))),
+            Err(socket::Silence::NotListening) => FocusAnswer::Refused(reply_word(None)),
+            Err(socket::Silence::NoAnswer) => FocusAnswer::Unanswered,
+        };
+        let _ = tx.send(Echo::Focus(answer));
     });
 }
 
@@ -554,5 +614,8 @@ fn activate(app: &mut App, hit: Hit) {
             // deferred flag the loop drains.
             app.pending_dismiss = Some(id);
         }
+        // Another harness's mark in the header: the menu bar's click on a
+        // mark, deferred the same way.
+        Hit::Account(key) => app.pending_focus = Some(FocusAsk::Pin(key)),
     }
 }

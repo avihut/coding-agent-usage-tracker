@@ -27,7 +27,8 @@ What this reads, and why it adds no network destination, is in
 The menu bar leads with whichever account you have actually been using:
 focus follows the volume of session files over the trailing fortnight
 (newest write breaks ties) — until you pick one, in the panel's account
-strip or in Settings, which pins it until you ask for Auto again. Each
+strip, in Settings or with `a` in the TUI, which pins it until you ask for
+Auto again (`A` in the TUI). Each
 account draws in the menu bar in its own form — digits, bars, rings,
 compact digits, or a dot — set per account or for all of them at once,
 with the focused account optionally expanded to its full numbers whatever

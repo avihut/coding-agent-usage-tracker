@@ -209,6 +209,16 @@ struct MultiHarnessHostTests {
         // The top level is the focused harness's own section.
         #expect(host.digest?.engine.providerID == "codex")
 
+        // Pinning the account activity already focuses moves nothing, yet
+        // the digest must still say it is pinned — a face reads the pin
+        // from there — and handing it back must say so too.
+        #expect(await host.handle(.focusProfile(id: "codex")).ok)
+        #expect(host.focusedProfileID == "codex")
+        #expect(host.digest?.pinnedProfile == "codex")
+        #expect(await host.handle(.focusProfile(id: nil)).ok)
+        #expect(host.focusedProfileID == "codex")
+        #expect(host.digest?.pinnedProfile == nil)
+
         let pinned = await host.handle(.focusProfile(id: "default"))
         #expect(pinned.ok)
         #expect(host.focusedProfileID == "default")
