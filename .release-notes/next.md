@@ -20,6 +20,16 @@ New
   written, and a Codex digest is rewritten every few minutes around a
   snapshot that can be hours old — so it passed on exactly the numbers it
   exists to refuse.
+- The terminal dashboard (`usage-tui`) switches accounts the way the menu
+  bar does: `a` pins focus on the next account, `A` hands it back to the
+  one you're using, and a click on another harness's mark in the header
+  pins that harness's account. It is the same pin as the panel's account
+  strip, so the menu bar follows, and the header says `pinned` while it
+  holds. The pane calls a switch done only once the engine shows it, says
+  so when one didn't land, and waits rather than gives up on an engine
+  that is merely slow. A chart open when the account changes — from here,
+  the menu bar or activity — goes back to the dashboard instead of showing
+  the new account's meter in the old one's place.
 
 Fixes
 - Meter popover: a model's token curve no longer towers over the percent

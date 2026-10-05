@@ -19,6 +19,15 @@ columns, and anything under ~10×40 collapses to a one-line strip
 (over the control socket), `?` help. Works against the app-hosted engine
 or the daemon interchangeably.
 
+The pane shows the account the engine focuses, and switches it the way the
+menu bar does: `a` pins focus on the next account, `A` hands it back to
+activity (the panel strip's Auto), and a click on another harness's mark
+in the header pins that harness's account. It is the engine's one pin, so
+the menu bar follows, and the header says `pinned` while it holds. `a`
+steps only through accounts the engine will focus — turned on, not
+dormant, harness shown — and the footer calls a switch done only when the
+digest shows it.
+
 ```sh
 mise run tui        # build + run in this terminal
 mise run tui-test   # digest contract + layout tests

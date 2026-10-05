@@ -713,10 +713,22 @@ fn render_dashboard(
 ) {
     let accent = rgb(digest.engine.accent);
     if let Some(rect) = plan.header {
-        frame.render_widget(
-            header(digest, freshness, app, now, accent, rect.width),
-            rect,
-        );
+        let (line, marks) = header(digest, freshness, app, now, accent, rect.width);
+        frame.render_widget(line, rect);
+        // Another harness's cell, wherever the line seated it whole, pins
+        // focus on that account when clicked or entered — the menu bar's
+        // click on a mark. Only accounts the engine will focus are offered.
+        let candidates = crate::state::focus_candidates(digest);
+        for (column, width, key) in marks {
+            if column + width <= usize::from(rect.width)
+                && candidates.iter().any(|profile| profile.id == key)
+            {
+                app.hits.add(
+                    Rect::new(rect.x + column as u16, rect.y, width as u16, 1),
+                    Hit::Account(key),
+                );
+            }
+        }
     }
     if let Some(rect) = plan.notices {
         let items = listed_notices(digest.notices.as_ref());
@@ -792,10 +804,17 @@ fn section_title(text: &str) -> Line<'static> {
     ))
 }
 
-/// Every SHOWN harness other than the focused account's, as (mark, accent,
-/// digits). Empty for a writer that meters one, so a one-harness header is
-/// exactly what it was.
-fn other_harnesses(digest: &LiveState) -> Vec<(String, crate::digest::Rgb, String)> {
+/// One other harness in the header's miniature: its mark and colour, and
+/// each of its menu bar cells as (account key, digits).
+struct OtherHarness {
+    glyph: String,
+    accent: crate::digest::Rgb,
+    cells: Vec<(String, String)>,
+}
+
+/// Every SHOWN harness other than the focused account's. Empty for a writer
+/// that meters one, so a one-harness header is exactly what it was.
+fn other_harnesses(digest: &LiveState) -> Vec<OtherHarness> {
     let (Some(harnesses), Some(cells)) =
         (digest.harnesses.as_ref(), digest.menu_bar_cells.as_ref())
     else {
@@ -810,28 +829,38 @@ fn other_harnesses(digest: &LiveState) -> Vec<(String, crate::digest::Rgb, Strin
         .iter()
         .filter(|harness| harness.shown && Some(&harness.id) != focused.as_ref())
         .filter_map(|harness| {
-            let digits: Vec<String> = cells
+            let cells: Vec<(String, String)> = cells
                 .iter()
-                .filter(|cell| cell.provider_id == harness.id)
-                .flat_map(|cell| cell.segments.iter())
-                .map(|segment| {
-                    segment
-                        .percent
-                        .map(|p| format!("{}{p}", segment.tag))
-                        .unwrap_or_else(|| format!("{}—", segment.tag))
+                .filter(|cell| cell.provider_id == harness.id && !cell.segments.is_empty())
+                .map(|cell| {
+                    let digits: Vec<String> = cell
+                        .segments
+                        .iter()
+                        .map(|segment| {
+                            segment
+                                .percent
+                                .map(|p| format!("{}{p}", segment.tag))
+                                .unwrap_or_else(|| format!("{}—", segment.tag))
+                        })
+                        .collect();
+                    (cell.profile.clone(), digits.join(glyphs().sep))
                 })
                 .collect();
-            if digits.is_empty() {
+            if cells.is_empty() {
                 return None;
             }
-            Some((
-                harness.glyph.clone(),
-                harness.accent,
-                digits.join(glyphs().sep),
-            ))
+            Some(OtherHarness {
+                glyph: harness.glyph.clone(),
+                accent: harness.accent,
+                cells,
+            })
         })
         .collect()
 }
+
+/// Where the header's first line seated each other harness's cell, as
+/// (column, width, account key) — the cells a click pins focus on.
+type HeaderMarks = Vec<(usize, usize, String)>;
 
 fn header<'a>(
     digest: &'a LiveState,
@@ -840,7 +869,7 @@ fn header<'a>(
     now: OffsetDateTime,
     accent: Color,
     width: u16,
-) -> Paragraph<'a> {
+) -> (Paragraph<'a>, HeaderMarks) {
     let engine = &digest.engine;
     let mut identity = vec![Span::styled(
         format!("{} ", engine.glyph),
@@ -862,22 +891,48 @@ fn header<'a>(
     if let Some(plan) = &engine.plan_label {
         identity.push(Span::styled(format!("  {plan}"), style(DIM)));
     }
+    // The strip's pin, in words: focus stays here whatever activity says
+    // until `A` (or the panel's Auto) hands it back. Only where another
+    // account could have had it, and only while the pin is what holds it.
+    if digest.pinned_profile.is_some()
+        && digest.pinned_profile == digest.focused_profile
+        && crate::state::focus_candidates(digest).len() > 1
+    {
+        identity.push(Span::styled("  pinned", style(DIM)));
+    }
     // The OTHER metered harnesses, in miniature (0.101.0): this pane's
     // meters are the focused account's, and a terminal that could not see
     // the second vendor at all would be a worse face than the menu bar.
     // Each keeps its own mark in its own colour; a hidden harness is absent,
     // and a writer that meters one adds nothing here.
-    for (glyph, accent, digits) in other_harnesses(digest) {
+    let seated = |spans: &[Span]| spans.iter().map(Span::width).sum::<usize>();
+    let mut marks = HeaderMarks::new();
+    for other in other_harnesses(digest) {
+        let lead = "   ";
+        let mark_column = seated(&identity) + lead.len();
         identity.push(Span::styled(
-            format!("   {glyph} "),
+            format!("{lead}{} ", other.glyph),
             style(Color::Rgb(
-                (accent.red * 255.0).round() as u8,
-                (accent.green * 255.0).round() as u8,
-                (accent.blue * 255.0).round() as u8,
+                (other.accent.red * 255.0).round() as u8,
+                (other.accent.green * 255.0).round() as u8,
+                (other.accent.blue * 255.0).round() as u8,
             ))
             .add_modifier(Modifier::BOLD),
         ));
-        identity.push(Span::styled(digits, style(DIM)));
+        for (index, (key, digits)) in other.cells.into_iter().enumerate() {
+            if index > 0 {
+                identity.push(Span::styled(glyphs().sep, style(DIM)));
+            }
+            // The first cell owns the mark too, as the menu bar's click on
+            // a mark lands on that harness's account.
+            let column = if index == 0 {
+                mark_column
+            } else {
+                seated(&identity)
+            };
+            identity.push(Span::styled(digits, style(DIM)));
+            marks.push((column, seated(&identity) - column, key));
+        }
     }
 
     // The status line is built at full phrasing first; when the pane can't
@@ -1012,7 +1067,10 @@ fn header<'a>(
     } else {
         build(true)
     };
-    Paragraph::new(vec![Line::from(identity), Line::from(status)])
+    (
+        Paragraph::new(vec![Line::from(identity), Line::from(status)]),
+        marks,
+    )
 }
 
 fn meters<'a>(digest: &'a LiveState, freshness: Freshness, rect: Rect) -> Paragraph<'a> {
@@ -2042,11 +2100,19 @@ fn footer<'a>(
     now: OffsetDateTime,
     width: u16,
 ) -> Paragraph<'a> {
+    // `a` is offered only where there is another account to go to.
+    let switchable = crate::state::focus_candidates(digest).len() > 1;
     let keys = match app.surface {
+        Surface::Dashboard if switchable => {
+            "q quit / r refresh / a account / v span / c cost / p pace / 1-3 meters / ? help"
+        }
         Surface::Dashboard => "q quit / r refresh / v span / c cost / p pace / 1-3 meters / ? help",
         Surface::Meter(_) => "esc back / arrows scrub / s span / z zoom / r refresh / ? help",
         _ => "esc back / arrows step / r refresh / ? help",
     };
+    let status = status_footer_spans(digest.service_status.as_ref(), now);
+    let claim: usize = status.iter().map(|span| span.content.chars().count()).sum();
+    let keys = footer_keys(keys, app.notice.as_deref(), claim, width);
     let mut spans = vec![Span::styled(keys, style(FAINT))];
     if let Some(notice) = &app.notice {
         spans.push(Span::styled(format!("  {notice}"), style(DIM)));
@@ -2078,12 +2144,23 @@ fn footer<'a>(
     // one green cell when all is well, and the incident itself when it's
     // minor enough not to have earned a banner row of its own. Right-aligned
     // rather than appended, so it can't be the thing a narrow pane clips.
-    place_status_in_footer(
-        &mut spans,
-        status_footer_spans(digest.service_status.as_ref(), now),
-        width,
-    );
+    place_status_in_footer(&mut spans, status, width);
     Paragraph::new(Line::from(spans))
+}
+
+/// A reply outranks the full key list: when the footer can't seat both —
+/// and the health mark — the keys fold to the one that lists the rest, so
+/// the answer to `a`, `p` or `r` is read rather than clipped (or dropped
+/// first, as the footer's tail).
+fn footer_keys(keys: &'static str, notice: Option<&str>, claim: usize, width: u16) -> &'static str {
+    match notice {
+        Some(notice)
+            if keys.chars().count() + 2 + notice.chars().count() + claim > width as usize =>
+        {
+            "? help"
+        }
+        _ => keys,
+    }
 }
 
 /// Seats the health mark at the footer's right edge and decides what gives
@@ -2223,6 +2300,8 @@ fn render_help(frame: &mut Frame, area: Rect) {
         Line::raw("v           activity span: 7D / 30D / All"),
         Line::raw("c           measure in tokens or cost"),
         Line::raw("p           polling pace: 3m / 5m / 15m"),
+        Line::raw("a / A       pin the next account / back to auto"),
+        Line::raw("click a mark pin that harness's account"),
         Line::raw("s z         on a meter: span, then zoom the frame"),
         Line::raw("arrows      move the cursor; enter/space opens"),
         Line::raw("1-3 / click open a meter's window chart"),
@@ -2546,6 +2625,22 @@ mod tests {
             );
             assert!(painted.starts_with('q'), "the key hints keep the head");
         }
+    }
+
+    #[test]
+    fn a_reply_is_read_whole_and_the_keys_fold_to_help() {
+        let keys =
+            "q quit / r refresh / a account / v span / c cost / p pace / 1-3 meters / ? help";
+        let reply = "focus pinned: Claude Code (A for auto)";
+        // Room for both: nothing folds.
+        assert_eq!(footer_keys(keys, Some(reply), 0, 200), keys);
+        // A pane that would clip the reply keeps the reply, and `?` still
+        // leads to every other key.
+        assert_eq!(footer_keys(keys, Some(reply), 0, 100), "? help");
+        // The health mark's claim counts too.
+        assert_eq!(footer_keys(keys, Some(reply), 60, 130), "? help");
+        // No reply: the full list, however tight — the trailer goes first.
+        assert_eq!(footer_keys(keys, None, 0, 60), keys);
     }
 
     /// Rungs that own a banner must not repeat themselves in the footer.

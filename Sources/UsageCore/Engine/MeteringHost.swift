@@ -296,8 +296,12 @@ public final class MeteringHost {
     /// pick reverted the moment the panel closed).
     public func setPin(_ id: String?) {
         ProfileStore.setPin(id, in: defaults)
+        let moved = pin != id
         pin = id
-        if recomputeFocus(overridingHold: true) { republish() }
+        // The digest carries the pin itself (`pinnedProfile`), so a pin
+        // that leaves focus where it was — the focused account pinned, or
+        // handed back to activity that agrees — still owes a publish.
+        if recomputeFocus(overridingHold: true) || moved { republish() }
     }
 
     public func setProfileEnabled(id: String, enabled: Bool) {
