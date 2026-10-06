@@ -13,6 +13,7 @@ struct SessionsShortlistSection: View {
     let onOpenSession: (String) -> Void
     /// The shortlist row under the cursor, if any.
     @State private var hoveredSession: String?
+    @Environment(\.faceDensity) private var density
 
     /// The last few interactive sessions, one quiet line each — a shortcut
     /// into the Sessions browser. Background runs stay out of the strip;
@@ -28,7 +29,7 @@ struct SessionsShortlistSection: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .firstTextBaseline) {
                     Text("Sessions")
-                        .font(.caption.bold())
+                        .font(density.sectionHeader)
                     if let focus = activityFocus {
                         Spacer(minLength: 8)
                         Text(Self.focusLabel(focus))

@@ -7,6 +7,7 @@ import UsageCore
 /// status bar.
 struct AccountStatusLine: View {
     let store: UsageStore
+    @Environment(\.faceDensity) private var density
 
     /// Pipeline state right under the meters it describes — fetch time,
     /// next-poll countdown, budget gauge — with the plan label flushed to
@@ -27,7 +28,7 @@ struct AccountStatusLine: View {
                     VStack(spacing: 2) {
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
                             (statusLeadText(now: context.date) ?? Text(""))
-                                .font(.caption)
+                                .font(density.statusLine)
                                 .foregroundStyle(.secondary)
                             Spacer(minLength: 12)
                             // Display-only with the full identity one hover
@@ -35,7 +36,7 @@ struct AccountStatusLine: View {
                             // link, and two adjacent invisible links with
                             // different destinations would be a trap.
                             Text(presence.current?.label ?? "signed out")
-                                .font(.caption)
+                                .font(density.statusLine)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                                 .truncationMode(.middle)
@@ -43,10 +44,10 @@ struct AccountStatusLine: View {
                         }
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
                             (statusDetailText(now: context.date) ?? Text(""))
-                                .font(.caption2)
+                                .font(density.statusDetail)
                                 .foregroundStyle(.tertiary)
                             Spacer(minLength: 12)
-                            planLabel(font: .caption2, style: .tertiary)
+                            planLabel(font: density.statusDetail, style: .tertiary)
                         }
                     }
                 }
@@ -54,11 +55,11 @@ struct AccountStatusLine: View {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     TimelineView(.periodic(from: .now, by: 1)) { context in
                         statusLine(now: context.date)
-                            .font(.caption)
+                            .font(density.statusLine)
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
-                    planLabel(font: .caption, style: .secondary)
+                    planLabel(font: density.statusLine, style: .secondary)
                 }
             }
         }

@@ -28,16 +28,18 @@ struct MeterRow: View {
     /// Panel-owned leave grace (cursor on neither a row nor the popover).
     let onLeave: () -> Void
 
+    @Environment(\.faceDensity) private var density
+
     /// This row's identity in `openMeter`/`hoveredMeter`.
     private var rowKey: String { key ?? meter.id }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .firstTextBaseline) {
-                Text(meter.label).font(.callout)
+                Text(meter.label).font(density.meterLabel)
                 Spacer()
                 Text(meter.percent.map { "\($0)%" } ?? "—")
-                    .font(.callout.monospacedDigit().bold())
+                    .font(density.meterPercent)
             }
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
@@ -49,8 +51,8 @@ struct MeterRow: View {
                     }
                 }
             }
-            .frame(height: 5)
-            captionLine.font(.caption2)
+            .frame(height: density.meterBarHeight)
+            captionLine.font(density.meterCaption)
         }
         // The highlight bleeds a little past the content into the panel
         // padding, menu-item style; the negative padding hands the space

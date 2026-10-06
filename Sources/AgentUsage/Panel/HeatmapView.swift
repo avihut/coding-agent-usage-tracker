@@ -76,6 +76,7 @@ struct HeatmapView: View {
 
     /// The chosen span, persisted — reopening the panel (or relaunching the
     /// app) lands on whatever span was last picked; fresh installs on 7D.
+    @Environment(\.faceDensity) private var density
     @AppStorage("activityPeriod") private var period: Period = .week
     @State private var dimension: Dimension = .tokens
     /// Audit-view toggles, persisted: the day drill-down's ring↔timeline and
@@ -243,7 +244,7 @@ struct HeatmapView: View {
     /// beside it; the Spacer holds ~85pt of slack, so the row still fits.
     private var titleRow: some View {
         HStack(spacing: Self.headerSpacing) {
-            Text("Activity").font(.caption.bold())
+            Text("Activity").font(density.sectionHeader)
             Spacer()
             if period == .week, weeklyAuditMeter != nil {
                 auditToggle(

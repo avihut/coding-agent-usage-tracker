@@ -16,6 +16,7 @@ struct ModelBreakdownGrid: View {
     var showsHeadline = true
     @Binding var hoveredModel: String?
     @State private var costDetail: String?
+    @Environment(\.faceDensity) private var density
 
     private static let tokenColumnWidth: CGFloat = 44
     private static let costColumnWidth: CGFloat = 54
@@ -29,7 +30,7 @@ struct ModelBreakdownGrid: View {
                 // The headline number: what this window would have cost.
                 VStack(spacing: 0) {
                     Text("≈ \(UsageFormatting.money(total))")
-                        .font(.system(size: 18, weight: .semibold).monospacedDigit())
+                        .font(density.costHeadline)
                         .foregroundStyle(.primary)
                     Text(unpricedCount > 0
                         ? "at API list prices · \(unpricedCount) unpriced"
