@@ -26,6 +26,9 @@ final class MainWindowController {
     private let onOpenSessions: (_ profileKey: String?, _ sessionID: String?) -> Void
     private let onOpenSettings: () -> Void
     private var window: NSWindow?
+    /// The page's name as last reported — it can arrive while the window
+    /// is still being built, before `window` is set.
+    private var pageTitle: String?
 
     init(
         registry: ProviderRegistry,
@@ -48,7 +51,10 @@ final class MainWindowController {
                 rootView: MainWindowView(
                     registry: registry, navigator: navigator,
                     onOpenSessions: onOpenSessions, onOpenSettings: onOpenSettings,
-                    onTitle: { [weak self] in self?.window?.title = $0 }))
+                    onTitle: { [weak self] title in
+                        self?.pageTitle = title
+                        self?.window?.title = title
+                    }))
             // The SwiftUI tree's title, subtitle and toolbar become the
             // window's own (unified toolbar over a full-height sidebar).
             host.sceneBridgingOptions = [.title, .toolbars]
@@ -56,7 +62,7 @@ final class MainWindowController {
             // never pinned to what the page would ideally take.
             host.sizingOptions = [.minSize]
             let window = NSWindow(contentViewController: host)
-            window.title = AppIdentity.displayName
+            window.title = pageTitle ?? AppIdentity.displayName
             window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
             window.toolbarStyle = .unified
             window.tabbingMode = .disallowed

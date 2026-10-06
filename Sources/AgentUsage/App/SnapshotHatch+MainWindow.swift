@@ -47,7 +47,10 @@ extension AppDelegate {
             host.sceneBridgingOptions = [.title, .toolbars]
             host.sizingOptions = [.minSize]
             let window = NSWindow(contentViewController: host)
-            host.rootView.onTitle = { [weak window] in window?.title = $0 }
+            window.title = selection == MainWindowView.homeSelection
+                ? "Home"
+                : registry.shownProfiles.first { $0.key == selection }
+                    .map { registry.rowTitle(for: $0).title } ?? ""
             window.isReleasedWhenClosed = false
             window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
             window.toolbarStyle = .unified

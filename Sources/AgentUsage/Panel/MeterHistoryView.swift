@@ -122,6 +122,7 @@ struct MeterHistoryView: View {
     /// Which limit window the Current span shows: 0 = the live one, k = the
     /// k-th observed window before it (`pastWindows[k - 1]`). Paged by the
     /// ‹ › arrows under the chart and by a two-finger horizontal swipe.
+    @Environment(\.faceDensity) private var density
     @State private var windowOffset = 0
     /// Which way the last page turn went (-1 earlier, +1 later): an earlier
     /// window slides in from the left, the way a timeline reads.
@@ -663,7 +664,7 @@ struct MeterHistoryView: View {
                 .frame(width: Self.chartWidth, alignment: .leading)
             }
             HStack(alignment: .firstTextBaseline) {
-                Text(meter.label).font(.caption.bold())
+                Text(meter.label).font(density.sectionHeader)
                 Spacer()
                 // The History span picks its trailing frame from a compact
                 // dropdown beside the span picker; the Current span's frame

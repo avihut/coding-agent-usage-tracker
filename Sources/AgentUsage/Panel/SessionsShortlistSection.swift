@@ -20,12 +20,16 @@ struct SessionsShortlistSection: View {
     /// "Show more" covers them and anything past the cap. While the activity
     /// section is navigated (paged window or drilled day) the strip follows
     /// it, labels the span, and states emptiness rather than vanishing.
+    ///
+    /// In a window the section is a column of its own beside Activity: it
+    /// stays in place when empty (a column that comes and goes would move
+    /// the page) and carries a "Show all" into the browser.
     var body: some View {
         let shortlist = SessionShortlist.build(store.sessions, in: activityFocus)
         if store.providesSessions,
-           !shortlist.rows.isEmpty || shortlist.hasMore || activityFocus != nil {
+           density.isWindow || !shortlist.rows.isEmpty || shortlist.hasMore || activityFocus != nil {
             let colors = shortlistColors
-            Divider()
+            if !density.isWindow { Divider() }
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .firstTextBaseline) {
                     Text("Sessions")
@@ -36,10 +40,16 @@ struct SessionsShortlistSection: View {
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
+                    if density.isWindow {
+                        Spacer(minLength: 8)
+                        Button("Show All", action: onOpenSessions)
+                            .buttonStyle(.link)
+                            .font(.subheadline)
+                    }
                 }
                 .padding(.bottom, 2)
                 if shortlist.rows.isEmpty {
-                    Text("No sessions in this period")
+                    Text(activityFocus == nil ? "No sessions yet" : "No sessions in this period")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                         .padding(.horizontal, 4)

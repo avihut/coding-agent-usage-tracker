@@ -271,7 +271,9 @@ final class UsageStore {
         }
     }
     var isLocalProvider: Bool { providerValue.networkDestinations.isEmpty }
-    var providesSessions: Bool { localActivity?.providesSessions ?? false }
+    /// Whether this face lists sessions: its scanner says so, and a face
+    /// with no scanner (a `--demo-digest` client) has the digest's.
+    var providesSessions: Bool { localActivity?.providesSessions ?? !sessions.isEmpty }
     /// True while a daemon hosts the engine — settings can say so.
     var isDigestClient: Bool {
         if case .client = mode { return true }

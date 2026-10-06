@@ -42,11 +42,13 @@ struct AccountPageContent: View {
 
     @State private var hoveredMeter: String?
 
-    /// The meter card's width: the popover's plot plus its own padding.
-    static let cardWidth: CGFloat = MeterHistoryView.chartWidth + 20
-    /// The activity chart keeps the panel's width, where its day-to-day
-    /// slide is measured.
-    static let activityWidth: CGFloat = 332
+    /// One column is the popover's own width: the activity chart's day
+    /// slide is measured at 332pt, and the meter card's plot is 300pt plus
+    /// its padding. The page is two of them — the panel's column, and the
+    /// hover card pinned beside it — so it keeps the popover's proportions
+    /// instead of stretching them.
+    static let columnWidth: CGFloat = 340
+    static let columnGap: CGFloat = 36
 
     private var meters: [Meter] { store.state.snapshot?.meters ?? [] }
 
@@ -69,15 +71,55 @@ struct AccountPageContent: View {
                 ServiceStatusBanner(card: card)
             }
             AccountErrorBlock(store: store)
-            HStack(alignment: .top, spacing: 24) {
-                limits
-                    .frame(minWidth: 240, maxWidth: 420, alignment: .topLeading)
-                if let meter = chosenMeter {
-                    meterCard(meter)
+            // Two columns while they fit, one under the other when the
+            // window is too narrow for both.
+            ViewThatFits(in: .horizontal) {
+                Grid(alignment: .topLeading, horizontalSpacing: Self.columnGap, verticalSpacing: 18) {
+                    GridRow {
+                        column(limits)
+                        column(card)
+                    }
+                    GridRow {
+                        Divider().frame(width: Self.columnWidth)
+                        Divider().frame(width: Self.columnWidth)
+                    }
+                    GridRow {
+                        column(activity)
+                        column(sessions)
+                    }
+                }
+                VStack(alignment: .leading, spacing: 18) {
+                    column(limits)
+                    column(card)
+                    Divider().frame(width: Self.columnWidth)
+                    column(activity)
+                    column(sessions)
                 }
             }
-            Divider()
-            HStack(alignment: .top, spacing: 24) {
+            .frame(maxWidth: .infinity)
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .environment(\.faceDensity, .window)
+        .environment(\.harnessStyle, store.style)
+    }
+
+    private func column(_ content: some View) -> some View {
+        content.frame(width: Self.columnWidth, alignment: .topLeading)
+    }
+
+    @ViewBuilder private var card: some View {
+        if let meter = chosenMeter {
+            meterCard(meter)
+        }
+    }
+
+    private var sessions: some View {
+        SessionsShortlistSection(
+            store: store, activityFocus: activityFocus,
+            onOpenSessions: onOpenSessions, onOpenSession: onOpenSession)
+    }
+
+    private var activity: some View {
                 HeatmapView(
                     activity: store.activity, pricing: store.pricing,
                     weeklyProfile: store.weeklyProfile,
@@ -93,15 +135,6 @@ struct AccountPageContent: View {
                     sessionAuditMeter: store.auditMeter(rank: 0),
                     weeklyAuditMeter: store.auditMeter(rank: 1),
                     resetsOnPanelClose: false)
-                    .frame(width: Self.activityWidth)
-                SessionsShortlistSection(
-                    store: store, activityFocus: activityFocus,
-                    onOpenSessions: onOpenSessions, onOpenSession: onOpenSession)
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-        .environment(\.harnessStyle, store.style)
     }
 
     // MARK: - Limits
@@ -135,7 +168,6 @@ struct AccountPageContent: View {
                             onLeave: {})
                     }
                 }
-                .environment(\.faceDensity, .windowLarge)
                 if snapshot.meters.isEmpty {
                     Text("No limits reported").foregroundStyle(.secondary)
                 }
@@ -188,13 +220,9 @@ struct AccountPageContent: View {
             // A fresh card per meter: its paging and hover state belong to
             // the meter it was opened on.
             .id("\(profile.key)|\(meter.id)")
-            .frame(width: Self.cardWidth, alignment: .topLeading)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color.primary.opacity(0.035)))
-            .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.08)))
+            // Unboxed, like every other section of the page: the card's own
+            // 10pt inset is handed back so its header lines up with Limits'.
+            .padding(-10)
     }
 
     private func openOutage(_ span: OutageSpan) {

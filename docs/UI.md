@@ -231,12 +231,19 @@ per-harness geometry of the bar is in [HARNESSES.md](HARNESSES.md).
   over a harness with several accounts (the strip's rule; a lone account's
   row already names its agent). Each row: the strip's 2pt accent rule
   (= focused in the menu bar, NOT selected here), its tile, its name,
-  `MiniMeterBars`. An ACCOUNT PAGE is the panel for one account: Limits
-  (`MeterRow` with `opensOnHover: false` — a click selects) beside the
-  selected meter's card inline (the hover popover's `MeterHistoryView` at
-  its native 300pt, same `scopeKey` prefs key, so span/frame choices are
-  shared with the popover), then Activity (`HeatmapView` at the panel's
-  332pt, `resetsOnPanelClose: false`) beside Sessions. The default meter
+  `MiniMeterBars`. An ACCOUNT PAGE is two popover-width columns (340pt,
+  a `Grid` so their rows align, centered; one column when the window is
+  too narrow): the panel's own column — Limits (`MeterRow` with
+  `opensOnHover: false`: a click selects), then Activity (`HeatmapView`,
+  `resetsOnPanelClose: false`) — and the hover card PINNED beside it — the
+  selected meter's `MeterHistoryView`, unboxed, same `scopeKey` prefs key
+  so span/frame choices are shared with the popover — then Sessions. A
+  first cut stretched Limits to fill the width at `title2`, boxed the card
+  and let each section take its own width; side by side with the popover
+  it read as heavier and looser than the thing it enlarges (user, 2026-10-06:
+  "doesn't yet feel as good as the menubar popover"). Keep the popover's
+  proportions; spend the room on putting things side by side, not on
+  making them bigger. The default meter
   is the most at-risk (highest forecast severity), else the weekly, else
   the first; a pick is remembered per account for the window's life.
   HOME is every account at a glance. A one-account Mac gets the account
@@ -250,8 +257,8 @@ per-harness geometry of the bar is in [HARNESSES.md](HARNESSES.md).
   one status dot per shown harness with a card, version + update chip.
 - Type (`FaceDensity`, an environment value, `.panel` = the popover's
   literal fonts, which the popover never sets): section headers
-  `headline`; meter label `body`; meter % `title3` on Home (`.window`) and
-  `title2` on a page's Limits (`.windowLarge`), bar 6/8pt; meter caption
+  `headline` (the meter card's title too); meter label `body`; meter %
+  `title3`, bar 6pt; meter caption
   `subheadline`; the breakdown's ≈ $ headline `title3` (below the meters,
   which are the page's largest numbers); the status line `footnote`. Grids
   and chart axes keep their size.

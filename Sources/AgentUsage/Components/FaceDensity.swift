@@ -11,12 +11,9 @@ import SwiftUI
 /// the value, so it draws exactly as it always has.
 enum FaceDensity {
     case panel
-    /// The main window's Home: one row per account, meters side by side.
     case window
-    /// An account page's Limits: one account, its meters the subject.
-    case windowLarge
 
-    var isWindow: Bool { self != .panel }
+    var isWindow: Bool { self == .window }
 
     /// A section's title (Activity, Sessions).
     var sectionHeader: Font {
@@ -28,19 +25,11 @@ enum FaceDensity {
     }
 
     var meterPercent: Font {
-        switch self {
-        case .panel: .callout.monospacedDigit().bold()
-        case .window: .title3.monospacedDigit().weight(.semibold)
-        case .windowLarge: .title2.monospacedDigit().weight(.semibold)
-        }
+        isWindow ? .title3.monospacedDigit().weight(.semibold) : .callout.monospacedDigit().bold()
     }
 
     var meterBarHeight: CGFloat {
-        switch self {
-        case .panel: 5
-        case .window: 6
-        case .windowLarge: 8
-        }
+        isWindow ? 6 : 5
     }
 
     /// "resets in 2h · runs out in 1h".
