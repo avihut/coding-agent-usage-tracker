@@ -16,6 +16,9 @@ import UsageCore
 extension ProviderRegistry {
 
     func enroll(home: URL, providerID: String, nickname: String? = nil) {
+        // A demo's accounts are the digest's; this Mac's records stay as
+        // they are (`DemoLaunch`).
+        guard !isDemo else { return }
         let provider = providers.first { $0.id == providerID } ?? providers[0]
         guard provider.supportsMultipleHomes, let standard = provider.homeDirectory else { return }
         let id = ProfileID.forHome(home, standard: standard)
@@ -44,7 +47,7 @@ extension ProviderRegistry {
     /// Removes the record; `deletingData` also removes THIS APP's scoped
     /// directories for the profile — never anything inside the home.
     func remove(id key: String, deletingData: Bool) {
-        guard let record = record(for: key), !record.isDefault else { return }
+        guard !isDemo, let record = record(for: key), !record.isDefault else { return }
         var stored = ProfileStore.load(from: .standard)
         stored.removeAll { $0.id == record.id && $0.providerID == record.providerID }
         ProfileStore.save(stored, to: .standard)
@@ -65,6 +68,7 @@ extension ProviderRegistry {
     /// sign-in it holds TODAY, so the offer stays silent until that
     /// changes — never a permanent silence (D2).
     func dismissDiscovered(_ home: DiscoveredHome, providerID: String) {
+        guard !isDemo else { return }
         var stored = ProfileStore.load(from: .standard)
         stored.removeAll { $0.id == home.profileID && $0.providerID == providerID }
         stored.append(Profile(
@@ -113,7 +117,7 @@ extension ProviderRegistry {
     }
 
     private func edit(_ key: String, _ body: (inout Profile) -> Void) {
-        guard let record = record(for: key) else { return }
+        guard !isDemo, let record = record(for: key) else { return }
         var stored = ProfileStore.load(from: .standard)
         if let index = stored.firstIndex(where: {
             $0.id == record.id && $0.providerID == record.providerID
@@ -131,6 +135,7 @@ extension ProviderRegistry {
     /// One edit over every enrolled record of every harness — an implicit
     /// default gets a stored record the moment it differs.
     private func editAll(_ body: (inout Profile) -> Void) {
+        guard !isDemo else { return }
         var stored = ProfileStore.load(from: .standard)
         for record in profiles where record.isEnrolled {
             if let index = stored.firstIndex(where: {

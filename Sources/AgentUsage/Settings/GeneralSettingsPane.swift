@@ -31,6 +31,7 @@ enum SettingsBindings {
         Binding(
             get: { LoginItemState.shared.enabled },
             set: { enabled in
+                guard !DemoLaunch.isActive else { return }
                 if enabled {
                     try? SMAppService.mainApp.register()
                 } else {
@@ -53,6 +54,7 @@ enum SettingsBindings {
         Binding(
             get: { DaemonItemState.shared.installed },
             set: { enabled in
+                guard !DemoLaunch.isActive else { return }
                 LaunchAgentInstaller.setAutoInstall(enabled, defaults: .standard)
                 if enabled {
                     let embedded = Bundle.main.bundleURL
@@ -614,6 +616,7 @@ struct GeneralSettingsPane: View {
             get: { retentionDays },
             set: { days in
                 retentionDays = days
+                guard !DemoLaunch.isActive else { return }
                 retentionWriteFailed =
                     !(store.provider.agentSettings?.writeRetentionDays(days) ?? false)
             })

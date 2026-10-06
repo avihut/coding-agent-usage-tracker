@@ -253,6 +253,7 @@ final class ProviderRegistry {
             if ok { onProfilesChange?() }
             return ok
         case .client(let feed):
+            guard !isDemo else { return false }
             // The host owns the floor rule; a client that can't ask must not
             // strand the person with an empty bar, so it checks the same one.
             var hidden = HarnessRoster.hidden(from: .standard)

@@ -2,6 +2,15 @@ import AppKit
 import SwiftUI
 import UsageCore
 
+/// A `--demo-digest` process. It shares the live app's bundle id, so it
+/// shares what lives outside its own storage scope — the login item, the
+/// usaged launch agent, an agent's settings file. Every control that would
+/// write one of those is inert while this is true: a demo is looked at and
+/// clicked through, and must leave the real install exactly as it was.
+enum DemoLaunch {
+    static let isActive = CommandLine.arguments.contains("--demo-digest")
+}
+
 /// The launch hatches that install synthetic state: a second account, a
 /// second harness, an incident, an update, an account switch, a notices card.
 /// None of these can be produced on demand on this Mac — an outage can't be
