@@ -225,65 +225,67 @@ per-harness geometry of the bar is in [HARNESSES.md](HARNESSES.md).
   `NoticesBand`, `SessionsShortlistSection`, `UpdateChip`, `MeterRow`,
   `HeatmapView`, `MeterHistoryView`) each take the store they show, so the
   window hands them any account. Code: `Sources/AgentUsage/MainWindow/`.
-- Layout: `NavigationSplitView`. The SIDEBAR is the account strip — Home,
-  then the shown accounts (`registry.shownProfiles`, the strip's set)
-  grouped by harness through core `ProfileGroups.byHarness`, a heading only
-  over a harness with several accounts (the strip's rule; a lone account's
-  row already names its agent). Each row: the strip's 2pt accent rule
-  (= focused in the menu bar, NOT selected here), its tile, its name,
-  `MiniMeterBars`. An ACCOUNT PAGE is two popover-width columns (340pt,
-  a `Grid` so their rows align, centered; one column when the window is
-  too narrow): the panel's own column — Limits (`MeterRow` with
-  `opensOnHover: false`: a click selects), then Activity (`HeatmapView`,
-  `resetsOnPanelClose: false`) — and the hover card PINNED beside it — the
-  selected meter's `MeterHistoryView`, unboxed, same `scopeKey` prefs key
-  so span/frame choices are shared with the popover — then Sessions. A
-  first cut stretched Limits to fill the width at `title2`, boxed the card
-  and let each section take its own width; side by side with the popover
-  it read as heavier and looser than the thing it enlarges (user, 2026-10-06:
-  "doesn't yet feel as good as the menubar popover"). Keep the popover's
-  proportions; spend the room on putting things side by side, not on
-  making them bigger. The default meter
-  is the most at-risk (highest forecast severity), else the weekly, else
-  the first; a pick is remembered per account for the window's life.
-  HOME is every account at a glance, the panel's stacked form at window
-  size: one block per account — tile, name, agent · sign-in · plan,
-  freshness at the far end (a click opens its page) — with its meters in
-  columns by KIND (core `MeterColumns.arrange`, tested: column 0 the first
-  rank-0 meter, column 1 the first rank-1, the rest in the menu bar's
-  order; a slot the account lacks is a blank cell, never 0%; a column
-  nobody has is dropped), so every weekly window reads straight down across
-  harnesses. A click on a meter opens that account's page on that meter.
-  Below, Activity beside Sessions for the account focused in the menu
-  bar, crossfading on a focus change like the panel. Same width as a
-  page's two columns, wider only when the meter columns need it (190pt
-  each). Notices and every shown harness's incident banner sit on top.
+- THE PAGE REFLOWS TO THE WINDOW (user, same day: "the dashboard should be
+  dynamic and respond to the size of the window … the menu bar popover is
+  an example of this same dashboard when the window is tall and narrow").
+  Every page is a set of TILES in one `DashboardFlow` (a custom `Layout`):
+  as many columns as the width holds, each at least the popover's 360pt,
+  at most four; tiles placed in reading order into the shortest column
+  (masonry), so one column IS the popover's stack and every extra column
+  puts more side by side. A tile is the section on a quiet `.quinary`
+  rounded ground — every section is one, so none looks foreign. Charts take
+  their tile's width: `MeterHistoryView(chartWidth:)` (default 300, every
+  popover call site unchanged) fed by the tile's measured width, and
+  `HeatmapView` measures its own day-slide distance. Scroll happens only
+  when the tiles don't fit. Two earlier cuts are the lesson: fixed columns
+  centered in the window ("content just stays the same … tons of empty
+  space"), and before that a stretched, boxed, mixed-scale page ("doesn't
+  yet feel as good as the menubar popover"). Keep the popover's
+  proportions per tile; spend width on more tiles side by side.
+- The SIDEBAR is the account strip — Home, then the shown accounts
+  (`registry.shownProfiles`, the strip's set) grouped by harness through
+  core `ProfileGroups.byHarness`, a heading only over a harness with
+  several accounts (the strip's rule). Each row: the strip's 2pt accent
+  rule (= focused in the menu bar, NOT selected here), its tile, its name,
+  `MiniMeterBars`. Its foot carries what the panel's footer does: each
+  shown harness's service status (a click opens the vendor's card) and the
+  version with its update chip — no opaque status bar under the page.
+- ACCOUNT PAGE tiles: Limits (`MeterRow` with `opensOnHover: false` — a
+  click selects; credits; the pipeline line under the meters, where the
+  panel has it), the selected meter's card (the hover popover, pinned;
+  same `scopeKey` prefs key, so span/frame choices are shared with the
+  popover), Activity, Sessions. The default meter is the most at-risk
+  (highest forecast severity), else the weekly, else the first; a pick is
+  remembered per account for the window's life. HOME tiles: one per
+  shown account (tile, name, agent · sign-in · plan, freshness — a click
+  opens its page; its meters — a click opens its page on that meter),
+  then Activity and Sessions for the account the menu bar shows. Notices
+  and every shown harness's incident banner sit above the flow.
   `scripts/demo-digest.py --accounts 3` adds a second account of one
   harness (the demo registry keeps its `accountID` — as the standard
-  profile it collided with the first by key). A one-account Mac gets the account
-  page with the sidebar collapsed — Home and the page would coincide.
+  profile it collided with the first by key). A one-account Mac gets the
+  account page with the sidebar collapsed — Home and the page coincide.
 - Selecting in the sidebar NEVER moves the menu bar's focus. Focus moves
-  only from the toolbar's Focus menu (Follow Activity, or pin an account)
-  and a row's context menu. Toolbar: Focus menu, Refresh (⌘R, the
-  panel's pressure-colored button), Usage ↗ (absent for local providers),
-  Sessions (⌘1, opens the Sessions window for THAT account —
-  `showSessions(for:)`). Status bar: the shown account's pipeline line,
-  one status dot per shown harness with a card, version + update chip.
+  only from the toolbar's menu-bar menu (Follow Activity, or pin an
+  account) and a row's context menu. Toolbar items are symbols, their
+  words one hover away: the menu-bar menu, Refresh (⌘R, the panel's
+  pressure-colored button), Usage ↗ (absent for local providers), Sessions
+  (⌘1, the Sessions window for THAT account — `showSessions(for:)`).
 - Type (`FaceDensity`, an environment value, `.panel` = the popover's
   literal fonts, which the popover never sets): section headers
   `headline` (the meter card's title too); meter label `body`; meter %
-  `title3`, bar 6pt; meter caption
-  `subheadline`; the breakdown's ≈ $ headline `title3` (below the meters,
-  which are the page's largest numbers); the status line `footnote`. Grids
-  and chart axes keep their size.
+  `title3`, bar 6pt; meter caption `subheadline`; the breakdown's ≈ $
+  headline `title3`; the status line `footnote`. Grids and chart axes keep
+  their size.
 - Contract: `MainWindowController`, the Settings contract — built on first
   show, `isReleasedWhenClosed = false`, `center()` then
   `setFrameAutosaveName("AgentUsageMain")`, `DockPresence.adopt` →
   `NSApp.activate()` → `makeKeyAndOrderFront` → `orderFrontRegardless`.
-  1100×720 default, 900×600 minimum, tabbing off. Owned by
-  `StatusItemController`, bound to the registry (never a store), never
-  closed by a focus change. ⌘Q quits the app, bar included; ⌘W closes the
-  window and DockPresence returns the app to `.accessory`.
+  1100×720 default, 620×480 minimum (the sidebar plus one tile column),
+  tabbing off. Owned by `StatusItemController`, bound to the registry
+  (never a store), never closed by a focus change. ⌘Q quits the app, bar
+  included; ⌘W closes the window and DockPresence returns the app to
+  `.accessory`.
 - Entry points: the panel footer's window button and ⋯ → Open Agent
   Usage Window; ⌘0 anywhere the app is key (the ⌘, local key monitor,
   which sees the key before any menu — the panel has none); the Window
@@ -295,7 +297,10 @@ per-harness geometry of the bar is in [HARNESSES.md](HARNESSES.md).
   open-application without the launched-as-login-item property. A login
   item's launch, a direct exec (every hatch) and the updater's relaunch
   (`open … --args --relaunched`) stay in the menu bar.
-- Hosting findings (2026-10-06, macOS 26): `NSHostingController
+- The Liquid Glass look needs the app LINKED against the 26+ SDK — see
+  `docs/WORKFLOW.md`, "The linked SDK". Until 2026-10-06 every build
+  recorded `sdk 15.0` and every window drew in the legacy look.
+- Hosting findings (2026-10-06, macOS 26/27): `NSHostingController
   .sceneBridgingOptions = [.title, .toolbars]` bridges the toolbar and
   `.navigationSubtitle`, but the TITLE stays "Untitled" — the view reports
   it (`onTitle`) and the controller sets `window.title`. The navigation
@@ -307,14 +312,20 @@ per-harness geometry of the bar is in [HARNESSES.md](HARNESSES.md).
   worktree — with the live app running under the same bundle id,
   LaunchServices fronts or relaunches the REAL app, and a normal launch of
   the worktree build repoints the launch agent.
-- Snapshots: `--snapshot` adds `main-account-<key>-{dark,light}.png` for
-  every shown account, `main-home-{dark,light}.png` (the pages' content,
-  at the detail column's 880pt,
-  hosted off-screen like the panel — a ScrollView draws blank there) and
-  `main-window-{home,account}-*.png`: a TITLED window parked off-screen
-  whose frame view (`contentView.superview`) `cacheDisplay`s with its
-  title bar, toolbar and sidebar — the one way to see the chrome without
-  Screen Recording or Accessibility consent. Stage windows with
+- Snapshots: `--snapshot` adds `main-home-{400,800,1200}-<theme>.png` and
+  `main-account-<key>-800-<theme>.png` (a page's content at detail widths
+  of one, two and three columns — one width proves nothing about a page
+  that reflows; hosted off-screen like the panel, a ScrollView draws blank
+  there) and `main-window-<page>-<width>-<theme>.png`: a TITLED window
+  parked off-screen whose frame view (`contentView.superview`)
+  `cacheDisplay`s with its title bar and toolbar — the one way to see the
+  chrome without Screen Recording or Accessibility consent (the glass
+  sidebar draws blank off-screen). Page stages are NOT sized by their
+  content: under the 26+ SDK a borderless window that animates to a hosted
+  `MeterHistoryView`'s size overflows the main thread's stack inside Auto
+  Layout (`updateAnimatedWindowSize` → `NSISEngine`), so they are laid out
+  tall and cut to `sizeThatFits` (the same card in a real `NSPopover`, the
+  hover card's path, was checked and is fine). Stage windows with
   `isReleasedWhenClosed = false`: a window the array owns is otherwise
   freed twice once closed. `--main-window [--select home|<key>]` opens it
   at launch.

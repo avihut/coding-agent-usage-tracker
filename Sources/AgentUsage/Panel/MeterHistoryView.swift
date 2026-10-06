@@ -159,8 +159,10 @@ struct MeterHistoryView: View {
         accountTitle: AccountTitle? = nil,
         highlightReset: Date? = nil,
         outages: [OutageSpan] = [],
-        onOpenOutage: ((OutageSpan) -> Void)? = nil
+        onOpenOutage: ((OutageSpan) -> Void)? = nil,
+        chartWidth: CGFloat = MeterHistoryView.chartWidth
     ) {
+        self.plotWidth = chartWidth
         self.accountTitle = accountTitle
         self.highlightReset = highlightReset
         self.outages = outages
@@ -196,7 +198,11 @@ struct MeterHistoryView: View {
     /// are exactly this wide, and only the breakdown grid may widen the card
     /// (its model names never truncate). The hover popover pins its incident
     /// banner to it.
+    /// The popover's plot width — what every caller gets unless it has
+    /// room to give (the main window's tiles pass their own).
     static let chartWidth: CGFloat = 300
+    /// This card's plot width.
+    let plotWidth: CGFloat
     private static let baseChartHeight: CGFloat = 124
     /// One floor's worth of height (≈1pt per domain unit at this size), so
     /// adding the outage floor never squeezes the plot.
@@ -224,7 +230,7 @@ struct MeterHistoryView: View {
     /// X-axis eclipse math runs in this track space — a fraction-of-domain
     /// reach can't answer "would these two labels overlap", since a label's
     /// width is points and a domain is hours.
-    private static let plotTrackWidth = chartWidth - axisLabelWidth
+    private var plotTrackWidth: CGFloat { plotWidth - Self.axisLabelWidth }
     /// Horizontal breathing room between two axis-row labels, in points:
     /// closer than this and the crossing's timestamp is crowding the tick.
     private static let xAxisLabelGap = 3.0
@@ -661,7 +667,7 @@ struct MeterHistoryView: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
-                .frame(width: Self.chartWidth, alignment: .leading)
+                .frame(width: plotWidth, alignment: .leading)
             }
             HStack(alignment: .firstTextBaseline) {
                 Text(meter.label).font(density.sectionHeader)
@@ -700,14 +706,14 @@ struct MeterHistoryView: View {
                     .lineLimit(1)
                 Spacer(minLength: 0)
             }
-            .frame(width: Self.chartWidth, height: 14)
+            .frame(width: plotWidth, height: 14)
             if points.count < 2 && curves.isEmpty {
                 Text(isLive || effectiveSpan == .history
                     ? "Collecting samples — this fills in as refreshes accumulate."
                     : "No samples retained for this \(windowNoun).")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
-                    .frame(width: Self.chartWidth, height: chartHeight)
+                    .frame(width: plotWidth, height: chartHeight)
             } else {
                 // The 30s tick keeps the now-notch sliding and the sliding
                 // domain honest while the popover stays open.
@@ -730,7 +736,7 @@ struct MeterHistoryView: View {
                     // right (fingers right = earlier) moves the chart right.
                     .transition(.push(from: pageSlide < 0 ? .leading : .trailing))
                 }
-                .frame(width: Self.chartWidth, height: chartHeight)
+                .frame(width: plotWidth, height: chartHeight)
                 .clipped()
                 .animation(.easeInOut(duration: 0.28), value: pageIndex)
                 // Two-finger horizontal swipes page windows like the arrows
@@ -751,7 +757,7 @@ struct MeterHistoryView: View {
                     && grantReadout == nil && pinnedReadout == nil && outageReadout == nil
                     ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.secondary))
                 .lineLimit(1)
-                .frame(width: Self.chartWidth, height: 14, alignment: .leading)
+                .frame(width: plotWidth, height: 14, alignment: .leading)
             Divider()
             if rows.isEmpty {
                 Text("No local token data in this window.")
@@ -796,7 +802,7 @@ struct MeterHistoryView: View {
     ) -> Date? {
         WindowPlot.nearestReset(
             to: date, in: resets, span: end.timeIntervalSince(start),
-            trackWidth: Self.chartWidth)
+            trackWidth: plotWidth)
     }
 
     // MARK: - Chart
@@ -1269,7 +1275,7 @@ struct MeterHistoryView: View {
                     }
             }
         }
-        .frame(width: Self.chartWidth, height: chartHeight)
+        .frame(width: plotWidth, height: chartHeight)
     }
 
     /// The activity strip's band, in chart-Y units below the plot floor.
@@ -1383,7 +1389,7 @@ struct MeterHistoryView: View {
         let span = end.timeIntervalSince(start)
         guard span > 0 else { return false }
         func x(_ date: Date) -> Double {
-            date.timeIntervalSince(start) / span * Self.plotTrackWidth
+            date.timeIntervalSince(start) / span * plotTrackWidth
         }
         let crossingX = x(exhaust)
         let crossingWidth = Self.captionWidth(timeLabel(exhaust))
@@ -1723,8 +1729,8 @@ struct MeterHistoryView: View {
         guard let curve, let tip = curve.points.last else { return false }
         let span = end.timeIntervalSince(start)
         guard span > 0 else { return false }
-        let xNow = now.timeIntervalSince(start) / span * Self.chartWidth
-        let xLabel = tip.t.timeIntervalSince(start) / span * Self.chartWidth
+        let xNow = now.timeIntervalSince(start) / span * plotWidth
+        let xLabel = tip.t.timeIntervalSince(start) / span * plotWidth
         let labelWidth = Double(ModelNames.display(curve.model).count) * 4.5 + 4
         return abs(xLabel - xNow) < (labelWidth + 18) / 2
     }
@@ -1824,7 +1830,7 @@ struct MeterHistoryView: View {
         }
         .font(.caption2)
         .foregroundStyle(.tertiary)
-        .frame(width: Self.chartWidth)
+        .frame(width: plotWidth)
     }
 
     /// Frame-aware timestamps: hours within a day, weekday + time across

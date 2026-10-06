@@ -67,7 +67,9 @@ final class MainWindowController {
             window.toolbarStyle = .unified
             window.tabbingMode = .disallowed
             window.setContentSize(NSSize(width: 1100, height: 720))
-            window.contentMinSize = NSSize(width: 900, height: 600)
+            // The sidebar plus one popover-width column: the page reflows to
+            // anything wider, and below this the sidebar collapses.
+            window.contentMinSize = NSSize(width: 620, height: 480)
             window.isReleasedWhenClosed = false
             window.center()
             // After centering so a remembered size/position wins over it.

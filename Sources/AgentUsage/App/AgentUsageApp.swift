@@ -214,7 +214,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 Self.writePanelSnapshots(panels, to: directory)
                 let pages = Self.stageMainWindowSnapshots(registry: registry)
                 try? await Task.sleep(for: .seconds(1))
-                Self.fitPanelSnapshots(pages)
+                Self.fitPageSnapshots(pages)
                 try? await Task.sleep(for: .seconds(1))
                 Self.writePanelSnapshots(pages, to: directory)
                 let frames = Self.stageMainWindowFrames(registry: registry)

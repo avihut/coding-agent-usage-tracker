@@ -61,13 +61,11 @@ struct MainWindowView: View {
                 registry: registry,
                 selection: Binding(
                     get: { selection },
-                    set: { if let key = $0 { selectionRaw = key } }))
-                .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 300)
+                    set: { if let key = $0 { selectionRaw = key } }),
+                onOpenSettings: onOpenSettings)
+                .navigationSplitViewColumnWidth(min: 200, ideal: 230, max: 320)
         } detail: {
             detail
-                .safeAreaInset(edge: .bottom, spacing: 0) {
-                    MainStatusBar(registry: registry, store: shownStore, onOpenSettings: onOpenSettings)
-                }
                 .toolbar { toolbar }
                 // On the detail column: the split view's own title wins
                 // over one set outside it (the window read "Untitled").
@@ -75,7 +73,6 @@ struct MainWindowView: View {
                 .navigationSubtitle(subtitle)
         }
         .onChange(of: title, initial: true) { _, title in onTitle(title) }
-        .frame(minWidth: 900, minHeight: 600)
         .onAppear {
             applyRequest()
             // A lone account needs no sidebar: Home and its page coincide.
@@ -201,15 +198,15 @@ struct MainFocusMenu: View {
                     set: { if $0 { registry.focus(profile.key) } else { registry.pin(nil) } }))
             }
         } label: {
+            // A toolbar item is its symbol; what it says is one hover away.
             Label(label, systemImage: "menubar.rectangle")
-                .labelStyle(.titleAndIcon)
         }
-        .help("Which account the menu bar shows")
+        .help(label)
     }
 
     private var label: String {
-        if let pageProfile, pageProfile.key == registry.focusedID { return "Focused in Menu Bar" }
-        guard let focused else { return "Menu Bar" }
-        return "\(registry.rowTitle(for: focused).title) in Menu Bar"
+        if let pageProfile, pageProfile.key == registry.focusedID { return "Shown in the menu bar" }
+        guard let focused else { return "Menu bar" }
+        return "The menu bar shows \(registry.rowTitle(for: focused).title)"
     }
 }

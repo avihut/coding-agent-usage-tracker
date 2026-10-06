@@ -107,7 +107,9 @@ struct HeatmapView: View {
     /// Invalidates a superseded slide's cleanup when the arrows are mashed.
     @State private var stepToken = 0
     /// The panel's content width — what a full slide traverses.
-    private static let daySlideWidth: CGFloat = 332
+    /// How far a day slides — the view's own width (332pt in the panel),
+    /// measured, since a window gives it more.
+    @State private var daySlideWidth: CGFloat = 332
     @State private var tipSize: CGSize = .zero
     /// Rebuilt only when the activity or the period changes — never per cell
     /// and never on hover. See `HeatmapLayout`.
@@ -178,6 +180,9 @@ struct HeatmapView: View {
             // pop back rather than point at nothing.
             if selectedDay != nil, selectedEntry == nil { selectedDay = nil }
             publishFocus()
+        }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
+            if width > 0 { daySlideWidth = width }
         }
         .onChange(of: selectedDay) { publishFocus() }
         .onChange(of: pageOffset) { publishFocus() }
@@ -600,7 +605,7 @@ struct HeatmapView: View {
     private func stepDay(from entry: DailyActivity, rows: [ModelTokenUsage], direction: Int) {
         guard let target = neighborDay(of: entry.day, direction: direction) else { return }
         outgoingStep = (entry, rows, direction)
-        slideX = CGFloat(direction) * Self.daySlideWidth
+        slideX = CGFloat(direction) * daySlideWidth
         drill(into: target)
         stepToken += 1
         let token = stepToken
@@ -656,7 +661,7 @@ struct HeatmapView: View {
                     // The outgoing frame is scenery — its ring must not
                     // co-present the cost popover the live copy owns.
                     dayDetail(outgoing.entry, rows: outgoing.rows, live: false)
-                        .offset(x: slideX - CGFloat(outgoing.direction) * Self.daySlideWidth)
+                        .offset(x: slideX - CGFloat(outgoing.direction) * daySlideWidth)
                 }
                 dayDetail(entry, rows: rows)
                     .offset(x: slideX)
