@@ -106,9 +106,13 @@ struct MainWindowView: View {
                 onOpenSession: { onOpenSessions(profile.key, $0) })
                 .id(profile.key)
         } else {
-            ContentUnavailableView(
-                "Every account at a glance", systemImage: "house",
-                description: Text("Select an account in the sidebar."))
+            HomePage(
+                registry: registry, activityFocus: $activityFocus,
+                onOpenAccount: { key, meterID in
+                    if let meterID { chosenMeters[key] = meterID }
+                    selectionRaw = key
+                },
+                onOpenSessions: onOpenSessions)
         }
     }
 

@@ -12,6 +12,10 @@ New
   limits beside the selected limit's chart, then its activity and
   sessions. Choosing an account there doesn't change what the menu bar
   shows — the toolbar's menu does that.
+- The window's Home shows every account at once, each one's limits lined
+  up by kind — every weekly limit in one column, whichever agent it
+  belongs to — with the menu bar account's activity and sessions below.
+  Click a limit to open that account on it.
 
 Fixes
 - An open Sessions or Settings window stays open when the menu bar's focus

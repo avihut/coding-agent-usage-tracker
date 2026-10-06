@@ -400,7 +400,14 @@ final class ProviderRegistry {
             profiles = (feed.digest?.profiles ?? []).compactMap { section in
                 guard let provider = providers.first(where: { $0.id == section.providerID })
                 else { return nil }
+                // A second account of a harness keeps its own storage id — as
+                // the standard one it would collide with the first by key.
                 var profile = Profile.standard(for: provider, addedAt: Date())
+                if let accountID = section.accountID, accountID != profile.id {
+                    profile = Profile(
+                        id: accountID, providerID: provider.id, home: nil,
+                        nickname: section.nickname, addedAt: Date())
+                }
                 if let own = stored.first(where: { $0.key == profile.key }) {
                     profile.menuBarForm = own.menuBarForm
                     profile.menuBarElements = own.menuBarElements

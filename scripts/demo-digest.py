@@ -14,7 +14,11 @@ weeks each. Everything is seeded, so two runs differ only by the
 clock: every stamp is laid out relative to now, because a digest whose
 resets are in the past renders as stale.
 
-usage: demo-digest.py <out.json>
+`--accounts 3` adds a second Claude Code account ("Personal", the golden's
+own second section) — the main window's Home with a harness of several
+accounts. Built after the other two, so their numbers don't move.
+
+usage: demo-digest.py [--accounts 2|3] <out.json>
 """
 
 import copy
@@ -240,7 +244,7 @@ def face(now, rng, section, *, models, meters, titles, typical, engine):
     return built
 
 
-def build(now):
+def build(now, accounts=2):
     rng = random.Random(5)
     state = json.loads(GOLDEN.read_text())
     sections = {section["id"]: section for section in state["profiles"]}
@@ -274,11 +278,33 @@ def build(now):
                   projected=88, verdict="green", severity=0, step_minutes=120),
         ])
     codex["isFocused"] = False
+    faces = [claude, codex]
+    if accounts >= 3:
+        # The golden's Personal is a bare (dormant) section; it takes the
+        # default's shape and keeps its own identity.
+        template = {**copy.deepcopy(sections["default"]), **sections["c982130e"], "dormant": False}
+        personal = face(
+            now, rng, template, models=CLAUDE_MODELS, titles=CLAUDE_SESSIONS,
+            typical=6e6, engine={"apiBudgetUsed": 2, "apiBudgetFraction": 0.1,
+                                 "planLabel": "Pro plan"},
+            meters=[
+                meter(now, rng, CLAUDE_MODELS, ident="session", label="Session (5h)", tag="S",
+                      rank=0, window=hours(5), elapsed=timedelta(hours=1, minutes=40), percent=8,
+                      projected=19, verdict="green", severity=0, step_minutes=5),
+                meter(now, rng, CLAUDE_MODELS, ident="weekly_all", label="Weekly (all)", tag="W",
+                      rank=1, window=days(7), elapsed=timedelta(days=1, hours=3), percent=17,
+                      projected=52, verdict="green", severity=0, step_minutes=120),
+                meter(now, rng, CLAUDE_MODELS[:1], ident="weekly_fable", label="Weekly (Fable)",
+                      tag="F", rank=2, window=days(7), elapsed=timedelta(days=1, hours=3),
+                      percent=3, projected=9, verdict="green", severity=0, step_minutes=120),
+            ])
+        personal.update({"label": "Personal", "monogram": "P", "isFocused": False})
+        faces.insert(1, personal)
 
     # The top level answers for the focused account.
     for key in ("activity", "engine", "menuBar", "meters", "models", "sessions"):
         state[key] = copy.deepcopy(claude[key])
-    state["profiles"] = [claude, codex]
+    state["profiles"] = faces
     state["focusedProfile"] = claude["id"]
     # A demo has no outage, no pending notice and no update to advertise.
     quiet = {"indicator": False, "items": [], "pendingCount": 0}
@@ -287,15 +313,17 @@ def build(now):
         state.pop(key, None)
     cells = {cell["profile"]: cell for cell in state["menuBarCells"]}
     state["menuBarCells"] = []
-    for section in (claude, codex):
-        cell = cells[section["id"]]
+    for section in faces:
+        # The golden draws two cells; a third account's is the first's shape.
+        cell = copy.deepcopy(cells.get(section["id"]) or {**cells["default"], "profile": section["id"]})
         cell.update({"segments": section["menuBar"], "monogram": section["monogram"],
                      "stale": False, "indicator": False,
                      "worstSeverity": max(s["severity"] for s in section["menuBar"])})
         state["menuBarCells"].append(cell)
     state["harnesses"] = [h for h in state["harnesses"] if h["id"] in ("claude", "codex")]
     for harness in state["harnesses"]:
-        harness.update({"accountCount": 1, "present": True, "shown": True,
+        count = sum(1 for f in faces if f["providerID"] == harness["id"])
+        harness.update({"accountCount": count, "present": True, "shown": True,
                         "notices": copy.deepcopy(quiet), "outages": [],
                         "newestActivityAt": stamp(now - timedelta(minutes=4))})
         harness.pop("serviceStatus", None)
@@ -303,10 +331,14 @@ def build(now):
 
 
 def main():
-    if len(sys.argv) != 2:
+    args = sys.argv[1:]
+    accounts = 2
+    if args[:1] == ["--accounts"] and len(args) >= 2 and args[1] in ("2", "3"):
+        accounts, args = int(args[1]), args[2:]
+    if len(args) != 1:
         sys.exit(__doc__.strip().splitlines()[-1])
     now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
-    Path(sys.argv[1]).write_text(json.dumps(build(now), indent=1, sort_keys=True) + "\n")
+    Path(args[0]).write_text(json.dumps(build(now, accounts), indent=1, sort_keys=True) + "\n")
 
 
 if __name__ == "__main__":

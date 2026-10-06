@@ -246,7 +246,21 @@ per-harness geometry of the bar is in [HARNESSES.md](HARNESSES.md).
   making them bigger. The default meter
   is the most at-risk (highest forecast severity), else the weekly, else
   the first; a pick is remembered per account for the window's life.
-  HOME is every account at a glance. A one-account Mac gets the account
+  HOME is every account at a glance, the panel's stacked form at window
+  size: one block per account — tile, name, agent · sign-in · plan,
+  freshness at the far end (a click opens its page) — with its meters in
+  columns by KIND (core `MeterColumns.arrange`, tested: column 0 the first
+  rank-0 meter, column 1 the first rank-1, the rest in the menu bar's
+  order; a slot the account lacks is a blank cell, never 0%; a column
+  nobody has is dropped), so every weekly window reads straight down across
+  harnesses. A click on a meter opens that account's page on that meter.
+  Below, Activity beside Sessions for the account focused in the menu
+  bar, crossfading on a focus change like the panel. Same width as a
+  page's two columns, wider only when the meter columns need it (190pt
+  each). Notices and every shown harness's incident banner sit on top.
+  `scripts/demo-digest.py --accounts 3` adds a second account of one
+  harness (the demo registry keeps its `accountID` — as the standard
+  profile it collided with the first by key). A one-account Mac gets the account
   page with the sidebar collapsed — Home and the page would coincide.
 - Selecting in the sidebar NEVER moves the menu bar's focus. Focus moves
   only from the toolbar's Focus menu (Follow Activity, or pin an account)
@@ -294,7 +308,8 @@ per-harness geometry of the bar is in [HARNESSES.md](HARNESSES.md).
   LaunchServices fronts or relaunches the REAL app, and a normal launch of
   the worktree build repoints the launch agent.
 - Snapshots: `--snapshot` adds `main-account-<key>-{dark,light}.png` for
-  every shown account (the page's content, at the detail column's 880pt,
+  every shown account, `main-home-{dark,light}.png` (the pages' content,
+  at the detail column's 880pt,
   hosted off-screen like the panel — a ScrollView draws blank there) and
   `main-window-{home,account}-*.png`: a TITLED window parked off-screen
   whose frame view (`contentView.superview`) `cacheDisplay`s with its

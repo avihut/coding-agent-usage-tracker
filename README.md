@@ -23,6 +23,8 @@ the Claude app's Settings → Usage), with Codex and Gemini CLI beside it.
   hit it, each agent drawn the way you choose (digits, bars, rings, a dot); a
   panel with reset times, run-out forecasts, a usage heatmap and a per-model
   token and cost breakdown. Several accounts, one meter each.
+- **A window** — the panel with room: every account side by side, then one
+  account's limits beside its usage chart (⌘0, or open the app).
 - **`usage-tui`** — the same dashboard in a terminal pane, down to a one-line
   strip, plus `usage-tui --status` for the tmux status bar.
 - **`usage-cli`** — every number as text or JSON, for status lines and scripts.

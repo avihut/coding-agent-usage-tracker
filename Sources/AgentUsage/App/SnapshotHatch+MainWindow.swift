@@ -25,6 +25,11 @@ extension AppDelegate {
                 .padding(20)
             staged += stage(page, named: "main-account-\(profile.key)")
         }
+        let home = HomePageContent(
+            registry: registry, activityFocus: .constant(nil),
+            onOpenAccount: { _, _ in }, onOpenSessions: { _, _ in })
+            .padding(20)
+        staged += stage(home, named: "main-home")
         return staged
     }
 
