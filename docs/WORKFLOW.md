@@ -183,6 +183,24 @@ lists the full catalog, including the AX verification pair
   so a locked agent makes the job warn rather than release; `mise run
   release` by hand finishes it.
 
+## The linked SDK
+
+- macOS draws an app in the look of the SDK it was LINKED against, not the
+  one it runs on: linked against a pre-26 SDK, every window, popover and
+  control keeps the legacy look on macOS 26+ — no Liquid Glass — and
+  nothing warns. The binary records it: `vtool -show-build
+  AgentUsage.app/Contents/MacOS/AgentUsage` prints `minos` (the deployment
+  target, 15.0) and `sdk`.
+- SwiftPM's default build system (swiftbuild, Swift 6.4) links through
+  clang with `--sysroot`, and clang reads the SDK's version only from
+  `-isysroot` — so every build recorded `sdk 15.0`, its deployment target,
+  whatever SDK built it (found 2026-10-06 when the main window looked
+  "like a window from a pre-26 macOS app" on macOS 27). `bundle.sh` and
+  `dist.sh` pass `-Xclang-linker -isysroot <sdk>` through `-Xswiftc`, and
+  `bundle.sh` refuses a binary whose recorded SDK major isn't the
+  building SDK's. The deprecated `--build-system native` records it
+  correctly; a plain `swiftc` does too.
+
 ## Signing
 
 Nothing in the repo names a developer account. Every build signs with an

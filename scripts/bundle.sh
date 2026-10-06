@@ -8,9 +8,23 @@ set -euo pipefail
 ROOT="${0:A:h:h}"
 CONFIG="${1:-release}"
 
-swift build -c "$CONFIG" --product AgentUsage --package-path "$ROOT"
-swift build -c "$CONFIG" --product usaged --package-path "$ROOT"
-swift build -c "$CONFIG" --product usage-cli --package-path "$ROOT"
+# SwiftPM's default build system links through clang with `--sysroot`, and
+# clang reads the SDK's VERSION only from `-isysroot` — so the binary used to
+# record its deployment target as its SDK (`sdk 15.0`), and macOS drew the
+# app as one linked against a pre-26 SDK: the legacy look, no Liquid Glass,
+# whatever SDK actually built it. Hand the linker the SDK the way it reads it.
+SDK_LINK=(-Xswiftc -Xclang-linker -Xswiftc -isysroot -Xswiftc -Xclang-linker -Xswiftc "$(xcrun --show-sdk-path)")
+swift build -c "$CONFIG" --product AgentUsage --package-path "$ROOT" "${SDK_LINK[@]}"
+swift build -c "$CONFIG" --product usaged --package-path "$ROOT" "${SDK_LINK[@]}"
+swift build -c "$CONFIG" --product usage-cli --package-path "$ROOT" "${SDK_LINK[@]}"
+# And prove it: an app that records an older SDK than the one that built it
+# is drawn in the old look, silently.
+LINKED=$(vtool -show-build "$ROOT/.build/$CONFIG/AgentUsage" | awk '/sdk/ {print $2; exit}')
+WANTED=$(xcrun --show-sdk-version)
+if [[ "${LINKED%%.*}" != "${WANTED%%.*}" ]]; then
+    echo "bundle: AgentUsage records SDK $LINKED, built with $WANTED — the app would draw in the old look" >&2
+    exit 1
+fi
 
 APP="$ROOT/AgentUsage.app"
 rm -rf "$APP"

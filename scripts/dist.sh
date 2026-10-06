@@ -21,9 +21,15 @@ ZIP="$DIST/AgentUsage-$VERSION.zip"
 # Fail on a missing identity now, not after three universal builds.
 CODESIGN_REQUIRE_IDENTITY=1 "$ROOT/scripts/sign.sh" --which
 
-swift build -c release --product AgentUsage --arch arm64 --arch x86_64 --package-path "$ROOT"
-swift build -c release --product usaged --arch arm64 --arch x86_64 --package-path "$ROOT"
-swift build -c release --product usage-cli --arch arm64 --arch x86_64 --package-path "$ROOT"
+# SwiftPM's default build system links through clang with `--sysroot`, and
+# clang reads the SDK's VERSION only from `-isysroot` — so the binary used to
+# record its deployment target as its SDK (`sdk 15.0`), and macOS drew the
+# app as one linked against a pre-26 SDK: the legacy look, no Liquid Glass,
+# whatever SDK actually built it. Hand the linker the SDK the way it reads it.
+SDK_LINK=(-Xswiftc -Xclang-linker -Xswiftc -isysroot -Xswiftc -Xclang-linker -Xswiftc "$(xcrun --show-sdk-path)")
+swift build -c release --product AgentUsage --arch arm64 --arch x86_64 --package-path "$ROOT" "${SDK_LINK[@]}"
+swift build -c release --product usaged --arch arm64 --arch x86_64 --package-path "$ROOT" "${SDK_LINK[@]}"
+swift build -c release --product usage-cli --arch arm64 --arch x86_64 --package-path "$ROOT" "${SDK_LINK[@]}"
 
 rm -rf "$APP" "$ZIP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"

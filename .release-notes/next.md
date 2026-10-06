@@ -21,3 +21,6 @@ Fixes
 - An open Sessions or Settings window stays open when the menu bar's focus
   moves to another harness's account. Clicking a Codex cell while reading
   Claude Code's sessions used to close the window under you.
+- The app looks like a macOS 26 app on macOS 26 and later — Liquid Glass
+  toolbars, controls and popovers. Every build was linked as if against the
+  macOS 15 SDK, whatever built it, so macOS drew it in the old look.

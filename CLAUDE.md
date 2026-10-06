@@ -176,6 +176,11 @@ may not realise you are standing. The doc named beside each says why.
   shortest window first so lockouts resolve. (`docs/MEASUREMENT.md`)
 - Renaming a meter is a data migration: history is keyed by LABEL.
   (`docs/HARNESSES.md`)
+- An app draws in the look of the SDK it was LINKED against: SwiftPM's
+  default build system recorded `sdk 15.0` (the deployment target) and
+  every window drew pre-26 on macOS 27. The `-isysroot` link flags in
+  `bundle.sh`/`dist.sh` are load-bearing; `vtool -show-build` proves it.
+  (`docs/WORKFLOW.md`)
 - Never poll faster than 180s (`TriggerGate.floor`) — the endpoint
   rate-limits sustained sub-3-minute polling, and adaptive cadence may
   only ever slow polling down. (`docs/ARCHITECTURE.md`)
