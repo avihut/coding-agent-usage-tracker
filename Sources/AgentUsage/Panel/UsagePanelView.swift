@@ -3,9 +3,8 @@ import UsageCore
 
 struct UsagePanelView: View {
     /// The one thing handed in (0.96.0): the panel shows whichever account
-    /// is focused and re-renders when that changes, so the status item no
-    /// longer rebuilds it on every focus move. A provider switch still
-    /// rebuilds — the catalog and accent statics change under it.
+    /// is focused and re-renders when that changes — the status item builds
+    /// it once per process.
     var registry: ProviderRegistry
     /// Wired by StatusItemController: closes the panel, opens the window —
     /// optionally landed on one card (an account-found notice's
@@ -214,6 +213,10 @@ struct UsagePanelView: View {
             activityFocus = nil
             hoveredSession = nil
             meterFrames = [:]
+            showRefreshBlocked = false
+            hoveringPopover = false
+            hoveringStatus = false
+            hoveringStatusDot = false
             store.scanActivity()
         }
         // Re-sync the login-item mirror between panel sessions: the user

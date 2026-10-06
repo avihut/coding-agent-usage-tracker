@@ -13,7 +13,7 @@ import UsageCore
 /// the meter popover lives on the panel's wrapper and the menu bar's hover
 /// card is its own `NSHostingController`, so neither can read a per-section
 /// environment — and through `\.harnessStyle` inside a window whose whole
-/// tree belongs to one account (Sessions, Settings), injected at its root.
+/// tree belongs to one account (Sessions), injected at its root.
 ///
 /// The accent is kept as core `RGBColor`, never `NSColor`: the renderer's
 /// `Model` is `Equatable` and the status item skips a redraw when the model

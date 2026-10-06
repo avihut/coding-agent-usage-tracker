@@ -27,9 +27,9 @@ final class SessionsWindowController {
         self.registry = registry
     }
 
-    /// Closes and drops the window. Called when the registry retires this
-    /// controller's store — releasing a visible NSWindow out from under
-    /// AppKit is not an option, so the switch closes it first.
+    /// Closes and drops the window. Called when the window is asked for
+    /// another account — releasing a visible NSWindow out from under AppKit
+    /// is not an option, so the swap closes it first.
     func close() {
         window?.close()
         window = nil

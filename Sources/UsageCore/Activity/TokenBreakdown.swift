@@ -128,11 +128,11 @@ public enum WindowTokens {
 /// (grids, charts, pickers) where threading a provider through would drown
 /// the code in plumbing.
 public enum ModelNames {
-    /// The active provider's catalog. Defaults to the provider this build
-    /// bundles (Claude) so names read right even before wiring. The app
-    /// writes this only on the main actor and only while re-binding the
-    /// active provider — at launch and inside a registry switch, both
-    /// before any dependent UI (re)builds — so every render observes one
+    /// The catalog of every harness this build meters. Defaults to the
+    /// provider this build bundles (Claude) so names read right even before
+    /// wiring. The app writes it exactly once, on the main actor, at launch
+    /// and before any UI renders or scan runs (0.101.0: the union of every
+    /// provider's catalog, never re-bound) — so every render observes one
     /// settled value, which is what makes the unsafe opt-out honest.
     nonisolated(unsafe) public static var catalog: ModelCatalog = .claude
 

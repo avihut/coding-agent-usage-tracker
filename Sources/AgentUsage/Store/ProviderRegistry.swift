@@ -45,16 +45,12 @@ final class ProviderRegistry {
     /// arrives from the host (or the daemon's next digest) a beat later,
     /// and the overlay lifts once they agree.
     private var manualFocusID: String?
-    /// Re-binds the status item to a new active store. The Bool says the
-    /// switch may wait for the panel to close (daily auto re-detection
-    /// must not yank the UI out from under the user; an explicit pick
-    /// applies immediately).
-    @ObservationIgnored var onActiveChange: ((UsageStore, _ deferrable: Bool) -> Void)?
+    /// The focused face changed — the status item re-binds its observation.
+    @ObservationIgnored var onActiveChange: ((UsageStore) -> Void)?
     /// The profile list or a profile's facts changed.
     @ObservationIgnored var onProfilesChange: (() -> Void)?
 
     @ObservationIgnored private let lease: EngineLease
-    @ObservationIgnored private var redetectTimer: Timer?
     @ObservationIgnored private var roleTimer: Timer?
     @ObservationIgnored private var wakeObserver: NSObjectProtocol?
     @ObservationIgnored private var observationGeneration = 0
@@ -327,9 +323,13 @@ final class ProviderRegistry {
     private var storedPin: String? {
         switch role {
         case .hosting(let host): host.pin
-        case .client: ProfileStore.pin(from: .standard)
+        case .client: isDemo ? demoPin : ProfileStore.pin(from: .standard)
         }
     }
+    /// A demo's pin lives here and nowhere else: the defaults key is the
+    /// LIVE app's (same bundle id), and a demo must neither show the real
+    /// pin nor change it.
+    @ObservationIgnored private var demoPin: String?
     private var dormantIDs: Set<String> {
         switch role {
         case .hosting(let host): return host.dormant
@@ -377,7 +377,11 @@ final class ProviderRegistry {
         switch role {
         case .hosting(let host): host.setPin(id)
         case .client(let feed):
-            ProfileStore.setPin(id, in: .standard)
+            if isDemo {
+                demoPin = id
+            } else {
+                ProfileStore.setPin(id, in: .standard)
+            }
             feed.send(.focusProfile(id: id))
         }
         syncFacts()
@@ -496,7 +500,7 @@ final class ProviderRegistry {
         }
         if focused != lastFocusedID {
             lastFocusedID = focused
-            if let store = stores[focused] { onActiveChange?(store, true) }
+            if let store = stores[focused] { onActiveChange?(store) }
         }
     }
 

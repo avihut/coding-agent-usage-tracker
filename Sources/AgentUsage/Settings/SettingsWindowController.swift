@@ -12,17 +12,8 @@ final class SettingsWindowController {
     private let navigator = SettingsNavigator()
     private var window: NSWindow?
 
-    init(store: UsageStore, registry: ProviderRegistry) {
+    init(registry: ProviderRegistry) {
         self.registry = registry
-        _ = store
-    }
-
-    /// Closes and drops the window. Called when the registry retires this
-    /// controller's store — releasing a visible NSWindow out from under
-    /// AppKit is not an option, so the switch closes it first.
-    func close() {
-        window?.close()
-        window = nil
     }
 
     func show(pane: SettingsSection = .general, landing: SettingsLanding? = nil) {

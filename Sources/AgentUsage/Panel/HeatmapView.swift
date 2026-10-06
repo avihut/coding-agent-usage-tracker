@@ -44,6 +44,10 @@ struct HeatmapView: View {
     var onOpenOutage: ((OutageSpan) -> Void)? = nil
     let sessionAuditMeter: AuditMeterInfo?
     let weeklyAuditMeter: AuditMeterInfo?
+    /// The panel's reset: closing it pops the drill and the page. A view
+    /// that lives in a window (which has its own lifetime) passes false —
+    /// `.panelDidClose` is a broadcast, not addressed to anyone.
+    var resetsOnPanelClose = true
 
     enum Period: String, CaseIterable, Identifiable {
         case week = "7D"
@@ -182,6 +186,7 @@ struct HeatmapView: View {
         // close, so .onDisappear can't catch this — the status item
         // controller posts .panelDidClose on every close path instead.
         .onReceive(NotificationCenter.default.publisher(for: .panelDidClose)) { _ in
+            guard resetsOnPanelClose else { return }
             selectedDay = nil
             hoveredModel = nil
             hoveredDay = nil

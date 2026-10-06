@@ -52,14 +52,12 @@ final class StatusItemController: NSResponder {
     private var defaultsObserver: NSObjectProtocol?
     private var settingsController: SettingsWindowController?
     private var sessionsController: SessionsWindowController?
-    /// The store each hosted window and the panel were built for — a focus
-    /// change rebuilds the panel, and re-opening a window rebuilds it.
-    private var panelStore: UsageStore
-    private var settingsStore: UsageStore?
+    /// The focused face the bar's observation is bound to — `adopt` moves
+    /// it when focus moves.
+    private var boundStore: UsageStore
+    /// The account the open Sessions window shows; re-opening it for
+    /// another account rebuilds it.
     private var sessionsStore: UsageStore?
-    /// A deferrable provider switch (daily auto re-detection) parked while
-    /// the panel is open; applied the moment it closes.
-    private var pendingStore: UsageStore?
     private var observationGeneration = 0
     /// Set while items are being torn down and rebuilt, so the visibility
     /// KVO doesn't read our own removals as the user hiding an account.
@@ -74,7 +72,7 @@ final class StatusItemController: NSResponder {
 
     init(registry: ProviderRegistry) {
         self.registry = registry
-        self.panelStore = registry.focusedStore
+        self.boundStore = registry.focusedStore
         super.init()
 
         popover.contentViewController = makePanelHost()
@@ -84,14 +82,7 @@ final class StatusItemController: NSResponder {
         hoverPopover.behavior = .applicationDefined
         hoverPopover.animates = false
 
-        registry.onActiveChange = { [weak self] newStore, deferrable in
-            guard let self else { return }
-            if deferrable, self.popover.isShown {
-                self.pendingStore = newStore
-            } else {
-                self.adopt(newStore)
-            }
-        }
+        registry.onActiveChange = { [weak self] newStore in self?.adopt(newStore) }
         registry.onProfilesChange = { [weak self] in self?.render() }
 
         // The bar-wide preferences are plain @AppStorage in Settings; the
@@ -122,9 +113,8 @@ final class StatusItemController: NSResponder {
     // concurrency anyway.
 
     /// The panel follows the registry's focus on its own, so this is built
-    /// once per PROVIDER, not per focus change.
+    /// once per process.
     private func makePanelHost() -> NSHostingController<UsagePanelView> {
-        panelStore = registry.focusedStore
         let host = NSHostingController(
             rootView: UsagePanelView(
                 registry: registry,
@@ -141,30 +131,17 @@ final class StatusItemController: NSResponder {
         return host
     }
 
-    /// Re-binds every surface to a new focused store — a focus change or a
-    /// provider switch. The registry retires faces (a face's engine is the
-    /// host's, its client reader its own) and already installed the new
-    /// provider's model catalog before calling here, so the rebuilt views
-    /// name models correctly. A mere focus change keeps open windows as
-    /// they are: they show the account the person opened them for, and
-    /// re-opening them rebuilds for whoever is focused then.
+    /// Re-binds the bar to a new focused store. Nothing else moves: the
+    /// panel follows focus on its own, and an open window keeps showing the
+    /// account it was opened for, even one of another harness. (A focus
+    /// move across harnesses used to close Settings and Sessions — a
+    /// leftover of the single-provider switch, which rebuilt them for a
+    /// catalog and an accent that have been per store since 0.101.0.)
     private func adopt(_ newStore: UsageStore) {
-        guard newStore !== panelStore else { return }
-        let providerChanged = newStore.provider.id != panelStore.provider.id
-        panelStore = newStore
+        guard newStore !== boundStore else { return }
+        boundStore = newStore
         hoverTask?.cancel()
         if hoverPopover.isShown { hoverPopover.performClose(nil) }
-        if providerChanged {
-            if popover.isShown { popover.performClose(nil) }
-            settingsController?.close()
-            settingsController = nil
-            settingsStore = nil
-            // Close before nil — never dealloc a visible NSWindow.
-            sessionsController?.close()
-            sessionsController = nil
-            sessionsStore = nil
-            popover.contentViewController = makePanelHost()
-        }
         observeState()
         render()
     }
@@ -425,21 +402,22 @@ final class StatusItemController: NSResponder {
     /// matters on the first show (the hatch always launches fresh).
     func showSettings(pane: SettingsSection = .general, landing: SettingsLanding? = nil) {
         if popover.isShown { popover.performClose(nil) }
-        let store = registry.focusedStore
-        if settingsController == nil || settingsStore !== store {
-            settingsController?.close()
-            settingsController = SettingsWindowController(store: store, registry: registry)
-            settingsStore = store
+        // Settings spans every account, so one window serves the process.
+        if settingsController == nil {
+            settingsController = SettingsWindowController(registry: registry)
         }
         settingsController?.show(pane: pane, landing: landing)
     }
 
-    /// Opens the Sessions window; also the `--sessions` launch hatch. A
-    /// session id (the panel shortlist's click) lands the sidebar on it.
-    func showSessions(selecting sessionID: String? = nil) {
+    /// Opens the Sessions window — for one account (`profileKey`), else the
+    /// focused one; also the `--sessions` launch hatch. A session id (the
+    /// panel shortlist's click) lands the sidebar on it. The window is
+    /// rebuilt only when it is asked for another account than it shows.
+    func showSessions(for profileKey: String? = nil, selecting sessionID: String? = nil) {
         if popover.isShown { popover.performClose(nil) }
-        let store = registry.focusedStore
+        let store = profileKey.flatMap(registry.store(for:)) ?? registry.focusedStore
         if sessionsController == nil || sessionsStore !== store {
+            // Close before replacing — never dealloc a visible NSWindow.
             sessionsController?.close()
             sessionsController = SessionsWindowController(store: store, registry: registry)
             sessionsStore = store
@@ -488,14 +466,9 @@ extension StatusItemController: NSPopoverDelegate {
     // so the monitors never outlive the panel.
     func popoverDidClose(_ notification: Notification) {
         endDismissMonitoring()
-        // The click's focus is forgotten and activity rules again; a switch
-        // decided while the panel was open lands now.
+        // The click's focus is forgotten and activity rules again.
         registry.holdFocus(false)
         NotificationCenter.default.post(name: .panelDidClose, object: nil)
-        if let pendingStore {
-            self.pendingStore = nil
-            adopt(pendingStore)
-        }
     }
 }
 

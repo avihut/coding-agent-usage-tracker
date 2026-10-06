@@ -209,9 +209,10 @@ per-harness geometry of the bar is in [HARNESSES.md](HARNESSES.md).
   (Dock tile, Cmd+Tab, SwiftUI's default main menu), dropping back to
   `.accessory` when the last closes. One process-wide holder keyed by
   visible-window identity — per-window flips would yank the Dock tile when
-  one of two open windows closes. It takes each hosted window's DELEGATE
-  seat (free today; if a window ever needs its own delegate, DockPresence
-  must move to willClose notifications). Window controllers call
+  one of two open windows closes. It hears each close through that
+  window's `willCloseNotification` (it took the DELEGATE seat until the
+  main window, which wants its own), so the seat stays free. Window
+  controllers call
   `DockPresence.shared.adopt(window)` on every show, BEFORE `NSApp
   .activate()` so the menu bar rides along.
 
