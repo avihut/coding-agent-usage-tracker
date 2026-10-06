@@ -18,7 +18,10 @@ resets are in the past renders as stale.
 own second section) — the main window's Home with a harness of several
 accounts. Built after the other two, so their numbers don't move.
 
-usage: demo-digest.py [--accounts 2|3] <out.json>
+`--notices` adds two pending notices — a limit reset on each harness, the
+kind the panel and the window list on top — where a plain demo has none.
+
+usage: demo-digest.py [--accounts 2|3] [--notices] <out.json>
 """
 
 import copy
@@ -244,7 +247,17 @@ def face(now, rng, section, *, models, meters, titles, typical, engine):
     return built
 
 
-def build(now, accounts=2):
+def reset_notice(now, harness, profile, label, title, ago):
+    """A pending limit-reset notice, the golden's own shape, retimed."""
+    at = stamp(now - ago)
+    return {"components": [], "detail": f"{label} fell from 62% ahead of its reset.",
+            "dismissable": True, "endedAt": at, "id": f"{harness}:reset|{int((now - ago).timestamp())}",
+            "kind": "reset", "meterLabel": label, "occurredAt": at, "ongoing": False,
+            "ownsMenuBarSurface": False, "profile": profile, "seen": False, "title": title,
+            "when": "earlier today"}
+
+
+def build(now, accounts=2, notices=False):
     rng = random.Random(5)
     state = json.loads(GOLDEN.read_text())
     sections = {section["id"]: section for section in state["profiles"]}
@@ -321,10 +334,22 @@ def build(now, accounts=2):
                      "worstSeverity": max(s["severity"] for s in section["menuBar"])})
         state["menuBarCells"].append(cell)
     state["harnesses"] = [h for h in state["harnesses"] if h["id"] in ("claude", "codex")]
+    pending = {}
+    if notices:
+        pending = {
+            "claude": [reset_notice(now, "claude", "default", "Weekly (all)",
+                                    "Limit reset · Claude", timedelta(hours=3))],
+            "codex": [reset_notice(now, "codex", "codex", "Weekly",
+                                   "Limit reset · ChatGPT", timedelta(hours=7))],
+        }
+        top = pending["claude"] + pending["codex"]
+        state["notices"] = {"indicator": True, "items": copy.deepcopy(top), "pendingCount": len(top)}
     for harness in state["harnesses"]:
         count = sum(1 for f in faces if f["providerID"] == harness["id"])
+        items = pending.get(harness["id"], [])
         harness.update({"accountCount": count, "present": True, "shown": True,
-                        "notices": copy.deepcopy(quiet), "outages": [],
+                        "notices": {"indicator": bool(items), "items": items, "pendingCount": len(items)},
+                        "outages": [],
                         "newestActivityAt": stamp(now - timedelta(minutes=4))})
         harness.pop("serviceStatus", None)
     return state
@@ -332,13 +357,18 @@ def build(now, accounts=2):
 
 def main():
     args = sys.argv[1:]
-    accounts = 2
-    if args[:1] == ["--accounts"] and len(args) >= 2 and args[1] in ("2", "3"):
-        accounts, args = int(args[1]), args[2:]
+    accounts, notices = 2, False
+    while args[:1] in (["--accounts"], ["--notices"]):
+        if args[0] == "--notices":
+            notices, args = True, args[1:]
+        elif len(args) >= 2 and args[1] in ("2", "3"):
+            accounts, args = int(args[1]), args[2:]
+        else:
+            break
     if len(args) != 1:
         sys.exit(__doc__.strip().splitlines()[-1])
     now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
-    Path(args[0]).write_text(json.dumps(build(now, accounts), indent=1, sort_keys=True) + "\n")
+    Path(args[0]).write_text(json.dumps(build(now, accounts, notices), indent=1, sort_keys=True) + "\n")
 
 
 if __name__ == "__main__":

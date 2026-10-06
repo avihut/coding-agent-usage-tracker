@@ -70,14 +70,26 @@ struct DashboardTile<Content: View>: View {
             content
         }
         .padding(Self.inset)
-        .frame(maxWidth: .infinity, alignment: .topLeading)
+        // minWidth 0: a frame with no lower bound takes its child's width
+        // when the child is wider, so one wide chart could push a tile past
+        // its column. The column decides; the content fits it.
+        .frame(minWidth: 0, maxWidth: .infinity, alignment: .topLeading)
         .background(.quinary, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }
 
+extension DashboardFlow {
+    /// The inner width of one tile when the flow is `width` wide — what a
+    /// chart inside a tile is drawn at. Computed from the PAGE's width, which
+    /// only the window decides, never measured from a tile, whose width a
+    /// wide chart could otherwise hold open after the window narrows.
+    func tileInnerWidth(forPageWidth width: CGFloat) -> CGFloat {
+        columns(for: width).width - 2 * DashboardTile<EmptyView>.inset
+    }
+}
+
 extension View {
-    /// The width this view is given, reported as it changes — how a tile
-    /// hands its chart the room the flow gave it.
+    /// The width this view is given, reported as it changes.
     func reportingWidth(_ width: Binding<CGFloat>) -> some View {
         onGeometryChange(for: CGFloat.self) { $0.size.width } action: { new in
             if new > 0, abs(new - width.wrappedValue) > 0.5 { width.wrappedValue = new }

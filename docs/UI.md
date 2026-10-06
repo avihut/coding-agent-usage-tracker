@@ -250,27 +250,51 @@ per-harness geometry of the bar is in [HARNESSES.md](HARNESSES.md).
   `MiniMeterBars`. Its foot carries what the panel's footer does: each
   shown harness's service status (a click opens the vendor's card) and the
   version with its update chip — no opaque status bar under the page.
-- ACCOUNT PAGE tiles: Limits (`MeterRow` with `opensOnHover: false` — a
-  click selects; credits; the pipeline line under the meters, where the
-  panel has it), the selected meter's card (the hover popover, pinned;
-  same `scopeKey` prefs key, so span/frame choices are shared with the
-  popover), Activity, Sessions. The default meter is the most at-risk
-  (highest forecast severity), else the weekly, else the first; a pick is
-  remembered per account for the window's life. HOME tiles: one per
+- ACCOUNT PAGE: this harness's notices on top (`NoticesBand(harnessID:)`
+  — dismissed one by one through the page's own store, so its "Dismiss
+  all" dismisses exactly what it lists), then tiles: Limits, Activity,
+  Sessions. In Limits the panel's hover card opens UNDER the limit it
+  belongs to (`MeterRow` with `opensOnHover: false`; a click moves it;
+  `MeterHistoryView(showsTitle: false)` — the row above names it; same
+  `scopeKey` prefs key as the popover). Exactly one is open, so the tile's
+  height moves only when the open one changes. A first cut pinned it as
+  a tile of its own beside Limits: user, "it's not even clear why it's
+  the details of another pane". The default open meter is the most
+  at-risk (highest forecast severity), else the weekly, else the first; a
+  pick is remembered per account for the window's life. The card's plot
+  width is COMPUTED from the page's width (`DashboardFlow
+  .tileInnerWidth(forPageWidth:)`), never measured from its tile: a
+  frame with no `minWidth` takes its child's width when the child is
+  wider, so a measured chart held its tile open after the window
+  narrowed and the tile ran off the window's edge (tiles are
+  `minWidth: 0` now too). HOME tiles: one per
   shown account (tile, name, agent · sign-in · plan, freshness — a click
   opens its page; its meters — a click opens its page on that meter),
   then Activity and Sessions for the account the menu bar shows. Notices
   and every shown harness's incident banner sit above the flow.
   `scripts/demo-digest.py --accounts 3` adds a second account of one
   harness (the demo registry keeps its `accountID` — as the standard
-  profile it collided with the first by key). A one-account Mac gets the
+  profile it collided with the first by key), and `--notices` a pending
+  reset on each harness. A demo's charts draw the meters' own `series`
+  (core `DigestActivity.samples`, each stamped with its meter's reset, or
+  the window picker drops it) — the current window and nothing before. A one-account Mac gets the
   account page with the sidebar collapsed — Home and the page coincide.
 - Selecting in the sidebar NEVER moves the menu bar's focus. Focus moves
-  only from the toolbar's menu-bar menu (Follow Activity, or pin an
-  account) and a row's context menu. Toolbar items are symbols, their
-  words one hover away: the menu-bar menu, Refresh (⌘R, the panel's
-  pressure-colored button), Usage ↗ (absent for local providers), Sessions
-  (⌘1, the Sessions window for THAT account — `showSessions(for:)`).
+  only from the toolbar's pin and a row's context menu. The toolbar is
+  three glass platters (`ToolbarSpacer`, macOS 26+) after the sidebar
+  toggle: Refresh (⌘R, untinted until the API budget presses —
+  `RefreshButton(tintsWhenCalm: false)`); Sessions (⌘1, the Sessions
+  window for THAT account — `showSessions(for:)`) with Usage ↗ (absent
+  for local providers); and the menu-bar pin — on an account page a split
+  button (the pin pins this account, or hands the bar back to activity;
+  the arrow lists Follow Activity and every account), on Home the list
+  alone. The sidebar toggle is our own item: a hosted split view gets
+  none (a `WindowGroup` scene's toolbar has `toggleSidebar`).
+- The sidebar IS Liquid Glass. Checked 2026-10-06 against a stock
+  `WindowGroup` + `NavigationSplitView` app built on the same SDK: both
+  draw the sidebar as one `NSGlassEffectView` at 0,0, full height — the
+  hosted path costs nothing there. Glass samples what lies behind it IN
+  the window, so over a plain dark window it reads as a gray panel.
 - Type (`FaceDensity`, an environment value, `.panel` = the popover's
   literal fonts, which the popover never sets): section headers
   `headline` (the meter card's title too); meter label `body`; meter %
@@ -316,7 +340,10 @@ per-harness geometry of the bar is in [HARNESSES.md](HARNESSES.md).
   `main-account-<key>-800-<theme>.png` (a page's content at detail widths
   of one, two and three columns — one width proves nothing about a page
   that reflows; hosted off-screen like the panel, a ScrollView draws blank
-  there) and `main-window-<page>-<width>-<theme>.png`: a TITLED window
+  there) and `main-window-<page>-<width>-<theme>.png` (plus
+  `main-window-account-1600to1100-dark.png`, laid out wide and narrowed
+  before it is drawn — the only picture that shows a width that sticks):
+  a TITLED window
   parked off-screen whose frame view (`contentView.superview`)
   `cacheDisplay`s with its title bar and toolbar — the one way to see the
   chrome without Screen Recording or Accessibility consent (the glass

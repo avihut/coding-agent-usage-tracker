@@ -137,16 +137,39 @@ struct MainWindowView: View {
 
     // MARK: - Toolbar
 
+    /// Three groups, each its own glass platter: the sidebar toggle at the
+    /// leading edge; then Refresh, the page's one frequent act; the ways
+    /// out of the window (Sessions, the vendor's usage page); and the menu
+    /// bar's pin, the one control that changes something outside it.
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
-        ToolbarItem(placement: .primaryAction) {
-            MainFocusMenu(registry: registry, pageProfile: selectedProfile)
+        if profiles.count > 1 {
+            ToolbarItem(placement: .navigation) {
+                Button {
+                    withAnimation { columns = columns == .detailOnly ? .all : .detailOnly }
+                } label: {
+                    Label("Sidebar", systemImage: "sidebar.left")
+                }
+                .help(columns == .detailOnly ? "Show the sidebar" : "Hide the sidebar")
+            }
         }
         ToolbarItem(placement: .primaryAction) {
-            RefreshButton(store: shownStore, showBlocked: $showRefreshBlocked)
+            RefreshButton(store: shownStore, showBlocked: $showRefreshBlocked, tintsWhenCalm: false)
                 .keyboardShortcut("r", modifiers: .command)
         }
-        if let usage = shownStore.provider.links.usageSettings {
-            ToolbarItem(placement: .primaryAction) {
+        if #available(macOS 26.0, *) {
+            ToolbarSpacer(.fixed, placement: .primaryAction)
+        }
+        ToolbarItemGroup(placement: .primaryAction) {
+            if shownStore.providesSessions {
+                Button {
+                    onOpenSessions(shownStore.profile.key, nil)
+                } label: {
+                    Label("Sessions", systemImage: "list.bullet.rectangle")
+                }
+                .keyboardShortcut("1", modifiers: .command)
+                .help("Browse this account's sessions (⌘1)")
+            }
+            if let usage = shownStore.provider.links.usageSettings {
                 // A Button, not a Link: a toolbar item keeps the toolbar's
                 // ink, where a Link draws in the link color.
                 Button {
@@ -157,56 +180,70 @@ struct MainWindowView: View {
                 .help("Open \(usage.host() ?? shownStore.provider.serviceName) usage settings")
             }
         }
-        if shownStore.providesSessions {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    onOpenSessions(shownStore.profile.key, nil)
-                } label: {
-                    Label("Sessions", systemImage: "list.bullet.rectangle")
-                }
-                .keyboardShortcut("1", modifiers: .command)
-                .help("Browse this account's sessions")
-            }
+        if #available(macOS 26.0, *) {
+            ToolbarSpacer(.fixed, placement: .primaryAction)
+        }
+        ToolbarItem(placement: .primaryAction) {
+            MenuBarPin(registry: registry, pageProfile: selectedProfile)
         }
     }
 }
 
 /// Which account the menu bar shows, said and changed from the toolbar —
-/// the window's one way to move focus, so browsing pages never does.
-struct MainFocusMenu: View {
+/// the window's one way to move focus, so browsing pages never does. On an
+/// account page it is a split button: the pin itself pins THIS account (or
+/// hands the bar back to activity when it already holds it), the arrow
+/// lists the rest. On Home it is the list alone.
+struct MenuBarPin: View {
     var registry: ProviderRegistry
     /// The account page's account; nil on Home.
     let pageProfile: Profile?
 
-    private var focused: Profile? { registry.focusedProfile }
-
-    var body: some View {
-        Menu {
-            if let pageProfile, pageProfile.key != registry.focusedID {
-                Button("Show \(registry.rowTitle(for: pageProfile).title) in Menu Bar") {
-                    registry.focus(pageProfile.key)
-                }
-                Divider()
-            }
-            Toggle("Follow Activity", isOn: Binding(
-                get: { registry.pinnedID == nil },
-                set: { if $0 { registry.pin(nil) } }))
-            Divider()
-            ForEach(registry.shownProfiles, id: \.key) { profile in
-                Toggle(registry.qualifiedLabel(for: profile), isOn: Binding(
-                    get: { registry.pinnedID == profile.key },
-                    set: { if $0 { registry.focus(profile.key) } else { registry.pin(nil) } }))
-            }
-        } label: {
-            // A toolbar item is its symbol; what it says is one hover away.
-            Label(label, systemImage: "menubar.rectangle")
-        }
-        .help(label)
+    private var pinnedHere: Bool {
+        guard let pageProfile else { return false }
+        return registry.pinnedID == pageProfile.key
     }
 
-    private var label: String {
-        if let pageProfile, pageProfile.key == registry.focusedID { return "Shown in the menu bar" }
-        guard let focused else { return "Menu bar" }
-        return "The menu bar shows \(registry.rowTitle(for: focused).title)"
+    var body: some View {
+        if let pageProfile {
+            Menu {
+                choices
+            } label: {
+                Label(pinnedHere ? "Pinned to the Menu Bar" : "Pin to the Menu Bar",
+                      systemImage: pinnedHere ? "pin.fill" : "pin")
+            } primaryAction: {
+                if pinnedHere { registry.pin(nil) } else { registry.focus(pageProfile.key) }
+            }
+            .help(pinnedHere
+                ? "The menu bar shows this account — click to follow activity again"
+                : "Show this account in the menu bar")
+        } else {
+            Menu {
+                choices
+            } label: {
+                Label("Menu Bar", systemImage: registry.pinnedID == nil ? "pin" : "pin.fill")
+            }
+            .help(summary)
+        }
+    }
+
+    @ViewBuilder private var choices: some View {
+        Toggle("Follow Activity", isOn: Binding(
+            get: { registry.pinnedID == nil },
+            set: { if $0 { registry.pin(nil) } }))
+        Divider()
+        ForEach(registry.shownProfiles, id: \.key) { profile in
+            Toggle(registry.qualifiedLabel(for: profile), isOn: Binding(
+                get: { registry.pinnedID == profile.key },
+                set: { if $0 { registry.focus(profile.key) } else { registry.pin(nil) } }))
+        }
+    }
+
+    private var summary: String {
+        guard let focused = registry.focusedProfile else { return "Menu bar" }
+        let name = registry.rowTitle(for: focused).title
+        return registry.pinnedID == nil
+            ? "The menu bar follows activity — now \(name)"
+            : "The menu bar is pinned to \(name)"
     }
 }

@@ -31,8 +31,9 @@ extension AppDelegate {
             let page = AccountPageContent(
                 registry: registry, profile: profile, store: store,
                 chosenMeterID: .constant(nil), activityFocus: .constant(nil),
+                flowWidth: 800 - 2 * AccountPageContent.margin,
                 onOpenSessions: {}, onOpenSession: { _ in })
-                .padding(16)
+                .padding(AccountPageContent.margin)
             staged += stage(page, named: "main-account-\(profile.key)-800", width: 800)
         }
         return staged
@@ -52,6 +53,10 @@ extension AppDelegate {
         ]
         if let first = registry.shownProfiles.first {
             pages.append(("main-window-account-1100-dark.png", first.key, NSSize(width: 1100, height: 720), .darkAqua))
+            // Laid out wide first, narrowed before it is drawn: a chart that
+            // held its tile open after the window narrowed clipped off the
+            // window's edge, and a page drawn fresh at one width can't show it.
+            pages.append((Self.narrowedFrameName, first.key, NSSize(width: 1600, height: 900), .darkAqua))
         }
         return pages.map { file, selection, size, appearance in
             let host = NSHostingController(
@@ -72,6 +77,17 @@ extension AppDelegate {
             window.setFrame(NSRect(origin: NSPoint(x: -20_000, y: -20_000), size: size), display: false)
             window.orderFrontRegardless()
             return (file, window)
+        }
+    }
+
+    static let narrowedFrameName = "main-window-account-1600to1100-dark.png"
+
+    /// The narrowing half of `narrowedFrameName`, a beat after staging.
+    static func narrowMainWindowFrames(_ frames: [(name: String, window: NSWindow)]) {
+        for (name, window) in frames where name == narrowedFrameName {
+            var frame = window.frame
+            frame.size = NSSize(width: 1100, height: 720)
+            window.setFrame(frame, display: true)
         }
     }
 

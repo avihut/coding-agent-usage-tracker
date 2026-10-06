@@ -62,4 +62,23 @@ public enum DigestActivity {
                 toolCalls: 0, subagentCount: 0, compactions: 0, models: split)
         }
     }
+
+    /// Usage samples from the meters' own series — the curve each meter
+    /// published over its current window. Each point becomes one sample of
+    /// that meter alone, STAMPED with the meter's current reset: the charts
+    /// pick a window's samples by reset stamp (`WindowSamples`), so an
+    /// unstamped one would be dropped. A demo's charts draw this window and
+    /// nothing before it; a meter with no series contributes nothing, never
+    /// a zero.
+    public static func samples(from meters: [LiveMeter]) -> [UsageSample] {
+        meters.flatMap { meter in
+            meter.series.map { point in
+                UsageSample(
+                    t: point.t,
+                    percents: [meter.label: Int(point.percent.rounded())],
+                    resets: meter.resetsAt.map { [meter.label: $0] })
+            }
+        }
+        .sorted { $0.t < $1.t }
+    }
 }

@@ -268,6 +268,10 @@ final class DigestClient {
         if !scansLocally {
             activity = DigestActivity.daily(from: digest.activity)
             sessions = DigestActivity.sessions(from: digest.sessions, models: digest.models)
+            // No history file is read either: the meters' own series are
+            // the charts' samples (and the weekly profile's input).
+            samples = DigestActivity.samples(from: digest.meters)
+            recomputeProfiles()
         }
         serviceStatus = digest.serviceStatus
         appUpdate = digest.appUpdate
@@ -348,7 +352,9 @@ final class DigestClient {
     /// Samples, outcomes, and the pricing cache change only when the engine
     /// writes them — the digest heartbeat is the reload signal.
     private func reloadArtifacts() {
-        samples = history.load()
+        // A face that reads nothing of this Mac takes its samples from the
+        // digest (`apply`), not from a history file.
+        if scansLocally { samples = history.load() }
         windowOutcomes = windowLedger.load()
         pricing = pricingService.current()
         recomputeProfiles()

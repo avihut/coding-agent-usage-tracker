@@ -8,6 +8,9 @@ struct RefreshButton: View {
     let store: UsageStore
     /// Owned by the host so a focus change can drop it.
     @Binding var showBlocked: Bool
+    /// The panel wears the accent while there is room; a toolbar keeps the
+    /// toolbar's ink and colors only under pressure.
+    var tintsWhenCalm = true
 
     var body: some View {
         Button {
@@ -38,11 +41,12 @@ struct RefreshButton: View {
     /// Orange once the hour's requests reach 80% of the estimated budget,
     /// red at or past it — the warning lives on the button that spends it.
     private var refreshPressureStyle: AnyShapeStyle {
-        guard !store.isLocalProvider else { return AnyShapeStyle(.tint) }
+        let calm = tintsWhenCalm ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary)
+        guard !store.isLocalProvider else { return calm }
         let fraction = store.apiBudget(now: Date()).fraction
         if fraction >= 1 { return AnyShapeStyle(.red) }
         if fraction >= 0.8 { return AnyShapeStyle(.orange) }
-        return AnyShapeStyle(.tint)
+        return calm
     }
 
     /// Tiered with `refreshPressureStyle` — whatever color the button

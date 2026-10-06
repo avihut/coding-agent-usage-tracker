@@ -1,11 +1,11 @@
 import SwiftUI
 import UsageCore
 
-/// One account, the way the panel shows it — its limits, the selected
-/// limit's card (the panel's hover popover, pinned), its activity and its
+/// One account, the way the panel shows it — its limits, its activity, its
 /// sessions — as tiles in the window's flow: one column in a narrow window,
-/// the popover's own order, and side by side as the window widens.
-/// Selecting a limit replaces the card; nothing here opens on hover.
+/// the popover's own order, and side by side as the window widens. The
+/// panel's hover card opens INSIDE Limits, right under the limit it belongs
+/// to: a click on another limit moves it there. Nothing opens on hover.
 struct AccountPage: View {
     var registry: ProviderRegistry
     let profile: Profile
@@ -14,16 +14,20 @@ struct AccountPage: View {
     @Binding var activityFocus: DateInterval?
     let onOpenSessions: () -> Void
     let onOpenSession: (String) -> Void
+    /// The scroll view's width — the window's, not any tile's.
+    @State private var width: CGFloat = 800
 
     var body: some View {
         ScrollView {
             AccountPageContent(
                 registry: registry, profile: profile, store: store,
                 chosenMeterID: $chosenMeterID, activityFocus: $activityFocus,
+                flowWidth: width - 2 * AccountPageContent.margin,
                 onOpenSessions: onOpenSessions, onOpenSession: onOpenSession)
-                .padding(16)
+                .padding(AccountPageContent.margin)
         }
         .scrollBounceBehavior(.basedOnSize)
+        .reportingWidth($width)
         // The panel scans on open; a page scans on appear, and only its own
         // account — never every account at once.
         .task(id: profile.key) { store.scanActivity() }
@@ -38,12 +42,16 @@ struct AccountPageContent: View {
     let store: UsageStore
     @Binding var chosenMeterID: String?
     @Binding var activityFocus: DateInterval?
+    /// The flow's width, from the page's own — what the expanded card's
+    /// plot is drawn at (one tile's inner width).
+    let flowWidth: CGFloat
     let onOpenSessions: () -> Void
     let onOpenSession: (String) -> Void
 
     @State private var hoveredMeter: String?
-    /// The card tile's inner width, which its plot takes.
-    @State private var cardWidth: CGFloat = 332
+
+    /// The page's margin around the flow.
+    static let margin: CGFloat = 16
 
     private var meters: [Meter] { store.state.snapshot?.meters ?? [] }
 
@@ -62,15 +70,22 @@ struct AccountPageContent: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            if let card = store.serviceStatus, card.hasIncident {
+            // This harness's notices, on top as in the panel. A reset's
+            // click-through opens that limit here.
+            NoticesBand(
+                registry: registry, store: store,
+                onOpenMeterHistory: { label, _ in
+                    if let meter = meters.first(where: { $0.label == label }) { chosenMeterID = meter.id }
+                },
+                onOpenAccounts: {},
+                harnessID: profile.providerID)
+            if let card = store.serviceStatus, card.hasIncident,
+               !(store.notices?.items.contains { $0.ownsMenuBarSurface } ?? false) {
                 ServiceStatusBanner(card: card)
             }
             AccountErrorBlock(store: store)
             DashboardFlow {
                 DashboardTile { limits }
-                if let meter = chosenMeter {
-                    DashboardTile { meterCard(meter) }
-                }
                 DashboardTile { activity }
                 if store.providesSessions {
                     DashboardTile {
@@ -113,8 +128,16 @@ struct AccountPageContent: View {
                             set: { if let id = $0 { chosenMeterID = id } }),
                         hoveredMeter: $hoveredMeter,
                         onLeave: {})
+                        .pointerStyle(.link)
+                    // Exactly one limit is open, so the tile's height moves
+                    // only when the open one changes.
+                    if meter.id == chosenMeter?.id {
+                        meterCard(meter)
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
                 }
             }
+            .animation(.snappy(duration: 0.22), value: chosenMeter?.id)
             if snapshot.meters.isEmpty {
                 Text("No limits reported").foregroundStyle(.secondary)
             }
@@ -152,9 +175,9 @@ struct AccountPageContent: View {
 
     // MARK: - The meter card
 
-    /// The hover card at the tile's width. The card draws its own 10pt inset;
-    /// it is handed back so the card's title lines up with every other
-    /// tile's, and its plot takes exactly the tile's inner width.
+    /// The hover card, opened under its limit at the tile's width. The card
+    /// draws its own 10pt inset; it is handed back so the plot spans exactly
+    /// the tile's inner width, and the row above already names the meter.
     private func meterCard(_ meter: Meter) -> some View {
         MeterHistoryView(
             meter: meter, samples: store.samples,
@@ -168,13 +191,14 @@ struct AccountPageContent: View {
             style: store.style,
             outages: store.outages,
             onOpenOutage: openOutage,
-            chartWidth: max(MeterHistoryView.chartWidth, cardWidth))
+            chartWidth: max(
+                MeterHistoryView.chartWidth,
+                DashboardFlow().tileInnerWidth(forPageWidth: flowWidth)),
+            showsTitle: false)
             // A fresh card per meter: its paging and hover state belong to
             // the meter it was opened on.
             .id("\(profile.key)|\(meter.id)")
             .padding(-10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .reportingWidth($cardWidth)
     }
 
     // MARK: - Activity

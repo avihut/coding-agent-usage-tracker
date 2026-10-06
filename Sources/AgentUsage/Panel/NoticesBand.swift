@@ -10,6 +10,19 @@ struct NoticesBand: View {
     /// A reset notice's click-through: the meter it names and the moment.
     let onOpenMeterHistory: (_ label: String?, _ at: Date) -> Void
     let onOpenAccounts: () -> Void
+    /// One harness's notices only (a main-window account page), dismissed
+    /// one by one through `store` — "Dismiss all" there dismisses exactly
+    /// what it lists. Nil: every shown harness's, as the panel lists them.
+    var harnessID: String?
+
+    /// What the band lists.
+    private var card: NoticesCard? {
+        guard let all = registry.pendingNotices else { return nil }
+        guard let harnessID else { return all }
+        let items = all.items.filter { registry.harnessOfNotice($0.id) == harnessID }
+        return NoticesCard(
+            indicator: items.contains { !$0.seen }, pendingCount: items.count, items: items)
+    }
 
     /// Pending notifications (v0.93.0) — absent entirely when nothing is
     /// pending. A running outage's row here IS the incident banner with a
@@ -19,7 +32,7 @@ struct NoticesBand: View {
         // Every SHOWN harness's pending notices, not just the focused one's:
         // what the list shows is exactly what "Dismiss all" dismisses, and
         // each row's rail wears its own vendor's accent.
-        if let card = registry.pendingNotices, !card.items.isEmpty {
+        if let card, !card.items.isEmpty {
             NoticesSection(
                 card: card, style: store.style,
                 styleForNotice: { notice in
@@ -29,7 +42,17 @@ struct NoticesBand: View {
                             .map(HarnessStyle.init) ?? store.style
                 },
                 onDismiss: { id in withAnimation { store.dismissNotice(id: id) } },
-                onDismissAll: { withAnimation { store.dismissAllNotices() } },
+                onDismissAll: {
+                    withAnimation {
+                        if harnessID == nil {
+                            store.dismissAllNotices()
+                        } else {
+                            for notice in card.items where notice.dismissable {
+                                store.dismissNotice(id: notice.id)
+                            }
+                        }
+                    }
+                },
                 canOpen: { notice in
                     self.provider(ofNotice: notice).noticeDestination(for: notice) != nil
                 },

@@ -73,4 +73,29 @@ struct DigestActivityTests {
         let empty = try #require(sessions.first { $0.id == "session-b" })
         #expect(empty.models.isEmpty)
     }
+
+    @Test("a meter's series becomes its samples, stamped with its reset, in time order")
+    func samplesFromSeries() {
+        let reset = Date(timeIntervalSince1970: 1_000_000)
+        func meter(_ label: String, _ points: [(TimeInterval, Double)], resetsAt: Date?) -> LiveMeter {
+            LiveMeter(
+                id: label, label: label, tag: "S", percent: nil, level: "normal", rank: 0,
+                rateWindowSeconds: 2700, forcesWarning: false, risk: nil, resetsAt: resetsAt,
+                limitWindow: 18_000, scopedModelName: nil, resetCaption: nil, forecast: nil,
+                series: points.map { SeriesPoint(t: Date(timeIntervalSince1970: $0.0), percent: $0.1) },
+                stretches: [])
+        }
+        let samples = DigestActivity.samples(from: [
+            meter("Session", [(20, 12.4), (40, 30.6)], resetsAt: reset),
+            meter("Weekly", [(30, 5)], resetsAt: nil),
+            meter("Empty", [], resetsAt: reset),
+        ])
+        #expect(samples.map(\.t.timeIntervalSince1970) == [20, 30, 40])
+        #expect(samples[0].percents == ["Session": 12])
+        #expect(samples[2].percents == ["Session": 31])
+        #expect(samples[0].resets == ["Session": reset])
+        #expect(samples[1].percents == ["Weekly": 5])
+        #expect(samples[1].resets == nil)
+        #expect(!samples.contains { $0.percents["Empty"] != nil })
+    }
 }

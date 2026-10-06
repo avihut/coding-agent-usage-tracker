@@ -218,6 +218,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 try? await Task.sleep(for: .seconds(1))
                 Self.writePanelSnapshots(pages, to: directory)
                 let frames = Self.stageMainWindowFrames(registry: registry)
+                try? await Task.sleep(for: .seconds(1))
+                Self.narrowMainWindowFrames(frames)
                 try? await Task.sleep(for: .seconds(2))
                 Self.writeWindowFrames(frames, to: directory)
                 Self.writeSnapshots(registry: registry, to: directory)

@@ -148,6 +148,9 @@ struct MeterHistoryView: View {
     }
 
     let accountTitle: AccountTitle?
+    /// The meter's name over the plot. Off where the card opens right under
+    /// the row that already says it (the main window's Limits).
+    let showsTitle: Bool
 
     init(
         meter: Meter, samples: [UsageSample], timeline: [TokenSlot],
@@ -160,9 +163,11 @@ struct MeterHistoryView: View {
         highlightReset: Date? = nil,
         outages: [OutageSpan] = [],
         onOpenOutage: ((OutageSpan) -> Void)? = nil,
-        chartWidth: CGFloat = MeterHistoryView.chartWidth
+        chartWidth: CGFloat = MeterHistoryView.chartWidth,
+        showsTitle: Bool = true
     ) {
         self.plotWidth = chartWidth
+        self.showsTitle = showsTitle
         self.accountTitle = accountTitle
         self.highlightReset = highlightReset
         self.outages = outages
@@ -670,7 +675,7 @@ struct MeterHistoryView: View {
                 .frame(width: plotWidth, alignment: .leading)
             }
             HStack(alignment: .firstTextBaseline) {
-                Text(meter.label).font(density.sectionHeader)
+                if showsTitle { Text(meter.label).font(density.sectionHeader) }
                 Spacer()
                 // The History span picks its trailing frame from a compact
                 // dropdown beside the span picker; the Current span's frame
