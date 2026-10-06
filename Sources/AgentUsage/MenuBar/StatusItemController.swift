@@ -52,6 +52,7 @@ final class StatusItemController: NSResponder {
     private var defaultsObserver: NSObjectProtocol?
     private var settingsController: SettingsWindowController?
     private var sessionsController: SessionsWindowController?
+    private var mainWindowController: MainWindowController?
     /// The focused face the bar's observation is bound to — `adopt` moves
     /// it when focus moves.
     private var boundStore: UsageStore
@@ -126,6 +127,9 @@ final class StatusItemController: NSResponder {
                 },
                 onOpenSession: { [weak self] id in
                     self?.showSessions(selecting: id)
+                },
+                onOpenMainWindow: { [weak self] in
+                    self?.showMainWindow()
                 }))
         host.sizingOptions = .preferredContentSize
         return host
@@ -423,6 +427,23 @@ final class StatusItemController: NSResponder {
             sessionsStore = store
         }
         sessionsController?.show(selecting: sessionID)
+    }
+
+    /// Opens the main window — the panel's footer button, ⌘0, a reopen
+    /// (Dock, Spotlight, Finder) and a person's own launch; also the
+    /// `--main-window [--select home|<key>]` hatch. Built once, never closed
+    /// by a focus change.
+    func showMainWindow(selecting selection: String? = nil) {
+        if popover.isShown { popover.performClose(nil) }
+        if mainWindowController == nil {
+            mainWindowController = MainWindowController(
+                registry: registry,
+                onOpenSessions: { [weak self] key, sessionID in
+                    self?.showSessions(for: key, selecting: sessionID)
+                },
+                onOpenSettings: { [weak self] in self?.showSettings() })
+        }
+        mainWindowController?.show(selecting: selection)
     }
 
     // MARK: - Outside-interaction dismissal

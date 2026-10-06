@@ -27,7 +27,7 @@ extension AppDelegate {
             let host = NSHostingController(
                 rootView: UsagePanelView(
                     registry: registry, onOpenSettings: { _ in }, onOpenSessions: {},
-                    onOpenSession: { _ in })
+                    onOpenSession: { _ in }, onOpenMainWindow: {})
                     .background(Color(nsColor: .windowBackgroundColor)))
             // As the popover sizes it: the ScrollView's ideal height is its
             // content's, which `fittingSize` on a bare view collapses.
@@ -35,6 +35,9 @@ extension AppDelegate {
             let window = NSWindow(
                 contentRect: NSRect(x: -20_000, y: -20_000, width: 360, height: 800),
                 styleMask: .borderless, backing: .buffered, defer: false)
+            // The array owns it: a released-when-closed window would be
+            // freed twice once `writePanelSnapshots` closes it.
+            window.isReleasedWhenClosed = false
             window.appearance = NSAppearance(named: appearance)
             window.contentViewController = host
             window.orderFrontRegardless()

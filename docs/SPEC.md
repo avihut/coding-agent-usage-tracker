@@ -37,6 +37,11 @@ A `LSUIElement` (no Dock icon) macOS app that:
 
 The numbers should match Settings → Usage in the Claude app.
 
+(Since the main window, user-directed 2026-10-06: the launch state is
+still `LSUIElement` — no Dock icon until a window opens. A launch by the
+person opens the main window; a login-item launch stays in the menu bar.
+`docs/UI.md`, "The main window".)
+
 ---
 
 ## 2. Provenance and honest caveats

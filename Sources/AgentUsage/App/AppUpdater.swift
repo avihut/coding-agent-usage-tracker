@@ -253,7 +253,10 @@ final class AppUpdater {
     nonisolated private static func relaunch(bundleURL: URL) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        process.arguments = ["-c", "sleep 0.6; /usr/bin/open \"$CLAUDE_USAGE_RELAUNCH\""]
+        // `--relaunched`: the new copy comes back the way this one was —
+        // in the menu bar, no window opened over whatever the person is
+        // doing (a launch by the person opens the main window).
+        process.arguments = ["-c", "sleep 0.6; /usr/bin/open \"$CLAUDE_USAGE_RELAUNCH\" --args --relaunched"]
         process.environment = ProcessInfo.processInfo.environment.merging(
             ["CLAUDE_USAGE_RELAUNCH": bundleURL.path], uniquingKeysWith: { _, new in new })
         try? process.run()

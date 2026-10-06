@@ -65,15 +65,10 @@ struct AccountStrip: View {
     /// order the bar draws them in, so the strip reads top to bottom the way
     /// the bar reads left to right.
     private var groups: [(harness: HarnessStyle, name: String, profiles: [Profile])] {
-        var seen: [String] = []
-        for profile in profiles where !seen.contains(profile.providerID) {
-            seen.append(profile.providerID)
-        }
-        return seen.compactMap { id in
-            guard let provider = registry.providers.first(where: { $0.id == id }) else { return nil }
-            let mine = profiles.filter { $0.providerID == id }
-            guard !mine.isEmpty else { return nil }
-            return (HarnessStyle(provider), provider.agentName, mine)
+        ProfileGroups.byHarness(profiles).compactMap { group in
+            guard let provider = registry.providers.first(where: { $0.id == group.providerID })
+            else { return nil }
+            return (HarnessStyle(provider), provider.agentName, group.profiles)
         }
     }
 

@@ -4,6 +4,15 @@
      blank line. This comment is stripped. -->
 a main window of its own
 
+New
+- A window of its own: the menu bar panel, given room. Open it from the
+  panel's window button, ⌘0, the Dock or Spotlight, or by launching the
+  app yourself (a launch at login still stays in the menu bar). The
+  sidebar lists your accounts by agent; an account's page shows its
+  limits beside the selected limit's chart, then its activity and
+  sessions. Choosing an account there doesn't change what the menu bar
+  shows — the toolbar's menu does that.
+
 Fixes
 - An open Sessions or Settings window stays open when the menu bar's focus
   moves to another harness's account. Clicking a Codex cell while reading

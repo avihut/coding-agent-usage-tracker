@@ -12,6 +12,17 @@ struct AgentUsageApp: App {
         // empty scene is an empty, dead window. ⌘, is a local key monitor
         // in the delegate and opens the real window.
         MenuBarExtra("", isInserted: .constant(false)) { EmptyView() }
+            // The main menu exists while a window is open (DockPresence makes
+            // the app `.regular`); the window is listed in its Window menu.
+            // ⌘0 itself is the delegate's key monitor, which sees the key
+            // first and also works from the panel, where no menu is.
+            .commands {
+                CommandGroup(before: .windowList) {
+                    Button("\(AppIdentity.displayName)") { delegate.showMainWindow() }
+                        .keyboardShortcut("0", modifiers: .command)
+                    Divider()
+                }
+            }
     }
 }
 
@@ -19,6 +30,40 @@ struct AgentUsageApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var controller: StatusItemController?
     private var settingsKeyMonitor: Any?
+    /// Whether the person launched the app (Finder, Dock, Spotlight, `open`)
+    /// rather than the system (a login item) or the updater — read off the
+    /// launch's Apple event, which is gone by `didFinishLaunching`.
+    private var launchedByPerson = false
+
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        launchedByPerson = Self.isPersonLaunch(NSAppleEventManager.shared().currentAppleEvent)
+    }
+
+    /// A launch the person asked for arrives as an "open application" Apple
+    /// event; a login item's carries the launched-as-login-item property,
+    /// and a launch with no event at all (launchd, a direct exec — every
+    /// hatch run) is nobody's request. The updater's relaunch is a person's
+    /// `open` in shape, so it says `--relaunched`.
+    private static func isPersonLaunch(_ event: NSAppleEventDescriptor?) -> Bool {
+        guard let event, event.eventClass == kCoreEventClass, event.eventID == kAEOpenApplication
+        else { return false }
+        if event.paramDescriptor(forKeyword: keyAEPropData)?.enumCodeValue == keyAELaunchedAsLogInItem {
+            return false
+        }
+        return !CommandLine.arguments.contains("--relaunched")
+    }
+
+    /// Opens (or fronts) the main window.
+    func showMainWindow() {
+        controller?.showMainWindow()
+    }
+
+    /// A Dock click, a Spotlight or Finder launch of the running app: the
+    /// window, always — there is nothing else to reopen.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        controller?.showMainWindow()
+        return false
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let bundleID = Bundle.main.bundleIdentifier ?? AppIdentity.bundleID
@@ -58,11 +103,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // menu and rebuilds it on its own schedule (an item inserted at
         // launch or on activation never survived to be seen), and the
         // monitor sees the key equivalent before the menu would anyway.
+        // ⌘0 the same way, for the main window.
         settingsKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
-                  event.charactersIgnoringModifiers == ","
+            guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command
             else { return event }
-            self?.controller?.showSettings()
+            switch event.charactersIgnoringModifiers {
+            case ",": self?.controller?.showSettings()
+            case "0": self?.controller?.showMainWindow()
+            default: return event
+            }
             return nil
         }
         // Touch the updater so its init sweeps a previous update's aside
@@ -138,6 +187,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             controller?.showPanel()
         } else if CommandLine.arguments.contains("--sessions") {
             controller?.showSessions()
+        } else if CommandLine.arguments.contains("--main-window") {
+            // `--main-window [--select home|<account key>]`.
+            controller?.showMainWindow(selecting: Self.launchArgument(after: "--select"))
+        } else if launchedByPerson, demo == nil {
+            // Launched by the person, not at login: they came for the window.
+            controller?.showMainWindow()
         }
         // `--snapshot <dir>` renders the Notifications section, the weekly
         // meter card and (while an incident is open) the menu bar's hover
@@ -157,10 +212,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 Self.fitPanelSnapshots(panels)
                 try? await Task.sleep(for: .seconds(1))
                 Self.writePanelSnapshots(panels, to: directory)
+                let pages = Self.stageMainWindowSnapshots(registry: registry)
+                try? await Task.sleep(for: .seconds(1))
+                Self.fitPanelSnapshots(pages)
+                try? await Task.sleep(for: .seconds(1))
+                Self.writePanelSnapshots(pages, to: directory)
+                let frames = Self.stageMainWindowFrames(registry: registry)
+                try? await Task.sleep(for: .seconds(2))
+                Self.writeWindowFrames(frames, to: directory)
                 Self.writeSnapshots(registry: registry, to: directory)
                 NSApp.terminate(nil)
             }
         }
+    }
+
+    private static func launchArgument(after flag: String) -> String? {
+        let arguments = CommandLine.arguments
+        guard let index = arguments.firstIndex(of: flag), arguments.indices.contains(index + 1)
+        else { return nil }
+        return arguments[index + 1]
     }
 
     private static func launchSnapshotDirectory() -> URL? {

@@ -15,6 +15,8 @@ struct UsagePanelView: View {
     /// The shortlist's click-through: opens the Sessions window landed on
     /// the clicked session.
     let onOpenSession: (String) -> Void
+    /// Opens the main window.
+    let onOpenMainWindow: () -> Void
     /// Coordinate space the row-frame preferences are measured in — the same
     /// view the shared popover attaches to, so its anchor rects line up.
     static let panelSpace = "usage-panel"
@@ -480,6 +482,12 @@ struct UsagePanelView: View {
             Spacer()
             RefreshButton(store: store, showBlocked: $showRefreshBlocked)
 
+            Button(action: onOpenMainWindow) {
+                Image(systemName: "macwindow")
+            }
+            .buttonStyle(.borderless)
+            .help("Open the \(AppIdentity.displayName) window (⌘0)")
+
             if let usageSettings = store.provider.links.usageSettings {
                 Link(destination: usageSettings) {
                     Image(systemName: "arrow.up.right.square")
@@ -519,6 +527,8 @@ struct UsagePanelView: View {
                         }
                     }
                 }
+                Button("Open \(AppIdentity.displayName) Window") { onOpenMainWindow() }
+                    .keyboardShortcut("0", modifiers: .command)
                 if store.providesSessions {
                     Button("Sessions…") { onOpenSessions() }
                         .keyboardShortcut("1", modifiers: .command)

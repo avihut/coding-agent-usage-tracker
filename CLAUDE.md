@@ -105,7 +105,7 @@ was learned the hard way.
 | how data reaches a face, engine landing points, refresh, storage | `docs/ARCHITECTURE.md` |
 | the daemon, the digest, host arbitration | `docs/DAEMON.md` |
 | a provider, an account, focus, identity, storage scopes | `docs/HARNESSES.md` |
-| the status item, panel, settings or sessions windows, hover/drag | `docs/UI.md` |
+| the status item, panel, main window, settings or sessions windows, hover/drag | `docs/UI.md` |
 | any chart, the heatmap, the meter popover, the audit views | `docs/CHARTS.md` |
 | the scanner, cost arithmetic, pricing, forecasts | `docs/MEASUREMENT.md` |
 | `usage-cli` nouns, fields, flags, exit codes | `docs/CLI.md` |

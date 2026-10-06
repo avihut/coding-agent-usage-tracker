@@ -29,7 +29,7 @@ extension ProviderRegistry {
     /// True for the only shown account of its harness: the row that wears
     /// the vendor's mark instead of a letter.
     func isLoneInHarness(_ profile: Profile) -> Bool {
-        shownProfiles.filter { $0.providerID == profile.providerID }.count == 1
+        ProfileGroups.isLone(profile, in: shownProfiles)
     }
 
     /// How a row names an account — ONE rule for every harness (0.101.0,

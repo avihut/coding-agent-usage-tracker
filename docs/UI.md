@@ -216,6 +216,87 @@ per-harness geometry of the bar is in [HARNESSES.md](HARNESSES.md).
   `DockPresence.shared.adopt(window)` on every show, BEFORE `NSApp
   .activate()` so the menu bar rides along.
 
+## The main window
+
+- User-directed 2026-10-06: "a more spacious representation of what the
+  menu bar popover already shows". The window is the popover given room,
+  re-laid out for the Mac HIG — not a new set of views. The panel's parts
+  (`AccountStatusLine`, `RefreshButton`, `AccountErrorBlock`,
+  `NoticesBand`, `SessionsShortlistSection`, `UpdateChip`, `MeterRow`,
+  `HeatmapView`, `MeterHistoryView`) each take the store they show, so the
+  window hands them any account. Code: `Sources/AgentUsage/MainWindow/`.
+- Layout: `NavigationSplitView`. The SIDEBAR is the account strip — Home,
+  then the shown accounts (`registry.shownProfiles`, the strip's set)
+  grouped by harness through core `ProfileGroups.byHarness`, a heading only
+  over a harness with several accounts (the strip's rule; a lone account's
+  row already names its agent). Each row: the strip's 2pt accent rule
+  (= focused in the menu bar, NOT selected here), its tile, its name,
+  `MiniMeterBars`. An ACCOUNT PAGE is the panel for one account: Limits
+  (`MeterRow` with `opensOnHover: false` — a click selects) beside the
+  selected meter's card inline (the hover popover's `MeterHistoryView` at
+  its native 300pt, same `scopeKey` prefs key, so span/frame choices are
+  shared with the popover), then Activity (`HeatmapView` at the panel's
+  332pt, `resetsOnPanelClose: false`) beside Sessions. The default meter
+  is the most at-risk (highest forecast severity), else the weekly, else
+  the first; a pick is remembered per account for the window's life.
+  HOME is every account at a glance. A one-account Mac gets the account
+  page with the sidebar collapsed — Home and the page would coincide.
+- Selecting in the sidebar NEVER moves the menu bar's focus. Focus moves
+  only from the toolbar's Focus menu (Follow Activity, or pin an account)
+  and a row's context menu. Toolbar: Focus menu, Refresh (⌘R, the
+  panel's pressure-colored button), Usage ↗ (absent for local providers),
+  Sessions (⌘1, opens the Sessions window for THAT account —
+  `showSessions(for:)`). Status bar: the shown account's pipeline line,
+  one status dot per shown harness with a card, version + update chip.
+- Type (`FaceDensity`, an environment value, `.panel` = the popover's
+  literal fonts, which the popover never sets): section headers
+  `headline`; meter label `body`; meter % `title3` on Home (`.window`) and
+  `title2` on a page's Limits (`.windowLarge`), bar 6/8pt; meter caption
+  `subheadline`; the breakdown's ≈ $ headline `title3` (below the meters,
+  which are the page's largest numbers); the status line `footnote`. Grids
+  and chart axes keep their size.
+- Contract: `MainWindowController`, the Settings contract — built on first
+  show, `isReleasedWhenClosed = false`, `center()` then
+  `setFrameAutosaveName("AgentUsageMain")`, `DockPresence.adopt` →
+  `NSApp.activate()` → `makeKeyAndOrderFront` → `orderFrontRegardless`.
+  1100×720 default, 900×600 minimum, tabbing off. Owned by
+  `StatusItemController`, bound to the registry (never a store), never
+  closed by a focus change. ⌘Q quits the app, bar included; ⌘W closes the
+  window and DockPresence returns the app to `.accessory`.
+- Entry points: the panel footer's window button and ⋯ → Open Agent
+  Usage Window; ⌘0 anywhere the app is key (the ⌘, local key monitor,
+  which sees the key before any menu — the panel has none); the Window
+  menu while the app is `.regular` (`.commands` on the inert
+  `MenuBarExtra`); a reopen of the running app (Dock tile, Spotlight,
+  Finder → `applicationShouldHandleReopen`); and a COLD launch by the
+  person. A launch counts as the person's when its Apple event, read in
+  `applicationWillFinishLaunching` (gone by `didFinish`), is
+  open-application without the launched-as-login-item property. A login
+  item's launch, a direct exec (every hatch) and the updater's relaunch
+  (`open … --args --relaunched`) stay in the menu bar.
+- Hosting findings (2026-10-06, macOS 26): `NSHostingController
+  .sceneBridgingOptions = [.title, .toolbars]` bridges the toolbar and
+  `.navigationSubtitle`, but the TITLE stays "Untitled" — the view reports
+  it (`onTitle`) and the controller sets `window.title`. The navigation
+  title must sit on the detail column, not outside the split view. The
+  controller's `sizingOptions` is `[.minSize]`: the default pins the
+  window to the page's ideal size.
+- NOT verified here (needs a person at the machine): the reopen path and
+  the login-item rule. Never test reopen with `open`/`open -a` from a
+  worktree — with the live app running under the same bundle id,
+  LaunchServices fronts or relaunches the REAL app, and a normal launch of
+  the worktree build repoints the launch agent.
+- Snapshots: `--snapshot` adds `main-account-<key>-{dark,light}.png` for
+  every shown account (the page's content, at the detail column's 880pt,
+  hosted off-screen like the panel — a ScrollView draws blank there) and
+  `main-window-{home,account}-*.png`: a TITLED window parked off-screen
+  whose frame view (`contentView.superview`) `cacheDisplay`s with its
+  title bar, toolbar and sidebar — the one way to see the chrome without
+  Screen Recording or Accessibility consent. Stage windows with
+  `isReleasedWhenClosed = false`: a window the array owns is otherwise
+  freed twice once closed. `--main-window [--select home|<key>]` opens it
+  at launch.
+
 ## The settings window
 
 - The settings window (⋯ menu → Settings…, `SettingsWindowController` —
@@ -479,3 +560,12 @@ per-harness geometry of the bar is in [HARNESSES.md](HARNESSES.md).
   the next run-loop turns, not on insertion. No screen capture, so no
   Screen Recording consent and no desktop in the picture. Existing
   snapshot files are untouched (the baselines `cmp` them).
+- A demo is also clicked through (2026-10-06, the main window), and it
+  shares the live app's bundle id — so whatever lives outside its storage
+  scope is shared too. `DemoLaunch.isActive` / `registry.isDemo` make every
+  such control inert: the focus pin lives in the registry, and Launch at
+  login, the background-engine switch, the retention picker (an agent's
+  settings file) and the account/harness edits write nothing. A long
+  interactive demo is best run from a COPY of the bundle with its own
+  `CFBundleIdentifier` (ad-hoc signed): its own defaults domain, its own
+  status-item slots, its own Dock identity.
