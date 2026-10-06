@@ -32,8 +32,6 @@ struct UsagePanelView: View {
     /// Clicking the red (budget-spent) reload button opens its explanation
     /// instead of refreshing.
     @State private var showRefreshBlocked = false
-    /// The shortlist row under the cursor, if any.
-    @State private var hoveredSession: String?
     /// Where the activity section is navigated to (paged window or drilled
     /// day); the Sessions strip below follows it.
     @State private var activityFocus: DateInterval?
@@ -112,11 +110,14 @@ struct UsagePanelView: View {
                                 registry.focus(next)
                             }
                         })
-                    noticesSection
+                    NoticesBand(
+                        registry: registry, store: store,
+                        onOpenMeterHistory: openMeterHistory,
+                        onOpenAccounts: { onOpenSettings(.accounts) })
                     serviceStatusSection
-                    errorBlock
+                    AccountErrorBlock(store: store)
                     content
-                    statusRow
+                    AccountStatusLine(store: store)
                     Divider()
                     HeatmapView(
                         activity: store.activity, pricing: store.pricing,
@@ -130,9 +131,11 @@ struct UsagePanelView: View {
                         windowOutcomes: store.windowOutcomes,
                         outages: store.outages,
                         onOpenOutage: openOutage,
-                        sessionAuditMeter: auditMeter(rank: 0),
-                        weeklyAuditMeter: auditMeter(rank: 1))
-                    sessionsSection
+                        sessionAuditMeter: store.auditMeter(rank: 0),
+                        weeklyAuditMeter: store.auditMeter(rank: 1))
+                    SessionsShortlistSection(
+                        store: store, activityFocus: activityFocus,
+                        onOpenSessions: onOpenSessions, onOpenSession: onOpenSession)
                 }
                 // Switching accounts crossfades everything below the strip
                 // (the drill idiom) — a fresh subtree, so nothing of the
@@ -211,7 +214,6 @@ struct UsagePanelView: View {
             statusAnchor = nil
             litReset = nil
             activityFocus = nil
-            hoveredSession = nil
             meterFrames = [:]
             showRefreshBlocked = false
             hoveringPopover = false
@@ -317,64 +319,20 @@ struct UsagePanelView: View {
         }
     }
 
-    /// Pending notifications (v0.93.0) — absent entirely when nothing is
-    /// pending. A running outage's row here IS the incident banner with a
-    /// lifecycle (same rail, same message, a running clock, no ×), so the
-    /// banner below yields to it rather than saying the same thing twice.
-    @ViewBuilder private var noticesSection: some View {
-        // Every SHOWN harness's pending notices, not just the focused one's:
-        // what the list shows is exactly what "Dismiss all" dismisses, and
-        // each row's rail wears its own vendor's accent.
-        if let card = registry.pendingNotices, !card.items.isEmpty {
-            NoticesSection(
-                card: card, style: store.style,
-                styleForNotice: { notice in
-                    registry.stores[registry.harnessOfNotice(notice.id)].map(\.style)
-                        ?? registry.providers
-                            .first { $0.id == registry.harnessOfNotice(notice.id) }
-                            .map(HarnessStyle.init) ?? store.style
-                },
-                onDismiss: { id in withAnimation { store.dismissNotice(id: id) } },
-                onDismissAll: { withAnimation { store.dismissAllNotices() } },
-                canOpen: { notice in
-                    self.provider(ofNotice: notice).noticeDestination(for: notice) != nil
-                },
-                onOpen: openNotice)
-        }
-    }
-
-    /// Which vendor a listed notice belongs to — its click-through is that
-    /// provider's call, never the focused one's.
-    private func provider(ofNotice notice: NoticeCard) -> any UsageProvider {
-        let id = registry.harnessOfNotice(notice.id)
-        return registry.providers.first { $0.id == id } ?? store.provider
-    }
-
-    /// A click on a notice goes where the provider says: an official record
-    /// on the web (the incident's report), or — for events the vendor keeps
-    /// no record of, like a limit reset — the meter card that saw it, lit at
+    /// A reset notice's click-through: the meter card that saw it, lit at
     /// the moment. The card hangs off the meter the notice names, falling
     /// back to the weekly meter; an event the vendor emptied every meter
     /// for is the weekly story either way.
-    private func openNotice(_ notice: NoticeCard) {
-        guard let destination = provider(ofNotice: notice).noticeDestination(for: notice)
-        else { return }
-        switch destination {
-        case .web(let url):
-            NSWorkspace.shared.open(url)
-        case .meterHistory(let label, let at):
-            guard let meters = store.state.snapshot?.meters else { return }
-            let meter = meters.first { $0.label == label }
-                ?? meters.first { $0.rank == 1 }
-                ?? meters.first { $0.rank > 0 }
-                ?? meters.first
-            guard let meter else { return }
-            statusAnchor = nil
-            litReset = (meter.id, at)
-            openMeter = meter.id
-        case .accounts:
-            onOpenSettings(.accounts)
-        }
+    private func openMeterHistory(label: String?, at: Date) {
+        guard let meters = store.state.snapshot?.meters else { return }
+        let meter = meters.first { $0.label == label }
+            ?? meters.first { $0.rank == 1 }
+            ?? meters.first { $0.rank > 0 }
+            ?? meters.first
+        guard let meter else { return }
+        statusAnchor = nil
+        litReset = (meter.id, at)
+        openMeter = meter.id
     }
 
     /// A click on an outage nub in any chart: the incident's report, where
@@ -434,118 +392,6 @@ struct UsagePanelView: View {
             )
             .help(ServiceStatusStyle.headline(card))
         }
-    }
-
-    /// Failures lead the panel: with no title row above them anymore, an
-    /// error and its hint are the first thing the eye lands on.
-    @ViewBuilder private var errorBlock: some View {
-        if let error = store.state.error {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(error.shortText(agent: store.provider.agentName))
-                    .font(.caption)
-                    .foregroundStyle(store.state.snapshot == nil ? AnyShapeStyle(.red) : AnyShapeStyle(.secondary))
-                if let hint = error.hint(agent: store.provider.agentName) {
-                    Text(hint).font(.caption2).foregroundStyle(.secondary)
-                }
-            }
-        }
-    }
-
-    /// Pipeline state right under the meters it describes — fetch time,
-    /// next-poll countdown, budget gauge — with the plan label flushed to
-    /// the opposite end.
-    ///
-    /// D9 (2026-08-25, user-directed): once a SECOND identity has ever been
-    /// observed, the row splits into two baseline-aligned lines — left
-    /// column pipeline time, right column identity, the plan tucked under
-    /// the email it belongs to ("who / on what plan"). The full email gets
-    /// a whole line; the bottom tier recedes to caption2·tertiary so the
-    /// block reads as structure, not two dense lines. Single-account
-    /// machines keep the original single line forever — the extra line is
-    /// paid exactly when the information exists.
-    @ViewBuilder private var statusRow: some View {
-        if store.state.snapshot != nil || store.nextRefreshAt != nil {
-            if let presence = store.accountPresence, presence.distinctAccounts >= 2 {
-                TimelineView(.periodic(from: .now, by: 1)) { context in
-                    VStack(spacing: 2) {
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            (statusLeadText(now: context.date) ?? Text(""))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Spacer(minLength: 12)
-                            // Display-only with the full identity one hover
-                            // away — the plan below keeps its disguised
-                            // link, and two adjacent invisible links with
-                            // different destinations would be a trap.
-                            Text(presence.current?.label ?? "signed out")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                                .help(accountHelp(presence))
-                        }
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            (statusDetailText(now: context.date) ?? Text(""))
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
-                            Spacer(minLength: 12)
-                            planLabel(font: .caption2, style: .tertiary)
-                        }
-                    }
-                }
-            } else {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    TimelineView(.periodic(from: .now, by: 1)) { context in
-                        statusLine(now: context.date)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    planLabel(font: .caption, style: .secondary)
-                }
-            }
-        }
-    }
-
-    /// A working link dressed as a plain caption: Link's tint shouted over
-    /// the header, so the hand cursor and help tag carry the affordance
-    /// instead of color. Providers without an upgrade page get the caption,
-    /// no link. Font and tier vary with the row's D9 shape.
-    @ViewBuilder private func planLabel(font: Font, style: some ShapeStyle) -> some View {
-        if let plan = store.state.snapshot?.plan?.displayLabel {
-            if let upgrade = store.provider.links.planUpgrade {
-                Button {
-                    NSWorkspace.shared.open(upgrade)
-                } label: {
-                    Text(plan)
-                        .font(font)
-                        .foregroundStyle(style)
-                }
-                .buttonStyle(.plain)
-                .pointerStyle(.link)
-                .help("Choose your plan on \(upgrade.host() ?? store.provider.serviceName)")
-            } else {
-                Text(plan)
-                    .font(font)
-                    .foregroundStyle(style)
-            }
-        }
-    }
-
-    /// The full identity, one hover away: name · email · org · since. The
-    /// plan is already the next line down, so it isn't repeated here.
-    private func accountHelp(_ presence: AccountPresenceCard) -> String {
-        guard let account = presence.current else {
-            return "No account is signed in right now."
-        }
-        var parts: [String] = []
-        if let name = account.displayName { parts.append(name) }
-        parts.append(account.email ?? account.label)
-        if let org = account.organizationName { parts.append(org) }
-        if let since = presence.since {
-            parts.append("since \(UsageFormatting.updatedStamp(since, now: Date()))")
-        }
-        return parts.joined(separator: " · ")
     }
 
     @ViewBuilder private var content: some View {
@@ -629,32 +475,10 @@ struct UsagePanelView: View {
                 Text("v\(AppIdentity.version)")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
-                updateControl
+                UpdateChip(store: store, onOpenSettings: { onOpenSettings(nil) })
             }
             Spacer()
-            Button {
-                // A red button is soft-disabled: the click surfaces WHY
-                // instead of spending a request that risks the lockout the
-                // color warns about. Hover already tells; click insists.
-                if !store.isLocalProvider, store.apiBudget(now: Date()).fraction >= 1 {
-                    showRefreshBlocked = true
-                } else {
-                    store.refresh(.manual)
-                }
-            } label: {
-                Image(systemName: "arrow.clockwise")
-                    .foregroundStyle(refreshPressureStyle)
-            }
-            .buttonStyle(.borderless)
-            .disabled(store.isRefreshing)
-            .help(refreshHelp)
-            .popover(isPresented: $showRefreshBlocked, arrowEdge: .bottom) {
-                Text(refreshHelp)
-                    .font(.caption)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(width: 220)
-                    .padding(10)
-            }
+            RefreshButton(store: store, showBlocked: $showRefreshBlocked)
 
             if let usageSettings = store.provider.links.usageSettings {
                 Link(destination: usageSettings) {
@@ -679,7 +503,7 @@ struct UsagePanelView: View {
                 // Settings → General, not a choice of which to read.
                 Toggle("Launch at login", isOn: SettingsBindings.launchAtLogin())
                 Divider()
-                if let update = visibleUpdate {
+                if let update = UpdateChip.visibleUpdate(store, skipped: skippedUpdateVersion) {
                     if store.canSelfInstall(update) {
                         Button("Update to \(update.latestVersion)…") {
                             AppUpdater.shared.resetFailure()
@@ -716,259 +540,6 @@ struct UsagePanelView: View {
         .padding(.horizontal, 14)
         .padding(.top, 8)
         .padding(.bottom, 10)
-    }
-
-    /// The update chip's card, or nil while there is nothing to whisper
-    /// about: no card, nothing newer, a version the user skipped, or a
-    /// release this build already IS (the daemon lags one relaunch behind
-    /// right after an update, and its card must not re-offer it).
-    private var visibleUpdate: AppUpdateCard? {
-        guard let card = store.appUpdate, card.updateAvailable,
-              card.latestVersion != AppIdentity.version,
-              card.latestVersion != skippedUpdateVersion
-        else { return nil }
-        return card
-    }
-
-    /// As quiet as an update can get: a small accent arrow riding beside
-    /// the version label it would change. On a self-installing channel one
-    /// click runs the whole install — spinner while it runs, amber with the
-    /// reason on hover after a failure, clicking again retries. On a
-    /// channel that only informs (a source checkout) the same arrow opens
-    /// Settings, where the card says how updating works here.
-    @ViewBuilder private var updateControl: some View {
-        if let update = visibleUpdate {
-            if store.canSelfInstall(update) {
-                installUpdateControl(update)
-            } else {
-                Button {
-                    onOpenSettings(nil)
-                } label: {
-                    Image(systemName: "arrow.down.circle.fill")
-                        .font(.caption)
-                        .foregroundStyle(store.style.accentColor)
-                }
-                .buttonStyle(.borderless)
-                .help("Version \(update.latestVersion) is available — this build updates from its checkout; click for how")
-            }
-        }
-    }
-
-    @ViewBuilder private func installUpdateControl(_ update: AppUpdateCard) -> some View {
-        let updater = AppUpdater.shared
-        switch updater.phase {
-            case .downloading, .installing, .relaunching:
-                ProgressView()
-                    .controlSize(.mini)
-                    .help("Updating to \(update.latestVersion)…")
-            case .failed(let message):
-                Button {
-                    updater.resetFailure()
-                    updater.install(update)
-                } label: {
-                    Image(systemName: "exclamationmark.arrow.circlepath")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                }
-                .buttonStyle(.borderless)
-                .help("\(message) Click to try again.")
-            case .idle:
-                Button {
-                    updater.install(update)
-                } label: {
-                    Image(systemName: "arrow.down.circle.fill")
-                        .font(.caption)
-                        .foregroundStyle(store.style.accentColor)
-                }
-                .buttonStyle(.borderless)
-                .help("Version \(update.latestVersion) is available — one click installs and relaunches")
-        }
-    }
-
-    /// The last few interactive sessions, one quiet line each — a shortcut
-    /// into the Sessions browser. Background runs stay out of the strip;
-    /// "Show more" covers them and anything past the cap. While the activity
-    /// section is navigated (paged window or drilled day) the strip follows
-    /// it, labels the span, and states emptiness rather than vanishing.
-    @ViewBuilder private var sessionsSection: some View {
-        let shortlist = SessionShortlist.build(store.sessions, in: activityFocus)
-        if store.providesSessions,
-           !shortlist.rows.isEmpty || shortlist.hasMore || activityFocus != nil {
-            let colors = shortlistColors
-            Divider()
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text("Sessions")
-                        .font(.caption.bold())
-                    if let focus = activityFocus {
-                        Spacer(minLength: 8)
-                        Text(Self.focusLabel(focus))
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .padding(.bottom, 2)
-                if shortlist.rows.isEmpty {
-                    Text("No sessions in this period")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 2)
-                }
-                ForEach(shortlist.rows) { session in
-                    shortlistRow(session, colors: colors)
-                }
-                if shortlist.hasMore {
-                    Button {
-                        onOpenSessions()
-                    } label: {
-                        Text("Show more…")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .pointerStyle(.link)
-                    .padding(.horizontal, 4)
-                    .padding(.top, 2)
-                }
-            }
-        }
-    }
-
-    /// The meter the audit surfaces read at this rank (0 session, 1 weekly):
-    /// its label keys the samples/ledger; a meter without a known window
-    /// length can't place cliffs, so it offers no audit.
-    private func auditMeter(rank: Int) -> AuditMeterInfo? {
-        guard let meter = store.state.snapshot?.meters.first(where: { $0.rank == rank }),
-              let window = meter.limitWindow
-        else { return nil }
-        return AuditMeterInfo(label: meter.label, window: window)
-    }
-
-    /// "Aug 5" for a drilled day, "Jul 27 – Aug 2" for a paged window — the
-    /// heatmap's own range vocabulary.
-    private static func focusLabel(_ interval: DateInterval) -> String {
-        let calendar = Calendar.current
-        let firstDay = calendar.startOfDay(for: interval.start)
-        // The interval is half-open; its last DAY sits just before the end.
-        let lastDay = calendar.startOfDay(for: interval.end.addingTimeInterval(-1))
-        if firstDay == lastDay { return focusFormatter.string(from: firstDay) }
-        return "\(focusFormatter.string(from: firstDay)) – \(focusFormatter.string(from: lastDay))"
-    }
-
-    private static let focusFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "MMM d"
-        return formatter
-    }()
-
-    /// The same palette input as the sessions window — the union over every
-    /// session's models — so a model's dot color matches across surfaces.
-    private var shortlistColors: [String: Color] {
-        var models: Set<String> = []
-        for session in store.sessions { models.formUnion(session.models.keys) }
-        return ModelPalette.assignment(for: models.sorted(), style: store.style)
-    }
-
-    /// One shortlist entry: the sidebar's full session card, wrapped in the
-    /// panel's hover/click chrome.
-    private func shortlistRow(_ session: SessionSummary, colors: [String: Color]) -> some View {
-        SessionRow(
-            session: session,
-            cost: SessionsView.cost(of: session, pricing: store.pricing),
-            colors: colors,
-            // Same auto-show rule as the sidebar (D4).
-            accounts: (store.accountPresence?.distinctAccounts ?? 0) >= 2
-                ? store.sessionAccountLabels(session) : nil)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
-            .background(
-                RoundedRectangle(cornerRadius: 5)
-                    .fill(Color.primary.opacity(hoveredSession == session.id ? 0.07 : 0)))
-            .contentShape(Rectangle())
-            .onHover { inside in
-                if inside {
-                    hoveredSession = session.id
-                } else if hoveredSession == session.id {
-                    hoveredSession = nil
-                }
-            }
-            .pointerStyle(.link)
-            .onTapGesture { onOpenSession(session.id) }
-    }
-
-    /// The freshness stamp alone — the two-line row's top-left cell.
-    private func statusLeadText(now: Date) -> Text? {
-        guard let fetchedAt = store.state.snapshot?.fetchedAt else { return nil }
-        // Day-aware: a local provider's data is only as fresh as the
-        // agent's last session, and a bare clock time would lie about
-        // a days-old stamp.
-        let stamp = UsageFormatting.updatedStamp(fetchedAt, now: now)
-        // The stale badge lives here now that there's no header for it.
-        return store.state.isStale
-            ? Text("cached \(stamp)").foregroundStyle(.orange)
-            : Text("Updated \(stamp)")
-    }
-
-    /// The operational tick-tock — countdown, idle multiplier, budget
-    /// gauge — the two-line row's bottom-left cell.
-    private func statusDetailText(now: Date) -> Text? {
-        var parts: [Text] = []
-        if let next = store.nextRefreshAt {
-            parts.append(Text(UsageFormatting.countdownText(to: next, now: now)))
-        }
-        // Why "next in 20m" instead of 5: quiet decayed the cadence. Activity
-        // (or usage moving) snaps it back — worth a word of transparency.
-        let pace = store.paceMultiplier(now: now)
-        if pace > 1 { parts.append(Text("idle ×\(pace)")) }
-        // Surface the API budget only once it's half spent — quiet otherwise.
-        // Local providers have no budget: nothing is requested from anyone.
-        if !store.isLocalProvider {
-            let budget = store.apiBudget(now: now)
-            if budget.fraction >= 0.5 { parts.append(Text("API \(budget.used)/\(budget.ceiling)h")) }
-        }
-        guard var line = parts.first else { return nil }
-        for part in parts.dropFirst() { line = line + Text(" · ") + part }
-        return line
-    }
-
-    /// The single-line form: stamp and detail joined, as before D9.
-    private func statusLine(now: Date) -> Text {
-        let parts = [statusLeadText(now: now), statusDetailText(now: now)]
-            .compactMap { $0 }
-        guard var line = parts.first else { return Text("") }
-        for part in parts.dropFirst() { line = line + Text(" · ") + part }
-        return line
-    }
-
-    /// Orange once the hour's requests reach 80% of the estimated budget,
-    /// red at or past it — the warning lives on the button that spends it.
-    private var refreshPressureStyle: AnyShapeStyle {
-        guard !store.isLocalProvider else { return AnyShapeStyle(.tint) }
-        let fraction = store.apiBudget(now: Date()).fraction
-        if fraction >= 1 { return AnyShapeStyle(.red) }
-        if fraction >= 0.8 { return AnyShapeStyle(.orange) }
-        return AnyShapeStyle(.tint)
-    }
-
-    /// Tiered with `refreshPressureStyle` — whatever color the button
-    /// wears, hovering it says why.
-    private var refreshHelp: String {
-        if store.isLocalProvider {
-            return "Refresh now — re-reads \(store.provider.agentName)'s local session files"
-        }
-        let budget = store.apiBudget(now: Date())
-        if budget.fraction >= 1 {
-            return "This hour's ~\(budget.ceiling)-request API budget is spent"
-                + " (\(budget.used) used) — refreshing now risks a rate-limit"
-                + " lockout. The gauge clears as requests age out of the hour."
-        }
-        if budget.fraction >= 0.8 {
-            return "Refresh now — \(budget.used) of ~\(budget.ceiling) hourly"
-                + " API requests used; nearing the budget, another poll may"
-                + " trip the rate limit"
-        }
-        return "Refresh now (at most once per 3 minutes)"
     }
 
 }

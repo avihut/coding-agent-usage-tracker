@@ -15,6 +15,11 @@ struct MeterRow: View {
     /// one-account panel uses; the stacked account form passes
     /// "<profile>|<meter>" so two accounts' rows can't collide.
     var key: String?
+    /// The panel opens a row's card on hover (after a dwell) and switches
+    /// between rows while one is up. False keeps the hover highlight and
+    /// the click, and nothing else — the main window's Limits list selects
+    /// on click and shows its card inline.
+    var opensOnHover = true
 
     /// Panel-wide single-popover authority and hover tracker, owned by
     /// UsagePanelView — which also hosts the one shared popover.
@@ -71,6 +76,7 @@ struct MeterRow: View {
             let key = rowKey
             if inside {
                 hoveredMeter = key
+                guard opensOnHover else { return }
                 if openMeter != nil {
                     openMeter = key
                 } else {
@@ -83,7 +89,7 @@ struct MeterRow: View {
                 }
             } else {
                 if hoveredMeter == key { hoveredMeter = nil }
-                onLeave()
+                if opensOnHover { onLeave() }
             }
         }
         .onTapGesture { openMeter = rowKey }
