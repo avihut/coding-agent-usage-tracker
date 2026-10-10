@@ -9,6 +9,65 @@ import Testing
 struct LaunchAgentInstallerTests {
     private let binary = URL(fileURLWithPath: "/Applications/AgentUsage.app/Contents/MacOS/usaged")
 
+    @Test func installWaitsForBootoutAndRetriesTransientBootstrapFailure() throws {
+        let target = "gui/\(getuid())/\(LaunchAgentInstaller.label)"
+        let plistURL = URL(fileURLWithPath: "/tmp/usaged.plist")
+        var commands: [[String]] = []
+        var results: [(status: Int32, output: String)] = [
+            (0, ""),
+            (0, "state = running"),
+            (0, "state = running"),
+            (113, "service not found"),
+            (5, "Bootstrap failed: 5: Input/output error"),
+            (0, ""),
+        ]
+        var sleeps = 0
+
+        try LaunchAgentInstaller.installRegisteredAgent(
+            uid: getuid(), label: LaunchAgentInstaller.label, plistURL: plistURL,
+            runner: { command in
+                commands.append(command)
+                return results.removeFirst()
+            },
+            sleep: { _ in sleeps += 1 })
+
+        #expect(commands == [
+            ["bootout", target],
+            ["print", target],
+            ["print", target],
+            ["print", target],
+            ["bootstrap", "gui/\(getuid())", plistURL.path],
+            ["bootstrap", "gui/\(getuid())", plistURL.path],
+        ])
+        #expect(sleeps == 3)
+        #expect(results.isEmpty)
+    }
+
+    @Test func installReportsBootstrapFailureAfterBoundedRetries() {
+        var commands: [[String]] = []
+        let expected = "Bootstrap failed: 5: Input/output error"
+
+        do {
+            try LaunchAgentInstaller.installRegisteredAgent(
+                uid: getuid(), label: LaunchAgentInstaller.label,
+                plistURL: URL(fileURLWithPath: "/tmp/usaged.plist"),
+                runner: { command in
+                    commands.append(command)
+                    if command.first == "print" { return (113, "service not found") }
+                    if command.first == "bootstrap" { return (5, expected) }
+                    return (0, "")
+                },
+                sleep: { _ in })
+            Issue.record("Expected installation to fail after bounded retries")
+        } catch let error as LaunchAgentInstaller.InstallError {
+            #expect(error.description == "launchctl bootstrap failed: \(expected)")
+        } catch {
+            Issue.record("Unexpected installation error: \(error)")
+        }
+
+        #expect(commands.filter { $0.first == "bootstrap" }.count == 21)
+    }
+
     // MARK: - Plist shape
 
     @Test func plistCarriesTheAgentContract() throws {

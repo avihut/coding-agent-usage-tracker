@@ -32,6 +32,9 @@ New
   the new account's meter in the old one's place.
 
 Fixes
+- Reinstalling or repointing the background metering agent now waits for
+  launchd to finish removing the old service and retries transient bootstrap
+  failures, so the agent is not left unloaded during a rapid replacement.
 - Meter popover: a model's token curve no longer towers over the percent
   line for the first hours after a session window resets. The poll that
   lands on the window boundary still reports the previous window's
