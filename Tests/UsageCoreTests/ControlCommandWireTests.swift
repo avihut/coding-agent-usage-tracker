@@ -126,6 +126,30 @@ struct ControlCommandWireTests {
         #expect(replies.allSatisfy { $0 == ControlReply(ok: true, message: "served") })
     }
 
+    /// A status line gives up after a second, and under load the host may
+    /// not have answered yet. Writing the late reply into the closed
+    /// connection must not kill the host with SIGPIPE.
+    @Test("a client that hangs up before its reply doesn't take the host down")
+    func clientLeavingEarlyIsSurvived() async throws {
+        let url = URL(fileURLWithPath: "/tmp")
+            .appending(path: "ccp-\(String(UInt32.random(in: 0..<0xFFFFFF), radix: 36))")
+            .appending(path: "control.sock")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let socket = ControlSocket(socketURL: url) { _ in
+            try? await Task.sleep(for: .milliseconds(300))
+            return ControlReply(ok: true, message: "late")
+        }
+        try socket.start()
+        defer { socket.stop() }
+
+        let gaveUp = await Task.detached { ControlSocket.send(.status, to: url, timeout: 0.05) }.value
+        #expect(gaveUp == nil)
+        // The host wrote that reply into a closed connection; it still serves.
+        try? await Task.sleep(for: .milliseconds(400))
+        let next = await Task.detached { ControlSocket.send(.status, to: url, timeout: 3) }.value
+        #expect(next == ControlReply(ok: true, message: "late"))
+    }
+
     @Test("an unknown verb over a live socket is refused, never dropped")
     func unknownVerbRefused() async throws {
         let url = URL(fileURLWithPath: "/tmp")

@@ -188,7 +188,10 @@ longer decodes). `usage-cli state | jq .menuBar` etc.
   session's status line may ask on one tick, and a full queue refuses the
   connect, which a caller can only read as "no engine". The handler still
   hops to the main actor — when the app hosts, that is its UI thread, a
-  sub-millisecond lookup a few times a second.
+  sub-millisecond lookup a few times a second. Both ends set
+  `SO_NOSIGPIPE`: a client that gives up before its reply (a status line
+  waits 1 s) used to make the host's late write raise SIGPIPE, which
+  killed the daemon or the hosting app outright.
 - `usaged` (Sources/usaged/, embedded at AgentUsage.app/Contents/MacOS/):
   RunAtLoad + KeepAlive + ThrottleInterval 10, signed with the app's
   identity, IOKit sleep/wake (sleep acknowledged immediately), daily

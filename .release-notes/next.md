@@ -54,6 +54,9 @@ Fixes
   not found; a full scan runs only for `--all` with no engine to ask, or
   with no digest at all, and a second scan of the same account exits 27
   instead of piling on.
+- The engine no longer dies when something asking it a question gives up
+  before the answer: replying to a caller that had already left raised a
+  signal that killed the daemon, or the menu bar app when it was hosting.
 - A transcript write that lands within a minute of the engine's last scan
   is picked up by a catch-up scan instead of waiting for the next write
   anywhere, so a session's numbers no longer lag its last turn.
