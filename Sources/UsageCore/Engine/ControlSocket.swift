@@ -36,15 +36,26 @@ public enum ControlCommand: Codable, Sendable, Equatable {
     /// and reconcile engines.
     case profilesChanged
     case shutdown
+    /// Read-only: one session's numbers from the named profile's engine —
+    /// its in-memory index of every session its last scan holds, not only
+    /// the published shortlist (issue #24). `profile` is a `ProfileKey`; nil
+    /// means the focused one. A profile with no running engine is refused,
+    /// never answered from another account. `id` is an id prefix. The
+    /// reply's `session` carries the answer; mutates nothing.
+    case session(profile: String?, id: String)
 }
 
 public struct ControlReply: Codable, Sendable, Equatable {
     public let ok: Bool
     public let message: String?
+    /// A `session` lookup's answer; nil for every other verb, and from a
+    /// host that predates the verb (it answers "unreadable command").
+    public let session: SessionAnswer?
 
-    public init(ok: Bool, message: String? = nil) {
+    public init(ok: Bool, message: String? = nil, session: SessionAnswer? = nil) {
         self.ok = ok
         self.message = message
+        self.session = session
     }
 }
 
@@ -56,6 +67,13 @@ public struct ControlReply: Codable, Sendable, Equatable {
 /// safe (a socket file with no live holder is by definition stale).
 public final class ControlSocket: @unchecked Sendable {
     public typealias Handler = @MainActor @Sendable (ControlCommand) async -> ControlReply
+
+    /// Connections the kernel queues while one is served. Every open
+    /// session's status line may ask for its numbers on the same tick
+    /// (`ControlCommand.session`), and a full queue refuses a connect
+    /// outright — which a caller can only read as "no engine". Four was
+    /// enough while every verb was human-paced.
+    static let backlog: Int32 = 64
 
     public let socketURL: URL
     private let handler: Handler
@@ -97,7 +115,7 @@ public final class ControlSocket: @unchecked Sendable {
             throw ControlSocketError.bindFailed(errno)
         }
         chmod(socketURL.path, 0o600)
-        guard listen(fd, 4) == 0 else {
+        guard listen(fd, Self.backlog) == 0 else {
             close(fd)
             throw ControlSocketError.bindFailed(errno)
         }

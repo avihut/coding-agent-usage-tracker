@@ -18,6 +18,10 @@ public enum DeepQuery {
     public static let nouns: Set<String> = ["windows", "history", "prices", "price"]
 
     static let exitWrongProvider: Int32 = 11
+    /// Another transcript scan of the same account is in flight
+    /// (`TranscriptScanLock`): nothing was scanned, and saying so beats
+    /// piling a second whole-corpus parse onto the first (issue #24).
+    static let exitScanBusy: Int32 = 27
 
     /// `--provider <id>` wins; else the registry's persisted pick unless
     /// it's "auto" (no explicit choice); else "claude". Factored out of

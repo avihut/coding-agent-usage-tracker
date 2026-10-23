@@ -171,8 +171,24 @@ longer decodes). `usage-cli state | jq .menuBar` etc.
   settingsChanged, refreshPricing, scanNow, refreshStatus, checkUpdates,
   markNoticesSeen, dismissNotice, dismissAllNotices, focusProfile (nil id
   clears the pin), refreshProfile, setProfileEnabled, profilesChanged,
-  shutdown. One socket per host however many homes it meters; an app-hosted
-  socket still refuses setProvider and shutdown.
+  shutdown, and (issue #24) `session(profile:id:)`. One socket per host
+  however many homes it meters; an app-hosted socket still refuses
+  setProvider and shutdown.
+- `session` is the one READ-ONLY verb that returns data: the named
+  profile's engine answers an id prefix from its in-memory index (every
+  session its last scan holds, not only the published eight) with
+  `ControlReply.session` — `SessionAnswer`: the matching ids, and on a hit
+  the digest's own `SessionCard` (built by `LiveStateBuilder.sessionCards`,
+  so the project is a folder name) plus `SessionDeepFields`. It is the
+  field class the 2026-08-17 re-amendment already allows in the digest,
+  over the same 0600 socket, and nothing is persisted. A named profile with
+  no running engine is refused rather than answered by the focused one; an
+  engine before its first scan answers no session at all (an empty index is
+  not "no such session"). The listen backlog is 64 (was 4): every open
+  session's status line may ask on one tick, and a full queue refuses the
+  connect, which a caller can only read as "no engine". The handler still
+  hops to the main actor — when the app hosts, that is its UI thread, a
+  sub-millisecond lookup a few times a second.
 - `usaged` (Sources/usaged/, embedded at AgentUsage.app/Contents/MacOS/):
   RunAtLoad + KeepAlive + ThrottleInterval 10, signed with the app's
   identity, IOKit sleep/wake (sleep acknowledged immediately), daily

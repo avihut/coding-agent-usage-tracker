@@ -308,17 +308,31 @@ struct SessionFallbackTests {
         DigestQueryTests.minimalState(engine: DigestQueryTests.minimalEngine(), sessions: [])
     }
 
-    @Test("a unique id-prefix miss on the shortlist resolves through the scan")
+    @Test("a unique id-prefix miss resolves through the scan when --all asks for it")
     func uniquePrefixFallsThrough() throws {
         let (fixture, entries) = try buildFixtureEntries()
         defer { fixture.tearDown() }
 
-        let parsed = DigestQuery.parseArgs(["aaaa1", "id"])
+        let parsed = DigestQuery.parseArgs(["aaaa1", "id", "--all"])
         let out = DigestQuery.runSession(
             parsed: parsed, digest: missingShortlistDigest(), now: fixtureNow, calendar: utcCalendar,
             json: false, scan: { entries })
         #expect(out.stdout == "aaaa1111")
         #expect(out.exitCode == 0)
+    }
+
+    /// Issue #24: one status line per open session, every 10 s, each miss
+    /// escalated to a whole-corpus scan, kept 18 scans in flight. A digest
+    /// on disk means a host published; its miss is answered, not scanned.
+    @Test("a plain miss against a digest never scans — it says how to ask for one")
+    func plainMissAgainstADigestNeverScans() {
+        let out = DigestQuery.runSession(
+            parsed: DigestQuery.parseArgs(["aaaa1"]), digest: missingShortlistDigest(), now: fixtureNow,
+            calendar: utcCalendar, json: false,
+            scan: { Issue.record("a plain miss against a digest must not scan"); return [] })
+        #expect(out.exitCode == 20)
+        #expect(out.note == "no session matches 'aaaa1' in the shortlist (≤8) and no engine answered"
+            + " — add --all to scan the transcripts")
     }
 
     @Test("with no digest at all, every selector goes straight to the scan")
@@ -337,7 +351,7 @@ struct SessionFallbackTests {
         let (fixture, entries) = try buildFixtureEntries()
         defer { fixture.tearDown() }
 
-        let parsed = DigestQuery.parseArgs(["aaaa"])
+        let parsed = DigestQuery.parseArgs(["aaaa", "--all"])
         let out = DigestQuery.runSession(
             parsed: parsed, digest: missingShortlistDigest(), now: fixtureNow, calendar: utcCalendar,
             json: false, scan: { entries })
@@ -349,7 +363,7 @@ struct SessionFallbackTests {
         let (fixture, entries) = try buildFixtureEntries()
         defer { fixture.tearDown() }
 
-        let parsed = DigestQuery.parseArgs(["zzzz"])
+        let parsed = DigestQuery.parseArgs(["zzzz", "--all"])
         let out = DigestQuery.runSession(
             parsed: parsed, digest: missingShortlistDigest(), now: fixtureNow, calendar: utcCalendar,
             json: false, scan: { entries })
@@ -366,7 +380,7 @@ struct SessionFallbackTests {
 
     @Test("a scan-returns-nil (non-claude provider) fallback is exit 11")
     func scanWrongProviderIsEleven() {
-        let parsed = DigestQuery.parseArgs(["anything"])
+        let parsed = DigestQuery.parseArgs(["anything", "--all"])
         let out = DigestQuery.runSession(
             parsed: parsed, digest: missingShortlistDigest(), now: fixtureNow, calendar: utcCalendar, json: false,
             scan: { nil })
@@ -613,10 +627,15 @@ struct DeepQuerySessionsCLITests {
         #expect(out.exitCode == 20)
         #expect(out.note == "no session matches 'nope' in the shortlist (≤8) — --no-scan forbids the transcript scan")
 
-        // Without it, the same miss escalates — proven by the scan closure's
-        // own wrong-provider exit, which a digest-only answer never reaches.
-        let escalated = DeepQuerySessionsCLI.run(
+        // Without it, a miss against a digest no longer escalates either
+        // (issue #24); only --all does — proven by the scan closure's own
+        // wrong-provider exit, which a digest-only answer never reaches.
+        let plain = DeepQuerySessionsCLI.run(
             noun: "session", arguments: ["nope", "--provider", "not-a-real-provider"], digest: digest, now: now)
+        #expect(plain.exitCode == 20)
+        let escalated = DeepQuerySessionsCLI.run(
+            noun: "session", arguments: ["nope", "--all", "--provider", "not-a-real-provider"],
+            digest: digest, now: now)
         #expect(escalated.exitCode == 11)
     }
 
@@ -819,5 +838,230 @@ struct DeepQueryTranscriptTests {
                 noun: "transcript", parsed: DigestQuery.parseArgs(["x", flag, "1"]))
             #expect(rejected?.exitCode == 19, "\(flag) should be unknown on transcript")
         }
+    }
+}
+
+// MARK: - `session` asks the engine before anything parses (issue #24)
+
+/// The engine's answer for `id` over the fixture — built by the same pure
+/// lookup the host runs, from the same scan the corpus path prices.
+private func engineAnswer(_ id: String, fixture: DeepSessionFixture) -> SessionAnswer {
+    SessionAnswer.lookup(
+        id, in: fixture.scanner.scan(now: fixtureNow).sessions, pricing: .bundled,
+        catalog: ClaudeProvider().modelCatalog, colorLedger: { ModelColorLedger() },
+        accent: RGBColor(red: 0.5, green: 0.5, blue: 0.5), timeline: nil)
+}
+
+@Suite("session asks the engine")
+struct SessionEngineTests {
+    private let everyField = "tokens,cost,active,started,end,prompts,api-calls,"
+        + "kind,tool-calls,subagents,compactions,agent-version"
+
+    private func missingShortlistDigest() -> LiveState {
+        DigestQueryTests.minimalState(engine: DigestQueryTests.minimalEngine(), sessions: [])
+    }
+
+    private func neverScans() -> DeepQuerySessions.Scan {
+        { Issue.record("the scan must not run when the engine answered"); return [] }
+    }
+
+    private func run(
+        _ args: [String], digest: LiveState?, scan: DeepQuerySessions.Scan? = nil,
+        ask: ((String) -> SessionAnswer?)?
+    ) -> QueryOutput {
+        DigestQuery.runSession(
+            parsed: DigestQuery.parseArgs(args), digest: digest, now: fixtureNow, calendar: utcCalendar,
+            json: args.contains("--json"), scan: scan, ask: ask)
+    }
+
+    @Test("the engine's answer prints exactly what the scan prints for the same session")
+    func engineMatchesTheScan() throws {
+        let (fixture, entries) = try buildFixtureEntries()
+        defer { fixture.tearDown() }
+        for id in ["aaaa1111", "bbbb2222"] {
+            let args = [id, "--fields", everyField, "--raw", "--unix"]
+            let scanned = run(args + ["--all"], digest: nil, scan: { entries }, ask: nil)
+            let asked = run(args, digest: missingShortlistDigest(), scan: neverScans()) {
+                engineAnswer($0, fixture: fixture)
+            }
+            #expect(scanned.exitCode == 0)
+            #expect(asked.exitCode == 0)
+            #expect(asked.stdout == scanned.stdout)
+            let scannedModels = run([id, "models", "--raw"] + ["--all"], digest: nil, scan: { entries }, ask: nil)
+            let askedModels = run([id, "models", "--raw"], digest: missingShortlistDigest(), scan: neverScans()) {
+                engineAnswer($0, fixture: fixture)
+            }
+            #expect(askedModels.stdout == scannedModels.stdout)
+        }
+    }
+
+    @Test("a shortlist miss is answered by the engine, and source says so")
+    func missAnsweredByTheEngine() throws {
+        let (fixture, _) = try buildFixtureEntries()
+        defer { fixture.tearDown() }
+        let out = run(["aaaa1", "--fields", "id,source,project", "--raw"], digest: missingShortlistDigest(),
+                      scan: neverScans()) { engineAnswer($0, fixture: fixture) }
+        #expect(out.exitCode == 0)
+        // The project is the cwd's folder name, never its path.
+        #expect(out.stdout == "aaaa1111\tengine\tproj1")
+    }
+
+    @Test("--no-scan still asks the engine — asking parses nothing")
+    func noScanStillAsks() throws {
+        let (fixture, _) = try buildFixtureEntries()
+        defer { fixture.tearDown() }
+        let out = run(["aaaa1111", "tokens", "--no-scan"], digest: missingShortlistDigest(), scan: neverScans()) {
+            engineAnswer($0, fixture: fixture)
+        }
+        #expect(out.exitCode == 0)
+        #expect(out.stdout == "165")
+    }
+
+    @Test("--all skips a shortlist hit and the engine answers the deep fields")
+    func allIsAnsweredByTheEngine() throws {
+        let (fixture, _) = try buildFixtureEntries()
+        defer { fixture.tearDown() }
+        let card = SessionCard(
+            id: "aaaa1111", title: "Shortlisted", project: nil, branch: nil, startedAt: fixtureNow,
+            end: fixtureNow, activeSeconds: 0, cost: nil, tokens: 0, prompts: 0, apiCalls: 0, modelColors: [])
+        let digest = DigestQueryTests.minimalState(engine: DigestQueryTests.minimalEngine(), sessions: [card])
+        let out = run(["aaaa1111", "--fields", "kind,subagents,source", "--raw", "--all"], digest: digest,
+                      scan: neverScans()) { engineAnswer($0, fixture: fixture) }
+        #expect(out.stdout == "interactive\t1\tengine")
+    }
+
+    @Test("the engine's no-match is final: exit 20 and no scan, even under --all")
+    func engineNoMatchIsFinal() throws {
+        let (fixture, _) = try buildFixtureEntries()
+        defer { fixture.tearDown() }
+        for args in [["zzzz"], ["zzzz", "--all"]] {
+            let out = run(args, digest: missingShortlistDigest(), scan: neverScans()) {
+                engineAnswer($0, fixture: fixture)
+            }
+            #expect(out.exitCode == 20)
+        }
+        let plain = run(["zzzz"], digest: missingShortlistDigest(), scan: neverScans()) {
+            engineAnswer($0, fixture: fixture)
+        }
+        #expect(plain.note == "no session matches 'zzzz' in the shortlist (≤8) or the engine's index")
+    }
+
+    @Test("an ambiguous engine answer is a bad query naming the ids, newest first")
+    func engineAmbiguityIsABadQuery() throws {
+        let (fixture, _) = try buildFixtureEntries()
+        defer { fixture.tearDown() }
+        let out = run(["aaaa"], digest: missingShortlistDigest(), scan: neverScans()) {
+            engineAnswer($0, fixture: fixture)
+        }
+        #expect(out.exitCode == 19)
+        #expect(out.note == "ambiguous selector 'aaaa' matches: aaaa1111, aaaa9999")
+    }
+
+    @Test("silence: a digest means exit 20 with no scan; --all scans; no digest at all scans")
+    func silenceFallsBackOnlyWhereAScanIsAllowed() throws {
+        let (fixture, entries) = try buildFixtureEntries()
+        defer { fixture.tearDown() }
+        let silent: (String) -> SessionAnswer? = { _ in nil }
+        let withDigest = run(["aaaa1", "id"], digest: missingShortlistDigest(), scan: {
+            Issue.record("a miss against a digest must not scan"); return []
+        }, ask: silent)
+        #expect(withDigest.exitCode == 20)
+        let asked = run(["aaaa1", "id", "--all"], digest: missingShortlistDigest(), scan: { entries }, ask: silent)
+        #expect(asked.stdout == "aaaa1111")
+        #expect(asked.exitCode == 0)
+        let noDigest = run(["aaaa1", "source"], digest: nil, scan: { entries }, ask: silent)
+        #expect(noDigest.stdout == "scan")
+    }
+
+    @Test("a shortlist hit never asks the engine")
+    func shortlistHitNeverAsks() {
+        let card = SessionCard(
+            id: "aaaa1111", title: "Shortlisted", project: nil, branch: nil, startedAt: fixtureNow,
+            end: fixtureNow, activeSeconds: 0, cost: nil, tokens: 0, prompts: 0, apiCalls: 0, modelColors: [])
+        let digest = DigestQueryTests.minimalState(engine: DigestQueryTests.minimalEngine(), sessions: [card])
+        let out = run(["aaaa1111", "title"], digest: digest, scan: nil) { _ in
+            Issue.record("a shortlist hit must not ask the engine")
+            return nil
+        }
+        #expect(out.stdout == "Shortlisted")
+    }
+
+    @Test("an answer no engine sends — one match, no card — counts as silence, never a hit")
+    func malformedAnswerIsSilence() {
+        let out = run(["aaaa1"], digest: missingShortlistDigest(), scan: nil) { _ in
+            SessionAnswer(matches: ["aaaa1111"], card: nil, deep: nil)
+        }
+        #expect(out.exitCode == 20)
+        #expect(out.note?.hasSuffix("and no engine answered — add --all to scan the transcripts") == true)
+    }
+}
+
+// MARK: - SessionAnswer.lookup: the host's side of the lookup
+
+@Suite("SessionAnswer.lookup")
+struct SessionAnswerLookupTests {
+    /// Nine sessions an hour apart: one more than the shortlist holds.
+    private func sessions() -> [SessionSummary] {
+        (0..<9).map { index in
+            let end = fixtureNow.addingTimeInterval(-Double(index) * 3600)
+            return SessionSummary(
+                id: String(format: "%02d", index) + "-session", title: "Session \(index)",
+                projectPath: "/Users/dev/proj\(index)", gitBranch: "main", agentVersion: "2.1.280",
+                kind: .interactive, start: end.addingTimeInterval(-600), end: end, activeSeconds: 300,
+                prompts: 2, apiCalls: 3, toolCalls: 1, subagentCount: 0, compactions: 0,
+                models: ["claude-fable-5": TokenTally(input: 100, output: 50)])
+        }
+    }
+
+    private func lookup(_ id: String, in sessions: [SessionSummary]) -> SessionAnswer {
+        SessionAnswer.lookup(
+            id, in: sessions, pricing: .bundled, catalog: ClaudeProvider().modelCatalog,
+            colorLedger: { ModelColorLedger() }, accent: RGBColor(red: 0.5, green: 0.5, blue: 0.5),
+            timeline: nil)
+    }
+
+    @Test("a session past the shortlist's eight is found, carded like the shortlist, folder name only")
+    func findsPastTheShortlist() throws {
+        let all = sessions()
+        let published = LiveStateBuilder.sessionCards(
+            all, pricing: .bundled, catalog: ClaudeProvider().modelCatalog, colorLedger: ModelColorLedger(),
+            accent: RGBColor(red: 0.5, green: 0.5, blue: 0.5))
+        #expect(published.count == LiveStateBuilder.sessionsCap)
+        #expect(!published.contains { $0.id == "08-session" })
+
+        let answer = lookup("08-SES", in: all)
+        guard case .found(let card, let deep) = try #require(answer.resolution) else {
+            Issue.record("expected the ninth session to be found")
+            return
+        }
+        #expect(card.id == "08-session")
+        #expect(card.project == "proj8")
+        #expect(card.tokens == 150)
+        #expect(card.cost == PricingTable.bundled.rates(for: "claude-fable-5")?
+            .dollars(for: TokenTally(input: 100, output: 50)))
+        #expect(deep.kind == "interactive")
+        #expect(deep.agentVersion == "2.1.280")
+        #expect(deep.models == [SessionModelCost(id: "claude-fable-5", tokens: 150, cost: card.cost)])
+    }
+
+    @Test("no match and several matches carry no card; several list newest first, capped")
+    func noneAndAmbiguous() {
+        let none = lookup("zz", in: sessions())
+        #expect(none.resolution == SessionAnswer.Resolution.none)
+        #expect(none.card == nil)
+        let several = lookup("0", in: sessions())
+        #expect(several.resolution == .ambiguous((0..<9).map { String(format: "%02d", $0) + "-session" }))
+        #expect(several.card == nil && several.deep == nil)
+
+        let many = (0..<(SessionAnswer.matchCap + 10)).map { index in
+            SessionSummary(
+                id: "x\(index)", title: "t", projectPath: nil, gitBranch: nil, agentVersion: nil,
+                kind: .interactive, start: fixtureNow, end: fixtureNow.addingTimeInterval(Double(index)),
+                activeSeconds: 0, prompts: 1, apiCalls: 0, toolCalls: 0, subagentCount: 0, compactions: 0,
+                models: [:])
+        }
+        let capped = lookup("x", in: many)
+        #expect(capped.matches.count == SessionAnswer.matchCap)
+        #expect(capped.matches.first == "x\(SessionAnswer.matchCap + 9)")
     }
 }

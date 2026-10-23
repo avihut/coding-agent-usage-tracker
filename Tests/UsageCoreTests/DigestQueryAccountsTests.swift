@@ -228,6 +228,24 @@ struct DigestQueryAccountsTests {
         #expect(sessions(["transcript", "/nowhere.jsonl"], env: ["CLAUDE_CONFIG_DIR": "/Users/t/.claude-squad"]).exitCode == 20)
     }
 
+    @Test("a shortlist miss asks the SELECTED account's engine, by its key")
+    func sessionsDoorAsksTheSelectedEngine() {
+        var asked: [String] = []
+        func miss(_ args: [String], env: [String: String] = [:]) -> QueryOutput {
+            DeepQuerySessionsCLI.run(
+                noun: "session", arguments: args, digest: golden, now: now, environment: env,
+                profiles: [personalProfile], homes: homes,
+                engine: { profile, _ in
+                    asked.append(profile)
+                    return nil
+                })
+        }
+        #expect(miss(["nope"]).exitCode == 20)
+        #expect(miss(["nope", "--account", "c982130e"]).exitCode == 20)
+        #expect(miss(["nope", "--no-scan"], env: ["CLAUDE_CONFIG_DIR": "~/.claude-personal"]).exitCode == 20)
+        #expect(asked == ["default", "c982130e", "c982130e"])
+    }
+
     @Test("the deep verbs select too; prices never does")
     func deepDoor() {
         func deep(_ args: [String], env: [String: String] = [:]) -> QueryOutput {

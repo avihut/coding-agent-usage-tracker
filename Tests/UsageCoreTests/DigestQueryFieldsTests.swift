@@ -192,7 +192,7 @@ struct DigestQueryFieldsTests {
         // with it rather than printing three cells and a lie.
         let out = run(["session", "latest", "--fields", "tokens,kind"])
         #expect(out.exitCode == 19)
-        #expect(out.note == "session field 'kind' isn't in the shortlist — add --all to resolve it through the scan")
+        #expect(out.note == "session field 'kind' isn't in the shortlist — add --all to resolve it past the shortlist")
     }
 
     // MARK: - --relative durations

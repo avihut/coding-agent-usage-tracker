@@ -44,6 +44,19 @@ Fixes
 - The "extra usage" estimate on a forecast past its limit is measured on
   the same samples, so the tokens and dollars it quotes match the curves
   the popover draws.
+- `usage-cli session <id>` no longer parses every transcript on the Mac
+  when the session isn't among the eight the menu bar lists. It asks the
+  running engine, which knows every session, and answers in milliseconds,
+  `--no-scan` included. With many Claude Code sessions open, each status
+  line past the eighth used to start a whole-corpus scan every ten
+  seconds — 28 open sessions kept a 12-core Mac at full load. While the
+  app or the daemon is running, a session it doesn't know is now simply
+  not found; a full scan runs only for `--all` with no engine to ask, or
+  with no digest at all, and a second scan of the same account exits 27
+  instead of piling on.
+- A transcript write that lands within a minute of the engine's last scan
+  is picked up by a catch-up scan instead of waiting for the next write
+  anywhere, so a session's numbers no longer lag its last turn.
 - Panel: a two-finger swipe across the account strip reaches another
   harness's account. It named the account it landed on by its storage
   folder, and every harness's standard home is called `default`, so a swipe
