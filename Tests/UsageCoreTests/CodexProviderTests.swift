@@ -47,6 +47,28 @@ struct CodexProviderTests {
         """
     }
 
+    @Test("Equal usage is distinct unless a valid cumulative snapshot also repeats")
+    func cumulativeRestatements() throws {
+        let fixture = try CodexFixture()
+        defer { fixture.tearDown() }
+        func row(_ total: String) -> String {
+            """
+            {"timestamp":"2026-08-15T10:00:30.000Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":100,"cached_input_tokens":0,"output_tokens":20},"total_token_usage":\(total)}}}
+            """
+        }
+        let a = "{\"input_tokens\":100,\"output_tokens\":20}"
+        let b = "{\"input_tokens\":200,\"output_tokens\":40}"
+        try fixture.writeRollout("2026/08/15/rollout-snapshots.jsonl", lines: [
+            row(a), row(a), row(b), row("null"), row("null"), row("{}"), row("{}")
+        ])
+        let source = CodexActivitySource(root: fixture.root, cacheDirectory: fixture.cacheDirectory)
+        let scan = source.scanTranscripts(now: Date())
+        let session = try #require(scan.sessions.first)
+        #expect(session.totalTokens == 720)
+        let detail = try #require(source.sessionDetail(id: "rollout-snapshots"))
+        #expect(detail.rows.count == 6)
+    }
+
     @Test("meters map primary→session and secondary→weekly with served percents")
     func meterMapping() throws {
         let fixture = try CodexFixture()
