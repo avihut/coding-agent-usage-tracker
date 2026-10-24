@@ -303,7 +303,8 @@ per-harness geometry of the bar is in [HARNESSES.md](HARNESSES.md).
   the sidebar by the subagents' spend is a bug class, and
   subagentRollup's rowTokens == summary.totalTokens assertion is its
   regression test. Freshness rides FSEvents → scanActivity (1/min
-  throttle) → DetailKey{id, end} re-fires the parse. SKELETON
+  throttle, with one catch-up scan for a write inside the minute —
+  `ActivityScanThrottle`, issue #24) → DetailKey{id, end} re-fires the parse. SKELETON
   (v0.34.0): a selection SWITCH clears stale detail synchronously in
   the .task (the previous session's content must never linger as a
   frozen pane) and shows a skeleton whose header + ModelBreakdownGrid

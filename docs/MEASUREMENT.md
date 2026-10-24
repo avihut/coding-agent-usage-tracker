@@ -99,7 +99,16 @@ a face is in [ARCHITECTURE.md](ARCHITECTURE.md).
   a WARM miss; cold it is the whole 41s.) This fires on a cacheVersion
   bump AND on first install — any empty-digest window. Warm the cache
   with ONE lease-holding scan, then start usaged; `--no-scan` is the
-  per-caller guard for anything polling on a timer. The call list also
+  per-caller guard for anything polling on a timer. Since issue #24
+  (docs/CLI.md) a miss against any digest no longer scans at all — it asks
+  the engine, which answers nothing until its own scan lands — so a
+  status line can't start this stampede; a non-holder's corpus scan is
+  also one per account (`TranscriptScanLock`, exit 27 for the rest).
+  The engine's own scan cadence: at most one a minute, and a transcript
+  write inside that minute is owed ONE catch-up when it ends
+  (`ActivityScanThrottle`) — the throttle used to drop it, and a turn's
+  last write could sit unscanned until anything else in the tree changed
+  (observed: five minutes). The call list also
   grew the cache 2.1MB -> 3.6MB.
   KNOWN, DELIBERATE 0.087% ABOVE ccusage: 1,510 lines state a
   `cache_creation_input_tokens` larger than their own 5m+1h breakdown; we

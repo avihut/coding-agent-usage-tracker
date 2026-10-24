@@ -21,7 +21,24 @@ enum DeepQuerySessions {
         /// Per-model dollar cost, priced models only — backs the `models`
         /// deep field without threading a `PricingTable` further downstream.
         let modelCosts: [String: Double]
+
+        /// The deep fields as every source carries them — what the engine's
+        /// answer holds for the same session.
+        var deepFields: SessionDeepFields {
+            SessionDeepFields(summary: summary, modelCosts: modelCosts)
+        }
     }
+
+    /// Why an injected scan ran nothing: the account can't be rooted, or
+    /// another scan of it is already in flight. Carries the exact output.
+    struct ScanRefusal: Error {
+        let output: QueryOutput
+    }
+
+    /// The scan capability `DigestQuery`'s session nouns are handed: nil
+    /// entries mean a non-claude provider (exit 11); a refusal is printed
+    /// as it stands.
+    typealias Scan = () throws(ScanRefusal) -> [Entry]?
 
     /// Prices every scanned session. Pure — no filesystem, no UserDefaults —
     /// so tests feed it a real `TranscriptScanner.scan` over a temp-dir
@@ -154,15 +171,33 @@ public enum DeepQuerySessionsCLI {
     /// noun gate checks this set alongside the other two.
     public static let nouns: Set<String> = ["sessions", "session", "transcript"]
 
+    /// Asks a running engine for one session: (profile key, id prefix) →
+    /// its answer, or nil when no engine answered at all.
+    public typealias EngineLookup = (_ profile: String, _ id: String) -> SessionAnswer?
+
+    /// The real `EngineLookup`: one `session` request over the host's
+    /// control socket. Silence — no listener, a host too old to know the
+    /// verb, a profile with no engine, an index not built yet — is nil, and
+    /// nil is never read as "no such session". The timeout is short because
+    /// the caller is usually a status line on a timer: a host too busy to
+    /// answer in a second costs that line its number, never a stall.
+    public static func engineLookup(socket: URL, timeout: TimeInterval = 1) -> EngineLookup {
+        { profile, id in
+            ControlSocket.send(.session(profile: profile, id: id), to: socket, timeout: timeout)?.session
+        }
+    }
+
     /// `environment`, `profiles`, `homes`: the account selector's inputs
     /// (`DigestQuery.selectProfile`) — `sessions`/`session` answer for one
     /// profile's shortlist and scan its HOME; `transcript` names its own
     /// file and never selects. nil `profiles`/`homes` read the app's store
-    /// and the provider's facts; tests inject both.
+    /// and the provider's facts; tests inject both. `engine` is how a
+    /// shortlist miss reaches the running engine's full index; nil (the
+    /// default, and every test that doesn't name one) asks nobody.
     public static func run(
         noun: String, arguments: [String], digest: LiveState?, now: Date,
         environment: [String: String] = [:], profiles: [Profile]? = nil,
-        homes: ProfileSelector.Homes? = nil
+        homes: ProfileSelector.Homes? = nil, engine: EngineLookup? = nil
     ) -> QueryOutput {
         let parsed = DigestQuery.parseArgs(arguments)
         if let error = parsed.error { return DigestQuery.badQuery(error) }
@@ -184,17 +219,7 @@ public enum DeepQuerySessionsCLI {
         let providerID = parsed.flags["provider"] ?? view.providerID
         let digest = view.digest ?? digest
 
-        // The scan roots at the profile's home. A profile the writer names
-        // but the store holds no home for cannot be scanned honestly —
-        // rooting at the standard home would list the OTHER account's
-        // sessions — so any query that could scan refuses up front.
         let home = stored.first { $0.key == view.id }?.home
-        let mayScan = parsed.flags["all"] != nil || (noun == "session" && parsed.flags["no-scan"] == nil)
-        if noun != "transcript", view.id != Profile.defaultID, home == nil, mayScan {
-            return DigestQuery.noMatch(
-                "account \(view.id) has no home on record — the transcript scan can't be rooted; "
-                    + "answer from the shortlist with --no-scan")
-        }
 
         // Mirrors `DigestQuery.run`'s own `--max-age` gate (that function
         // is this file's entry point for every OTHER noun, and its check is
@@ -233,10 +258,34 @@ public enum DeepQuerySessionsCLI {
         }
 
         let json = parsed.flags["json"] != nil
-        let scan = {
-            DeepQuerySessions.buildIndex(
-                providerFlag: providerID, home: home, profileID: view.accountID, now: now)
+        let accountKey = view.id
+        let accountID = view.accountID
+        let scan: DeepQuerySessions.Scan = { () throws(DeepQuerySessions.ScanRefusal) in
+            // Exit 11 ahead of any disk touch: the format this parser reads
+            // is Claude Code's.
+            guard DeepQuery.resolveProviderID(flag: providerID) == "claude" else { return nil }
+            // The scan roots at the profile's home. A profile the writer
+            // names but the store holds no home for cannot be scanned
+            // honestly — rooting at the standard home would list the OTHER
+            // account's sessions.
+            if accountKey != Profile.defaultID, home == nil {
+                throw DeepQuerySessions.ScanRefusal(output: DigestQuery.noMatch(
+                    "account \(accountKey) has no home on record — the transcript scan can't be rooted"))
+            }
+            let lock = TranscriptScanLock.acquire(
+                directory: DeepQuery.profileDirectory(providerID: "claude", profileID: accountID))
+            if case .busy = lock {
+                throw DeepQuerySessions.ScanRefusal(output: QueryOutput(
+                    stdout: "",
+                    note: "another transcript scan of account \(accountKey) is running — nothing scanned; "
+                        + "try again when it finishes",
+                    exitCode: DeepQuery.exitScanBusy))
+            }
+            return withExtendedLifetime(lock) {
+                DeepQuerySessions.buildIndex(providerFlag: providerID, home: home, profileID: accountID, now: now)
+            }
         }
+        let ask = engine.map { lookup in { (token: String) in lookup(accountKey, token) } }
         switch noun {
         case "sessions":
             return DigestQuery.runSessionsList(
@@ -244,7 +293,7 @@ public enum DeepQuerySessionsCLI {
                 raw: parsed.flags["raw"] != nil, scan: scan)
         case "session":
             return DigestQuery.runSession(
-                parsed: parsed, digest: digest, now: now, calendar: calendar, json: json, scan: scan)
+                parsed: parsed, digest: digest, now: now, calendar: calendar, json: json, scan: scan, ask: ask)
         case "transcript":
             // Exit 11 ahead of the verb body, like every other Claude-only
             // path: the format this parser reads is Claude Code's.

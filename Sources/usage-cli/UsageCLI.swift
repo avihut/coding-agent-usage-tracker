@@ -342,12 +342,18 @@ struct UsageCLI {
         // and `transcript` never does anything else (`DigestQuery.run`
         // itself stays pure, per its own doc contract). A digest that exists
         // but fails to decode degrades the same way as one that's simply
-        // absent: corrupt state is no more answerable than no state.
+        // absent: corrupt state is no more answerable than no state. A
+        // shortlist miss asks the running engine over its socket (issue
+        // #24) — except against a `--digest` file, which no engine wrote.
         if DeepQuerySessionsCLI.nouns.contains(noun) {
             let digest = digestData.flatMap { try? LiveState.decoder().decode(LiveState.self, from: $0) }
+            let engine = digestPath == nil
+                ? DeepQuerySessionsCLI.engineLookup(
+                    socket: EngineHostBroker.socketURL(bundleID: AppIdentity.bundleID))
+                : nil
             let output = DeepQuerySessionsCLI.run(
                 noun: noun, arguments: Array(arguments.dropFirst()), digest: digest, now: Date(),
-                environment: ProcessInfo.processInfo.environment)
+                environment: ProcessInfo.processInfo.environment, engine: engine)
             emit(output)
             return
         }

@@ -11,7 +11,8 @@ provider, 13 no digest, 19 bad query, 20 selector matched nothing, 21
 stale under `--max-age` or `--max-data-age`, 22 `health --check` while an
 incident is open, 23 `notices --check` while anything is pending, and
 `headroom`'s answers: 24 at or over the cap, 25 a forecast fails
-`--forecast`, 26 nothing to judge.
+`--forecast`, 26 nothing to judge, and 27 another transcript scan of the
+same account is already running (nothing was scanned).
 
 ## The query surface (v0.81.0)
 
@@ -225,6 +226,59 @@ incident is open, 23 `notices --check` while anything is pending, and
   first. Registered per noun (`dataAgeNouns`: status limits limit headroom
   spend prompt get — the nouns whose answer IS the measurement); anywhere
   else it is an unknown flag (19), never accepted and inert.
+
+## session lookups ask the engine (issue #24)
+
+- SESSION LOOKUPS ASK THE ENGINE (2026-10-23, issue #24; SUPERSEDES the
+  v0.83.0 "shortlist miss falls through to the scan" rule and narrows
+  v0.84.0's `--no-scan`). WHY: one Claude Code status line per open
+  session, each asking `session <id>` every 10 s, and the shortlist holds
+  eight. Every session past the eighth missed on every tick and escalated
+  to a whole-corpus scan, inline and unlocked: 18 scans in flight, load
+  ~221 on 12 cores (2026-10-23), after 25–30 of them at load 360–520 on
+  10-03. A session open but idle never returns to the shortlist (its last
+  record never moves, while Claude Code still rewrites its file in place,
+  untimestamped), so for it a miss was permanent, and each scan re-parsed
+  every transcript changed since the host's last cache write — N callers ×
+  N live files.
+  ORDER for `session <selector>` (`DigestQuery.runSession`): (1) the
+  shortlist, unless `--all`; (2) the ENGINE, over the control socket
+  (`ControlCommand.session(profile:id:)`, the selected account's
+  `ProfileKey` + the id prefix): its index is every session its last scan
+  holds, priced and carded exactly as the shortlist is, deep fields
+  included — so `--no-scan` allows it (asking parses nothing) and `--all`
+  is answered by it. Its answer is FINAL: a session it doesn't hold is
+  exit 20 "…or the engine's index", never a scan. `source` reads
+  `engine`. (3) Only when no engine answered: `--no-scan` stops (20, or 13
+  with no digest); a miss against ANY digest is exit 20 "no engine
+  answered — add --all to scan the transcripts"; the whole-corpus scan
+  runs only for `--all`, or with no digest at all (the v0.83.0 no-daemon
+  door, kept). Silence is a nil answer, never "no such session": no
+  listener, a host too old for the verb ("unreadable command"), an account
+  with no running engine (refused, NEVER answered by the focused one), an
+  engine whose first scan hasn't landed. The client gives up after 1 s.
+  `--digest <file>` asks no engine (no engine wrote that file).
+  ONE SCAN PER ACCOUNT: every out-of-process corpus scan (`sessions --all`,
+  the fallback above) takes `TranscriptScanLock`, a non-blocking `flock`
+  on the account's EXISTING storage folder (no new file — §10 enumerates
+  the arbitration artifacts). A second scan gives up at once with exit 27
+  rather than queueing: a waiting lock grows without bound once callers
+  arrive faster than scans finish. Sharing one scan's result would need
+  the CLI to write, which the single-writer rule forbids.
+  Prices: a miss the engine answers costs what a shortlist hit costs
+  (~0.2 B instructions, the digest decode); the scan it replaces was 11.2 B
+  for a 3 MB idle session the same morning, ~3.3 B fixed plus every live
+  file re-parsed. Tests: `DeepQuerySessionsTests` ("session asks the
+  engine", `SessionAnswer.lookup`), the routing tests whose scan closure
+  fails if a miss calls it, `MeteringHostTests` (an id past the eight
+  answers; another account's engine never answers),
+  `ControlCommandWireTests` (verb shape, payload, 32 concurrent connects),
+  `TranscriptScanLockTests`.
+  CALLER RULE (the recipes, #15): a status line asks `session <id>
+  --no-scan` and treats a miss as "no number yet". `--all` on a timer is
+  no longer a storm (the engine answers it; with no engine, one scan per
+  account runs and the rest exit 27), but it buys nothing a status line
+  needs.
 
 ## Daemon verbs
 

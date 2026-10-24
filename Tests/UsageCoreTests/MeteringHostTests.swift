@@ -60,6 +60,23 @@ struct MeteringHostTests {
             try TempTree(root: home.directory).file("projects/-Users-t/\(name).jsonl", age: age, now: Date())
         }
 
+        /// A real two-line transcript — one prompt, one priced call — whose
+        /// last record is `minutesAgo` old, so the scan indexes it.
+        func transcript(_ home: ClaudeHome, id: String, minutesAgo: Int) throws {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            let end = Date().addingTimeInterval(-Double(minutesAgo) * 60)
+            let start = formatter.string(from: end.addingTimeInterval(-60))
+            let lines = [
+                #"{"type":"user","timestamp":"\#(start)","entrypoint":"cli","cwd":"/Users/dev/proj","gitBranch":"main","version":"2.1.280","message":{"role":"user","content":"Build the thing"}}"#,
+                #"{"type":"assistant","timestamp":"\#(formatter.string(from: end))","requestId":"r-\#(id)","message":{"id":"m-\#(id)","model":"claude-fable-5","usage":{"input_tokens":100,"output_tokens":50}}}"#,
+            ]
+            let url = home.projectsDirectory.appending(path: "-Users-dev-proj/\(id).jsonl")
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try (lines.joined(separator: "\n") + "\n").write(to: url, atomically: true, encoding: .utf8)
+        }
+
         func enroll(_ home: ClaudeHome, addedAgo: TimeInterval = 0, enabled: Bool = true, order: Int = 1) {
             var stored = ProfileStore.load(from: defaults)
             stored.removeAll { $0.id == home.profileID }
@@ -113,6 +130,48 @@ struct MeteringHostTests {
             try? await Task.sleep(for: .milliseconds(25))
         }
         return condition()
+    }
+
+    /// Issue #24: an idle session off the shortlist for good still answers
+    /// by id — and only from its own account's engine.
+    @Test("the session verb answers any indexed session, from the named account's engine only")
+    func sessionVerbAnswersPastTheShortlist() async throws {
+        let fixture = try Fixture()
+        defer { fixture.tearDown() }
+        for index in 0..<9 {
+            try fixture.transcript(fixture.standard, id: String(format: "work-%02d", index), minutesAgo: index * 60)
+        }
+        try fixture.transcript(fixture.personal, id: "personal-00", minutesAgo: 5)
+        fixture.enroll(fixture.personal)
+        let host = fixture.makeHost()
+        host.start()
+        defer { host.shutdown() }
+        let indexed = await eventually {
+            host.engines["default"]?.sessions.count == 9
+                && host.engines[fixture.personalID]?.sessionsIndexed == true
+        }
+        #expect(indexed)
+        let published = try #require(host.engines["default"]?.lastPublished?.sessions)
+        #expect(published.count == LiveStateBuilder.sessionsCap)
+        #expect(!published.contains { $0.id == "work-08" })
+
+        let reply = await host.handle(.session(profile: "default", id: "work-08"))
+        #expect(reply.ok)
+        let card = try #require(reply.session?.card)
+        #expect(card.id == "work-08")
+        #expect(card.project == "proj")
+        #expect(card.tokens == 150)
+        #expect(reply.session?.deep?.kind == "interactive")
+
+        // The work index doesn't hold the personal session; its own does.
+        let crossed = await host.handle(.session(profile: "default", id: "personal-00"))
+        #expect(crossed.session?.matches == [])
+        let own = await host.handle(.session(profile: fixture.personalID, id: "personal"))
+        #expect(own.session?.card?.id == "personal-00")
+        // A named account with no engine is refused, never answered by the focused one.
+        let unknown = await host.handle(.session(profile: "nope", id: "work-08"))
+        #expect(!unknown.ok)
+        #expect(unknown.session == nil)
     }
 
     @Test("two enrolled profiles run two engines and compose one digest")

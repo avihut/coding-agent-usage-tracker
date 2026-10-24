@@ -118,11 +118,16 @@ public final class UsageEngine {
     /// The observed-epochs presence ledger; nil exactly when
     /// `identitySource` is. Engine-confined single writer, like `history`.
     private var presence: AccountPresenceLedger?
-    private var lastActivityScan: Date?
-    /// Single-flight for transcript scans: a window-open force-scan must not
-    /// overlap an FSEvents-triggered one — two concurrent scans race their
-    /// MainActor assignments and can land stale-last.
-    private var isScanningActivity = false
+    /// Spacing AND single-flight for transcript scans: a window-open
+    /// force-scan must not overlap an FSEvents-triggered one (two concurrent
+    /// scans race their MainActor assignments and can land stale-last), and
+    /// a write that lands inside the spacing is owed a catch-up, never
+    /// dropped.
+    private var scanThrottle = ActivityScanThrottle()
+    private var catchUpTask: Task<Void, Never>?
+    /// True once a scan has landed `sessions` — before that, an empty index
+    /// means "not looked yet", not "no such session".
+    public private(set) var sessionsIndexed = false
 
     public static let defaultInterval: TimeInterval = 300
     static let intervalKey = "refreshIntervalSeconds"
@@ -260,6 +265,8 @@ public final class UsageEngine {
         presence?.flush()
         scheduler.stop()
         watcher = nil
+        catchUpTask?.cancel()
+        catchUpTask = nil
         nextRefreshAt = nil
     }
 
@@ -495,18 +502,43 @@ public final class UsageEngine {
         cadence.isBackingOff(now: now) ? 1 : cadence.multiplier(now: now)
     }
 
-    /// Re-scans the agent's transcripts + prompt history for the heatmap,
-    /// at most once a minute. A provider without local traces has nothing
+    /// Re-scans the agent's transcripts + prompt history for the heatmap and
+    /// the session index, at most once a minute — and a write that lands
+    /// inside that minute gets a catch-up scan when it ends, never dropped
+    /// (`ActivityScanThrottle`). A provider without local traces has nothing
     /// to scan — the activity section shows its empty state.
     public func scanActivity(force: Bool = false) {
-        guard !isShutDown, !isScanningActivity, let source = localActivity else { return }
-        if !force, let last = lastActivityScan, Date().timeIntervalSince(last) < 60 { return }
-        lastActivityScan = Date()
+        guard !isShutDown, localActivity != nil else { return }
+        follow(scanThrottle.request(at: Date(), force: force))
+    }
+
+    private func follow(_ step: ActivityScanThrottle.Step) {
+        guard !isShutDown else { return }
+        switch step {
+        case .scan:
+            catchUpTask?.cancel()
+            catchUpTask = nil
+            startActivityScan()
+        case .schedule(let due):
+            catchUpTask?.cancel()
+            let delay = max(0, due.timeIntervalSinceNow)
+            catchUpTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(delay))
+                guard !Task.isCancelled, let self else { return }
+                self.catchUpTask = nil
+                self.follow(self.scanThrottle.catchUpDue(at: Date()))
+            }
+        case .nothing:
+            break
+        }
+    }
+
+    private func startActivityScan() {
+        guard let source = localActivity else { return }
         // Observation rides the scan pass by design: the lines this scan
         // ingests are attributed against a timeline that includes right now,
         // so attribution is settled the first time it's computed.
         observeAccountIdentity()
-        isScanningActivity = true
         Task.detached(priority: .utility) { [weak self] in
             let scan = source.scanTranscripts(now: Date())
             let activity = ActivityMerge.merge(
@@ -530,10 +562,25 @@ public final class UsageEngine {
                     defaults: self.defaults, providerID: self.provider.id)
                 // After the seed, so no render observes sessions first.
                 self.sessions = scan.sessions
-                self.isScanningActivity = false
+                self.sessionsIndexed = true
                 self.publishState()
+                self.follow(self.scanThrottle.finish(at: Date()))
             }
         }
+    }
+
+    /// One session's card and deep fields from the last scan's index — the
+    /// `ControlCommand.session` answer. Every session the scan holds, not
+    /// only the eight the digest publishes; priced and carded exactly as the
+    /// digest's shortlist is. Nil before the first scan lands: an empty
+    /// index then means "not looked yet", which no caller may read as "no
+    /// such session".
+    public func sessionAnswer(idPrefix: String) -> SessionAnswer? {
+        guard sessionsIndexed else { return nil }
+        return SessionAnswer.lookup(
+            idPrefix, in: sessions, pricing: pricing, catalog: provider.modelCatalog,
+            colorLedger: { ModelColorLedger.load(from: self.defaults, providerID: self.provider.id) },
+            accent: RGBColor(provider.accent), timeline: presenceTimeline)
     }
 
     /// Parses one session in full, off-main. Cancellation propagates into

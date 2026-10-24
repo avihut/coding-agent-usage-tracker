@@ -156,6 +156,9 @@ may not realise you are standing. The doc named beside each says why.
 - A window's samples are picked by reset stamp (`WindowSamples`), never by
   time alone — the poll that lands on the boundary still reads the old
   window. (`docs/CHARTS.md`)
+- A per-session lookup asks the engine's index, never a whole-corpus scan
+  on a miss: callers run once per open session on a timer, so a scan per
+  miss is N callers × N live transcripts. (`docs/CLI.md`, issue #24)
 - Absent ≠ zero, everywhere it is rendered or printed: an unpriced cost
   or an unreported percent is null, never 0. (`docs/DAEMON.md`)
 - The digest is additive-only forever, and its goldens are decoded by

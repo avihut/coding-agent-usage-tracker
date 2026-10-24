@@ -36,15 +36,26 @@ public enum ControlCommand: Codable, Sendable, Equatable {
     /// and reconcile engines.
     case profilesChanged
     case shutdown
+    /// Read-only: one session's numbers from the named profile's engine —
+    /// its in-memory index of every session its last scan holds, not only
+    /// the published shortlist (issue #24). `profile` is a `ProfileKey`; nil
+    /// means the focused one. A profile with no running engine is refused,
+    /// never answered from another account. `id` is an id prefix. The
+    /// reply's `session` carries the answer; mutates nothing.
+    case session(profile: String?, id: String)
 }
 
 public struct ControlReply: Codable, Sendable, Equatable {
     public let ok: Bool
     public let message: String?
+    /// A `session` lookup's answer; nil for every other verb, and from a
+    /// host that predates the verb (it answers "unreadable command").
+    public let session: SessionAnswer?
 
-    public init(ok: Bool, message: String? = nil) {
+    public init(ok: Bool, message: String? = nil, session: SessionAnswer? = nil) {
         self.ok = ok
         self.message = message
+        self.session = session
     }
 }
 
@@ -56,6 +67,13 @@ public struct ControlReply: Codable, Sendable, Equatable {
 /// safe (a socket file with no live holder is by definition stale).
 public final class ControlSocket: @unchecked Sendable {
     public typealias Handler = @MainActor @Sendable (ControlCommand) async -> ControlReply
+
+    /// Connections the kernel queues while one is served. Every open
+    /// session's status line may ask for its numbers on the same tick
+    /// (`ControlCommand.session`), and a full queue refuses a connect
+    /// outright — which a caller can only read as "no engine". Four was
+    /// enough while every verb was human-paced.
+    static let backlog: Int32 = 64
 
     public let socketURL: URL
     private let handler: Handler
@@ -97,7 +115,7 @@ public final class ControlSocket: @unchecked Sendable {
             throw ControlSocketError.bindFailed(errno)
         }
         chmod(socketURL.path, 0o600)
-        guard listen(fd, 4) == 0 else {
+        guard listen(fd, Self.backlog) == 0 else {
             close(fd)
             throw ControlSocketError.bindFailed(errno)
         }
@@ -123,6 +141,7 @@ public final class ControlSocket: @unchecked Sendable {
 
     private func serve(_ connection: Int32) {
         defer { close(connection) }
+        Self.noSignalOnClosedPeer(connection)
         guard let line = Self.readLine(from: connection, limit: 64 * 1024),
               let command = try? JSONDecoder().decode(ControlCommand.self, from: line)
         else {
@@ -131,7 +150,8 @@ public final class ControlSocket: @unchecked Sendable {
             return
         }
         // Block this (background) queue until the MainActor handler answers —
-        // commands are rare and serial by design.
+        // serial by design: the verbs are human-paced, and the one a status
+        // line repeats (`session`) is a sub-millisecond lookup.
         let semaphore = DispatchSemaphore(value: 0)
         nonisolated(unsafe) var reply = ControlReply(ok: false, message: "handler dropped")
         let handler = handler
@@ -163,6 +183,7 @@ public final class ControlSocket: @unchecked Sendable {
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { return nil }
         defer { close(fd) }
+        noSignalOnClosedPeer(fd)
         var tv = timeval(
             tv_sec: Int(timeout), tv_usec: Int32((timeout - timeout.rounded(.down)) * 1e6))
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
@@ -194,6 +215,18 @@ public final class ControlSocket: @unchecked Sendable {
     }
 
     // MARK: - Wire helpers
+
+    /// A write to a connection whose peer already left raises SIGPIPE, and
+    /// the default action kills the process: the daemon (launchd restarts it
+    /// cold) or the app hosting the engine (the menu bar item vanishes). It
+    /// happens whenever a client gives up before its reply — a status line
+    /// waits one second, and a busy host's queue can be longer than that.
+    /// With the flag set the write just fails with EPIPE, and the reply is
+    /// dropped for a caller that is no longer listening.
+    private static func noSignalOnClosedPeer(_ fd: Int32) {
+        var on: Int32 = 1
+        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
+    }
 
     private static func readLine(from fd: Int32, limit: Int) -> Data? {
         var collected = Data()

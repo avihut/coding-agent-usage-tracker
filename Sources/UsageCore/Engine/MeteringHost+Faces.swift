@@ -218,6 +218,29 @@ extension MeteringHost {
         case .shutdown:
             return onShutdown?()
                 ?? ControlReply(ok: false, message: "not while the app hosts — use the app's Metering menu")
+        case .session(let profile, let id):
+            return sessionReply(profile: profile, id: id)
         }
+    }
+
+    /// A named profile without a running engine is refused, never answered
+    /// by the focused one: a status line asking for its own account's
+    /// session must not get another account's numbers (the `--account`
+    /// rule, exit 20 on the CLI). Every refusal carries no answer, which the
+    /// CLI reads as "no engine answered", not as "no such session".
+    func sessionReply(profile: String?, id: String) -> ControlReply {
+        let engine: UsageEngine? = if let profile { engines[profile] } else { focusedEngine }
+        guard let engine else {
+            return ControlReply(ok: false, message: "no engine for profile \(profile ?? "in focus")")
+        }
+        guard let answer = engine.sessionAnswer(idPrefix: id) else {
+            return ControlReply(ok: false, message: "\(engine.profileID) has not indexed its sessions yet")
+        }
+        let message = switch answer.matches.count {
+        case 0: "no session matches '\(id)'"
+        case 1: "found \(answer.matches[0])"
+        default: "\(answer.matches.count) sessions match '\(id)'"
+        }
+        return ControlReply(ok: true, message: message, session: answer)
     }
 }
