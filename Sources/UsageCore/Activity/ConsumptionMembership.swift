@@ -73,11 +73,15 @@ public enum ConsumptionMembership {
 /// scope keeps the colours its models wear everywhere; several paint each
 /// model in its AGENT's accent at the family's tone, so two vendors can
 /// never wear look-alikes. The slots are the agent's own ledger's; the
-/// arithmetic is `ModelColorMath`'s, untouched here.
+/// arithmetic — and its per-appearance legibility — is `ModelColorMath`'s,
+/// untouched here.
 public enum ConsumptionPalette {
-    public static func rgb(hueSlot: Int, shadeSlot: Int, accent: RGBColor, spansAgents: Bool) -> RGBColor {
+    public static func rgb(
+        hueSlot: Int, shadeSlot: Int, accent: RGBColor, spansAgents: Bool,
+        on appearance: ModelColorAppearance
+    ) -> RGBColor {
         spansAgents
-            ? ModelColorMath.agentShade(hueSlot: hueSlot, shadeSlot: shadeSlot, accent: accent)
-            : ModelColorMath.rgb(hueSlot: hueSlot, shadeSlot: shadeSlot, accent: accent)
+            ? ModelColorMath.agentShade(hueSlot: hueSlot, shadeSlot: shadeSlot, accent: accent, on: appearance)
+            : ModelColorMath.rgb(hueSlot: hueSlot, shadeSlot: shadeSlot, accent: accent, on: appearance)
     }
 }

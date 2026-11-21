@@ -285,7 +285,7 @@ struct LiveStateHarnessTests {
         // Two agents share the chart: each model wears its agent's tone.
         let codexRow = try #require(models.first { $0.id == "gpt-5.2-codex" })
         #expect(codexRow.color == ModelColorMath.agentShade(
-            hueSlot: 0, shadeSlot: 0, accent: RGBColor(CodexProvider().accent)))
+            hueSlot: 0, shadeSlot: 0, accent: RGBColor(CodexProvider().accent), on: .dark))
         // A projection keeps the section — every view of the file has it.
         #expect(state.viewing(profile: "default")?.allAgents == all)
     }

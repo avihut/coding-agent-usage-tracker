@@ -230,9 +230,11 @@ public enum AllAgentsDigest {
                         for: model, family: catalog?.familyName(model) ?? model) ?? (hue: 0, shade: 0)
                     rows.append(ModelRow(
                         id: model, displayName: catalog?.displayName(model) ?? model,
+                        // The dark variant, as every digest colour is
+                        // (`LiveStateBuilder`): terminals draw on dark.
                         color: ConsumptionPalette.rgb(
                             hueSlot: slots.hue, shadeSlot: slots.shade, accent: accent,
-                            spansAgents: spansAgents),
+                            spansAgents: spansAgents, on: .dark),
                         tally: sum.tally, cost: sum.priced ? sum.cost : nil, agent: agent))
                 }
             }

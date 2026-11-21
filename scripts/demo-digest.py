@@ -104,14 +104,16 @@ def risk(severity):
     return rgb(*(round(low + (high - low) * min(1, severity), 4) for low, high in zip(*RAMP)))
 
 
-# ModelColorMath.agentShade(hueSlot, shadeSlot, accent) for the demo's models
-# when several agents share a chart — computed in Swift, pasted (see above).
+# ModelColorMath.agentShade(hueSlot, shadeSlot, accent, on: .dark) — the
+# digest's variant — for the demo's models when several agents share a
+# chart; computed in Swift, pasted (see above).
 AGENT_SHADES = {
     ("claude", "claude-fable-5"): rgb(0.851, 0.467, 0.341),
-    ("claude", "claude-sonnet-5"): rgb(1.000, 0.774, 0.700),
-    ("claude", "claude-haiku-4-5"): rgb(0.528, 0.242, 0.148),
-    ("claude", "claude-sonnet-4-5"): rgb(0.760, 0.564, 0.499),
+    ("claude", "claude-sonnet-5"): rgb(1.000, 0.525, 0.368),
+    ("claude", "claude-haiku-4-5"): rgb(0.740, 0.564, 0.506),
+    ("claude", "claude-sonnet-4-5"): rgb(1.000, 0.772, 0.697),
     ("codex", "gpt-5.2-codex"): rgb(0.063, 0.639, 0.498),
+    ("codex", "codex-auto-review"): rgb(0.472, 0.776, 0.669),
 }
 HOUR_SPAN_DAYS = 8  # AllAgentsDigest.hourSpanDays
 

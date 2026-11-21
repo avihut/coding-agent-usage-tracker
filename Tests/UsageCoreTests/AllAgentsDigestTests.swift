@@ -192,7 +192,7 @@ struct AllAgentsDigestTests {
                 section(profile("default", "codex"), scan([(0, model, 10)])),
             ], now: now, calendar: utc))
         #expect(several.models?.first { $0.id == model }?.color == ModelColorMath.agentShade(
-            hueSlot: slots.hue, shadeSlot: slots.shade, accent: RGBColor(codex.accent)))
+            hueSlot: slots.hue, shadeSlot: slots.shade, accent: RGBColor(codex.accent), on: .dark))
 
         let claudeLedger = ModelColorLedger().assigning([("claude-opus-4-8", "Opus"), ("claude-sonnet-4-5", "Sonnet")])
         let one = try #require(AllAgentsDigest.build(
@@ -202,7 +202,8 @@ struct AllAgentsDigestTests {
                 section(profile("work", "claude"), scan([(0, "claude-sonnet-4-5", 10)])),
             ], now: now, calendar: utc))
         #expect(one.countLabel == "2 accounts")
-        #expect(one.models?.first?.color == ModelColorMath.rgb(hueSlot: 1, shadeSlot: 0, accent: RGBColor(claude.accent)))
+        #expect(one.models?.first?.color == ModelColorMath.rgb(
+            hueSlot: 1, shadeSlot: 0, accent: RGBColor(claude.accent), on: .dark))
     }
 
     @Test("hourly buckets stop at the section's own span; today's are always there")

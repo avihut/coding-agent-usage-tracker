@@ -152,7 +152,8 @@ Contents, by section:
   agent + model, accounts of one agent summed, and carry `ModelRow.agent`
   (absent on every per-account row, so those encode byte-identically);
   colours are the agent's ledger slots by its own catalog's family,
-  `ModelColorMath.agentShade` when several agents share the chart. Hourly
+  `ModelColorMath.agentShade` when several agents share the chart — the
+  dark variant, as every digest colour is. Hourly
   buckets reach 8 days back — a SIZE cap (`AllAgentsDigest.hourSpanDays`;
   an account's own reach its scanner's 56-day retention). Absent when "all"
   holds fewer than two accounts (the focused section IS the total) or the
