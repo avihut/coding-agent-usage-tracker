@@ -220,7 +220,12 @@ public enum PredictionEngine {
     /// prediction of its own (a flat all-100 tail has no measurable rate).
     ///
     /// Equal or longer windows never gate: the scoped weekly running out
-    /// leaves the all-models weekly free to spend on other models. A meter
+    /// leaves the all-models weekly free to spend on other models. Nor does
+    /// a meter of ANOTHER POOL (2026-11-21): a shorter meter gates only when
+    /// it covers every model this one counts — unscoped, or the same
+    /// `countedScope` — so Antigravity's spent Claude + GPT session leaves
+    /// its Gemini weekly free, and Claude's session still gates both
+    /// weeklies. A meter
     /// with no known window neither issues nor receives a lockout — its
     /// shape is unknown, and guessing is worse than the old behavior.
     ///
@@ -236,6 +241,8 @@ public enum PredictionEngine {
             // Strictly shorter, which also rules the meter out against
             // itself — nothing is shorter than its own window.
             guard let otherWindow = other.limitWindow, otherWindow < window else { continue }
+            guard other.countedScope == nil || other.countedScope == meter.countedScope
+            else { continue }
             guard let reset = other.resetsAt, reset > now else { continue }
             let start: Date
             if let percent = other.percent, percent >= 100 {

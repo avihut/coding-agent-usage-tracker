@@ -42,7 +42,7 @@ extension AppDelegate {
                 resetsAt: meter.resetsAt, limitWindow: meter.limitWindow,
                 scopedModelName: meter.scopedModelName, resetCaption: meter.resetCaption,
                 forecast: meter.forecast, series: meter.series, stretches: meter.stretches,
-                modelSeries: meter.modelSeries)
+                modelSeries: meter.modelSeries, modelScope: meter.modelScope)
         }
         var meters: [LiveMeter] = []
         if let session = live.meters.first(where: { $0.rank == 0 }) {

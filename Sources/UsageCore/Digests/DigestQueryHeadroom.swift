@@ -284,7 +284,7 @@ extension DigestQuery {
             forcesWarning: meter.forcesWarning, risk: nil, resetsAt: nil,
             limitWindow: meter.limitWindow, scopedModelName: meter.scopedModelName,
             resetCaption: nil, forecast: nil, series: meter.series, stretches: meter.stretches,
-            modelSeries: meter.modelSeries)
+            modelSeries: meter.modelSeries, modelScope: meter.modelScope)
     }
 
     // MARK: - Registers

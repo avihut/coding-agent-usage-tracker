@@ -254,6 +254,14 @@ public final class UsageEngine {
         scanActivity()
     }
 
+    /// The last fetch's snapshot from the cache, without fetching — what the
+    /// host's focus rule reads for an engine that hasn't read yet, so a
+    /// launch doesn't hand the lead to a harness whose last reading held no
+    /// limits (`MeteringHost+Focus`).
+    func cachedSnapshot() -> Snapshot? {
+        service.cachedSnapshot(thresholds: currentThresholds())
+    }
+
     /// Retires this engine: stops the scheduler's event sources and the
     /// FSEvents watcher so a replaced engine leaks nothing. An in-flight
     /// refresh may still land — the flag keeps its completion from

@@ -43,7 +43,7 @@ public enum ResetCarry {
                 id: meter.id, label: meter.label, percent: meter.percent, resetsAt: stamp,
                 level: meter.level, rank: meter.rank, limitWindow: meter.limitWindow,
                 rateWindow: meter.rateWindow, forcesWarning: meter.forcesWarning,
-                scopedModelName: meter.scopedModelName)
+                scopedModelName: meter.scopedModelName, modelScope: meter.modelScope)
         }
         guard changed else { return snapshot }
         return Snapshot(

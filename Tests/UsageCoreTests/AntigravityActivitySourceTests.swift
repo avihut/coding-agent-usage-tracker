@@ -147,7 +147,9 @@ struct AntigravityActivitySourceTests {
     func effortAllowlist() {
         #expect(AntigravityModels.baseID("gemini-4-neon-xhigh") == "gemini-4-neon")
         #expect(AntigravityModels.baseID("gemini-4-argon-low") == "gemini-4-argon")
-        #expect(AntigravityModels.baseID("gemini-4-neon-max") == "gemini-4-neon")
+        // "max" is a model-name word (`gpt-5.1-codex-max`), not an effort.
+        #expect(AntigravityModels.baseID("gemini-4-neon-max") == "gemini-4-neon-max")
+        #expect(AntigravityModels.baseID("gpt-5.1-codex-max") == "gpt-5.1-codex-max")
         #expect(AntigravityModels.baseID("gemini-4-argon-trial") == "gemini-4-argon-trial")
         #expect(AntigravityModels.baseID("gemini-3.1-flash-lite") == "gemini-3.1-flash-lite")
         #expect(AntigravityModels.baseID("gemini-3-flash-preview") == "gemini-3-flash-preview")
@@ -242,6 +244,51 @@ struct AntigravityActivitySourceTests {
         #expect(after.daily.first?.tokens == (gone == original ? 560 : 550))
     }
 
+    @Test("prompts in the same second are distinct unless their files are forks")
+    func concurrentPrompts() throws {
+        let fixture = try AntigravityFixture()
+        defer { fixture.tearDown() }
+        let t0 = Date(timeIntervalSince1970: ((now.timeIntervalSince1970 - 3600) / 60)
+            .rounded(.down) * 60)
+        // Three `agy -p` runs started in the same second: three prompts.
+        for tokens in [100, 200, 300] {
+            try fixture.conversation(rows: [
+                AntigravityFixture.prompt(at: t0),
+                AntigravityFixture.call(at: t0.addingTimeInterval(2), input: tokens, output: 1),
+            ])
+        }
+        // One file stating the same call twice counts it twice.
+        try fixture.conversation(rows: [
+            AntigravityFixture.call(at: t0.addingTimeInterval(9), input: 7, output: 1),
+            AntigravityFixture.call(at: t0.addingTimeInterval(9), input: 7, output: 1, step: 2),
+        ])
+        let scan = fixture.source().scanTranscriptsReadOnly(now: now)
+        #expect(scan.daily.first?.prompts == 3)
+        #expect(scan.daily.first?.messages == 5)
+    }
+
+    @Test("a transcript that can't be read keeps what it had, and is read again")
+    func unreadableKeepsRecord() throws {
+        let fixture = try AntigravityFixture()
+        defer { fixture.tearDown() }
+        let t0 = now.addingTimeInterval(-600)
+        let id = try fixture.conversation(rows: [
+            AntigravityFixture.call(at: t0, input: 40, output: 4),
+        ])
+        let source = fixture.source()
+        #expect(source.scanTranscripts(now: now).daily.first?.tokens == 44)
+        // The file grows, then can't be read while it's scanned.
+        try fixture.transcript(id, rows: [
+            AntigravityFixture.call(at: t0, input: 40, output: 4),
+            AntigravityFixture.call(at: t0.addingTimeInterval(5), input: 50, output: 5),
+        ])
+        let url = fixture.transcriptURL(id)
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: url.path)
+        #expect(source.scanTranscripts(now: now).daily.first?.tokens == 44)
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: url.path)
+        #expect(source.scanTranscripts(now: now).daily.first?.tokens == 99)
+    }
+
     @Test("rows that don't state both counts are not calls; unknown keys are fine")
     func malformedRows() throws {
         let fixture = try AntigravityFixture()
@@ -252,6 +299,7 @@ struct AntigravityActivitySourceTests {
             #"{"created_at":"\#(stamp)","type":"PLANNER_RESPONSE","output_tokens":5}"#,
             #"{"created_at":"nonsense","type":"PLANNER_RESPONSE","model":"m","input_tokens":5,"output_tokens":5}"#,
             "not json at all",
+            #"{"created_at":"\#(stamp)","model":"gemini-4-neon","input_tokens":9000000000000000000,"output_tokens":9000000000000000000}"#,
             #"{"created_at":"\#(stamp)","model":"gemini-4-neon","input_tokens":3,"output_tokens":2,"brand_new":{"x":[1]}}"#,
         ])
         let scan = fixture.source().scanTranscriptsReadOnly(now: now)

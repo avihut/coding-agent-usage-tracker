@@ -74,7 +74,13 @@ public struct AntigravityActivitySource: LocalActivitySource {
             if let record = cache.files[path], record.mtime == mtime, record.size == size {
                 continue
             }
-            cache.files[path] = AntigravityTranscript.parse(url: url, mtime: mtime, size: size)
+            // A read that fails leaves the old record (or none) in place: it
+            // must not be cached as an empty file under today's stamp, or a
+            // finished conversation — which never changes again — would
+            // lose its calls for good.
+            guard let record = AntigravityTranscript.parse(url: url, mtime: mtime, size: size)
+            else { continue }
+            cache.files[path] = record
         }
         cache.files = cache.files.filter { seen.contains($0.key) }
         if persistCache { saveCache(cache) }
@@ -83,9 +89,12 @@ public struct AntigravityActivitySource: LocalActivitySource {
 
     /// ONE CALL BELONGS TO ONE FILE: a forked conversation starts with a
     /// copy of the steps before its fork point, so the same call can sit in
-    /// two transcripts. Files are visited smallest path first and a call
-    /// (or prompt) already claimed is skipped — a total order every process
-    /// agrees on, recomputed from the cache alone.
+    /// two transcripts. Files are visited smallest path first and a call an
+    /// EARLIER file already counted is skipped — a total order every process
+    /// agrees on, recomputed from the cache alone. Within one file nothing is
+    /// deduplicated. A prompt is skipped only in a file that shares a call
+    /// with an earlier one (a fork): prompts carry whole-second stamps, and
+    /// three conversations started in the same second are three prompts.
     func aggregate(_ files: [String: AntigravityTranscript.Record], now: Date) -> TranscriptScan {
         var claimedCalls: Set<AntigravityTranscript.Call> = []
         var claimedPrompts: Set<AntigravityTranscript.Prompt> = []
@@ -97,7 +106,8 @@ public struct AntigravityActivitySource: LocalActivitySource {
 
         for path in files.keys.sorted() {
             guard let record = files[path] else { continue }
-            for call in record.calls where claimedCalls.insert(call).inserted {
+            let forked = record.calls.contains { claimedCalls.contains($0) }
+            for call in record.calls where !claimedCalls.contains(call) {
                 let key = day(call.t)
                 var merged = byDay[key] ?? DailyActivity(day: key, tokens: 0, messages: 0)
                 merged.tokens += call.tally.total
@@ -113,12 +123,14 @@ public struct AntigravityActivitySource: LocalActivitySource {
                 slot.add(call.tally)
                 slots[SlotKey(t: minute, model: call.model)] = slot
             }
-            for prompt in record.prompts where claimedPrompts.insert(prompt).inserted {
+            claimedCalls.formUnion(record.calls)
+            for prompt in record.prompts where !(forked && claimedPrompts.contains(prompt)) {
                 let key = day(prompt.t)
                 var merged = byDay[key] ?? DailyActivity(day: key, tokens: 0, messages: 0)
                 merged.prompts += 1
                 byDay[key] = merged
             }
+            claimedPrompts.formUnion(record.prompts)
         }
         let timeline = slots
             .map { TokenSlot(t: $0.key.t, model: $0.key.model, tally: $0.value) }
@@ -136,6 +148,8 @@ public struct AntigravityActivitySource: LocalActivitySource {
     private struct CacheFile: Codable {
         var version: Int
         var files: [String: AntigravityTranscript.Record]
+
+        enum CodingKeys: String, CodingKey { case version, files }
     }
 
     /// v1 (antigravity's first): per-file calls and prompts, kept whole so
@@ -259,12 +273,16 @@ enum AntigravityTranscript {
         let output: Int
 
         var tally: TokenTally { TokenTally(input: input, output: output, cacheRead: cacheRead) }
+
+        enum CodingKeys: String, CodingKey { case t, model, input, cacheRead, output }
     }
 
     /// One typed (or handed-over) prompt.
     struct Prompt: Codable, Hashable {
         let t: Date
         let source: String
+
+        enum CodingKeys: String, CodingKey { case t, source }
     }
 
     struct Record: Codable {
@@ -272,14 +290,20 @@ enum AntigravityTranscript {
         let size: Int
         let calls: [Call]
         let prompts: [Prompt]
+
+        enum CodingKeys: String, CodingKey { case mtime, size, calls, prompts }
     }
 
-    static func parse(url: URL, mtime: Date, size: Int) -> Record {
-        guard let data = try? Data(contentsOf: url) else {
-            return Record(mtime: mtime, size: size, calls: [], prompts: [])
-        }
+    /// Nil when the file can't be read right now — the caller keeps what it
+    /// had rather than caching an empty file.
+    static func parse(url: URL, mtime: Date, size: Int) -> Record? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
         return parse(data: data, mtime: mtime, size: size)
     }
+
+    /// The most tokens one call can plausibly report. A count beyond it is
+    /// garbage, and summing garbage could overflow — the row is no call.
+    static let maxTokensPerCall = 1_000_000_000_000
 
     /// A line that doesn't decode — the CLI's half-written last line, or a
     /// shape this build doesn't know — is skipped; a growing file changes
@@ -299,12 +323,15 @@ enum AntigravityTranscript {
             // A call needs both halves stated: a row missing one is not a
             // call with zero tokens. A missing cache read is 0 — the CLI
             // writes an explicit 0 when nothing was cached.
+            let plausible = 0...maxTokensPerCall
             guard let model = row.model, !model.isEmpty,
-                  let input = row.inputTokens, let output = row.outputTokens
+                  let input = row.inputTokens, let output = row.outputTokens,
+                  plausible.contains(input), plausible.contains(output),
+                  plausible.contains(row.cacheReadTokens ?? 0)
             else { continue }
             let call = Call(
-                t: stamp, model: AntigravityModels.baseID(model), input: max(0, input),
-                cacheRead: max(0, row.cacheReadTokens ?? 0), output: max(0, output))
+                t: stamp, model: AntigravityModels.baseID(model), input: input,
+                cacheRead: row.cacheReadTokens ?? 0, output: output)
             guard call.tally.total > 0 else { continue }
             calls.append(call)
         }
@@ -317,9 +344,10 @@ enum AntigravityTranscript {
 enum AntigravityModels {
     /// The thinking-effort words the CLI appends to a model id
     /// (`gemini-4-neon-xhigh`). An ALLOWLIST: a model's own name often ends
-    /// in a word too (`-lite`, `-preview`, `-trial`), so anything not listed
-    /// stays on the id — and goes unpriced — rather than being guessed away.
-    static let effortWords: Set<String> = ["minimal", "low", "medium", "high", "xhigh", "max"]
+    /// in a word too (`-lite`, `-preview`, `-trial`, and `-max`, as in
+    /// `gpt-5.1-codex-max`), so anything not listed stays on the id — and
+    /// goes unpriced — rather than being guessed away.
+    static let effortWords: Set<String> = ["minimal", "low", "medium", "high", "xhigh"]
 
     /// The id a call is tallied and priced under: effort stripped, since
     /// the effort's cost already shows as thinking tokens in output.

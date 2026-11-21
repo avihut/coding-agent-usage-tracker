@@ -74,16 +74,28 @@ public struct AntigravityProvider: UsageProvider {
     public var agentSettings: (any AgentSettingsStore)? { nil }
 
     /// Antigravity's own models are Gemini ids (`gemini-4-neon` once the
-    /// effort is stripped), so Gemini's grammar reads them; a Claude id is
-    /// claimed by Claude's catalog in the union.
-    public var modelCatalog: ModelCatalog { .gemini }
+    /// effort is stripped), and its Claude + GPT pool runs other vendors'
+    /// models — each id is read in its own vendor's grammar, Gemini's first
+    /// (the digest and the color ledger ask the provider's catalog
+    /// directly, never the app's union).
+    public var modelCatalog: ModelCatalog { .union([.gemini, .claude, .codex]) }
 
-    /// No bundled floor: rates arrive with the feed's gemini slice.
+    /// No bundled floor: rates arrive with the feed.
     public var bundledRates: PricingTable {
         PricingTable(rates: [:], fetchedAt: .distantPast, source: .bundled)
     }
 
-    public var pricingSelector: PricingFeedSelector { .gemini }
+    /// Gemini's slice plus the Claude and OpenAI ones, for the models its
+    /// third-party pool runs.
+    public var pricingSelector: PricingFeedSelector {
+        PricingFeedSelector(
+            includes: { key, provider in
+                PricingFeedSelector.gemini.includes(key, provider)
+                    || PricingFeedSelector.claude.includes(key, provider)
+                    || PricingFeedSelector.openAI.includes(key, provider)
+            },
+            normalizeKey: PricingFeedSelector.gemini.normalizeKey)
+    }
 
     public var statusLineExport: StatusLineExport? {
         StatusLineExport(

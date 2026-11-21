@@ -11,7 +11,7 @@ read-only investigation and a proposal.
 > | Identity | id `antigravity`, "Antigravity CLI", service "Google AI", glyph `∩`, accent violet #A142F4; registered last |
 > | Tokens | the per-conversation `transcript.jsonl`, conversations found by listing `conversations/` by name; no database is opened |
 > | Plan limits | the CLI's documented custom **status line**, installed by hand; `usage-cli export-statusline antigravity` keeps only the quota in one file in the app's own folder (spec §10 amendment 2026-11-21, `docs/PRIVACY.md`) |
-> | Meters | `gemini-5h` → Session (5h), `gemini-weekly` → Weekly, `3p-*` → scoped "… · Claude + GPT" (bar S·W·C); other buckets skipped |
+> | Meters | `gemini-5h` → Session (5h), `gemini-weekly` → Weekly, `3p-*` → scoped "Claude + GPT (5h/7d)" (bar S·W·C); other buckets skipped |
 > | A window that rolled with no newer reading | a dash and no reset time, unless no conversation was written since the reset (then 0%) |
 > | Focus | a harness that read its usage and holds no limit isn't ranked for focus unless pinned (vendor-neutral) |
 > | Gemini CLI | deprecated, still metered; its provider declares the note Settings and `usage-cli harnesses` show |

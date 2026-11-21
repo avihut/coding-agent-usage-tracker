@@ -112,6 +112,11 @@ public enum WindowTokens {
     /// Rows whose model id matches a scoped limit's display name ("Fable" →
     /// "claude-fable-5"). Empty when nothing matches — a scoped meter must
     /// never show other models' usage as its own.
+    /// The rows a meter counts (`Meter.countedScope`); nil keeps them all.
+    public static func scoped(_ breakdown: [ModelTokenUsage], needles: [String]?) -> [ModelTokenUsage] {
+        breakdown.filter { Meter.inScope($0.model, needles: needles) }
+    }
+
     public static func scoped(_ breakdown: [ModelTokenUsage], name: String) -> [ModelTokenUsage] {
         let needle = name.lowercased()
         guard !needle.isEmpty else { return breakdown }

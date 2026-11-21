@@ -289,6 +289,28 @@ struct MultiHarnessHostTests {
         #expect(back)
     }
 
+    /// The next launch (or a host taking over) must not lead with the
+    /// meterless harness even for the moment before its first read: focus
+    /// answers from the cached last fetch, synchronously, at start.
+    @Test("a launch reads meter presence from the cache, before the first read")
+    func meterlessFocusAtLaunch() async throws {
+        let fixture = try Fixture()
+        defer { fixture.tearDown() }
+        try fixture.claudeSession(daysAgo: 0.2)
+        for day in 1...5 { try fixture.antigravityConversation(daysAgo: Double(day) + 0.3) }
+        let first = fixture.makeHost([fixture.claude, fixture.antigravity])
+        first.start()
+        let cached = await eventually { first.engines["antigravity"]?.state.snapshot != nil }
+        #expect(cached)
+        first.shutdown()
+
+        let second = fixture.makeHost([fixture.claude, fixture.antigravity])
+        second.start()
+        defer { second.shutdown() }
+        #expect(second.focusedProfileID == "default")
+        #expect(second.digest?.focusedProfile == "default")
+    }
+
     /// A harness with no local data yet publishes no snapshot at all — that
     /// is "unknown", not "no limits", and must not cost it focus.
     @Test("a harness with no local data stays in the focus ranking")

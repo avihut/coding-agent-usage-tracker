@@ -83,6 +83,9 @@ struct AntigravityProviderTests {
     func modelsAndPricing() {
         let provider = AntigravityProvider()
         #expect(provider.modelCatalog.displayName("gemini-4-neon") == "Gemini 4 Neon")
+        // Other vendors' ids read in their own grammar.
+        #expect(provider.modelCatalog.displayName("claude-sonnet-4-5")
+            == ModelCatalog.claude.displayName("claude-sonnet-4-5"))
         #expect(provider.pricingSelector.normalizeKey("gemini/gemini-4-neon") == "gemini-4-neon")
         #expect(provider.pricingSelector.includes("gemini/gemini-4-neon", "gemini"))
     }
@@ -107,6 +110,18 @@ struct AntigravityProviderTests {
         #expect(abs(dollars - (3 + 1.5 + 0.15)) < 0.0001)
         #expect(table.rates["gemini-4-argon"] != nil)
         #expect(table.rates.count == 2)
+        // Its Claude + GPT pool's models price from those vendors' slices.
+        let thirdParty = Data("""
+        {"claude-sonnet-4-5":{"litellm_provider":"anthropic","input_cost_per_token":0.000003,
+          "output_cost_per_token":0.000015},
+         "gpt-5.1":{"litellm_provider":"openai","input_cost_per_token":0.000001,
+          "output_cost_per_token":0.00001},
+         "openai/gpt-5.1":{"litellm_provider":"openai","input_cost_per_token":9,
+          "output_cost_per_token":9}}
+        """.utf8)
+        let other = try PricingFeedClient.decode(
+            feed: thirdParty, now: now, selector: AntigravityProvider().pricingSelector)
+        #expect(Set(other.rates.keys) == ["claude-sonnet-4-5", "gpt-5.1"])
     }
 
     @Test("no conversations is noLocalData; conversations without transcripts too")
@@ -168,18 +183,28 @@ struct AntigravityProviderTests {
         #expect(UsageFormatting.tag(for: weekly) == "W")
 
         let thirdParty = try #require(byID["2-3p-weekly"])
-        #expect(thirdParty.label == "Weekly · Claude + GPT")
+        #expect(thirdParty.label == "Claude + GPT (7d)")
         #expect(thirdParty.rank == 2)
         #expect(thirdParty.scopedModelName == "Claude + GPT")
         #expect(UsageFormatting.tag(for: thirdParty) == "C")
+        // Each pool counts its own models' tokens, never the other's.
+        #expect(thirdParty.inScope("claude-sonnet-4-5") && thirdParty.inScope("gpt-5.1"))
+        #expect(!thirdParty.inScope("gemini-4-neon"))
+        #expect(session.inScope("gemini-4-neon") && !session.inScope("claude-sonnet-4-5"))
+        #expect(weekly.countedScope == ["gemini"])
         // reset_in_seconds became an absolute time at capture.
         let thirdPartySession = try #require(byID["2-3p-5h"])
-        #expect(thirdPartySession.label == "Session (5h) · Claude + GPT")
+        #expect(thirdPartySession.label == "Claude + GPT (5h)")
         #expect(thirdPartySession.resetsAt.map {
             abs($0.timeIntervalSince(now.addingTimeInterval(3600))) < 1
         } == true)
 
         #expect(UsageFormatting.menuBarSegments(from: snapshot.meters).map(\.tag) == ["S", "W", "C"])
+        // `usage-cli limits session|weekly` must each still name ONE meter:
+        // the pool's labels never repeat the Gemini meters' window words.
+        for word in ["session", "weekly"] {
+            #expect(snapshot.meters.filter { $0.label.lowercased().contains(word) }.count == 1)
+        }
         #expect(snapshot.plan?.subscriptionType == "pro")
     }
 
@@ -209,6 +234,86 @@ struct AntigravityProviderTests {
         let idle = try snapshot(data, conversationWrittenAt: reset.addingTimeInterval(-60))
         #expect(idle.meters.first?.percent == 0)
         #expect(idle.meters.first?.resetsAt == nil)
+        // No write time at all: "nothing since" is unknown — a dash.
+        let unknown = try snapshot(data, conversationWrittenAt: nil)
+        #expect(unknown.meters.first?.percent == nil)
+        // A body fetched BEFORE the reset and replayed from the cache after
+        // it knows nothing of the writes since: a dash too.
+        let replayed = try snapshot(
+            data, conversationWrittenAt: reset.addingTimeInterval(-600),
+            fetchedAt: reset.addingTimeInterval(-300))
+        #expect(replayed.meters.first?.percent == nil)
+    }
+
+    /// The digest carries a stated scope (additive), so a client-mode app
+    /// filters a pool's curves the way the host does — and a meter without
+    /// one encodes exactly as before.
+    @Test("a meter's model scope rides the digest only when stated")
+    func scopeInDigest() throws {
+        func card(_ scope: [String]?) -> LiveMeter {
+            LiveMeter(
+                id: "2-3p-weekly", label: "Claude + GPT (7d)", tag: "C", percent: 7,
+                level: "normal", rank: 2, rateWindowSeconds: 14400, forcesWarning: false,
+                risk: nil, resetsAt: nil, limitWindow: 604_800, scopedModelName: "Claude + GPT",
+                resetCaption: nil, forecast: nil, series: [], stretches: [], modelScope: scope)
+        }
+        let scoped = try LiveState.encoder().encode(card(["claude", "gpt"]))
+        let decoded = try LiveState.decoder().decode(LiveMeter.self, from: scoped)
+        #expect(decoded.modelScope == ["claude", "gpt"])
+        let plain = try LiveState.encoder().encode(card(nil))
+        #expect(!(String(data: plain, encoding: .utf8) ?? "").contains("modelScope"))
+        #expect(Meter.countedScope(modelScope: nil, scopedModelName: "Fable") == ["fable"])
+        #expect(Meter.countedScope(modelScope: nil, scopedModelName: nil) == nil)
+    }
+
+    @Test("a garbage reading can't crash the engine")
+    func garbageBounds() throws {
+        #expect(AntigravityQuota.windowLength("3000000000000000h") == nil)
+        #expect(AntigravityQuota.windowLength("0h") == nil)
+        #expect(AntigravityQuota.windowLength("10000d") == TimeInterval(10_000 * 86400))
+        #expect(AntigravityQuota.usedPercent(5) == 0)
+        #expect(AntigravityQuota.usedPercent(-3) == 100)
+        #expect(AntigravityQuota.usedPercent(1e300) == 0)
+        // A stored reading with an absurd id and fraction decodes to meters
+        // without trapping.
+        let stored = Data("""
+        {"version":1,"capturedAt":"2026-11-21T10:00:00Z","buckets":[
+          {"id":"gemini-3000000000000000h","remainingFraction":0.5,"disabled":false},
+          {"id":"gemini-weekly","remainingFraction":1e300,"disabled":false}]}
+        """.utf8)
+        let snapshot = try snapshot(stored)
+        #expect(snapshot.meters.map(\.label) == ["Weekly"])
+        #expect(snapshot.meters.first?.percent == 0)
+    }
+
+    @Test("an unexpected field drops only itself; a spent bucket with no fraction is 100%")
+    func lenientPayload() throws {
+        let reset = AntigravityFixture.stamp(now.addingTimeInterval(3600))
+        let payload = Data("""
+        {"plan_tier":{"id":"pro"},"version":15,"quota":{
+          "gemini-daily":null,
+          "gemini-monthly":[1,2],
+          "gemini-weekly":{"reset_time":"\(reset)"},
+          "gemini-5h":{"remaining_fraction":0.5,"reset_in_seconds":"3600"},
+          "3p-weekly":{"remaining_amount":12,"reset_time":"\(reset)"},
+          "3p-5h":{"remaining_fraction":0.9,"reset_in_seconds":1e300}}}
+        """.utf8)
+        let kept = try #require(AntigravityQuota.reduce(statusLine: payload, now: now))
+        let reading = try #require(AntigravityQuota.decodeReading(kept))
+        #expect(reading.planTier == nil && reading.cliVersion == nil)
+        let byID = Dictionary(uniqueKeysWithValues: reading.buckets.map { ($0.id, $0) })
+        #expect(Set(byID.keys) == ["gemini-weekly", "gemini-5h", "3p-weekly", "3p-5h"])
+        // Fraction omitted, reset stated, no amount: spent, not dropped.
+        #expect(byID["gemini-weekly"]?.remainingFraction == 0)
+        // An amount bucket has no fraction to draw.
+        #expect(byID["3p-weekly"]?.remainingFraction == nil)
+        // A numeric string reads; an absurd distance is no reset.
+        #expect(byID["gemini-5h"]?.resetsAt.map {
+            abs($0.timeIntervalSince(now.addingTimeInterval(3600))) < 1
+        } == true)
+        #expect(byID["3p-5h"]?.resetsAt == nil)
+        let meters = try snapshot(kept).meters
+        #expect(meters.first { $0.label == "Weekly" }?.percent == 100)
     }
 
     @Test("an export the provider can't read surfaces as a schema error")

@@ -130,9 +130,15 @@ a face is in [ARCHITECTURE.md](ARCHITECTURE.md).
   against the CLI's own conversation store during the investigation, and
   92/92 calls and 17.06M tokens against a `jq` pass on the person's Mac.
 - A forked conversation copies its parent's rows into its own file, so
-  calls are claimed by VALUE (timestamp, model, the three counts) and
-  prompts by timestamp and source, visiting files in path order: the same
-  call in two files counts once, in whichever file sorts first.
+  calls are claimed by VALUE (timestamp, model, the three counts),
+  visiting files in path order: a call an EARLIER file counted is skipped,
+  so the same call in two files counts once, in whichever sorts first.
+  Nothing is deduplicated within one file. Prompts are skipped only in a
+  file that shares a call with an earlier one (a fork): their stamps are
+  whole seconds, and three `agy -p` runs started in the same second are
+  three prompts.
+- A row whose counts are negative or beyond 10^12 is no call (garbage, and
+  summing it could overflow).
 - Days are local days of each call's own UTC timestamp, through the
   injected calendar; the minute timeline keeps the scanner's 56 days.
 

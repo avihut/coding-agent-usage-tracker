@@ -604,6 +604,11 @@ pub struct LiveMeter {
     pub resets_at: Option<OffsetDateTime>,
     pub limit_window: Option<f64>,
     pub scoped_model_name: Option<String>,
+    /// The models this meter counts, as lowercase needles — present only
+    /// when the provider stated several families or an independent pool
+    /// (2026-11-21); otherwise derive it from `scoped_model_name`.
+    #[serde(default)]
+    pub model_scope: Option<Vec<String>>,
     pub reset_caption: Option<String>,
     pub forecast: Option<MeterForecast>,
     pub series: Vec<SeriesPoint>,
