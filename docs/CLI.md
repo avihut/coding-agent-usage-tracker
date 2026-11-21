@@ -157,6 +157,33 @@ same account is already running (nothing was scanned).
   other config dirs — the account timeline (v0.89.0) is time-based, and
   two dirs active at once would need root-based attribution first.
 
+## export-statusline (2026-11-21)
+
+- USAGE-CLI EXPORT-STATUSLINE (user-directed, spec §10 amendment
+  2026-11-21): `usage-cli export-statusline <provider> [--to <file>]
+  [--print-config]` is an AGENT'S status-line command, for a provider that
+  declares `statusLineExport` (today: `antigravity`). It reads the agent's
+  status-line payload on stdin (capped at 256 KB), lets the provider reduce
+  it to what may be kept, and writes that to
+  `<bundle>/<provider>/default/statusline-export.json` (mode 0600, temp +
+  rename) when it changed or is a minute old — otherwise it touches
+  nothing. Routed FIRST in `main`, before any digest, settings or account
+  store is read: an agent runs it on every redraw. The logic is core
+  `StatusLineExportCommand`; the target only reads stdin and exits.
+- ALWAYS EXIT 0, STDOUT EMPTY: an agent switches a status line off after
+  repeated failures, and anything printed would replace the agent's own
+  line. A misconfiguration (unknown provider, unwritable file) is one
+  stderr line, which the printed snippet sends to `/dev/null`.
+- `--print-config` is the setup step and the one form that prints: the
+  provider's settings entry (`settingsPath` + `settingsSnippet`) with this
+  binary's own resolved path, single-quoted for `sh -c`, and `; exit 0`
+  after it so a rebuild that moves the binary can't fail the agent's
+  status line. An unknown provider there is 19. `--to` redirects the write
+  (verification only).
+- `usage-cli harnesses` gained a LAST column, `note` (2026-11-21): a
+  deprecated harness's own note, empty otherwise. Appended, so a script
+  reading the first seven columns by position is unaffected.
+
 ## headroom and the data-age guard
 
 - HEADROOM (2026-10-03, issue #8): `usage-cli headroom [<meter>] --cap

@@ -3,7 +3,8 @@
 "Agent Usage": a macOS menu bar app (LSUIElement), a launchd daemon, a CLI
 and a Rust TUI that meter coding agents' plan limits — Claude Code from the
 undocumented `/api/oauth/usage` endpoint, authenticated with the local Claude
-Code OAuth access token; Codex and Gemini CLI from their local files. Open
+Code OAuth access token; Codex, Antigravity CLI and Gemini CLI (deprecated)
+from their local files. Open
 source (MIT) and SOURCE-ONLY: no binary is published, every install is built
 and signed by the Mac that runs it, so whoever runs your change is trusting
 it with their own sign-in. The build contract is `docs/SPEC.md` (§10 is the
@@ -51,7 +52,7 @@ was learned the hard way.
 - A status feed is declared by `UsageProvider.statusFeed`, NOT added to
   `networkDestinations`: that list being empty is what makes a provider
   "local" (`isLocalProvider` — no budget gauge, refresh = rescan), so folding
-  a status host in would silently reclassify Codex/Gemini the day they get
+  a status host in would silently reclassify Codex/Gemini/Antigravity the day they get
   feeds. The privacy card renders it on its own line.
 - The account-identity source is declared by `UsageProvider.accountIdentity`
   (§10 amendment 2026-08-25, v0.89.0): a LOCAL read-only file read — for

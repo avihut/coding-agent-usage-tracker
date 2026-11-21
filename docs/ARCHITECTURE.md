@@ -18,7 +18,7 @@ full), [HARNESSES.md](HARNESSES.md) (providers, accounts, identity),
 - `UsageCore` is a library with zero AppKit/SwiftUI imports; all logic is
   headlessly testable. The app layer is a pure function of store state.
 - CODE LAYOUT (2026-08-16 v0.63.0 reorg): UsageCore groups by subject —
-  Api/ Refresh/ Credentials/ Providers/{,Claude,Codex,Gemini}/ Activity/
+  Api/ Refresh/ Credentials/ Providers/{,Claude,Codex,Gemini,Antigravity}/ Activity/
   Sessions/ Pricing/ Prediction/ Audit/ Formatting/ Storage/ Digests/ —
   with AppIdentity.swift alone at the core root (the release-bump sed
   path). App target: App/ MenuBar/ Store/ Components/ Panel/ Charts/
