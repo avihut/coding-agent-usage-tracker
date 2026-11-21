@@ -917,7 +917,10 @@ fn render_dashboard(
                 |key| crate::state::account_name(digest, key),
             )
         });
-        frame.render_widget(sessions(digest, owner.as_deref(), accent, rect, app.local_offset), rect);
+        frame.render_widget(
+            sessions(digest, owner.as_deref(), accent, rect, app.local_offset),
+            rect,
+        );
     }
     if let Some(rect) = plan.status
         && let Some(card) = digest.service_status.as_ref()
@@ -2929,10 +2932,18 @@ mod tests {
     fn a_scanning_digest_says_scanning_never_zero() {
         let digest = golden_digest(Some(("scanning", None)));
         let rect = Rect::new(0, 0, 60, 4);
-        let head = text(today(&digest, None, Color::Reset, rect, UtcOffset::UTC), 60, 4);
+        let head = text(
+            today(&digest, None, Color::Reset, rect, UtcOffset::UTC),
+            60,
+            4,
+        );
         assert!(head.contains("scanning…"), "{head}");
         assert!(!head.contains("tok"), "{head}");
-        let sessions = text(sessions(&digest, None, Color::Reset, rect, UtcOffset::UTC), 60, 4);
+        let sessions = text(
+            sessions(&digest, None, Color::Reset, rect, UtcOffset::UTC),
+            60,
+            4,
+        );
         assert!(sessions.contains("scanning…"), "{sessions}");
         assert!(!sessions.contains("no sessions recorded yet"), "{sessions}");
     }
@@ -2972,7 +2983,12 @@ mod tests {
         assert_ne!(glyph, Some(DIM), "a busy strip is not greyed: {strip}");
     }
 
-    fn rendered(app: &mut crate::state::App, now: OffsetDateTime, width: u16, height: u16) -> String {
+    fn rendered(
+        app: &mut crate::state::App,
+        now: OffsetDateTime,
+        width: u16,
+        height: u16,
+    ) -> String {
         let backend = ratatui::backend::TestBackend::new(width, height);
         let mut terminal = ratatui::Terminal::new(backend).unwrap();
         terminal.draw(|frame| render(frame, app, now)).unwrap();
@@ -3032,6 +3048,39 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// The focused account still scanning doesn't blank an All agents total
+    /// the other agents already make up; its own scope says "scanning…".
+    #[test]
+    fn a_scanning_focused_account_leaves_the_all_agents_total_standing() {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../Tests/UsageCoreTests/Fixtures/digest/live-state-v1-harnesses.json");
+        let mut digest = LiveState::parse(&std::fs::read(path).unwrap()).unwrap();
+        digest.activity_status = Some(crate::digest::ActivityStatus {
+            state: "scanning".into(),
+            as_of: None,
+        });
+        let all = digest
+            .all_agents
+            .clone()
+            .expect("the harness golden carries a total");
+        let rect = Rect::new(0, 0, 80, 4);
+        let total = text(
+            today(&digest, Some(&all), Color::Reset, rect, UtcOffset::UTC),
+            80,
+            4,
+        );
+        assert!(
+            total.contains("tok") && !total.contains("scanning…"),
+            "{total}"
+        );
+        let mine = text(
+            today(&digest, None, Color::Reset, rect, UtcOffset::UTC),
+            80,
+            4,
+        );
+        assert!(mine.contains("scanning…"), "{mine}");
+    }
+
     #[test]
     fn a_cached_digest_shows_its_numbers_and_their_age() {
         let as_of = OffsetDateTime::parse(
@@ -3041,14 +3090,22 @@ mod tests {
         .unwrap();
         let digest = golden_digest(Some(("cached", Some(as_of))));
         let rect = Rect::new(0, 0, 80, 4);
-        let cached = text(today(&digest, None, Color::Reset, rect, UtcOffset::UTC), 80, 4);
+        let cached = text(
+            today(&digest, None, Color::Reset, rect, UtcOffset::UTC),
+            80,
+            4,
+        );
         assert!(
             cached.contains("tok") && cached.contains("as of 11:12"),
             "{cached}"
         );
         // A scanned (or marker-less) digest carries no age line.
         let plain = golden_digest(None);
-        let fresh = text(today(&plain, None, Color::Reset, rect, UtcOffset::UTC), 80, 4);
+        let fresh = text(
+            today(&plain, None, Color::Reset, rect, UtcOffset::UTC),
+            80,
+            4,
+        );
         assert!(!fresh.contains("as of"), "{fresh}");
     }
 

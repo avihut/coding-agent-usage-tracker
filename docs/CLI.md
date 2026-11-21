@@ -17,7 +17,9 @@ and was too busy to answer in time (nothing was scanned either way), and
 28 the selected account's first transcript scan hasn't finished — every
 reading of its activity (`activity`, `cost`, `models`, `model`, `sessions`
 and `session` without `--all`, `account`'s token fields, `get activity.*`)
-answers nothing rather than zero.
+answers nothing rather than zero. `--all-agents` keeps its own rules
+(a `partial` note, exit 20 while no member is counted); on a one-account
+Mac its view IS that account's, so 28 applies there too.
 
 ## The query surface (v0.81.0)
 

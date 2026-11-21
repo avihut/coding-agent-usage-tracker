@@ -396,7 +396,11 @@ about 20 coding agents at once, load averages of 200–380 on 10 cores.
   `scanning` carries `activity`, `models` and `sessions` as nil. The TOP
   LEVEL keeps its empty rollup, because every pre-0.10x decoder requires
   the field; a reader that knows the marker draws "scanning…" from it.
-  `cached` is the previous run's scan, `asOf` its real age. An unknown
+  `cached` is the previous run's scan, `asOf` its real age. The
+  `allAgents` section (#43) reads the same status: a member whose activity
+  is `cached` or `scanned` is COUNTED (its numbers are already on screen,
+  dated), one still `scanning` is named and left out (`partial`), and an
+  engine without the marker keeps the index rule. An unknown
   state from a newer writer reads as `scanned` in both decoders (never a
   failed decode of the whole digest). The CLI answers exit 28 for every
   reading of an unscanned account's activity — `activity`, `cost`,
