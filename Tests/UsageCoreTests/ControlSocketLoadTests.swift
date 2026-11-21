@@ -109,8 +109,9 @@ struct ControlSocketLoadTests {
         close(pair[1])
         var byte: UInt8 = 1
         let written = write(pair[0], &byte, 1)
+        let error = errno  // read before anything else can overwrite it
         #expect(written == -1)
-        #expect(errno == EPIPE)
+        #expect(error == EPIPE)
         close(pair[0])
     }
 
@@ -137,11 +138,25 @@ struct ControlSocketLoadTests {
         #expect(listen(listener, 1) == 0)
         var queued: [Int32] = []
         defer { queued.forEach { close($0) } }
-        // Fill the queue with clients that sit in it, until a connect is refused.
-        for _ in 0..<64 {
-            queued.append(silentClient(url))
-            if ControlSocket.exchange(.status, to: url, timeout: 0.2) == .notListening { break }
+        // Fill the queue with clients held OPEN, until a connect is refused.
+        // (A client that connects, times out and closes may free its slot,
+        // so nothing that closes is used to fill.)
+        var refused = false
+        for _ in 0..<512 where !refused {
+            let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+            let connected = withUnsafePointer(to: &address) { pointer in
+                pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+                }
+            }
+            if connected == 0 {
+                queued.append(fd)
+            } else {
+                refused = errno == ECONNREFUSED
+                close(fd)
+            }
         }
+        #expect(refused)
         // The queue is full now: a refused connect, and no lease yet.
         #expect(ControlSocket.exchange(.status, to: url, timeout: 0.2) == .notListening)
         // A host holds the lease beside the socket: alive and behind.
