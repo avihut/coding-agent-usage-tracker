@@ -114,6 +114,8 @@ public final class MeteringHost {
     @ObservationIgnored public var onLog: ((String) -> Void)?
 
     @ObservationIgnored let defaults: UserDefaults
+    /// The composer's memo of the all-agents section (heartbeats re-use it).
+    @ObservationIgnored let allAgentsCache = AllAgentsCache()
     @ObservationIgnored private let serviceFactory: ((Profile) -> UsageService?)?
     @ObservationIgnored private let systemAccent: RGBColor?
     @ObservationIgnored private let gateSeeds: [String: Date]
@@ -633,7 +635,16 @@ public final class MeteringHost {
                 monogram: ProfileFacts.monogram(profile: profile, label: label),
                 dormant: dormant.contains(key), lastActivityAt: lastActivity[key],
                 homeDisplayPath: profile.displayHome(relativeTo: configuration.userHome),
-                state: engines[key] != nil ? sections[key] : nil)
+                state: engines[key] != nil ? sections[key] : nil,
+                consumption: engines[key].flatMap { engine in
+                    // `activity` lands in the same step that sets the flag;
+                    // before it, the empty list means "not looked yet".
+                    engine.sessionsIndexed
+                        ? SectionConsumption(
+                            days: engine.activity, timeline: engine.tokenTimeline,
+                            pricing: engine.pricing)
+                        : nil
+                })
         }
         let harnessList = roster.rows.map { row -> HarnessSection in
             let services = serviceRegistry.services(for: row.provider)
@@ -646,7 +657,8 @@ public final class MeteringHost {
                 recentFiles: keys.compactMap { recentActivity[$0] }.reduce(0, +),
                 activeDays: days.count,
                 serviceStatus: services.serviceStatus, notices: services.notices.pending,
-                outages: services.outageSpans(now: now))
+                outages: services.outageSpans(now: now),
+                colorLedger: ModelColorLedger.load(from: defaults, providerID: row.provider.id))
         }
         let composed = MeteringDigest.compose(
             harnesses: harnessList, sections: sectionList, focused: focusedProfileID,
@@ -654,7 +666,7 @@ public final class MeteringHost {
             pid: Int(ProcessInfo.processInfo.processIdentifier),
             appVersion: AppIdentity.version, systemAccent: systemAccent,
             activeInterval: activeInterval, appUpdate: appUpdate,
-            nextReprobeAt: nextReprobeAt, now: now)
+            nextReprobeAt: nextReprobeAt, now: now, allAgentsCache: allAgentsCache)
         digest = composed
         notices = composed.notices
         outages = composed.outages ?? []

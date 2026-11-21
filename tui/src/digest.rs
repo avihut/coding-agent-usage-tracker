@@ -82,6 +82,41 @@ pub struct LiveState {
     /// follows activity.
     #[serde(default)]
     pub pinned_profile: Option<String>,
+    /// Consumption summed across every account "all" counts — every agent,
+    /// every model (2026-11-21). Never limits. `None` = "all" holds one
+    /// account (its own section is the total) or a writer before the field.
+    #[serde(default)]
+    pub all_agents: Option<AllAgentsState>,
+}
+
+/// Mirror of `AllAgentsState`: the app panel's "All agents" reading. Its
+/// `activity` is shaped exactly like the top level's, its model rows carry
+/// `agent`, and a member still `scanning` is named and left out of every
+/// sum (`partial`), never counted as zero.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AllAgentsState {
+    pub members: Vec<AllAgentsMember>,
+    /// "3 agents", "2 of 3 agents", "2 accounts" — phrased by the writer.
+    pub count_label: String,
+    pub partial: bool,
+    /// `None` until at least one member is counted — every account still
+    /// scanning is "no total yet", never a total of zero.
+    #[serde(default)]
+    pub models: Option<Vec<ModelRow>>,
+    #[serde(default)]
+    pub activity: Option<ActivityRollup>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AllAgentsMember {
+    pub profile: String,
+    #[serde(rename = "providerID")]
+    pub provider_id: String,
+    /// "counted" | "scanning" | "noTokens" — a string, so a later state is
+    /// one a reader can skip rather than fail on.
+    pub state: String,
 }
 
 /// Mirror of `HarnessState`: one metered harness — who it is, whether the
@@ -713,6 +748,10 @@ pub struct ModelRow {
     pub tally: Tally,
     /// None = unpriced. Never 0 for "unknown".
     pub cost: Option<f64>,
+    /// The harness the row's model ran under — set on all-agents rows only,
+    /// where two agents' same id ("unknown") must stay two rows.
+    #[serde(default)]
+    pub agent: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Deserialize)]
@@ -852,6 +891,51 @@ mod tests {
             }
         }
         assert!(seen >= 2, "expected the harness golden beside the base one");
+    }
+
+    /// The all-agents section (2026-11-21): two agents' `unknown` stay two
+    /// rows by their `agent`, and a per-account row carries none.
+    #[test]
+    fn all_agents_section_decodes() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../Tests/UsageCoreTests/Fixtures/digest/live-state-v1-harnesses.json");
+        let state = LiveState::parse(&std::fs::read(path).unwrap()).unwrap();
+        let all = state
+            .all_agents
+            .expect("the harness golden totals two agents");
+        assert_eq!(all.count_label, "2 agents");
+        assert!(!all.partial);
+        let members: Vec<(&str, &str, &str)> = all
+            .members
+            .iter()
+            .map(|m| (m.profile.as_str(), m.provider_id.as_str(), m.state.as_str()))
+            .collect();
+        assert_eq!(
+            members,
+            [
+                ("default", "claude", "counted"),
+                ("codex", "codex", "counted")
+            ]
+        );
+        let unknown: Vec<Option<&str>> = all
+            .models
+            .as_deref()
+            .unwrap_or_default()
+            .iter()
+            .filter(|row| row.id == "unknown")
+            .map(|row| row.agent.as_deref())
+            .collect();
+        assert_eq!(unknown, [Some("codex"), Some("claude")]);
+        let activity = all.activity.as_ref().expect("two counted members: a total");
+        assert!(
+            activity
+                .model_days
+                .iter()
+                .all(|day| day.models.iter().all(|m| m.agent.is_some()))
+        );
+        assert!(state.models.iter().all(|row| row.agent.is_none()));
+        // The base golden meters one account: nothing to total.
+        assert!(LiveState::parse(&golden()).unwrap().all_agents.is_none());
     }
 
     #[test]

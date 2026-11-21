@@ -86,6 +86,12 @@ public struct LiveState: Codable, Sendable, Equatable {
     /// The account the person pinned focus to, if any (0.101.0) — nil means
     /// focus follows activity. `focusedProfile` says who holds it either way.
     public let pinnedProfile: String?
+    /// Consumption — tokens and list-price cost — summed across every
+    /// account on the strip, every agent and model (2026-11-21). Never
+    /// limits. Nil = "all" holds one account (whose own section IS the
+    /// total) or a writer before this field; `ConsumptionMembership` over
+    /// `profiles`/`harnesses` tells the two apart.
+    public let allAgents: AllAgentsState?
 
     public init(
         schemaVersion: Int = Self.schemaVersion,
@@ -96,7 +102,8 @@ public struct LiveState: Codable, Sendable, Equatable {
         accountPresence: AccountPresenceCard? = nil, notices: NoticesCard? = nil,
         outages: [OutageSpan]? = nil, focusedProfile: String? = nil,
         profiles: [ProfileState]? = nil, menuBarCells: [MenuBarCell]? = nil,
-        harnesses: [HarnessState]? = nil, pinnedProfile: String? = nil
+        harnesses: [HarnessState]? = nil, pinnedProfile: String? = nil,
+        allAgents: AllAgentsState? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.sessionsCap = sessionsCap
@@ -116,6 +123,7 @@ public struct LiveState: Codable, Sendable, Equatable {
         self.menuBarCells = menuBarCells
         self.harnesses = harnesses
         self.pinnedProfile = pinnedProfile
+        self.allAgents = allAgents
     }
 
     /// `<App Support>/<bundleID>/live-state.json` — the bundle root, above
@@ -576,13 +584,22 @@ public struct ModelRow: Codable, Sendable, Equatable, Identifiable {
     public let tally: TokenTally
     /// Nil = unpriced (no rates for this model) — absent, never 0.
     public let cost: Double?
+    /// The harness (provider id) this row's model ran under — set only on
+    /// rows that span agents (`LiveState.allAgents`), where `id` alone can't
+    /// tell two agents' same-named models apart. Nil (and absent from the
+    /// wire) on every per-account row, whose agent is its section's.
+    public let agent: String?
 
-    public init(id: String, displayName: String, color: RGBColor, tally: TokenTally, cost: Double?) {
+    public init(
+        id: String, displayName: String, color: RGBColor, tally: TokenTally, cost: Double?,
+        agent: String? = nil
+    ) {
         self.id = id
         self.displayName = displayName
         self.color = color
         self.tally = tally
         self.cost = cost
+        self.agent = agent
     }
 }
 
@@ -659,8 +676,9 @@ public struct ActivityRollup: Codable, Sendable, Equatable {
     /// Per-model day tallies for the trailing ~35 days (the 30D drill
     /// horizon), ascending dayKey.
     public let modelDays: [ModelDayRollup]
-    /// Hourly buckets for days inside timeline retention (~8 days),
-    /// ascending dayKey.
+    /// Hourly buckets for days inside the timeline's retention (the
+    /// scanner's, weeks of it; the all-agents total keeps
+    /// `AllAgentsDigest.hourSpanDays`), ascending dayKey.
     public let hourDays: [DayHours]
 
     public init(
@@ -829,51 +847,9 @@ public enum LiveStateBuilder {
                 exhaustsAt: $0.exhaustsAt, resetsAt: $0.resetsAt)
         }
 
-        let today = calendar.startOfDay(for: now)
-        let todayEntry = activity.first { calendar.startOfDay(for: $0.day) == today }
-        let models = rows(todayEntry?.models ?? [:])
-
-        let dayKey = dayKeyFormatter(calendar: calendar)
-        let daysFloor = now.addingTimeInterval(-Self.daysHorizon)
-        let days = activity
-            .filter { $0.day >= daysFloor }
-            .map { day in
-                let priced = day.models.compactMap { id, tally in
-                    pricing.rates(for: id).map { $0.dollars(for: tally) }
-                }
-                return DayRollup(
-                    dayKey: dayKey.string(from: day.day),
-                    tokens: day.tokens,
-                    prompts: day.prompts,
-                    cost: priced.isEmpty ? nil : priced.reduce(0, +))
-            }
-            .sorted { $0.dayKey < $1.dayKey }
-
-        let modelDaysFloor = now.addingTimeInterval(-Self.modelDaysHorizon)
-        let modelDays = activity
-            .filter { $0.day >= modelDaysFloor && !$0.models.isEmpty }
-            .map { ModelDayRollup(dayKey: dayKey.string(from: $0.day), models: rows($0.models)) }
-            .sorted { $0.dayKey < $1.dayKey }
-
-        let hourDays = Self.hourDays(
-            timeline: timeline, pricing: pricing, calendar: calendar, dayKey: dayKey)
-        let todayHours = hourDays.last?.dayKey == dayKey.string(from: today)
-            ? hourDays.last!.hours : []
-
-        let activityRollup = ActivityRollup(
-            timeZone: calendar.timeZone.identifier,
-            todayHours: todayHours,
-            todayTokens: todayEntry?.tokens ?? 0,
-            todayPrompts: todayEntry?.prompts ?? 0,
-            todayCost: todayEntry.flatMap { entry in
-                let priced = entry.models.compactMap { id, tally in
-                    pricing.rates(for: id).map { $0.dollars(for: tally) }
-                }
-                return priced.isEmpty ? nil : priced.reduce(0, +)
-            },
-            days: days,
-            modelDays: modelDays,
-            hourDays: hourDays)
+        let (models, activityRollup) = Self.activity(
+            activity, timeline: timeline, pricing: pricing, now: now, calendar: calendar,
+            rows: rows)
 
         let presenceTimeline = presence.map { AccountTimeline(epochs: $0.epochs) }
         return LiveState(
@@ -895,6 +871,60 @@ public enum LiveStateBuilder {
                     calendar: calendar, locale: locale)
             },
             outages: outages)
+    }
+
+    // MARK: - Activity
+
+    /// Today's model rows and the activity rollup over `activity` — the
+    /// account's own days, or the all-agents section's merged ones
+    /// (`AllAgentsDigest`), which is why the rows are the caller's to build:
+    /// one function, so the per-account and the merged reading can't drift.
+    static func activity(
+        _ activity: [DailyActivity], timeline: [TokenSlot], pricing: PricingTable,
+        now: Date, calendar: Calendar, rows: ([String: TokenTally]) -> [ModelRow]
+    ) -> (models: [ModelRow], rollup: ActivityRollup) {
+        let today = calendar.startOfDay(for: now)
+        let todayEntry = activity.first { calendar.startOfDay(for: $0.day) == today }
+        let models = rows(todayEntry?.models ?? [:])
+
+        func cost(_ entry: DailyActivity) -> Double? {
+            let priced = entry.models.compactMap { id, tally in
+                pricing.rates(for: id).map { $0.dollars(for: tally) }
+            }
+            return priced.isEmpty ? nil : priced.reduce(0, +)
+        }
+
+        let dayKey = dayKeyFormatter(calendar: calendar)
+        let daysFloor = now.addingTimeInterval(-Self.daysHorizon)
+        let days = activity
+            .filter { $0.day >= daysFloor }
+            .map { day in
+                DayRollup(
+                    dayKey: dayKey.string(from: day.day), tokens: day.tokens, prompts: day.prompts,
+                    cost: cost(day))
+            }
+            .sorted { $0.dayKey < $1.dayKey }
+
+        let modelDaysFloor = now.addingTimeInterval(-Self.modelDaysHorizon)
+        let modelDays = activity
+            .filter { $0.day >= modelDaysFloor && !$0.models.isEmpty }
+            .map { ModelDayRollup(dayKey: dayKey.string(from: $0.day), models: rows($0.models)) }
+            .sorted { $0.dayKey < $1.dayKey }
+
+        let hourDays = Self.hourDays(
+            timeline: timeline, pricing: pricing, calendar: calendar, dayKey: dayKey)
+        let todayHours = hourDays.last?.dayKey == dayKey.string(from: today)
+            ? hourDays.last!.hours : []
+
+        return (models, ActivityRollup(
+            timeZone: calendar.timeZone.identifier,
+            todayHours: todayHours,
+            todayTokens: todayEntry?.tokens ?? 0,
+            todayPrompts: todayEntry?.prompts ?? 0,
+            todayCost: todayEntry.flatMap(cost),
+            days: days,
+            modelDays: modelDays,
+            hourDays: hourDays))
     }
 
     // MARK: - Meters

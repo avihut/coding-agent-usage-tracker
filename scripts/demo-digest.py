@@ -18,14 +18,23 @@ resets are in the past renders as stale.
 Activity outline's family fold has something to fold) and Gemini CLI, whose
 traces carry prompts and no tokens — the merged consumption scope's edge
 states. The default output is unchanged by it (the extras draw their
-randomness after everything else).
+randomness after everything else). `--scanning` publishes Codex as an
+account whose first scan hasn't landed: named in the all-agents total and
+left out of it, its own section empty as a scanning engine's is.
 
 `--with-antigravity` adds Antigravity CLI with the five meters its quota
 probe reads (Gemini session and weekly, the Claude + GPT pool's two, Gemini
 4 Argon's weekly) — opt-in and drawn last too, so the other outputs keep
 their bytes.
 
-usage: demo-digest.py [--several] [--with-antigravity] <out.json>
+The all-agents section (`allAgents`) is rebuilt here from the synthesized
+sections — the golden's own would describe the golden's accounts. It is a
+plain sum of those sections, as the engine's is of its scans; the colours
+are core `ModelColorMath.agentShade` outputs for the demo's ledgers (each
+agent's families seeded heaviest first) and must be recomputed if that
+math changes.
+
+usage: demo-digest.py [--several] [--scanning] [--with-antigravity] <out.json>
 """
 
 import copy
@@ -93,6 +102,122 @@ def risk(severity):
     if severity <= 0:
         return None
     return rgb(*(round(low + (high - low) * min(1, severity), 4) for low, high in zip(*RAMP)))
+
+
+# ModelColorMath.agentShade(hueSlot, shadeSlot, accent) for the demo's models
+# when several agents share a chart — computed in Swift, pasted (see above).
+AGENT_SHADES = {
+    ("claude", "claude-fable-5"): rgb(0.851, 0.467, 0.341),
+    ("claude", "claude-sonnet-5"): rgb(1.000, 0.774, 0.700),
+    ("claude", "claude-haiku-4-5"): rgb(0.528, 0.242, 0.148),
+    ("claude", "claude-sonnet-4-5"): rgb(0.760, 0.564, 0.499),
+    ("codex", "gpt-5.2-codex"): rgb(0.063, 0.639, 0.498),
+}
+HOUR_SPAN_DAYS = 8  # AllAgentsDigest.hourSpanDays
+
+
+def count_label(members):
+    """ConsumptionMembership.countLabel, over (agent, counted) pairs."""
+    agents = list(dict.fromkeys(agent for agent, _ in members))
+    if len(agents) <= 1:
+        return f"{len(members)} accounts"
+    counted = sum(1 for agent in agents if any(a == agent and c for a, c in members))
+    return f"{len(agents)} agents" if counted == len(agents) else f"{counted} of {len(agents)} agents"
+
+
+def all_agents(state, now, scanning=()):
+    """The all-agents section: the strip's accounts of shown harnesses, the
+    counted ones summed day by day, rows per agent + model."""
+    shown = {h["id"] for h in state["harnesses"] if h["shown"]}
+    members = [p for p in state["profiles"]
+               if p["enabled"] and not p["dormant"] and p["providerID"] in shown]
+    if len(members) < 2:
+        return None
+    states = []
+    for profile in members:
+        if profile["providerID"] == "gemini":
+            states.append("noTokens")
+        elif profile["providerID"] in scanning:
+            states.append("scanning")
+        else:
+            states.append("counted")
+    counted = [p for p, st in zip(members, states) if st == "counted"]
+    spans = len({p["providerID"] for p in members}) > 1
+
+    def add_cost(a, b):
+        return b if a is None else (a if b is None else round(a + b, 6))
+
+    days, model_days, hour_days = {}, {}, {}
+    for profile in counted:
+        agent, act = profile["providerID"], profile["activity"]
+        for day in act["days"]:
+            merged = days.setdefault(day["dayKey"], {"dayKey": day["dayKey"], "tokens": 0, "prompts": 0, "cost": None})
+            merged["tokens"] += day["tokens"]
+            merged["prompts"] += day["prompts"]
+            merged["cost"] = add_cost(merged["cost"], day.get("cost"))
+        for day in act["modelDays"]:
+            rows = model_days.setdefault(day["dayKey"], {})
+            for row in day["models"]:
+                key = (agent, row["id"])
+                if spans and key not in AGENT_SHADES:
+                    sys.exit(f"no pasted agent shade for {key} — compute it with "
+                             "ModelColorMath.agentShade and add it to AGENT_SHADES")
+                merged = rows.setdefault(key, {
+                    "id": row["id"], "displayName": row["displayName"], "agent": agent,
+                    "color": AGENT_SHADES[key] if spans else row["color"],
+                    "tally": {k: 0 for k in row["tally"]}, "cost": None})
+                for k, v in row["tally"].items():
+                    merged["tally"][k] += v
+                merged["cost"] = add_cost(merged["cost"], row.get("cost"))
+        floor = (now.date() - timedelta(days=HOUR_SPAN_DAYS - 1)).isoformat()
+        for day in act["hourDays"]:
+            if day["dayKey"] < floor:
+                continue
+            hours = hour_days.setdefault(day["dayKey"], {})
+            for bucket in day["hours"]:
+                merged = hours.setdefault(bucket["hour"], {"hour": bucket["hour"], "tokens": 0, "cost": None})
+                merged["tokens"] += bucket["tokens"]
+                merged["cost"] = add_cost(merged["cost"], bucket.get("cost"))
+
+    def total(row):
+        return sum(row["tally"][k] for k in ("input", "output", "cacheCreation", "cacheRead"))
+
+    def ordered(rows):
+        return sorted(rows, key=lambda r: (-total(r), r["agent"], r["id"]))
+
+    def clean(entry):
+        return {k: v for k, v in entry.items() if v is not None}
+
+    members_out = [{"profile": p["id"], "providerID": p["providerID"], "state": st}
+                   for p, st in zip(members, states)]
+    label = count_label([(p["providerID"], st == "counted") for p, st in zip(members, states)])
+    if not counted:
+        # Nobody counted yet: no total, never a zero one.
+        return {"members": members_out, "countLabel": label, "partial": "scanning" in states}
+    # The section is a plain sum of the counted sections, day by day.
+    for key in days:
+        parts = sum(d["tokens"] for p in counted for d in p["activity"]["days"] if d["dayKey"] == key)
+        assert days[key]["tokens"] == parts, f"{key}: {days[key]['tokens']} ≠ Σ {parts}"
+    today = now.date().isoformat()
+    day_list = [clean(d) for _, d in sorted(days.items())]
+    hours = [{"dayKey": k, "hours": [clean(b) for _, b in sorted(v.items())]} for k, v in sorted(hour_days.items())]
+    today_day = days.get(today)
+    return {
+        "members": members_out,
+        "countLabel": label,
+        "partial": "scanning" in states,
+        "models": [clean(r) for r in ordered(model_days.get(today, {}).values())],
+        "activity": clean({
+            "timeZone": "GMT", "days": day_list,
+            "modelDays": [{"dayKey": k, "models": [clean(r) for r in ordered(v.values())]}
+                          for k, v in sorted(model_days.items())],
+            "hourDays": hours,
+            "todayHours": hours[-1]["hours"] if hours and hours[-1]["dayKey"] == today else [],
+            "todayTokens": today_day["tokens"] if today_day else 0,
+            "todayPrompts": today_day["prompts"] if today_day else 0,
+            "todayCost": today_day.get("cost") if today_day else None,
+        }),
+    }
 
 
 def stamp(moment):
@@ -379,7 +504,7 @@ def add_antigravity(now, rng, state, sections, cells):
     state["menuBarCells"].append(cell)
 
 
-def build(now, several=False, with_antigravity=False):
+def build(now, several=False, with_antigravity=False, scanning=False):
     rng = random.Random(5)
     state = json.loads(GOLDEN.read_text())
     sections = {section["id"]: section for section in state["profiles"]}
@@ -445,18 +570,28 @@ def build(now, several=False, with_antigravity=False):
                         "notices": copy.deepcopy(quiet), "outages": [],
                         "newestActivityAt": stamp(now - timedelta(minutes=4))})
         harness.pop("serviceStatus", None)
+    if scanning:
+        # A scanning engine publishes nothing of its own yet.
+        codex["models"] = []
+        codex["activity"] = {"timeZone": "GMT", "todayHours": [], "todayTokens": 0,
+                             "todayPrompts": 0, "days": [], "modelDays": [], "hourDays": []}
+    section = all_agents(state, now, scanning=("codex",) if scanning else ())
+    if section is None:
+        state.pop("allAgents", None)
+    else:
+        state["allAgents"] = section
     return state
 
 
 def main():
-    flags = ("--several", "--with-antigravity")
+    flags = ("--several", "--with-antigravity", "--scanning")
     args = sys.argv[1:]
     paths = [a for a in args if a not in flags]
-    if len(paths) != 1:
+    if len(paths) != 1 or paths[0].startswith("-"):
         sys.exit(__doc__.strip().splitlines()[-1])
     now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
     digest = build(now, several="--several" in args,
-                   with_antigravity="--with-antigravity" in args)
+                   with_antigravity="--with-antigravity" in args, scanning="--scanning" in args)
     Path(paths[0]).write_text(json.dumps(digest, indent=1, sort_keys=True) + "\n")
 
 

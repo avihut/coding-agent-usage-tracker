@@ -397,13 +397,25 @@ pub fn render_day(
     rect: Rect,
     pushed: bool,
 ) {
-    let day: Option<&DayRollup> = digest.activity.days.iter().find(|d| d.day_key == day_key);
-    let accent = rgb(digest.engine.accent);
+    // The drill reads what the dashboard reads: all agents or the account.
+    let reading = app.reading(digest);
+    let day: Option<&DayRollup> = reading.days.iter().find(|d| d.day_key == day_key);
+    let all = app.all_agents(digest);
+    let accent = if all.is_some_and(crate::state::spans_agents) {
+        rgb(crate::ui::NEUTRAL)
+    } else {
+        rgb(digest.engine.accent)
+    };
     let mut lines: Vec<Line> = Vec::new();
     let pretty = Date::parse(day_key, DAY_KEY)
         .map(|d| format!("{} {} {}", d.weekday(), d.day(), d.month()))
         .unwrap_or_else(|_| day_key.to_owned());
     let mut title = pretty;
+    // Whose day this is — the drill reads what the dashboard reads — said
+    // before the figures, so a narrow title clips those first.
+    if let Some(all) = all {
+        title.push_str(&format!("{}{}", glyphs().sep, all.count_label));
+    }
     if let Some(day) = day {
         title.push_str(&format!("{}{} tok", glyphs().sep, compact(day.tokens)));
         if let Some(cost) = day.cost {
@@ -428,13 +440,37 @@ pub fn render_day(
     // per-model composition plus the four token classes and the priced
     // rollup. (A donut is a GUI idiom; bars carry the same composition
     // where cells are the only ink.)
-    let models: Vec<ModelTotal> = digest
-        .activity
+    let mut models: Vec<ModelTotal> = reading
         .model_days
         .iter()
         .find(|entry| entry.day_key == day_key)
         .map(|entry| entry.models.iter().map(ModelTotal::from).collect())
         .unwrap_or_default();
+    // Two agents' same-named models ("Other") would print as twin rows: a
+    // name more than one agent uses carries its agent's short name.
+    let twins: Vec<String> = models
+        .iter()
+        .filter(|m| {
+            models
+                .iter()
+                .filter(|other| other.display_name == m.display_name)
+                .count()
+                > 1
+        })
+        .map(|m| m.display_name.clone())
+        .collect();
+    for model in models.iter_mut() {
+        if twins.contains(&model.display_name)
+            && let Some(agent) = model.agent.as_deref()
+        {
+            let short = digest
+                .harnesses
+                .as_deref()
+                .and_then(|list| list.iter().find(|h| h.id == agent))
+                .map_or(agent, |h| h.short_name.as_str());
+            model.display_name = format!("{} ({short})", model.display_name);
+        }
+    }
 
     let wide = rect.width >= 46;
     let name_width = (rect.width as usize)
@@ -451,8 +487,7 @@ pub fn render_day(
         .saturating_sub(lines.len() + table_rows + 2)
         .min(8);
 
-    let hours = digest
-        .activity
+    let hours = reading
         .hour_days
         .iter()
         .find(|entry| entry.day_key == day_key);
@@ -512,8 +547,18 @@ pub fn render_day(
             )));
         }
         None if day.is_some() => {
+            // The all-agents total keeps fewer days of hours than an account
+            // (a size cap); an account's reach is its scanner's retention.
+            let text = if all.is_some() {
+                "all agents keep hours for 8 days — totals only for this day (u: this account)"
+            } else {
+                "no hourly detail kept for this day — totals only"
+            };
+            lines.push(Line::from(Span::styled(text, crate::ui::style(FAINT))));
+        }
+        None if app.no_total_yet(digest) => {
             lines.push(Line::from(Span::styled(
-                "hourly detail is kept ~8 days — totals only for this day",
+                "no all-agents total yet — every account is still being scanned",
                 crate::ui::style(FAINT),
             )));
         }

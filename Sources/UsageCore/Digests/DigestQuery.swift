@@ -77,7 +77,7 @@ public enum DigestQuery {
     private static let booleanFlags: Set<String> = [
         "json", "raw", "iso", "unix", "relative", "no-color", "header",
         "check", "no-glyph", "tmux", "all", "background", "no-background",
-        "no-scan",
+        "no-scan", "all-agents",
     ]
     /// `digest` is recognized-but-inert here: the CLI already consumed it to
     /// choose which file to read. `--provider` NARROWS to one harness since
@@ -113,6 +113,7 @@ public enum DigestQuery {
         "max-data-age": dataAgeNouns,
         "cap": ["headroom"],
         "forecast": ["headroom"],
+        "all-agents": allAgentsNouns,
     ]
 
     static func rejectInapplicableFlags(noun: String, parsed: ParsedArgs) -> QueryOutput? {
@@ -161,9 +162,12 @@ public enum DigestQuery {
         // read. `get` walks the re-encoded view when a section was lifted;
         // the focused profile's bytes stay the writer's own.
         let view: ProfileView
-        switch selectProfile(
-            noun: noun, parsed: parsed, environment: environment, digest: digest,
-            profiles: profiles, homes: homes)
+        let allAgents = parsed.flags["all-agents"] != nil
+        switch allAgents
+            ? allAgentsView(parsed: parsed, digest: digest)
+            : selectProfile(
+                noun: noun, parsed: parsed, environment: environment, digest: digest,
+                profiles: profiles, homes: homes)
         {
         case .failure(let output): return output
         case .success(let selected): view = selected
@@ -192,7 +196,19 @@ public enum DigestQuery {
         }
 
         let calendar = digestCalendar(digest)
+        let output = answer(
+            noun: noun, parsed: parsed, digest: digest, rawDigest: rawDigest, view: view,
+            environment: environment, now: now, calendar: calendar, json: json, raw: raw)
+        return allAgents
+            ? markingPartial(output, noun: noun, parsed: parsed, digest: digest, json: json, raw: raw)
+            : output
+    }
 
+    /// The noun's own answer, for whichever view was selected.
+    private static func answer(
+        noun: String, parsed: ParsedArgs, digest: LiveState, rawDigest: Data, view: ProfileView,
+        environment: [String: String], now: Date, calendar: Calendar, json: Bool, raw: Bool
+    ) -> QueryOutput {
         switch noun {
         case "status":
             return runStatus(parsed: parsed, digest: digest, now: now, json: json, profileID: view.id)
@@ -506,7 +522,16 @@ public enum DigestQuery {
     /// displayName substring.
     static func selectModel(_ token: String, in models: [ModelRow]) -> Selection<ModelRow> {
         let needle = token.lowercased()
-        if let exact = models.first(where: { $0.id.lowercased() == needle }) { return .found(exact) }
+        // Rows that span agents (`--all-agents`) can share an id — two
+        // agents' `unknown` — so an exact id is ambiguous then, and
+        // `agent:id` names one of them.
+        func qualified(_ row: ModelRow) -> String { row.agent.map { "\($0):\(row.id)" } ?? row.id }
+        let exact = models.filter { $0.id.lowercased() == needle }
+        if exact.count == 1 { return .found(exact[0]) }
+        if exact.count > 1 { return .ambiguous(exact.map(qualified)) }
+        if let named = models.first(where: { $0.agent != nil && qualified($0).lowercased() == needle }) {
+            return .found(named)
+        }
         if needle == "top" {
             guard let first = models.first else { return .none }
             return .found(first)
@@ -515,7 +540,7 @@ public enum DigestQuery {
         switch candidates.count {
         case 0: return .none
         case 1: return .found(candidates[0])
-        default: return .ambiguous(candidates.map(\.id))
+        default: return .ambiguous(candidates.map(qualified))
         }
     }
 
@@ -621,23 +646,35 @@ public enum DigestQuery {
     /// lives once. Cost sums only the days that priced this model; a model
     /// unpriced on every matched day stays absent, never $0.
     static func aggregateModels(_ modelDays: [ModelDayRollup]) -> [ModelRow] {
-        var tallies: [String: TokenTally] = [:]
-        var costs: [String: [Double]] = [:]
-        var identity: [String: (displayName: String, color: RGBColor)] = [:]
+        // Keyed by agent + id: all-agents rows can share an id across agents.
+        struct Key: Hashable {
+            let agent: String?
+            let id: String
+        }
+        var tallies: [Key: TokenTally] = [:]
+        var costs: [Key: [Double]] = [:]
+        var identity: [Key: (displayName: String, color: RGBColor)] = [:]
         for day in modelDays {
             for row in day.models {
-                tallies[row.id, default: TokenTally()].add(row.tally)
-                if let cost = row.cost { costs[row.id, default: []].append(cost) }
-                identity[row.id] = (row.displayName, row.color)
+                let key = Key(agent: row.agent, id: row.id)
+                tallies[key, default: TokenTally()].add(row.tally)
+                if let cost = row.cost { costs[key, default: []].append(cost) }
+                identity[key] = (row.displayName, row.color)
             }
         }
-        return tallies.compactMap { id, tally -> ModelRow? in
-            guard let identity = identity[id] else { return nil }
-            let priced = costs[id] ?? []
+        return tallies.compactMap { key, tally -> ModelRow? in
+            guard let identity = identity[key] else { return nil }
+            let priced = costs[key] ?? []
             return ModelRow(
-                id: id, displayName: identity.displayName, color: identity.color, tally: tally,
-                cost: priced.isEmpty ? nil : priced.reduce(0, +))
-        }.sorted { $0.tally.total != $1.tally.total ? $0.tally.total > $1.tally.total : $0.id < $1.id }
+                id: key.id, displayName: identity.displayName, color: identity.color, tally: tally,
+                cost: priced.isEmpty ? nil : priced.reduce(0, +), agent: key.agent)
+        }.sorted {
+            // Ties as the section's own rows order them: agent, then id
+            // (a per-account row has no agent, so id alone, as ever).
+            if $0.tally.total != $1.tally.total { return $0.tally.total > $1.tally.total }
+            if $0.agent != $1.agent { return ($0.agent ?? "") < ($1.agent ?? "") }
+            return $0.id < $1.id
+        }
     }
 
 }

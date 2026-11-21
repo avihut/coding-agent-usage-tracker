@@ -7,11 +7,17 @@
 
 use crate::activity::{self, ModelTotal};
 use crate::digest::{
-    DayRollup, HourBucket, LiveState, NoticeCard, NoticesCard, Rgb, ServiceStatusCard,
+    AllAgentsState, DayRollup, HourBucket, LiveState, NoticeCard, NoticesCard, Rgb,
+    ServiceStatusCard,
 };
 use crate::layout::{self, Plan, Shape};
+use crate::outline::{self, Kind, Note};
 use crate::state::{App, Dimension, Freshness, Hit, Period, Surface};
 use crate::surfaces;
+pub use consumption::{cost_rollup, model_columns, model_row};
+use consumption::{models, today};
+
+mod consumption;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
@@ -32,6 +38,14 @@ const TRACK: Color = Color::Rgb(48, 48, 52);
 /// The unreachable region's diagonal fill: CRITICAL held well back from the
 /// data, the app's own `.red.opacity(0.13)` register.
 pub const HATCH: Color = Color::Rgb(80, 22, 19);
+/// What a chart that totals several agents is painted in when no model is
+/// singled out — no one vendor owns the total (the app's `Color.primary`
+/// rule for the merged heatmap).
+pub const NEUTRAL: Rgb = Rgb {
+    red: 0.80,
+    green: 0.80,
+    blue: 0.82,
+};
 
 /// The color normal-state fills wear: the host Mac's control accent when
 /// the digest carries it (the app's bars are `controlAccentColor`-tinted),
@@ -527,14 +541,7 @@ pub fn render(frame: &mut Frame, app: &mut App, now: OffsetDateTime) {
 
     match app.surface.clone() {
         Surface::Dashboard => {
-            let plan = layout::plan_with_status(
-                area,
-                status_rungs(digest.service_status.as_ref()),
-                notice_rows(digest.notices.as_ref()),
-                data.meter_rows,
-                data.model_rows,
-                data.activity_rows,
-            );
+            let plan = dashboard_plan(area, &digest, &data);
             render_dashboard(frame, app, &digest, freshness, &plan, &data, now);
         }
         surface => {
@@ -549,14 +556,7 @@ pub fn render(frame: &mut Frame, app: &mut App, now: OffsetDateTime) {
                     area.width - left_width - 1,
                     area.height,
                 );
-                let plan = layout::plan_with_status(
-                    left,
-                    status_rungs(digest.service_status.as_ref()),
-                    notice_rows(digest.notices.as_ref()),
-                    data.meter_rows,
-                    data.model_rows,
-                    data.activity_rows,
-                );
+                let plan = dashboard_plan(left, &digest, &data);
                 render_dashboard(frame, app, &digest, freshness, &plan, &data, now);
                 render_surface(frame, app, &digest, &surface, right, false, now);
             } else {
@@ -569,6 +569,32 @@ pub fn render(frame: &mut Frame, app: &mut App, now: OffsetDateTime) {
     } else if let Some(rect) = halo {
         highlight_band(frame, rect);
     }
+}
+
+/// The dashboard's plan. Sections drop whole, so the outline's extra rows
+/// must never cost the pane a section it would otherwise show (MODELS
+/// itself, or the activity chart below it): every MODELS size from the full
+/// outline down to its agent rows alone is tried, and the largest that
+/// lands the most sections wins (docs/TUI.md, the degrade).
+fn dashboard_plan(area: Rect, digest: &LiveState, data: &Dash) -> Plan {
+    let plan_with = |model_rows: u16| {
+        layout::plan_with_status(
+            area,
+            status_rungs(digest.service_status.as_ref()),
+            notice_rows(digest.notices.as_ref()),
+            data.meter_rows,
+            model_rows,
+            data.activity_rows,
+        )
+    };
+    let mut best = plan_with(data.model_rows);
+    for rows in (data.compact_model_rows..data.model_rows).rev() {
+        let candidate = plan_with(rows);
+        if layout::landed(&candidate) > layout::landed(&best) {
+            best = candidate;
+        }
+    }
+    best
 }
 
 /// The selection halo, painted over whatever the widgets left in the
@@ -635,7 +661,13 @@ struct Dash {
     end: String,
     start_date: Date,
     end_date: Date,
+    /// The period's models in the bars' stacking order (outline order
+    /// under "All agents", heaviest first otherwise).
     models: Vec<ModelTotal>,
+    /// MODELS' rows: the agent ▸ model outline, or one account's models.
+    rows: Vec<outline::Row>,
+    /// The rows span agents (the outline is up).
+    outlined: bool,
     /// The per-model horizon starts inside the span — the table speaks for
     /// less than the period claims and must say so.
     models_truncated: bool,
@@ -646,7 +678,23 @@ struct Dash {
     activation_note: Option<String>,
     meter_rows: u16,
     model_rows: u16,
+    /// MODELS at its smallest useful size — what the plan falls back to
+    /// before the section would drop.
+    compact_model_rows: u16,
     activity_rows: u16,
+}
+
+/// What a hovered or focused MODELS row singles out in the charts: its own
+/// figures and every model key it counts (an agent row, all of its models).
+struct Filter {
+    total: ModelTotal,
+    keys: Vec<String>,
+}
+
+impl Filter {
+    fn covers(&self, key: &str) -> bool {
+        self.keys.iter().any(|k| k == key)
+    }
 }
 
 impl Dash {
@@ -659,11 +707,28 @@ impl Dash {
 
     fn build(app: &App, digest: &LiveState, area: Rect, now: OffsetDateTime) -> Self {
         let today = now.to_offset(app.local_offset).date();
-        let days = &digest.activity.days;
+        let all = app.all_agents(digest);
+        let reading = app.reading(digest);
+        let days = &reading.days;
         let (start, end) = activity::span(app.period, app.heat_page, today, days);
         let (start_key, end_key) = (activity::day_key(start), activity::day_key(end));
         let (start_date, end_date) = (start, end);
-        let models = activity::model_totals(&digest.activity, &start_key, &end_key);
+        let totals = activity::model_totals(reading, &start_key, &end_key);
+        let breakdown = match all {
+            Some(all) => outline::build(totals, all, digest.harnesses.as_deref()),
+            None => outline::flat(totals),
+        };
+        let outlined = breakdown.rows.iter().any(outline::Row::is_agent);
+        // An outline is agents plus models: it may ask for a little more
+        // than four rows, and gives rows back (models first, then agents —
+        // `outline::seat`) down to a single one rather than cost the pane a
+        // section one account's view would show.
+        let (model_rows, compact_model_rows) = if outlined {
+            (breakdown.rows.len().min(6) as u16 + 2, 1 + 2)
+        } else {
+            let rows = breakdown.rows.len().min(4) as u16 + 2;
+            (rows, rows)
+        };
         let weeks = match app.period {
             Period::Week => 1,
             // A 30D calendar shows all 30 days whether or not they carry
@@ -679,8 +744,10 @@ impl Dash {
         // and goes silent once the profile is live; the pane does the same.
         // A digest without the field at all (an engine that predates it)
         // says nothing rather than guessing a countdown.
+        // One account's limit rhythm: it steps aside when agents are totalled,
+        // as the app's typical-week caption does.
         let activation_note = match app.period {
-            Period::Week => digest
+            Period::Week if all.is_none() => digest
                 .engine
                 .forecast_profile
                 .as_ref()
@@ -696,14 +763,16 @@ impl Dash {
         };
         Self {
             today,
-            models_truncated: activity::model_horizon_truncates(&digest.activity, &start_key),
+            models_truncated: activity::model_horizon_truncates(reading, &start_key),
             start: start_key,
             end: end_key,
             start_date,
             end_date,
-            // Title, up to four models, and the cost rollup line.
-            model_rows: (models.len().min(4) as u16) + 2,
-            models,
+            model_rows,
+            compact_model_rows,
+            models: breakdown.models,
+            rows: breakdown.rows,
+            outlined,
             weeks,
             activation_note,
             // The credits line rides inside the meters section when the
@@ -713,11 +782,18 @@ impl Dash {
         }
     }
 
-    /// The model the pane is currently focused on, if any — the one hover
-    /// treatment every activity form reads.
-    fn filter<'a>(&'a self, app: &App) -> Option<&'a ModelTotal> {
+    /// What the pane is currently singling out, if anything — the one hover
+    /// treatment every activity form reads. A row that counts no model (an
+    /// agent still scanning) singles out nothing, and dims nothing.
+    fn filter(&self, app: &App) -> Option<Filter> {
         match &app.hover_hit {
-            Some(Hit::ModelRow(index)) => self.models.get(*index),
+            Some(Hit::ModelRow(id)) => {
+                let row = self.rows.iter().find(|row| &row.id == id)?;
+                (!row.keys.is_empty()).then(|| Filter {
+                    total: row.total.clone(),
+                    keys: row.keys.clone(),
+                })
+            }
             _ => None,
         }
     }
@@ -784,18 +860,20 @@ fn render_dashboard(
             );
         }
     }
+    let all = app.all_agents(digest);
     if let Some(rect) = plan.today {
-        frame.render_widget(today(digest, accent, rect), rect);
+        frame.render_widget(today(digest, all, accent, rect), rect);
     }
     if let Some(rect) = plan.models {
         // Rows the section can seat: its height minus the title and the
         // cost rollup line that closes it.
         let seats = (rect.height as usize).saturating_sub(2);
-        frame.render_widget(models(app, data, seats, rect), rect);
-        for index in 0..data.models.len().min(seats) {
+        let (shown, hidden) = outline::seat(&data.rows, seats);
+        frame.render_widget(models(app, data, &shown, hidden, rect), rect);
+        for (position, index) in shown.iter().enumerate() {
             app.hits.add(
-                Rect::new(rect.x, rect.y + 1 + index as u16, rect.width, 1),
-                Hit::ModelRow(index),
+                Rect::new(rect.x, rect.y + 1 + position as u16, rect.width, 1),
+                Hit::ModelRow(data.rows[*index].id.clone()),
             );
         }
     }
@@ -806,7 +884,15 @@ fn render_dashboard(
         }
     }
     if let Some(rect) = plan.sessions {
-        frame.render_widget(sessions(digest, accent, rect), rect);
+        // Under "All agents" the shortlist is still the focused account's —
+        // its title says whose, so it can't read as everyone's.
+        let owner = all.map(|_| {
+            digest.focused_profile.as_deref().map_or_else(
+                || digest.engine.agent_name.clone(),
+                |key| crate::state::account_name(digest, key),
+            )
+        });
+        frame.render_widget(sessions(digest, owner.as_deref(), accent, rect), rect);
     }
     if let Some(rect) = plan.status
         && let Some(card) = digest.service_status.as_ref()
@@ -1224,208 +1310,6 @@ fn spend_text(spend: &crate::digest::SpendStatus) -> String {
     }
 }
 
-fn today<'a>(digest: &'a LiveState, accent: Color, rect: Rect) -> Paragraph<'a> {
-    let activity = &digest.activity;
-    let mut title = format!(
-        "TODAY{}{} tok",
-        glyphs().sep,
-        compact(activity.today_tokens)
-    );
-    if let Some(cost) = activity.today_cost {
-        title.push_str(&format!("{}{}", glyphs().sep, money(cost)));
-    }
-    title.push_str(&format!(
-        "{}{} prompts",
-        glyphs().sep,
-        activity.today_prompts
-    ));
-    let mut lines = vec![section_title(&title)];
-
-    let mut buckets = [0i64; 24];
-    for HourBucket { hour, tokens, .. } in &activity.today_hours {
-        if (*hour as usize) < 24 {
-            buckets[*hour as usize] = *tokens;
-        }
-    }
-    let max = buckets.iter().copied().max().unwrap_or(0).max(1);
-    let spark_glyphs = glyphs().spark;
-    let cell_width = ((rect.width as usize) / 24).clamp(1, 6);
-    let mut spark: Vec<Span> = Vec::with_capacity(24);
-    for tokens in buckets {
-        let span = if tokens == 0 {
-            Span::styled(glyphs().dot.repeat(cell_width), style(FAINT))
-        } else {
-            let step = (((tokens * 7 + max - 1) / max) as usize).min(7);
-            Span::styled(
-                spark_glyphs[step].to_string().repeat(cell_width),
-                style(accent),
-            )
-        };
-        spark.push(span);
-    }
-    lines.push(Line::from(spark));
-    lines.push(Line::from(Span::styled(
-        format!(
-            "{:<width$}12{:>width$}",
-            "0",
-            "23",
-            width = cell_width * 12 - 1
-        ),
-        style(FAINT),
-    )));
-    Paragraph::new(lines)
-}
-
-/// The MODELS section: the app's breakdown grid, terminal-fitted. Rows
-/// follow the active period (not just today), and where the pane affords
-/// it they carry the same four columns the app separates — fresh input
-/// apart from the cache re-reads an agentic loop dwarfs it with.
-fn models<'a>(app: &App, data: &'a Dash, seats: usize, rect: Rect) -> Paragraph<'a> {
-    let wide = rect.width >= 46;
-    let name_width = (rect.width as usize)
-        .saturating_sub(if wide { 36 } else { 20 })
-        .clamp(8, 22);
-    let mut lines = vec![models_title(app, data, name_width, wide, rect.width)];
-
-    if data.models.is_empty() {
-        lines.push(Line::from(Span::styled(
-            format!("no usage in this {}", app.period.label()),
-            style(FAINT),
-        )));
-        return Paragraph::new(lines);
-    }
-    for model in data.models.iter().take(seats) {
-        let dim = data.filter(app).is_some_and(|filter| filter.id != model.id);
-        lines.push(model_row(model, name_width, wide, dim));
-    }
-    lines.push(cost_rollup(&data.models, seats));
-    Paragraph::new(lines)
-}
-
-/// One breakdown row: the model's dot and name, then either the four
-/// token classes the app separates or a single total, and its cost — "—"
-/// when unpriced, never $0. `dim` is the legend-filter treatment.
-pub fn model_row(model: &ModelTotal, name_width: usize, wide: bool, dim: bool) -> Line<'static> {
-    let mut spans = vec![
-        Span::styled(
-            glyphs().live,
-            style(if dim {
-                ramp(model.color, 0.45)
-            } else {
-                rgb(model.color)
-            }),
-        ),
-        Span::styled(
-            format!("{:<name_width$}", truncate(&model.display_name, name_width)),
-            if dim { style(DIM) } else { Style::new() },
-        ),
-    ];
-    if wide {
-        spans.push(Span::styled(
-            format!("{:>8}", compact(model.tally.uncached_input())),
-            style(DIM),
-        ));
-        spans.push(Span::styled(
-            format!("{:>8}", compact(model.tally.cache_read)),
-            style(FAINT),
-        ));
-        spans.push(Span::styled(
-            format!("{:>8}", compact(model.tally.output)),
-            style(DIM),
-        ));
-    } else {
-        spans.push(Span::styled(
-            format!("{:>8}", compact(model.tally.total())),
-            style(DIM),
-        ));
-    }
-    spans.push(Span::styled(
-        format!(
-            "{:>10}",
-            model.cost.map(money).unwrap_or_else(|| "—".into())
-        ),
-        if dim { style(DIM) } else { Style::new() },
-    ));
-    Line::from(spans)
-}
-
-/// The breakdown table's column labels, for surfaces that seat them on
-/// their own row rather than folding them into a section title.
-pub fn model_columns(name_width: usize, wide: bool) -> Line<'static> {
-    let labels = if wide {
-        format!(
-            "{:>8}{:>8}{:>8}{:>10}",
-            "input", "cached", "output", "est. cost"
-        )
-    } else {
-        format!("{:>8}{:>10}", "tokens", "est. cost")
-    };
-    Line::from(Span::styled(
-        format!("{:width$}{labels}", "", width = 2 + name_width),
-        style(FAINT),
-    ))
-}
-
-/// "MODELS · 7D" with the grid's column labels flushed right when the pane
-/// is wide enough to seat them over their own columns.
-fn models_title(
-    app: &App,
-    data: &Dash,
-    name_width: usize,
-    wide: bool,
-    width: u16,
-) -> Line<'static> {
-    let mut title = format!("MODELS{}{}", glyphs().sep, app.period.label());
-    if data.models_truncated {
-        // No silent caps: per-model rows exist for ~35 days only.
-        title.push_str(&format!("{}last ~35d", glyphs().sep));
-    }
-    let labels = if wide {
-        format!(
-            "{:>8}{:>8}{:>8}{:>10}",
-            "input", "cached", "output", "est. cost"
-        )
-    } else {
-        String::new()
-    };
-    // Labels ride the title line only when they fit over their own
-    // columns without crowding the title.
-    let head_room = 2 + name_width;
-    if labels.is_empty()
-        || title.chars().count() + 1 > head_room
-        || head_room + labels.chars().count() > width as usize
-    {
-        return section_title(&title);
-    }
-    let pad = head_room - title.chars().count();
-    Line::from(vec![
-        Span::styled(title, style(DIM).add_modifier(Modifier::BOLD)),
-        Span::styled(format!("{:pad$}{labels}", ""), style(FAINT)),
-    ])
-}
-
-/// "≈ $1,308 at API list prices" — the grid's headline over EVERY model
-/// in scope, the honest tail when some have no rates at all, and the
-/// count of any the section had no room to seat (a cap nobody is told
-/// about reads as "this is all of it").
-pub fn cost_rollup(rows: &[ModelTotal], shown: usize) -> Line<'static> {
-    let priced: Vec<f64> = rows.iter().filter_map(|row| row.cost).collect();
-    let unpriced = rows.len() - priced.len();
-    let total: f64 = priced.iter().sum();
-    let mut text = if priced.is_empty() {
-        "no priced models — costs unavailable".to_owned()
-    } else {
-        format!("≈ {} at API list prices", money(total))
-    };
-    if unpriced > 0 && !priced.is_empty() {
-        text.push_str(&format!("{}{unpriced} unpriced", glyphs().sep));
-    }
-    if rows.len() > shown {
-        text.push_str(&format!("{}+{} more", glyphs().sep, rows.len() - shown));
-    }
-    Line::from(Span::styled(text, style(FAINT)))
-}
-
 // MARK: - Heatmap (two forms, weekday-true, paged — design §4)
 
 /// The four density cells, doubled to cell width — leaked once, static
@@ -1533,7 +1417,7 @@ fn heat_grid(days: &[DayRollup], weeks_visible: usize, page: usize, today: Date)
 /// where they sit.
 fn activity_title(
     app: &App,
-    filter: Option<&ModelTotal>,
+    filter: Option<&Filter>,
     back_label: Option<String>,
     has_older: bool,
     has_newer: bool,
@@ -1563,12 +1447,12 @@ fn activity_title(
             style(DIM),
         );
     }
-    if let Some(model) = filter {
+    if let Some(filter) = filter {
         push(
             &mut spans,
             &mut width,
-            format!("{}{}", glyphs().sep, model.display_name),
-            style(rgb(model.color)),
+            format!("{}{}", glyphs().sep, filter.total.display_name),
+            style(rgb(filter.total.color)),
         );
     }
     if let Some(back) = back_label {
@@ -1607,11 +1491,13 @@ fn activity_title(
 fn activity_readout(
     app: &App,
     digest: &LiveState,
-    filter: Option<&ModelTotal>,
+    filter: Option<&Filter>,
     window: (&str, &str),
+    width: usize,
 ) -> String {
+    let reading = app.reading(digest);
     if let Some(Hit::HeatDay(key)) = &app.hover_hit
-        && let Some(day) = digest.activity.days.iter().find(|day| &day.day_key == key)
+        && let Some(day) = reading.days.iter().find(|day| &day.day_key == key)
     {
         let mut text = format!("{}{}{} tok", day.day_key, glyphs().sep, compact(day.tokens));
         if let Some(cost) = day.cost {
@@ -1628,25 +1514,66 @@ fn activity_readout(
         Dimension::Cost => format!("≈ {}", money(value)),
     };
     let (start, end) = window;
-    if let Some(model) = filter {
-        let days = digest
-            .activity
+    if let Some(filter) = filter {
+        let days = reading
             .model_days
             .iter()
             .filter(|day| day.day_key.as_str() >= start && day.day_key.as_str() <= end)
-            .filter(|day| day.models.iter().any(|m| m.id == model.id))
+            .filter(|day| {
+                day.models
+                    .iter()
+                    .any(|m| filter.covers(&activity::row_key(m.agent.as_deref(), &m.id)))
+            })
             .count();
+        // Absent ≠ zero: a selection with nothing priced has no cost.
+        let figure = match (app.dimension, filter.total.cost) {
+            (Dimension::Cost, None) => "— unpriced".to_owned(),
+            _ => measure(filter.total.value(app.dimension)),
+        };
         return format!(
-            "{}{}{}{}{days} active days",
-            model.display_name,
+            "{}{}{figure}{}{days} active days",
+            filter.total.display_name,
             glyphs().sep,
-            measure(model.value(app.dimension)),
             glyphs().sep
         );
     }
-    let total = activity::total_value(&digest.activity.days, start, end, app.dimension);
-    let active = activity::active_days(&digest.activity.days, start, end);
-    format!("{}{}{active} active days", measure(total), glyphs().sep)
+    let sep = glyphs().sep;
+    if app.no_total_yet(digest)
+        && let Some(all) = app.all_agents(digest)
+    {
+        return format!("no total yet{sep}{}{sep}partial", all.count_label);
+    }
+    let total = activity::total_value(&reading.days, start, end, app.dimension);
+    let active = activity::active_days(&reading.days, start, end);
+    let figure = measure(total);
+    let days = format!("{sep}{active} active days");
+    // Whose total this is, and whether it is all of it yet. "partial" is
+    // the one word saying a scan is still out of the total (the count label
+    // reads alike for an agent that reports no tokens), so it gives way
+    // last: the active days first, then the label.
+    let (label, partial) = app
+        .all_agents(digest)
+        .map(|all| {
+            (
+                format!("{sep}{}", all.count_label),
+                if all.partial {
+                    format!("{sep}partial")
+                } else {
+                    String::new()
+                },
+            )
+        })
+        .unwrap_or_default();
+    let candidates = [
+        format!("{figure}{days}{label}{partial}"),
+        format!("{figure}{label}{partial}"),
+        format!("{figure}{partial}"),
+    ];
+    candidates
+        .iter()
+        .find(|text| text.chars().count() <= width)
+        .unwrap_or(&candidates[2])
+        .clone()
 }
 
 /// The 7D form: one stacked bar per day in the models' ledger colors, its
@@ -1654,8 +1581,18 @@ fn activity_readout(
 /// activity chart, terminal-fitted (item 10).
 fn render_bars(frame: &mut Frame, app: &mut App, digest: &LiveState, data: &Dash, rect: Rect) {
     let filter = data.filter(app);
-    let by_key: HashMap<&str, &DayRollup> = digest
-        .activity
+    let reading = app.reading(digest);
+    // Agents share the bars: a day with no per-model split, or only a
+    // prompt count, is painted neutral — no one vendor's accent.
+    let (fill, stub) = if app
+        .all_agents(digest)
+        .is_some_and(crate::state::spans_agents)
+    {
+        (rgb(NEUTRAL), ramp(NEUTRAL, 0.35))
+    } else {
+        (fill_accent(digest), ramp(digest.engine.accent, 0.35))
+    };
+    let by_key: HashMap<&str, &DayRollup> = reading
         .days
         .iter()
         .map(|day| (day.day_key.as_str(), day))
@@ -1667,8 +1604,7 @@ fn render_bars(frame: &mut Frame, app: &mut App, digest: &LiveState, data: &Dash
 
     // Paging back is possible while data predates the window; forward only
     // once we have stepped away from the current week.
-    let oldest = digest
-        .activity
+    let oldest = reading
         .days
         .first()
         .map(|day| day.day_key.as_str())
@@ -1678,8 +1614,13 @@ fn render_bars(frame: &mut Frame, app: &mut App, digest: &LiveState, data: &Dash
         .map(|date| activity::day_key(*date))
         .is_some_and(|key| key.as_str() > oldest);
     let back_label = (app.heat_page > 0).then(|| format!("{}w back", app.heat_page));
-    let (title, older_x, newer_x) =
-        activity_title(app, filter, back_label, has_older, app.heat_page > 0);
+    let (title, older_x, newer_x) = activity_title(
+        app,
+        filter.as_ref(),
+        back_label,
+        has_older,
+        app.heat_page > 0,
+    );
     frame.render_widget(title, Rect::new(rect.x, rect.y, rect.width, 1));
     if has_older {
         app.hits
@@ -1753,24 +1694,25 @@ fn render_bars(frame: &mut Frame, app: &mut App, digest: &LiveState, data: &Dash
                 let rows = usize::from(prompts > 0);
                 return Bar {
                     rows,
-                    cells: vec![(ramp(digest.engine.accent, 0.35), glyphs().bar_fill); rows],
+                    cells: vec![(stub, glyphs().bar_fill); rows],
                     label: String::new(),
                 };
             }
             let rows = (((value / max) * usable as f64).round() as usize).clamp(1, plot_height);
-            let segments = activity::segments(&digest.activity, &key, &data.models, app.dimension);
+            let segments = activity::segments(reading, &key, &data.models, app.dimension);
             let mut colors: Vec<(Color, &'static str)> = Vec::with_capacity(rows);
             if segments.is_empty() {
-                colors.resize(rows, (fill_accent(digest), glyphs().bar_fill));
+                colors.resize(rows, (fill, glyphs().bar_fill));
             } else {
                 // Rows split by share, largest remainder so the stack sums
-                // to the bar's height exactly; the period's heaviest model
-                // sits at the bottom of every bar, so bands line up.
+                // to the bar's height exactly; the stacking order is the
+                // period's (heaviest first, or agent by agent under All
+                // agents), the same for every bar, so bands line up.
                 let mut assigned: Vec<(usize, (Color, &'static str))> = segments
                     .iter()
                     .enumerate()
-                    .map(|(index, (id, color, fraction))| {
-                        let dim = filter.is_some_and(|model| &model.id != id);
+                    .map(|(index, (key, color, fraction))| {
+                        let dim = filter.as_ref().is_some_and(|filter| !filter.covers(key));
                         let paint = if dim { ramp(*color, 0.3) } else { rgb(*color) };
                         // Monochrome: the stack's bands separate by
                         // density instead of hue, brightest band first.
@@ -1803,7 +1745,7 @@ fn render_bars(frame: &mut Frame, app: &mut App, digest: &LiveState, data: &Dash
                 for (count, cell) in assigned {
                     colors.extend(std::iter::repeat_n(cell, count));
                 }
-                colors.resize(rows, (fill_accent(digest), glyphs().bar_fill));
+                colors.resize(rows, (fill, glyphs().bar_fill));
             }
             Bar {
                 rows,
@@ -1916,7 +1858,13 @@ fn render_bars(frame: &mut Frame, app: &mut App, digest: &LiveState, data: &Dash
 
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
-            activity_readout(app, digest, filter, (&data.start, &data.end)),
+            activity_readout(
+                app,
+                digest,
+                filter.as_ref(),
+                (&data.start, &data.end),
+                rect.width as usize,
+            ),
             style(FAINT),
         ))),
         Rect::new(rect.x, rect.y + rect.height - 1, rect.width, 1),
@@ -1926,26 +1874,38 @@ fn render_bars(frame: &mut Frame, app: &mut App, digest: &LiveState, data: &Dash
 /// The 30D and All forms: the calendar grid (portrait) or the weekday
 /// strip (landscape), scoped to the active period.
 fn render_heatmap(frame: &mut Frame, app: &mut App, digest: &LiveState, data: &Dash, rect: Rect) {
-    let days = &digest.activity.days;
+    let reading = app.reading(digest);
+    let days = &reading.days;
+    // Agents share the grid: its ramp is neutral (the app's Color.primary).
+    let ground = if app
+        .all_agents(digest)
+        .is_some_and(crate::state::spans_agents)
+    {
+        NEUTRAL
+    } else {
+        digest.engine.accent
+    };
     let by_key: HashMap<&str, &DayRollup> = days.iter().map(|d| (d.day_key.as_str(), d)).collect();
     // A hovered/focused model row filters the grid to that model's own
     // days, in its ledger color — the pane's version of the app's
     // hover-to-filter. Calendar geometry stays unfiltered: paging and
     // week rows never shrink under a filter.
     let filter = data.filter(app);
-    let heat_values: HashMap<&str, f64> = match filter {
-        Some(model) => digest
-            .activity
+    let heat_values: HashMap<&str, f64> = match &filter {
+        Some(filter) => reading
             .model_days
             .iter()
             .filter_map(|day| {
-                day.models.iter().find(|m| m.id == model.id).map(|m| {
-                    let value = match app.dimension {
+                let counted: Vec<f64> = day
+                    .models
+                    .iter()
+                    .filter(|m| filter.covers(&activity::row_key(m.agent.as_deref(), &m.id)))
+                    .map(|m| match app.dimension {
                         Dimension::Tokens => m.tally.total() as f64,
                         Dimension::Cost => m.cost.unwrap_or(0.0),
-                    };
-                    (day.day_key.as_str(), value)
-                })
+                    })
+                    .collect();
+                (!counted.is_empty()).then(|| (day.day_key.as_str(), counted.iter().sum()))
             })
             .collect(),
         None => days
@@ -1958,7 +1918,7 @@ fn render_heatmap(frame: &mut Frame, app: &mut App, digest: &LiveState, data: &D
         .copied()
         .fold(0.0_f64, f64::max)
         .max(f64::MIN_POSITIVE);
-    let heat_color = filter.map(|m| m.color).unwrap_or(digest.engine.accent);
+    let heat_color = filter.as_ref().map_or(ground, |f| f.total.color);
     let today = data.today;
     // The 30D form is the app's calendar in both orientations; only the
     // all-time grid takes the landscape weekday strip, where a year of
@@ -1993,8 +1953,13 @@ fn render_heatmap(frame: &mut Frame, app: &mut App, digest: &LiveState, data: &D
         Period::Month => format!("{}d back", 30 * app.heat_page),
         _ => format!("{}w back", weeks_visible * app.heat_page),
     });
-    let (title, older_x, newer_x) =
-        activity_title(app, filter, back_label, grid.has_older, grid.has_newer);
+    let (title, older_x, newer_x) = activity_title(
+        app,
+        filter.as_ref(),
+        back_label,
+        grid.has_older,
+        grid.has_newer,
+    );
     frame.render_widget(title, Rect::new(rect.x, rect.y, rect.width, 1));
     if grid.has_older {
         app.hits
@@ -2026,7 +1991,7 @@ fn render_heatmap(frame: &mut Frame, app: &mut App, digest: &LiveState, data: &D
                 text = "██";
             }
         } else if filter.is_none() && by_key.get(key.as_str()).is_some_and(|day| day.prompts > 0) {
-            cell_style = style(ramp(digest.engine.accent, 0.35));
+            cell_style = style(ramp(ground, 0.35));
             text = glyphs().prompt_cell;
         } else {
             cell_style = style(FAINT);
@@ -2117,7 +2082,13 @@ fn render_heatmap(frame: &mut Frame, app: &mut App, digest: &LiveState, data: &D
     };
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
-            activity_readout(app, digest, filter, (&window.0, &window.1)),
+            activity_readout(
+                app,
+                digest,
+                filter.as_ref(),
+                (&window.0, &window.1),
+                rect.width as usize,
+            ),
             style(FAINT),
         ))),
         Rect::new(rect.x, rect.y + rect.height - 1, rect.width, 1),
@@ -2133,9 +2104,17 @@ fn footer<'a>(
 ) -> Paragraph<'a> {
     // `a` is offered only where there is another account to go to.
     let switchable = crate::state::focus_candidates(digest).len() > 1;
+    // `u` only where there is a total to switch to.
+    let agents = digest.all_agents.is_some();
     let keys = match app.surface {
+        Surface::Dashboard if switchable && agents => {
+            "q quit / r refresh / a account / u agents / v span / c cost / p pace / 1-3 meters / ? help"
+        }
         Surface::Dashboard if switchable => {
             "q quit / r refresh / a account / v span / c cost / p pace / 1-3 meters / ? help"
+        }
+        Surface::Dashboard if agents => {
+            "q quit / r refresh / u agents / v span / c cost / p pace / 1-3 meters / ? help"
         }
         Surface::Dashboard => "q quit / r refresh / v span / c cost / p pace / 1-3 meters / ? help",
         Surface::Meter(_) => "esc back / arrows scrub / s span / z zoom / r refresh / ? help",
@@ -2330,6 +2309,7 @@ fn render_help(frame: &mut Frame, area: Rect) {
         Line::raw("r           ask the engine to refresh now"),
         Line::raw("v           activity span: 7D / 30D / All"),
         Line::raw("c           measure in tokens or cost"),
+        Line::raw("u           count all agents / the focused account"),
         Line::raw("p           polling pace: 3m / 5m / 15m"),
         Line::raw("a / A       pin the next account / back to auto"),
         Line::raw("click a mark pin that harness's account"),
@@ -2369,12 +2349,36 @@ fn render_help(frame: &mut Frame, area: Rect) {
 /// pane keeps the title and the cost, a roomier one earns duration, tokens
 /// and prompts, and the widest adds project·branch. Model dots ride at the
 /// left in the engine's ledger colours.
-fn sessions<'a>(digest: &'a LiveState, accent: Color, rect: Rect) -> Paragraph<'a> {
-    let cards = &digest.sessions;
-    let mut title = "SESSIONS".to_owned();
-    if !cards.is_empty() {
-        title.push_str(&format!("{}{} recent", glyphs().sep, cards.len()));
+/// "SESSIONS · Claude Code (work) · 6 recent", fitted: under All agents the
+/// owner says whose list this is, so the count gives way first, then the
+/// owner is clipped.
+fn sessions_title(owner: Option<&str>, count: usize, width: usize) -> String {
+    let sep = glyphs().sep;
+    let recent = if count > 0 {
+        format!("{sep}{count} recent")
+    } else {
+        String::new()
+    };
+    let Some(owner) = owner else {
+        return format!("SESSIONS{recent}");
+    };
+    let full = format!("SESSIONS{sep}{owner}{recent}");
+    if full.chars().count() <= width {
+        return full;
     }
+    let head = format!("SESSIONS{sep}");
+    let room = width.saturating_sub(head.chars().count()).max(4);
+    format!("{head}{}", truncate(owner, room))
+}
+
+fn sessions<'a>(
+    digest: &'a LiveState,
+    owner: Option<&str>,
+    accent: Color,
+    rect: Rect,
+) -> Paragraph<'a> {
+    let cards = &digest.sessions;
+    let title = sessions_title(owner, cards.len(), rect.width as usize);
     let mut lines = vec![section_title(&title)];
 
     if cards.is_empty() {
@@ -2566,6 +2570,200 @@ mod tests {
         cell["segments"] = serde_json::json!([]);
         cells.push(cell);
         serde_json::from_value(object).expect("digest decodes")
+    }
+
+    fn harness_golden() -> serde_json::Value {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../Tests/UsageCoreTests/Fixtures/digest/live-state-v1-harnesses.json");
+        serde_json::from_slice(&std::fs::read(&path).expect("harness golden")).expect("json")
+    }
+
+    fn app_on(object: serde_json::Value) -> App {
+        let mut app = App::new(
+            std::path::PathBuf::from("/nonexistent/live-state.json"),
+            None,
+            time::UtcOffset::UTC,
+        );
+        app.digest = Some(serde_json::from_value(object).expect("digest decodes"));
+        app
+    }
+
+    /// The golden's own clock, so its 7D period holds its activity.
+    fn golden_now() -> OffsetDateTime {
+        time::macros::datetime!(2026-09-19 12:00 UTC)
+    }
+
+    fn screen(app: &mut App, width: u16, height: u16) -> Vec<String> {
+        let backend = ratatui::backend::TestBackend::new(width, height);
+        let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+        terminal
+            .draw(|frame| render(frame, app, golden_now()))
+            .expect("draw");
+        let buffer = terminal.backend().buffer().clone();
+        (0..height)
+            .map(|y| (0..width).map(|x| buffer[(x, y)].symbol()).collect())
+            .collect()
+    }
+
+    /// The keyboard cursor holds a ROW, not a position: a scan that lands
+    /// and puts a row above it can't move it onto a row nobody chose.
+    #[test]
+    fn the_cursor_keeps_its_row_across_a_reload() {
+        let mut app = app_on(harness_golden());
+        screen(&mut app, 140, 40);
+        let codex = app
+            .hits
+            .find(|hit| matches!(hit, Hit::ModelRow(id) if id.ends_with("gpt-5.2-codex")))
+            .expect("the Codex model row is drawn");
+        app.keyboard_mode = true;
+        app.focus_hit = Some(codex);
+        screen(&mut app, 140, 40);
+        let activity_line = |lines: &[String]| {
+            lines
+                .iter()
+                .find(|line| line.contains("ACTIVITY"))
+                .cloned()
+                .unwrap_or_default()
+        };
+        assert!(activity_line(&screen(&mut app, 140, 40)).contains("GPT 5.2 Codex"));
+        // A heavier Codex model lands, seated above it.
+        let mut object = harness_golden();
+        let days = object["allAgents"]["activity"]["modelDays"]
+            .as_array_mut()
+            .expect("modelDays");
+        let last = days.last_mut().expect("a day");
+        let mut heavier = last["models"][1].clone();
+        heavier["id"] = "zz-heavier".into();
+        heavier["displayName"] = "Heavier".into();
+        heavier["tally"]["input"] = 9_000_000.into();
+        last["models"]
+            .as_array_mut()
+            .expect("models")
+            .insert(0, heavier);
+        app.digest = Some(serde_json::from_value(object).expect("digest decodes"));
+        let after = screen(&mut app, 140, 40);
+        let line = activity_line(&after);
+        assert!(line.contains("GPT 5.2 Codex"), "{line}");
+        assert!(!line.contains("Heavier"), "{line}");
+    }
+
+    /// The outline's extra rows never cost the pane a section one
+    /// account's view would show (the activity chart, MODELS itself).
+    #[test]
+    fn the_outline_never_costs_a_section() {
+        for (width, height) in [
+            (46, 22),
+            (90, 13),
+            (46, 18),
+            (60, 20),
+            (72, 16),
+            (100, 27),
+            (120, 15),
+        ] {
+            let area = Rect::new(0, 0, width, height);
+            let mut app = app_on(harness_golden());
+            let digest = app.digest.clone().expect("digest");
+            let all = dashboard_plan(
+                area,
+                &digest,
+                &Dash::build(&app, &digest, area, golden_now()),
+            );
+            app.scope = crate::state::Scope::Account;
+            let account = dashboard_plan(
+                area,
+                &digest,
+                &Dash::build(&app, &digest, area, golden_now()),
+            );
+            assert!(
+                layout::landed(&all) >= layout::landed(&account),
+                "{width}x{height}: all agents lands {} sections, the account {}",
+                layout::landed(&all),
+                layout::landed(&account)
+            );
+        }
+    }
+
+    /// The day drill under All agents names its scope, and a model name
+    /// two agents share stays two tellable rows.
+    #[test]
+    fn the_day_drill_names_its_scope_and_its_twins() {
+        let mut app = app_on(harness_golden());
+        app.surface = Surface::Day("2026-09-19".into());
+        let lines = screen(&mut app, 160, 40);
+        let text = lines.join("\n");
+        assert!(text.contains("2 agents"), "{text}");
+        assert!(text.contains("Other (Codex)"), "{text}");
+        assert!(text.contains("Other (Claude)"), "{text}");
+        // The focused account's own day names no twins.
+        app.scope = crate::state::Scope::Account;
+        let text = screen(&mut app, 160, 40).join("\n");
+        assert!(!text.contains("Other ("), "{text}");
+    }
+
+    /// Whose sessions these are outlives the count when the title is tight.
+    #[test]
+    fn the_sessions_title_keeps_its_owner() {
+        let owner = Some("Claude Code (dev@example.com)");
+        assert_eq!(
+            sessions_title(owner, 6, 80),
+            "SESSIONS · Claude Code (dev@example.com) · 6 recent"
+        );
+        assert_eq!(
+            sessions_title(owner, 6, 44),
+            "SESSIONS · Claude Code (dev@example.com)"
+        );
+        let tight = sessions_title(owner, 6, 30);
+        assert!(tight.starts_with("SESSIONS · Claude Code"), "{tight}");
+        assert!(tight.chars().count() <= 30, "{tight}");
+        assert_eq!(sessions_title(None, 6, 20), "SESSIONS · 6 recent");
+    }
+
+    /// "partial" is the one word saying a scan is still out of the total;
+    /// a narrow readout gives up everything else first.
+    #[test]
+    fn a_narrow_readout_keeps_partial() {
+        let mut object = harness_golden();
+        object["allAgents"]["partial"] = true.into();
+        object["allAgents"]["members"][1]["state"] = "scanning".into();
+        object["allAgents"]["countLabel"] = "1 of 2 agents".into();
+        let app = app_on(object);
+        let digest = app.digest.clone().expect("digest");
+        let window = ("2026-09-13", "2026-09-19");
+        let wide = activity_readout(&app, &digest, None, window, 80);
+        assert!(
+            wide.contains("active days") && wide.ends_with("partial"),
+            "{wide}"
+        );
+        // The narrowest dashboard column is ~38 wide (below 40 the strip
+        // takes over); every width from there keeps the word.
+        for width in [24, 30, 38, 46] {
+            let line = activity_readout(&app, &digest, None, window, width);
+            assert!(line.ends_with("partial"), "{width}: {line}");
+            assert!(line.chars().count() <= width, "{width}: {line}");
+        }
+    }
+
+    /// Where the account's MODELS title seats its column labels, the
+    /// outline's does too.
+    #[test]
+    fn the_outline_keeps_the_column_labels() {
+        for width in [46u16, 52, 60, 100] {
+            let mut app = app_on(harness_golden());
+            let all = screen(&mut app, width, 40);
+            app.scope = crate::state::Scope::Account;
+            let account = screen(&mut app, width, 40);
+            let labelled = |lines: &[String], title: &str| {
+                lines
+                    .iter()
+                    .find(|line| line.contains(title))
+                    .is_some_and(|line| line.contains("input"))
+            };
+            assert_eq!(
+                labelled(&all, "AGENTS · 7D"),
+                labelled(&account, "MODELS · 7D"),
+                "{width} columns"
+            );
+        }
     }
 
     /// The header's miniature keeps a shown harness that has no limits to

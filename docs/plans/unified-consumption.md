@@ -105,8 +105,8 @@ these pictures; a real scan has both for every day.
 
 - The Sessions window's own scope ("Show more…" still opens the focused
   account's window).
-- The cross-agent total in the digest, so `usage-cli` and the TUI report
-  it (an additive field; goldens on both sides).
+- ~~The cross-agent total in the digest, so `usage-cli` and the TUI report
+  it~~ — done: [tui-unified-reading.md](tui-unified-reading.md).
 - The family view at every period, and one family total across agents
   once a model line is reachable through more than one.
 - The main window's Home page (feat/main-window): consumption as tiles

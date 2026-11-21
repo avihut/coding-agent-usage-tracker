@@ -29,15 +29,14 @@ struct ConsumptionInput: Equatable {
     /// More than one agent in scope — read per heatmap cell, so stored.
     let spansAgents: Bool
 
-    /// "2 agents", "2 of 3 agents" (one reports no tokens), "2 accounts".
+    /// "2 agents", "2 of 3 agents" (one reports no tokens), "2 accounts" —
+    /// core's phrasing, the words the TUI and the CLI print too. One gap:
+    /// the panel has no "scanning" state yet, so an account whose first
+    /// scan hasn't landed counts (as nothing) here while the digest names
+    /// it `scanning` and calls the total partial (follow-up, plan
+    /// tui-unified-reading → Build notes).
     var countLabel: String {
-        let agents = accounts.map(\.agent).uniquedInOrder()
-        guard agents.count > 1 else { return "\(accounts.count) accounts" }
-        let counted = agents.filter { agent in
-            accounts.contains { $0.agent == agent && $0.reportsTokens }
-        }.count
-        return counted == agents.count
-            ? "\(agents.count) agents" : "\(counted) of \(agents.count) agents"
+        ConsumptionMembership.countLabel(accounts.map { ($0.agent, $0.reportsTokens) })
     }
 }
 
@@ -72,11 +71,18 @@ extension ProviderRegistry {
     /// accounts stay out: while the app hosts they have no engine and so no
     /// activity in memory, and counting them would take a scan of its own
     /// and make the total depend on which process hosts.
+    /// The rule is core's (`ConsumptionMembership`), shared with the digest's
+    /// all-agents section and `usage-cli --all-agents`.
     var consumptionMembers: [ConsumptionMember] {
         let hidden = Set(harnesses.filter { !$0.shown }.map(\.id))
-        return shownProfiles
-            .filter { !hidden.contains($0.providerID) }
-            .map { ConsumptionMember(agent: $0.providerID, account: $0.key) }
+        let dormant = dormantIDs
+        return ConsumptionMembership.members(
+            profiles.map {
+                ConsumptionMembership.Candidate(
+                    key: $0.key, providerID: $0.providerID, enrolled: $0.isEnrolled,
+                    enabled: $0.enabled, dormant: dormant.contains($0.key))
+            },
+            shown: Set(profiles.map(\.providerID)).subtracting(hidden))
     }
 
     /// The scope as chosen, resolved against today's members — a target
@@ -110,9 +116,11 @@ extension ProviderRegistry {
         }
         return consumptionCache.input(accounts: accounts, faces: faces) {
             var agents: [String: ConsumptionAgentFace] = [:]
+            var catalogs: [String: ModelCatalog] = [:]
             for store in stores where agents[store.provider.id] == nil {
                 agents[store.provider.id] = ConsumptionAgentFace(
                     name: store.provider.agentName, style: store.style)
+                catalogs[store.provider.id] = store.provider.modelCatalog
             }
             var accountFaces: [String: ConsumptionAccountFace] = [:]
             for (store, face) in zip(stores, faces) { accountFaces[store.profile.key] = face }
@@ -120,7 +128,7 @@ extension ProviderRegistry {
                 accounts: accounts,
                 days: ConsumptionMerge.days(accounts),
                 pricing: ConsumptionMerge.pricing(accounts),
-                colors: Self.consumptionColors(accounts, agents: agents),
+                colors: Self.consumptionColors(accounts, agents: agents, catalogs: catalogs),
                 agents: agents, accountFaces: accountFaces, spansAgents: agents.count > 1)
         }
     }
@@ -129,9 +137,14 @@ extension ProviderRegistry {
     /// wear everywhere; several agents each paint their models in their own
     /// accent's tones, so two vendors can never wear look-alikes. Either
     /// way each agent's ledger grows with its OWN raw ids only, heaviest
-    /// first like the engine's seed.
+    /// first like the engine's seed. Families are read by the AGENT'S own
+    /// catalog, as its engine seeded the ledger — the globally active catalog
+    /// (`ModelNames`) would file another vendor's model under a family its
+    /// engine never named, growing a stray slot and a different tone than
+    /// the digest's.
     private static func consumptionColors(
-        _ accounts: [AccountConsumption], agents: [String: ConsumptionAgentFace]
+        _ accounts: [AccountConsumption], agents: [String: ConsumptionAgentFace],
+        catalogs: [String: ModelCatalog]
     ) -> [String: Color] {
         let spansAgents = agents.count > 1
         var colors: [String: Color] = [:]
@@ -144,9 +157,10 @@ extension ProviderRegistry {
                 }
             }
             let models = weight.keys.sorted { weight[$0]! != weight[$1]! ? weight[$0]! > weight[$1]! : $0 < $1 }
+            let family = catalogs[agent]?.familyName ?? ModelFamily.familyName
             let raw = spansAgents
-                ? ModelPalette.agentShades(for: models, style: face.style)
-                : ModelPalette.assignment(for: models, style: face.style)
+                ? ModelPalette.agentShades(for: models, style: face.style, family: family)
+                : ModelPalette.assignment(for: models, style: face.style, family: family)
             for account in mine {
                 for model in models {
                     colors[ConsumptionKey.make(agent: agent, account: account.account, model: model)] = raw[model]
@@ -154,12 +168,5 @@ extension ProviderRegistry {
             }
         }
         return colors
-    }
-}
-
-extension Array where Element: Hashable {
-    fileprivate func uniquedInOrder() -> [Element] {
-        var seen: Set<Element> = []
-        return filter { seen.insert($0).inserted }
     }
 }

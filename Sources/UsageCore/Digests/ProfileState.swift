@@ -122,10 +122,15 @@ public struct ProfileSection: Sendable {
     public let lastActivityAt: Date?
     public let homeDisplayPath: String?
     public let state: LiveState?
+    /// The engine's landed scan, for the all-agents total — nil when no
+    /// engine runs or its first scan hasn't landed (the account then counts
+    /// as `scanning`, never as zero).
+    public let consumption: SectionConsumption?
 
     public init(
         profile: Profile, label: String, monogram: String, dormant: Bool,
-        lastActivityAt: Date?, homeDisplayPath: String?, state: LiveState?
+        lastActivityAt: Date?, homeDisplayPath: String?, state: LiveState?,
+        consumption: SectionConsumption? = nil
     ) {
         self.profile = profile
         self.label = label
@@ -134,6 +139,7 @@ public struct ProfileSection: Sendable {
         self.lastActivityAt = lastActivityAt
         self.homeDisplayPath = homeDisplayPath
         self.state = state
+        self.consumption = consumption
     }
 
     /// Enabled, awake, and wanted in the bar.
@@ -158,7 +164,7 @@ public enum MeteringDigest {
         pinned: String? = nil, host: String, pid: Int, appVersion: String,
         systemAccent: RGBColor?, activeInterval: TimeInterval, appUpdate: AppUpdateCard?,
         nextReprobeAt: Date?, now: Date, calendar: Calendar = .current,
-        locale: Locale = .current
+        locale: Locale = .current, allAgentsCache: AllAgentsCache? = nil
     ) -> LiveState {
         let shownIDs = Set(harnesses.filter(\.shown).map(\.provider.id))
         // Focus fell to nobody (every account dormant, or a stale key): the
@@ -241,7 +247,10 @@ public enum MeteringDigest {
             },
             outages: focusedHarness?.outages,
             focusedProfile: focusedID, profiles: profiles, menuBarCells: cells,
-            harnesses: states, pinnedProfile: pinned)
+            harnesses: states, pinnedProfile: pinned,
+            allAgents: AllAgentsDigest.build(
+                harnesses: harnesses, sections: sections, now: now, calendar: calendar,
+                cache: allAgentsCache))
     }
 
     /// The one-harness call this host made before several were metered at
@@ -340,7 +349,7 @@ extension LiveState {
             notices: harness.map(\.notices) ?? notices,
             outages: harness.map(\.outages) ?? outages,
             focusedProfile: focusedProfile, profiles: profiles, menuBarCells: menuBarCells,
-            harnesses: harnesses, pinnedProfile: pinnedProfile)
+            harnesses: harnesses, pinnedProfile: pinnedProfile, allAgents: allAgents)
     }
 
     /// Every SHOWN harness's pending notices in one card (0.101.0). The

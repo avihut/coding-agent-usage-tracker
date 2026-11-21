@@ -1,7 +1,7 @@
 //! The app's whole mutable world: the last decoded digest, its file
 //! freshness, and the one-line reply channel for socket commands.
 
-use crate::digest::{LiveState, ProfileState};
+use crate::digest::{ActivityRollup, AllAgentsState, LiveState, ProfileState};
 use ratatui::layout::Rect;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -86,6 +86,40 @@ impl Dimension {
             Self::Cost => Self::Tokens,
         }
     }
+}
+
+/// Whose consumption TODAY, MODELS and ACTIVITY count (the app's Activity
+/// scope, #37): every agent on the strip, or the focused account alone.
+/// Limits are never part of it — the header is always the focused
+/// account's. Like `Period` and `Dimension` it lives for the run: the pane
+/// writes nothing, so each run starts on the app's fresh-install default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Scope {
+    AllAgents,
+    Account,
+}
+
+/// Whether a total spans more than one AGENT (not merely several accounts
+/// of one) — when charts go neutral, as the app's do only then.
+pub fn spans_agents(all: &AllAgentsState) -> bool {
+    all.members
+        .iter()
+        .any(|member| member.provider_id != all.members[0].provider_id)
+}
+
+/// The rollup a not-yet-existing total reads as.
+fn empty_rollup() -> &'static ActivityRollup {
+    static EMPTY: OnceLock<ActivityRollup> = OnceLock::new();
+    EMPTY.get_or_init(|| ActivityRollup {
+        time_zone: String::new(),
+        today_hours: Vec::new(),
+        today_tokens: 0,
+        today_prompts: 0,
+        today_cost: None,
+        days: Vec::new(),
+        model_days: Vec::new(),
+        hour_days: Vec::new(),
+    })
 }
 
 /// The panel ⋯ menu's quick pace picks, in seconds. 3 minutes is the
@@ -241,7 +275,8 @@ pub enum Hit {
     HeatDay(String),
     PageEarlier,
     PageLater,
-    ModelRow(usize),
+    /// A MODELS row, by its `outline::Row::id` — never by position.
+    ModelRow(String),
     Back,
     /// A notification row, by notice id — focusable, so `x` has a target.
     Notice(String),
@@ -349,7 +384,8 @@ pub enum Freshness {
 
 pub struct App {
     pub digest_path: PathBuf,
-    pub socket_path: PathBuf,
+    /// None when the pane reads a `--digest` file and may dial no engine.
+    pub socket_path: Option<PathBuf>,
     pub digest: Option<LiveState>,
     pub decode_error: Option<String>,
     /// One-line echo of the last socket command's reply, cleared by the
@@ -370,6 +406,9 @@ pub struct App {
     /// view, so each run starts on the app's fresh-install defaults.
     pub period: Period,
     pub dimension: Dimension,
+    /// All agents or the focused account (`u`). Kept across a focus switch:
+    /// it is the person's choice of reading, not a cursor into one account.
+    pub scope: Scope,
     /// Scrub cursor into the open meter's VISIBLE points (index from the
     /// END of `meter::view(...).points`, never the whole series — the
     /// cursor must not reach a sample the span isn't drawing).
@@ -404,7 +443,11 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(digest_path: PathBuf, socket_path: PathBuf, local_offset: UtcOffset) -> Self {
+    pub fn new(
+        digest_path: PathBuf,
+        socket_path: Option<PathBuf>,
+        local_offset: UtcOffset,
+    ) -> Self {
         let mut app = Self {
             digest_path,
             socket_path,
@@ -422,6 +465,7 @@ impl App {
             heat_page: 0,
             period: Period::Week,
             dimension: Dimension::Tokens,
+            scope: Scope::AllAgents,
             scrub: None,
             meter_span: HashMap::new(),
             pointer: None,
@@ -432,6 +476,56 @@ impl App {
         };
         app.reload();
         app
+    }
+
+    /// The all-agents section when that is the reading in force — the scope
+    /// asks for it AND the writer published one (it doesn't with one
+    /// account in "all", whose own section is then the whole total).
+    pub fn all_agents<'a>(&self, digest: &'a LiveState) -> Option<&'a AllAgentsState> {
+        if self.scope != Scope::AllAgents {
+            return None;
+        }
+        digest.all_agents.as_ref()
+    }
+
+    /// The activity the consumption sections read under the scope. A total
+    /// that doesn't exist yet (every member still scanning) reads as an
+    /// empty rollup, and the sections say why instead of showing zeros.
+    pub fn reading<'a>(&self, digest: &'a LiveState) -> &'a ActivityRollup {
+        match self.all_agents(digest) {
+            Some(all) => all.activity.as_ref().unwrap_or_else(|| empty_rollup()),
+            None => &digest.activity,
+        }
+    }
+
+    /// Under All agents, while no member is counted yet: there is no total.
+    pub fn no_total_yet(&self, digest: &LiveState) -> bool {
+        self.all_agents(digest)
+            .is_some_and(|all| all.activity.is_none())
+    }
+
+    /// `u`: switch between all agents and the focused account. With one
+    /// account in "all" there is nothing to switch, and the pane says why
+    /// instead of pretending to.
+    pub fn toggle_scope(&mut self) {
+        let Some(digest) = self.digest.as_ref() else {
+            return;
+        };
+        if digest.all_agents.is_none() {
+            // One account in "all", or an engine older than the total.
+            self.notice = Some("no all-agents total in this digest".into());
+            return;
+        }
+        self.scope = match self.scope {
+            Scope::AllAgents => Scope::Account,
+            Scope::Account => Scope::AllAgents,
+        };
+        // Rows and bands index a different breakdown now — and the next
+        // frame resolves hover against this frame's map, so drop it too.
+        self.focus_hit = None;
+        self.hover_hit = None;
+        self.hits.clear();
+        self.notice = None;
     }
 
     /// The span and zoom rung in force for a meter — the app's own opening
@@ -675,7 +769,7 @@ mod tests {
     fn app_with(digest: LiveState) -> App {
         let mut app = App::new(
             PathBuf::from("/nonexistent/live-state.json"),
-            PathBuf::from("/nonexistent/control.sock"),
+            Some(PathBuf::from("/nonexistent/control.sock")),
             UtcOffset::UTC,
         );
         app.digest = Some(digest);
@@ -694,6 +788,76 @@ mod tests {
         let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../Tests/UsageCoreTests/Fixtures/digest/live-state-v1-harnesses.json");
         LiveState::parse(&std::fs::read(path).unwrap()).unwrap()
+    }
+
+    // MARK: - The All agents scope (u)
+
+    #[test]
+    fn the_scope_starts_on_all_agents_and_u_flips_it() {
+        let digest = harness_digest();
+        let mut app = app_with(digest.clone());
+        assert_eq!(app.scope, Scope::AllAgents);
+        assert!(app.all_agents(&digest).is_some());
+        // Rows and bands index a different breakdown after a flip: nothing
+        // hovered, focused or hit-mapped survives it.
+        app.hover_hit = Some(Hit::ModelRow("codex\u{1f}".into()));
+        app.focus_hit = Some(Hit::ModelRow("codex\u{1f}".into()));
+        app.hits.add(Rect::new(0, 0, 4, 1), Hit::Back);
+        app.toggle_scope();
+        assert_eq!(app.scope, Scope::Account);
+        assert!(app.all_agents(&digest).is_none());
+        assert!(app.hover_hit.is_none() && app.focus_hit.is_none());
+        assert!(app.hits.at(0, 0).is_none());
+        // The account scope reads the focused account's own rollup.
+        assert!(std::ptr::eq(app.reading(&digest), &digest.activity));
+        app.toggle_scope();
+        assert_eq!(app.scope, Scope::AllAgents);
+    }
+
+    #[test]
+    fn without_a_section_u_says_so_and_changes_nothing() {
+        let mut app = app_with(golden_digest());
+        app.toggle_scope();
+        assert_eq!(app.scope, Scope::AllAgents);
+        assert_eq!(
+            app.notice.as_deref(),
+            Some("no all-agents total in this digest")
+        );
+    }
+
+    #[test]
+    fn the_scope_survives_a_focus_switch() {
+        let mut app = app_with(harness_digest());
+        app.toggle_scope();
+        let mut next = harness_digest();
+        next.focused_profile = Some("default".into());
+        app.adopt(next);
+        assert_eq!(app.scope, Scope::Account);
+    }
+
+    #[test]
+    fn nobody_counted_yet_is_no_total_not_a_zero_one() {
+        let mut digest = harness_digest();
+        let all = digest.all_agents.as_mut().expect("section");
+        all.models = None;
+        all.activity = None;
+        let app = app_with(digest.clone());
+        assert!(app.no_total_yet(&digest));
+        assert!(app.reading(&digest).days.is_empty());
+        assert!(app.reading(&digest).today_cost.is_none());
+    }
+
+    #[test]
+    fn charts_go_neutral_only_when_agents_share_them() {
+        let digest = harness_digest();
+        let all = digest.all_agents.clone().expect("section");
+        assert!(spans_agents(&all));
+        // Two accounts of ONE agent keep that agent's colours.
+        let mut one = all;
+        for member in &mut one.members {
+            member.provider_id = "claude".into();
+        }
+        assert!(!spans_agents(&one));
     }
 
     fn candidate_keys(digest: &LiveState) -> Vec<&str> {
@@ -980,7 +1144,7 @@ mod tests {
     fn missing_digest_is_engine_offline() {
         let app = App::new(
             PathBuf::from("/nonexistent/live-state.json"),
-            PathBuf::from("/nonexistent/control.sock"),
+            Some(PathBuf::from("/nonexistent/control.sock")),
             UtcOffset::UTC,
         );
         assert_eq!(
