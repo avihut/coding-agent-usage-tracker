@@ -116,8 +116,8 @@ and the same words appear under it in Settings → General → Harnesses.
 Since 2026-11-21 the app also meters **Antigravity CLI**, under a violet `∩`,
 with nothing to set up. Its tokens, models and activity come from its own
 transcripts. Its PLAN LIMITS live on Google's servers, so the app asks the
-CLI itself: while you use Antigravity it runs the CLI's own read-only
-limits report (`agy -p /quota`) at most every ten minutes — no agent turn,
+CLI itself: while you use Antigravity it runs the CLI's own limits report
+(`agy -p /quota`) at most every ten minutes — no agent turn,
 no quota spent — and shows every pool your plan reports: the Gemini session
 (5h) and weekly limits, the Claude + GPT pool's two, and Gemini 4 Argon's
 own weekly. The menu bar reads S · W plus the most-used of the others; the
@@ -485,26 +485,42 @@ succeeds it for Google's plans, and it stays metered for API-key use.
   `UsageProvider.quotaCommand` (candidates, version check, argv, env,
   reducer, privacy lines); `AgentQuotaProbe` (one per engine) runs it only
   when the host was given a runner (`MeteringHost.Configuration
-  .agentCommandRunner` — usaged and the hosting app; never tests, snapshots,
-  clients or usage-cli), on `AgentQuotaSchedule`'s terms: a conversation
+  .agentCommandRunner` — usaged and the hosting app; never tests (bar the
+  opt-in live one), snapshots, clients or usage-cli), on
+  `AgentQuotaSchedule`'s terms: a conversation
   written since the last reading began (first reading: within 7 days), the
-  10-minute floor (`minimumFloor`, slack 30 s) from the last ATTEMPT,
-  backoff 20/40/80/120 min, single flight. `SpawnedCommandRunner` is
+  10-minute floor from the last ATTEMPT (`minimumFloor`, hard: the 30 s
+  slack only rounds the backoff steps), backoff 20/40/80/120 min (a manual
+  refresh skips it, never the floor), single flight; the state file is
+  stamped before the first spawn and re-read before every decision, and a
+  shut-down engine's probe (`retire()`) neither runs nor writes again. `SpawnedCommandRunner` is
   `posix_spawn` with CLOEXEC_DEFAULT (no host fd reaches the child —
   `engine.lock` above all), its own process group (a timeout kills the
-  group), default signals, utility QoS, cwd `/`, and it returns on the
-  child's EXIT, never pipe EOF. State and reading in
+  group, and whatever is left in it is killed when the child exits — seen
+  with `WNOWAIT`, so the group id can't be reused first), default signals,
+  utility QoS, cwd `/`, and it returns on the child's EXIT, never pipe
+  EOF. State and reading in
   `<bundle>/antigravity/default/quota-probe.json` (0600, the engine's own).
   The reading reaches the provider through
   `fetchRawUsage(accessToken:quota:)`; a failed attempt makes the service
   return `.cached(snapshot, error)` (`agentTimedOut`,
   `agentOutputUnreadable`, `agentCommandFailed`, or `noCredentials` for
   not signed in) — a snapshot, so focus sees one. Binary candidates:
-  `~/.local/bin/agy`, `$HOMEBREW_PREFIX/bin/agy`; a candidate inside an
-  `.app` (the desktop editor's same-named launcher) or whose `--version`
-  isn't a single version line is never asked; no `PATH` lookup. A version
-  run that doesn't finish is an attempt — floor, backoff and a shown
-  failure — and is retried, not held against the file.
+  `~/.local/bin/agy`, `/opt/homebrew/bin/agy`, `/usr/local/bin/agy`; a
+  candidate inside an `.app` (the desktop editor's same-named launcher) or
+  whose `--version` doesn't end on a version line is never asked; no
+  `PATH` lookup. A version check settles per file identity, except one
+  that times out: an attempt (floor, backoff, a shown failure), retried.
+  REFUSAL: a run that reads as an agent turn (`num_turns`, tokens, or a
+  `conversation_id`) — or a success with no command result that can't say
+  no turn ran — is `notALimitsCommand`: that binary is never asked again
+  until the file changes, so a CLI that began treating `/quota` as a
+  prompt costs at most one turn per update. The CLI uninstalled clears the
+  failure it left, and a failure older than the 7-day reach isn't shown.
+  A shape that moved (no `data`, `groups` mistyped or renamed, buckets
+  none of which read) is `unreadable`, never an empty reading; an EMPTY
+  `data` is zero groups (protobuf JSON omits an empty list). Disabled
+  buckets are skipped. Sign-in is recognised by whole phrases only.
   Buckets map by id (the real ids, settled 2026-11-21): `gemini-5h` →
   "Session (5h)" (rank 0, S), `gemini-weekly` → "Weekly" (rank 1, W),
   `3p-5h`/`3p-weekly` → scoped "Claude + GPT (5h)" / "(7d)" (rank 2, C),
@@ -520,8 +536,9 @@ succeeds it for Google's plans, and it stays metered for API-key use.
   reset, unless no conversation is KNOWN to have been written since the
   reset (then 0%). The reducer decodes only `status`, bucket ids, windows,
   fractions and resets, lenient per bucket; a bucket with a REAL future
-  reset and no fraction reads as SPENT (never the epoch) — still unverified,
-  no spent bucket seen yet. `/quota` carries no plan tier: no plan name.
+  reset, no fraction and no stated amount reads as SPENT (never the epoch)
+  — a documented exception to absent ≠ zero, since protobuf JSON omits a
+  zero field; still unverified, no spent bucket seen yet. `/quota` carries no plan tier: no plan name.
 - THREE POOLS, ONE ACCOUNT (`Meter.modelScope`, core, additive in the
   digest as `LiveMeter.modelScope`): the Gemini meters count `gemini`, the
   pool's `claude` and `gpt`, Argon's `argon` — in the curves, the activity

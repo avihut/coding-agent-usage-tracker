@@ -475,6 +475,55 @@ machine is simply never read again.
 16. The failure hints say "limits already read stay shown", which holds
     whether or not a reading exists.
 
+Review round (2026-11-22, xhigh: the code-review skill plus a §10
+compliance reviewer on Opus):
+
+17. REFUSAL. A run that reads as an agent turn (`num_turns` > 0, tokens, or
+    a non-empty `conversation_id` — the real limits command reports zero,
+    zero and `""`), or a success with no `command` result that doesn't
+    itself say zero turns, is `notALimitsCommand`: that binary identity is
+    never asked again until the file changes. Without it, a future CLI that
+    treated `/quota` as a prompt would spend quota on every attempt, and
+    its own conversation would keep the schedule due forever.
+18. A shape that moved reads as `unreadable`, never as an empty reading:
+    no `data`, `groups` mistyped, `data` with other keys and no `groups`,
+    or buckets reported none of which read. An EMPTY `data` is zero groups
+    (protobuf JSON omits an empty list), so an API-key sign-in still reads
+    as "no limits", not as an error. An unknown window word is no longer a
+    disagreement.
+19. The "no fraction + real future reset = spent" reading stays, as a
+    documented exception to absent ≠ zero (protobuf JSON omits a zero
+    field), now guarded as #36's was: a bucket that states an amount is
+    never read as spent, and a disabled bucket is skipped.
+20. A manual refresh skips the failure backoff, never the floor — so
+    "sign in, then refresh" works. The floor is now hard: the 30 s slack
+    rounds backoff steps only (it had made the floor 9.5 minutes).
+21. After every run, whatever is left in the child's process group is
+    killed (the exit seen with `WNOWAIT`, reaped after the kill). A tool
+    that means to outlive the run detaches into its own session.
+22. The CLI uninstalled clears the failure it left; a failure older than
+    the 7-day reach isn't shown. A version check settles per file identity
+    on any outcome but a timeout (an unrelated `agy` that exits non-zero is
+    a quiet absence, not a standing error). Its LAST line must be the
+    version (at most three lines), which supersedes #15's one-line rule: a
+    one-off notice printed first can't reject a whole CLI version.
+23. The probe re-reads its state before every decision, stamps the attempt
+    before its first spawn (version check included), and a shut-down
+    engine's probe neither runs nor writes (`retire()`), so a handover
+    can't beat the floor or write under the next lease holder.
+24. Antigravity's `lastActivity` is the uncapped newest conversation write
+    (the capped shared walk could miss the active conversation in a folder
+    of thousands and starve the probe).
+25. Sign-in is recognised by whole phrases only ("not signed in", "please
+    log in", "authentication expired"…), never "login" or "authentication"
+    alone.
+26. Argon is excluded from the Gemini meters only when its bucket becomes a
+    meter (has a fraction), so its tokens never count nowhere.
+27. SPEC §10's Keychain bullet and CLAUDE.md's first hard rule now say the
+    by-proxy part out loud: the spawned CLI manages its own sign-in (its
+    own Keychain item); the rules bind the app, which touches none of it.
+    The person should read this wording in the PR.
+
 ## Build record (2026-11-21)
 
 - The real check (`ANTIGRAVITY_LIVE_QUOTA=1 swift test --filter liveQuota`,

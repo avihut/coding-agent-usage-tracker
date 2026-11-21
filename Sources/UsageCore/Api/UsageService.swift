@@ -28,7 +28,7 @@ public struct UsageService: Sendable {
         self.probe = probe
     }
 
-    public func refresh(thresholds: Thresholds = .standard) async -> DisplayState {
+    public func refresh(thresholds: Thresholds = .standard, manual: Bool = false) async -> DisplayState {
         // The token is re-read every cycle (the agent rotates it) and lives
         // only in this frame for the duration of one request (spec §5).
         let token: String
@@ -45,7 +45,7 @@ public struct UsageService: Sendable {
 
         // The probe runs on its own schedule and always reports where it
         // stands: its newest reading, and the last attempt's failure.
-        let quota = await probe?.refreshIfDue()
+        let quota = await probe?.refreshIfDue(manual: manual)
         let body: Data
         do {
             body = try await fetchWithOneRetry(token: token, quota: quota?.reading)

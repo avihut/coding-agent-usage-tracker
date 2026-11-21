@@ -187,10 +187,15 @@ requires extra work from the user to start metering antigravity" —
   Homebrew cask sets the same one) so the run neither logs nor checks for an
   update, from `/`, in a minimal environment. `agy` is the CLI's own install
   (`~/.local/bin`, or Homebrew's `bin`), confirmed by its `--version` — never
-  the desktop app's editor launcher of the same name.
+  the desktop app's editor launcher of the same name. Should a run ever come
+  back as an agent turn rather than the limits report (a future CLI
+  treating `/quota` as a prompt), that install is never asked again until
+  it changes — at most one turn per update, never one per run.
 - **How often.** At most once every ten minutes, only when Antigravity has
   written a conversation since the last reading, one at a time, stopped
-  after 30 seconds, and backing off to two hours when it fails. It runs only
+  after 30 seconds (with anything it started), and backing off to two hours
+  when it fails — your clicking refresh skips that backoff, never the ten
+  minutes. It runs only
   in the process that runs the meters (the background daemon, or the app
   when no daemon is running). A Mac that doesn't use Antigravity never runs
   it. Each run takes about two seconds and half a second of CPU.
@@ -206,16 +211,19 @@ requires extra work from the user to start metering antigravity" —
   reads or stores any of it.
 - **What the CLI writes inside its own folder.** Each run stamps the
   modification time of `cache/onboarding.json`, `conversation_summaries.db`
-  and `crashes/` under `~/.gemini/antigravity-cli` (measured; no sizes
-  change). Without the two switches above it would also write a log, an
+  and `crashes/` under `~/.gemini/antigravity-cli`, and so of the folders
+  holding them (measured; no sizes change). Without the two switches above it would also write a log, an
   `implicit/` file and its update check's markers — the switches turn those
   off. This is the one place an agent home is written to on this app's
   initiative, and it is the vendor's own process doing it: the app itself
   still writes nothing there.
 - **What the app keeps.** Each bucket's id, remaining fraction and reset
   time, in `quota-probe.json` in its own Application Support folder (mode
-  0600). The rest of the output — its text, names and descriptions — is
-  dropped before anything is written, and nothing the CLI prints is logged.
+  0600), beside where it found the CLI (path, size, date, whether it
+  answered as the CLI) and when it last asked and how often that failed;
+  the limits also sit in its usage cache like any reading. The rest of the
+  output — its text, names and descriptions — is dropped before anything
+  is written, and nothing the CLI prints is logged.
 
 Every pool the reading reports gets its meters: the Gemini session and
 weekly limits, the Claude + GPT pool, and Gemini 4 Argon's separate weekly.

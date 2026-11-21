@@ -57,12 +57,15 @@ enum AntigravityQuota {
     static func acceptsVersion(_ stdout: Data) -> Bool {
         guard let text = String(data: stdout, encoding: .utf8) else { return false }
         let lines = text.split(whereSeparator: \.isNewline)
-        guard lines.count == 1 else { return false }
-        // One line is the discriminator (the desktop editor's launcher
-        // prints three); within it, tolerate a name before the number, a
-        // `v`, and a pre-release or build suffix after it, so a cosmetic
-        // change to the CLI's version line can't make the limits vanish.
-        return lines[0].trimmingCharacters(in: .whitespaces)
+            .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        // The LAST line must be the version: the editor's launcher ends on
+        // its architecture, while a one-off notice the CLI prints first
+        // (a migration, say) can't settle a rejection for the whole
+        // version. Within that line: a name before the number, a `v`, and
+        // a pre-release or build suffix after it are tolerated, so a
+        // cosmetic change to the version line can't make the limits vanish.
+        guard let last = lines.last, lines.count <= 3 else { return false }
+        return last
             .range(of: #"^(\S+\s+)?v?\d+\.\d+(\.\d+)?([-+.]\S*)?$"#,
                    options: .regularExpression) != nil
     }
@@ -75,37 +78,71 @@ enum AntigravityQuota {
     private struct Envelope: Decodable {
         let status: String?
         let command: Command?
+        /// What a print-mode run reports of an AGENT TURN. The limits
+        /// command reports zero turns, zero tokens and no conversation;
+        /// anything else means the request ran as a prompt.
+        let turns: Int?
+        let conversationID: String?
+        let totalTokens: Int?
 
         enum CodingKeys: String, CodingKey {
             case status, command
+            case turns = "num_turns"
+            case conversationID = "conversation_id"
+            case usage
+        }
+
+        enum UsageKeys: String, CodingKey {
+            case totalTokens = "total_tokens"
         }
 
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             status = try? container.decodeIfPresent(String.self, forKey: .status)
             command = try? container.decodeIfPresent(Command.self, forKey: .command)
+            turns = try? container.decodeIfPresent(Int.self, forKey: .turns)
+            conversationID = try? container.decodeIfPresent(String.self, forKey: .conversationID)
+            let usage = try? container.nestedContainer(keyedBy: UsageKeys.self, forKey: .usage)
+            totalTokens = (try? usage?.decodeIfPresent(Int.self, forKey: .totalTokens)) ?? nil
+        }
+
+        /// Whether the run reads as an agent turn rather than the command.
+        var ranATurn: Bool {
+            (turns ?? 0) > 0 || !(conversationID ?? "").isEmpty || (totalTokens ?? 0) > 0
         }
 
         struct Command: Decodable {
+            /// nil when the shape moved: no `data` object, `groups` of the
+            /// wrong type, or a `data` that carries other keys and no
+            /// `groups` (renamed). An EMPTY `data` is zero groups — protobuf
+            /// JSON omits an empty list.
             let groups: [Group]?
 
             enum CodingKeys: String, CodingKey {
                 case data
             }
 
-            enum DataKeys: String, CodingKey {
-                case groups
+            struct DataKey: CodingKey {
+                let stringValue: String
+                var intValue: Int? { nil }
+                init(stringValue: String) { self.stringValue = stringValue }
+                init?(intValue: Int) { nil }
+                static let groups = DataKey(stringValue: "groups")
             }
 
             init(from decoder: Decoder) throws {
                 let container = try decoder.container(keyedBy: CodingKeys.self)
-                guard let data = try? container.nestedContainer(keyedBy: DataKeys.self, forKey: .data)
+                guard let data = try? container.nestedContainer(keyedBy: DataKey.self, forKey: .data)
                 else {
                     groups = nil
                     return
                 }
-                let raw = try? data.decodeIfPresent([Lenient<Group>].self, forKey: .groups)
-                groups = (raw ?? nil)?.compactMap(\.value)
+                guard data.contains(.groups) else {
+                    groups = data.allKeys.isEmpty ? [] : nil
+                    return
+                }
+                let raw = try? data.decode([Lenient<Group>].self, forKey: .groups)
+                groups = raw?.compactMap(\.value)
             }
         }
 
@@ -128,10 +165,15 @@ enum AntigravityQuota {
             let window: String?
             let remainingFraction: Double?
             let resetTime: String?
+            /// The bucket states an amount (so a missing fraction is not
+            /// an omitted zero).
+            let reportsAmount: Bool
+            let disabled: Bool
 
             enum CodingKeys: String, CodingKey {
-                case id, window
+                case id, window, disabled
                 case remainingFraction = "remaining_fraction"
+                case remainingAmount = "remaining_amount"
                 case resetTime = "reset_time"
             }
 
@@ -149,6 +191,9 @@ enum AntigravityQuota {
                 }
                 remainingFraction = fraction.flatMap { $0.isFinite ? $0 : nil }
                 resetTime = try? container.decodeIfPresent(String.self, forKey: .resetTime)
+                reportsAmount = container.contains(.remainingAmount)
+                    && (try? container.decodeNil(forKey: .remainingAmount)) == false
+                disabled = (try? container.decodeIfPresent(Bool.self, forKey: .disabled)) == true
             }
         }
 
@@ -174,22 +219,38 @@ enum AntigravityQuota {
         guard let envelope = try? JSONDecoder().decode(Envelope.self, from: stdout) else {
             return .failure(.unreadable)
         }
+        // An agent turn is not the limits command, whatever its status. The
+        // probe stops asking this binary: a CLI that began treating
+        // `/quota` as a prompt would spend quota on every attempt
+        // (`notALimitsCommand`).
+        if envelope.ranATurn { return .failure(.notALimitsCommand) }
         if let status = envelope.status, status.uppercased() != "SUCCESS" {
             return .failure(mentionsSignIn(stdout, stderr) ? .notSignedIn : .failed)
         }
-        // No `command` at all is not a limits report. A command with no
-        // groups is one with nothing in it — a sign-in with no plan quota
-        // (an API key) — an honest empty reading, not an error.
-        guard let command = envelope.command else { return .failure(.unreadable) }
+        // A success without the command's result: if the output itself says
+        // no turn ran, a shape that moved (unreadable, retried); if it can't
+        // say, assume the worst and stop asking.
+        if envelope.command == nil {
+            return .failure(envelope.turns == 0 ? .unreadable : .notALimitsCommand)
+        }
+        // A command whose groups are missing or mistyped is a shape that
+        // moved: unreadable, so the last reading stands. Groups that are
+        // there and empty are a sign-in with no plan quota (an API key) —
+        // an honest empty reading, not an error.
+        guard let command = envelope.command, let groups = command.groups else {
+            return .failure(.unreadable)
+        }
         var seen = Set<String>()
         var buckets: [AgentQuotaBucket] = []
-        for entry in (command.groups ?? []).flatMap(\.buckets) {
+        let entries = groups.flatMap(\.buckets)
+        for entry in entries where !entry.disabled {
             guard isBucketID(entry.id), !seen.contains(entry.id) else { continue }
             // The bucket's own window must agree with the one its id names;
             // a disagreement means the vocabulary moved — skip, don't guess.
-            if let stated = entry.window.map({ $0.lowercased() }),
+            // A window word this build can't read is no disagreement.
+            if let stated = entry.window.map({ $0.lowercased() }).flatMap(windowLength),
                let named = shape(of: entry.id)?.window,
-               windowLength(stated) != named {
+               stated != named {
                 continue
             }
             seen.insert(entry.id)
@@ -197,17 +258,23 @@ enum AntigravityQuota {
                 $0 >= earliestReset && abs($0.timeIntervalSince(now)) <= maxResetDistance ? $0 : nil
             }
             var fraction = entry.remainingFraction.map { min(1, max(0, $0)) }
-            // A spent bucket might arrive with its fraction OMITTED (a zero
-            // dropped by the encoder): one that states a REAL reset still
-            // ahead and no fraction is read as nothing left rather than
-            // dropped — dropping it would hide the meter that matters most.
-            // The epoch never triggers this. Unverified: no spent bucket has
-            // been seen yet.
-            if fraction == nil, let resetsAt, resetsAt > now {
+            // A documented exception to "absent ≠ zero": the CLI's JSON is
+            // protobuf's, which OMITS a field holding its zero value, so a
+            // spent bucket arrives with no fraction. Read as nothing left
+            // only when it says nothing else — no amount, not disabled —
+            // and states a REAL reset still ahead; the epoch never
+            // triggers it. Dropping it would hide the meter that matters
+            // most. Unverified: no spent bucket has been seen yet.
+            if fraction == nil, !entry.reportsAmount, let resetsAt, resetsAt > now {
                 fraction = 0
             }
             buckets.append(AgentQuotaBucket(
                 id: entry.id, remainingFraction: fraction, resetsAt: resetsAt))
+        }
+        // Buckets were reported and none could be read: the vocabulary
+        // moved under this build — say so rather than show no limits.
+        if buckets.isEmpty, entries.contains(where: { !$0.disabled }) {
+            return .failure(.unreadable)
         }
         return .buckets(buckets)
     }
@@ -220,8 +287,13 @@ enum AntigravityQuota {
         let text = (String(data: stderr, encoding: .utf8) ?? "")
             + " " + (String(data: stdout, encoding: .utf8) ?? "")
         let lower = text.lowercased()
-        return ["not logged in", "not signed in", "sign in", "log in", "login",
-                "unauthenticated", "authentication"].contains { lower.contains($0) }
+        // Whole phrases only: "login keychain is locked" or "TLS
+        // authentication failed" on a network error is not "sign in first".
+        return ["not logged in", "not signed in", "please log in", "please sign in",
+                "please login", "log back in", "sign back in", "log in again",
+                "sign in again", "login required", "sign-in required", "sign in required",
+                "unauthenticated", "authentication required", "authentication expired"]
+            .contains { lower.contains($0) }
     }
 
     /// Bucket ids are short machine words; anything else is not kept.
@@ -327,7 +399,11 @@ enum AntigravityQuota {
             // fresh as of this fetch.
             return Snapshot(meters: [], fetchedAt: payload.fetchedAt)
         }
-        let argonApart = reading.buckets.contains { shape(of: $0.id)?.pool == .argon }
+        // Only an Argon bucket that BECOMES a meter takes Argon out of the
+        // Gemini meters; otherwise its tokens would count nowhere.
+        let argonApart = reading.buckets.contains {
+            $0.remainingFraction != nil && shape(of: $0.id)?.pool == .argon
+        }
         var built: [(meter: Meter, order: Int)] = []
         for bucket in reading.buckets {
             guard let fraction = bucket.remainingFraction, let shape = shape(of: bucket.id)

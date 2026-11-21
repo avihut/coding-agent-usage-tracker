@@ -35,6 +35,10 @@ public struct AntigravityActivitySource: LocalActivitySource {
     /// probe all read it. Never `brain/`, whose step outputs and worktrees
     /// would swamp the probe.
     public var watchDirectories: [URL] { [tree.conversationsDirectory] }
+    /// The newest conversation write, uncapped — not the shared capped
+    /// mtime walk, which could miss the active conversation in a folder of
+    /// thousands and so starve the quota probe, whose schedule reads this.
+    public func lastActivity(now: Date) -> Date? { tree.newestConversationWrite() }
     public var displayPath: String { "~/.gemini/antigravity-cli" }
     public var displayPaths: [String] {
         [

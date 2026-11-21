@@ -115,6 +115,12 @@ public enum AgentQuotaFailure: String, Codable, Sendable, Equatable {
     case unreadable
     /// Exited non-zero, was killed by a signal, or couldn't start.
     case failed
+    /// What ran was NOT the tool's limits command — it ran an agent turn,
+    /// or answered without the command's result. The probe never asks that
+    /// binary again (until the file changes): a tool that started treating
+    /// the request as a prompt would otherwise spend the person's quota on
+    /// every attempt, and its own conversation would keep the schedule due.
+    case notALimitsCommand
 }
 
 public enum AgentQuotaOutcome: Sendable, Equatable {
@@ -130,8 +136,9 @@ public enum AgentQuotaSchedule {
     public static let reach: TimeInterval = 7 * 86400
     /// The longest backoff after failures.
     public static let backoffCap: TimeInterval = 2 * 3600
-    /// So an engine polling every 5 minutes lands ON a 10-minute floor
-    /// rather than just short of it.
+    /// So an engine polling every 5 minutes lands ON a backoff step rather
+    /// than just short of it. Never applied below `minimumFloor`: the
+    /// floor is a promise ("at most every 10 minutes"), not a target.
     public static let slack: TimeInterval = 30
 
     /// The floor, doubled per consecutive failure, capped.
@@ -144,18 +151,23 @@ public enum AgentQuotaSchedule {
     /// Due when the agent wrote a conversation since the last reading began
     /// (and within `reach`), and the floor — or the backoff — has passed
     /// since the last attempt. No write, no run: a Mac that doesn't use the
-    /// agent pays nothing.
+    /// agent pays nothing. A MANUAL refresh skips the failure backoff (the
+    /// person may just have fixed what failed — signed in, say), never the
+    /// floor.
     public static func isDue(
         lastAttemptAt: Date?, consecutiveFailures: Int, readingStartedAt: Date?,
-        lastWrite: Date?, now: Date, floor: TimeInterval
+        lastWrite: Date?, now: Date, floor: TimeInterval, manual: Bool = false
     ) -> Bool {
         guard let lastWrite, now.timeIntervalSince(lastWrite) <= reach else { return false }
         if let readingStartedAt, lastWrite <= readingStartedAt { return false }
         guard let lastAttemptAt else { return true }
         // A clock that jumped back leaves a "future" attempt: don't wait on it.
         if lastAttemptAt > now.addingTimeInterval(60) { return true }
-        let wait = interval(consecutiveFailures: consecutiveFailures, floor: floor)
-        return now.timeIntervalSince(lastAttemptAt) + slack >= wait
+        let elapsed = now.timeIntervalSince(lastAttemptAt)
+        let floor = max(floor, AgentQuotaCommand.minimumFloor)
+        guard elapsed >= floor else { return false }
+        let wait = interval(consecutiveFailures: manual ? 0 : consecutiveFailures, floor: floor)
+        return elapsed + slack >= wait
     }
 }
 
@@ -167,7 +179,7 @@ extension UsageError {
         switch quotaFailure {
         case .notSignedIn: self = .noCredentials
         case .timedOut: self = .agentTimedOut
-        case .unreadable: self = .agentOutputUnreadable
+        case .unreadable, .notALimitsCommand: self = .agentOutputUnreadable
         case .failed: self = .agentCommandFailed
         }
     }

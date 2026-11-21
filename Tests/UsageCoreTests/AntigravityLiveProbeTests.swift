@@ -21,8 +21,11 @@ import Testing
 ///
 /// runs the provider's own quota command once through the real runner —
 /// the documented print mode only, its state in a scratch folder, never the
-/// app's — and prints the reduced meters: label, percent, reset. No id, no
-/// output text.
+/// app's — and prints the reduced meters (label, percent, reset) and the
+/// plan's bucket ids ("gemini-5h": pool names, not account identifiers).
+/// No output text. This is the ONE test that spawns the real CLI (spec §10
+/// amendment 2026-11-21, second): by hand, one run per invocation, and it
+/// stamps the CLI's home exactly as the probe's runs do.
 enum AntigravityLiveEnvironment {
     static func path(_ key: String) -> URL? {
         ProcessInfo.processInfo.environment[key]

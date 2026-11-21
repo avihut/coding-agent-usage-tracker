@@ -360,7 +360,12 @@ struct AntigravityProviderTests {
         #expect(reduce(Data()) == .failure(.unreadable))
         #expect(reduce(Data("Gemini Models\tWeekly Limit Remaining\t77%".utf8)) == .failure(.unreadable))
         #expect(reduce(Data(try AntigravityQuotaFixture.real().prefix(900))) == .failure(.unreadable))
-        #expect(reduce(Data(#"{"status":"SUCCESS","response":"x"}"#.utf8)) == .failure(.unreadable))
+        // A success without the command's result: if it says no turn ran,
+        // unreadable; if it can't say, assume a turn and stop asking.
+        #expect(reduce(Data(#"{"status":"SUCCESS","num_turns":0,"response":"x"}"#.utf8))
+            == .failure(.unreadable))
+        #expect(reduce(Data(#"{"status":"SUCCESS","response":"x"}"#.utf8))
+            == .failure(.notALimitsCommand))
         #expect(reduce(Data(#"{"status":"ERROR","response":"x"}"#.utf8)) == .failure(.failed))
         #expect(reduce(Data(), exit: 1, stderr: "AGY_ERROR: {\"status\":\"UNAVAILABLE\"}") == .failure(.failed))
         #expect(reduce(Data(), exit: 1, stderr: "You are not logged into Antigravity.") == .failure(.notSignedIn))
@@ -371,6 +376,72 @@ struct AntigravityProviderTests {
         // nothing in it: no limits, not an error.
         #expect(reduce(Data(#"{"status":"SUCCESS","command":{"name":"usage","data":{}}}"#.utf8))
             == .buckets([]))
+        #expect(reduce(Data(
+            #"{"status":"SUCCESS","command":{"name":"usage","data":{"groups":[]}}}"#.utf8))
+            == .buckets([]))
+    }
+
+    @Test("an agent turn is never a limits report: the probe must stop asking")
+    func agentTurnRefused() throws {
+        // The real limits command: zero turns, zero tokens, no conversation.
+        #expect(try buckets(try AntigravityQuotaFixture.real()).count == 5)
+        let turn = #"{"status":"SUCCESS","conversation_id":"c-1","num_turns":1,"#
+            + #""usage":{"total_tokens":1200},"response":"Here is your quota…"}"#
+        #expect(reduce(Data(turn.utf8)) == .failure(.notALimitsCommand))
+        // Even when it carried a command result, and even when it errored.
+        let both = #"{"status":"SUCCESS","num_turns":2,"command":{"name":"usage","data":{}}}"#
+        #expect(reduce(Data(both.utf8)) == .failure(.notALimitsCommand))
+        let spent = #"{"status":"ERROR","usage":{"total_tokens":30}}"#
+        #expect(reduce(Data(spent.utf8)) == .failure(.notALimitsCommand))
+        #expect(UsageError(quotaFailure: .notALimitsCommand) == .agentOutputUnreadable)
+    }
+
+    @Test("a shape that moved reads as unreadable, never as no limits")
+    func movedShape() throws {
+        let renamed = #"{"status":"SUCCESS","num_turns":0,"command":{"name":"usage","#
+            + #""data":{"quota_groups":[{"buckets":[]}]}}}"#
+        #expect(reduce(Data(renamed.utf8)) == .failure(.unreadable))
+        let mistyped = #"{"status":"SUCCESS","command":{"name":"usage","data":{"groups":"x"}}}"#
+        #expect(reduce(Data(mistyped.utf8)) == .failure(.unreadable))
+        let noData = #"{"status":"SUCCESS","command":{"name":"usage"}}"#
+        #expect(reduce(Data(noData.utf8)) == .failure(.unreadable))
+        // Buckets reported, none readable: unreadable too.
+        let bad = AntigravityQuotaFixture.output([
+            AntigravityQuotaFixture.bucket("gemini weekly!", window: "weekly", remaining: 0.5,
+                                           reset: "2026-11-28T14:02:05Z"),
+        ])
+        #expect(reduce(bad) == .failure(.unreadable))
+        // A window word this build can't read is no disagreement: kept.
+        let unknownWindow = AntigravityQuotaFixture.output([
+            AntigravityQuotaFixture.bucket("gemini-weekly", window: "1w", remaining: 0.5,
+                                           reset: "2026-11-28T14:02:05Z"),
+        ])
+        #expect(try buckets(unknownWindow).map(\.id) == ["gemini-weekly"])
+    }
+
+    @Test("a disabled bucket is skipped, and one that states an amount is never read as spent")
+    func disabledAndAmount() throws {
+        let future = "2026-11-28T14:02:05Z"
+        let raw = #"{"status":"SUCCESS","num_turns":0,"command":{"name":"usage","data":{"groups":[{"buckets":["#
+            + #"{"id":"gemini-weekly","window":"weekly","disabled":true,"reset_time":"\#(future)"},"#
+            + #"{"id":"gemini-5h","window":"5h","remaining_amount":40,"reset_time":"\#(future)"},"#
+            + #"{"id":"3p-5h","window":"5h","reset_time":"\#(future)"}"#
+            + #"]}]}}}"#
+        let read = try buckets(Data(raw.utf8))
+        #expect(read.map(\.id) == ["gemini-5h", "3p-5h"])
+        #expect(read.first { $0.id == "gemini-5h" }?.remainingFraction == nil)
+        // No amount, no fraction, a real reset ahead: protobuf's omitted zero.
+        #expect(read.first { $0.id == "3p-5h" }?.remainingFraction == 0)
+    }
+
+    @Test("sign-in is recognised by whole phrases only")
+    func signInPhrases() {
+        #expect(reduce(Data(), exit: 1, stderr: "Error: not signed in. Run agy to sign in.")
+            == .failure(.notSignedIn))
+        #expect(reduce(Data(), exit: 1, stderr: "TLS authentication handshake failed: dial tcp")
+            == .failure(.failed))
+        #expect(reduce(Data(), exit: 1, stderr: "the login keychain is locked") == .failure(.failed))
+        #expect(reduce(Data(), exit: 1, stderr: "catalog in use") == .failure(.failed))
     }
 
     @Test("only bucket numbers are kept — nothing the output says in words")

@@ -11,7 +11,9 @@ import Foundation
 ///     <root>/<bundleID>/<providerID>/<profileID>/ history.json, activity-cache.json,
 ///                                                window-ledger.json, account-presence.json,
 ///                                                session-renames.json (caches: usage.json),
-///                                                statusline-export.json*
+///                                                quota-probe.json (a provider with a quota
+///                                                command only, spec §10 amendment
+///                                                2026-11-21, second)
 ///
 /// — a PROFILE being one agent home (`~/.claude`, `~/.claude-personal`)
 /// under one provider. Pricing and notices describe the vendor, not an

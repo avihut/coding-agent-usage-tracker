@@ -14,7 +14,11 @@ import Foundation
 ///   work, but not so low a 2 s run on a loaded Mac blows past its timeout
 ///   (background QoS starved usaged for 254 s, 2026-11-21).
 /// - The run is over when the CHILD EXITS, never at pipe EOF: a grandchild
-///   holding stdout open gets a short drain and is then left alone.
+///   holding stdout open gets a short drain. Then, on EVERY path, whatever
+///   is left in the group is killed: the exit is observed without reaping
+///   (`WNOWAIT`), so the group id can't be reused before the kill, and the
+///   child is reaped after it. A tool that means to outlive the run
+///   detaches into its own session and is out of reach by design.
 public struct SpawnedCommandRunner: AgentCommandRunner {
     /// SIGTERM to SIGKILL, on a timeout.
     public static let terminateGrace: TimeInterval = 2
@@ -110,14 +114,14 @@ public struct SpawnedCommandRunner: AgentCommandRunner {
         var forced: AgentCommandResult.Termination?
 
         while true {
-            if exitedAt == nil, waitpid(pid, &status, WNOHANG) == pid {
+            if exitedAt == nil, hasExited(pid) {
                 exitedAt = monotonic()
             }
             let now = monotonic()
             if let exitedAt {
                 if streams.allSatisfy({ !$0.open }) || now >= exitedAt + drainAfterExit { break }
             } else if now >= deadline {
-                stopGroup(pid, reaped: false, status: &status)
+                stopGroup(pid)
                 forced = .timedOut
                 break
             }
@@ -133,11 +137,15 @@ public struct SpawnedCommandRunner: AgentCommandRunner {
                 streams[index].drain()
             }
             if streams.contains(where: \.overflowed) {
-                stopGroup(pid, reaped: exitedAt != nil, status: &status)
+                stopGroup(pid)
                 forced = .outputOverflow
                 break
             }
         }
+        // The child is a zombie or about to be: nothing of its group may
+        // outlive the run. Then reap, which frees the pid and group id.
+        kill(-pid, SIGKILL)
+        while waitpid(pid, &status, 0) == -1, errno == EINTR {}
 
         let out = streams[0].data
         let err = streams[1].data
@@ -149,24 +157,22 @@ public struct SpawnedCommandRunner: AgentCommandRunner {
             : result(.signaled(signal), out, err)
     }
 
-    /// SIGTERM to the whole group, a grace period, then SIGKILL — and the
-    /// child reaped, so nothing is left as a zombie.
-    private static func stopGroup(_ pid: pid_t, reaped: Bool, status: inout Int32) {
+    /// Whether the child has exited — observed WITHOUT reaping it, so its
+    /// pid (and the group id) stay reserved until the group is killed.
+    private static func hasExited(_ pid: pid_t) -> Bool {
+        var info = siginfo_t()
+        let observed = waitid(P_PID, id_t(pid), &info, WEXITED | WNOHANG | WNOWAIT)
+        return observed == 0 && info.si_pid == pid
+    }
+
+    /// SIGTERM to the whole group and a grace period for the child to go;
+    /// the caller then SIGKILLs what's left and reaps.
+    private static func stopGroup(_ pid: pid_t) {
         kill(-pid, SIGTERM)
-        guard !reaped else {
-            kill(-pid, SIGKILL)
-            return
-        }
         let until = monotonic() + terminateGrace
-        while monotonic() < until {
-            if waitpid(pid, &status, WNOHANG) == pid {
-                kill(-pid, SIGKILL) // whatever it started, too
-                return
-            }
+        while monotonic() < until, !hasExited(pid) {
             usleep(20_000)
         }
-        kill(-pid, SIGKILL)
-        while waitpid(pid, &status, 0) == -1, errno == EINTR {}
     }
 
     /// One non-blocking pipe, read to its cap.

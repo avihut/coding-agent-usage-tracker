@@ -295,6 +295,9 @@ public final class UsageEngine {
         catchUpTask?.cancel()
         catchUpTask = nil
         nextRefreshAt = nil
+        // Before the host releases the lease: a probe run still finishing
+        // must not write under the next holder.
+        service.probe?.retire()
     }
 
     /// A wake impulse from the host process — the app's NSWorkspace
@@ -366,7 +369,8 @@ public final class UsageEngine {
             // spend, and the window is nonetheless still running. History
             // records the API's own word below; the carry is what gets
             // rendered and forecast.
-            let reported = await service.refresh(thresholds: currentThresholds())
+            let reported = await service.refresh(
+                thresholds: currentThresholds(), manual: reason == .manual)
             let newState = Self.carryingResets(reported, samples: samples, now: Date())
             state = newState
             isRefreshing = false

@@ -3,8 +3,9 @@
 "Agent Usage": a macOS menu bar app (LSUIElement), a launchd daemon, a CLI
 and a Rust TUI that meter coding agents' plan limits — Claude Code from the
 undocumented `/api/oauth/usage` endpoint, authenticated with the local Claude
-Code OAuth access token; Codex, Antigravity CLI and Gemini CLI (deprecated)
-from their local files. Open
+Code OAuth access token; Codex and Gemini CLI (deprecated) from their local
+files; Antigravity CLI from its local files plus its own CLI's limits report
+(`agy -p /quota`, spawned by the engine host). Open
 source (MIT) and SOURCE-ONLY: no binary is published, every install is built
 and signed by the Mac that runs it, so whoever runs your change is trusting
 it with their own sign-in. The build contract is `docs/SPEC.md` (§10 is the
@@ -27,6 +28,9 @@ was learned the hard way.
 
 - Never write to the Keychain. Never read or use the refresh token — access
   token only, re-read on every refresh cycle, never cached in memory or disk.
+  These bind the app; the Antigravity CLI the quota probe spawns manages
+  its own sign-in (its own Keychain item) BY PROXY, as when it starts
+  (§10 amendment 2026-11-21, second).
 - UNDER NO CIRCUMSTANCES may a feature require the user to enter system
   credentials — Keychain consent, admin authorization, TCC prompts — for the
   app's REGULAR operation (user-directed §10 amendment 2026-08-25). The

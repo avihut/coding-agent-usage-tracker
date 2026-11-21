@@ -12,11 +12,14 @@ actor FakeAgentRunner: AgentCommandRunner {
     var quota: AgentCommandResult
     var delay: Duration = .zero
     private(set) var invocations: [AgentCommandInvocation] = []
+    /// Called as each run starts — what the world looked like at the spawn.
+    var onRun: (@Sendable (AgentCommandInvocation) -> Void)?
 
     init(quota: AgentCommandResult) { self.quota = quota }
 
     func run(_ invocation: AgentCommandInvocation) async -> AgentCommandResult {
         invocations.append(invocation)
+        onRun?(invocation)
         if invocation.arguments == ["--version"] { return version }
         if delay > .zero { try? await Task.sleep(for: delay) }
         return quota
@@ -27,6 +30,7 @@ actor FakeAgentRunner: AgentCommandRunner {
     func set(quota: AgentCommandResult) { self.quota = quota }
     func set(version: AgentCommandResult) { self.version = version }
     func set(delay: Duration) { self.delay = delay }
+    func set(onRun: @escaping @Sendable (AgentCommandInvocation) -> Void) { self.onRun = onRun }
 }
 
 extension AgentCommandResult {
@@ -128,13 +132,14 @@ struct AgentQuotaScheduleTests {
 
     func due(
         lastAttempt: TimeInterval? = nil, failures: Int = 0, readingStarted: TimeInterval? = nil,
-        lastWrite: TimeInterval? = -60
+        lastWrite: TimeInterval? = -60, manual: Bool = false
     ) -> Bool {
         AgentQuotaSchedule.isDue(
             lastAttemptAt: lastAttempt.map { now.addingTimeInterval($0) },
             consecutiveFailures: failures,
             readingStartedAt: readingStarted.map { now.addingTimeInterval($0) },
-            lastWrite: lastWrite.map { now.addingTimeInterval($0) }, now: now, floor: floor)
+            lastWrite: lastWrite.map { now.addingTimeInterval($0) }, now: now, floor: floor,
+            manual: manual)
     }
 
     @Test("no conversation written: never due, so an idle Mac pays nothing")
@@ -151,11 +156,12 @@ struct AgentQuotaScheduleTests {
         #expect(due(lastAttempt: -3600, readingStarted: -3600, lastWrite: -60))
     }
 
-    @Test("the floor holds from the last attempt, with slack for a 5-minute poll")
+    @Test("the floor holds from the last attempt — ten minutes, never less")
     func floorHolds() {
         #expect(!due(lastAttempt: -300, readingStarted: -300))
-        #expect(!due(lastAttempt: -560, readingStarted: -560))
-        #expect(due(lastAttempt: -575, readingStarted: -575))
+        #expect(!due(lastAttempt: -575, readingStarted: -575))
+        #expect(!due(lastAttempt: -599, readingStarted: -599))
+        #expect(due(lastAttempt: -600, readingStarted: -600))
         // A clock that jumped back doesn't strand the probe.
         #expect(due(lastAttempt: 3600, readingStarted: -7200))
     }
@@ -167,9 +173,20 @@ struct AgentQuotaScheduleTests {
         }
         #expect(steps == [10, 20, 40, 80, 120, 120, 120])
         #expect(!due(lastAttempt: -1000, failures: 1, readingStarted: -7200))
-        #expect(due(lastAttempt: -1200, failures: 1, readingStarted: -7200))
+        // The slack lets a 5-minute poll land on a backoff step.
+        #expect(due(lastAttempt: -1175, failures: 1, readingStarted: -7200))
         #expect(!due(lastAttempt: -7000, failures: 9, readingStarted: -90000))
         #expect(due(lastAttempt: -7200, failures: 9, readingStarted: -90000))
+    }
+
+    @Test("a manual refresh skips the failure backoff, never the floor")
+    func manualSkipsBackoff() {
+        #expect(!due(lastAttempt: -700, failures: 3, readingStarted: -7200))
+        #expect(due(lastAttempt: -700, failures: 3, readingStarted: -7200, manual: true))
+        #expect(!due(lastAttempt: -300, failures: 3, readingStarted: -7200, manual: true))
+        // Nor the rule that something was written since the last reading.
+        #expect(!due(lastAttempt: -700, failures: 3, readingStarted: -60, lastWrite: -120,
+                     manual: true))
     }
 
     @Test("a provider can't ask more often than the hard floor")
@@ -351,6 +368,138 @@ struct AgentQuotaProbeTests {
         // Installed later: the next due refresh finds it.
         try fixture.install(at: fixture.binary)
         #expect(await probe.refreshIfDue().reading != nil)
+    }
+
+    @Test("an answer that wasn't the limits command: that binary is never asked again")
+    func refusedBinary() async throws {
+        let fixture = try ProbeFixture()
+        defer { fixture.tearDown() }
+        let runner = try realRunner()
+        let turn = #"{"status":"SUCCESS","conversation_id":"c-1","num_turns":1,"response":"…"}"#
+        await runner.set(quota: .exited(stdout: Data(turn.utf8)))
+        let clock = TestClock(start)
+        let write = TestClock(start)
+        let probe = try fixture.probe(runner: runner, clock: clock, lastWrite: write)
+        #expect(await probe.refreshIfDue().failure == .notALimitsCommand)
+        // The turn's own conversation keeps the schedule due — and still,
+        // nothing more runs, however long it goes on.
+        for _ in 0..<6 {
+            clock.advance(3 * 3600)
+            write.set(clock.now)
+            #expect(await probe.refreshIfDue().failure == .notALimitsCommand)
+        }
+        #expect(await runner.quotaRuns.count == 1)
+        // A restart remembers it.
+        let again = try fixture.probe(runner: runner, clock: clock, lastWrite: write)
+        clock.advance(3 * 3600)
+        write.set(clock.now)
+        _ = await again.refreshIfDue()
+        #expect(await runner.quotaRuns.count == 1)
+        // The CLI updated (the file changed): asked once more.
+        FileManager.default.createFile(
+            atPath: fixture.binary.path, contents: Data("#!/bin/sh\nexit 98 # v2\n".utf8),
+            attributes: [.posixPermissions: 0o755])
+        await runner.set(quota: .exited(stdout: AntigravityQuotaFixture.output([
+            AntigravityQuotaFixture.bucket("gemini-weekly", window: "weekly", remaining: 0.5),
+        ])))
+        clock.advance(3 * 3600)
+        write.set(clock.now)
+        let status = await again.refreshIfDue()
+        #expect(await runner.quotaRuns.count == 2)
+        #expect(status.failure == nil && status.reading != nil)
+    }
+
+    @Test("a version run that finished with an error settles it: quiet, and never re-run")
+    func failedVersionSettles() async throws {
+        let fixture = try ProbeFixture()
+        defer { fixture.tearDown() }
+        let runner = try realRunner()
+        await runner.set(version: .exited(2, stdout: Data(), stderr: "usage: agy <file>"))
+        let clock = TestClock(start)
+        let write = TestClock(start)
+        let probe = try fixture.probe(runner: runner, clock: clock, lastWrite: write)
+        #expect(await probe.refreshIfDue() == AgentQuotaProbe.Status(reading: nil, failure: nil))
+        for _ in 0..<3 {
+            clock.advance(3 * 3600)
+            write.set(clock.now)
+            _ = await probe.refreshIfDue()
+        }
+        #expect(await runner.versionRuns == 1)
+        #expect(await runner.quotaRuns.isEmpty)
+    }
+
+    @Test("the attempt is on disk before the first spawn, version check included")
+    func stampedBeforeSpawn() async throws {
+        let fixture = try ProbeFixture()
+        defer { fixture.tearDown() }
+        let runner = try realRunner()
+        let stateURL = fixture.state
+        let seen = Mutex<[Bool]>([])
+        await runner.set { _ in
+            let stamped = AgentQuotaProbeState.load(from: stateURL)?.lastAttemptAt != nil
+            seen.withLock { $0.append(stamped) }
+        }
+        let probe = try fixture.probe(
+            runner: runner, clock: TestClock(start), lastWrite: TestClock(start))
+        _ = await probe.refreshIfDue()
+        #expect(seen.withLock { $0 } == [true, true])
+    }
+
+    @Test("the CLI gone: the failure it left clears; an old failure stops speaking")
+    func failureClears() async throws {
+        let fixture = try ProbeFixture()
+        defer { fixture.tearDown() }
+        let runner = try realRunner()
+        await runner.set(quota: AgentCommandResult(
+            termination: .timedOut, stdout: Data(), stderr: Data(), duration: 30))
+        let clock = TestClock(start)
+        let write = TestClock(start)
+        let probe = try fixture.probe(runner: runner, clock: clock, lastWrite: write)
+        #expect(await probe.refreshIfDue().failure == .timedOut)
+        try FileManager.default.removeItem(at: fixture.binary)
+        clock.advance(3 * 3600)
+        write.set(clock.now)
+        #expect(await probe.refreshIfDue().failure == nil)
+
+        // A failure left standing while the agent goes unused for a week no
+        // longer speaks for the present.
+        try fixture.install(at: fixture.binary)
+        clock.advance(3 * 3600)
+        write.set(clock.now)
+        #expect(await probe.refreshIfDue().failure == .timedOut)
+        clock.advance(8 * 86400)
+        #expect(await probe.status.failure == nil)
+    }
+
+    @Test("two hosts on one state file: the floor holds across the handover")
+    func handover() async throws {
+        let fixture = try ProbeFixture()
+        defer { fixture.tearDown() }
+        let runner = try realRunner()
+        let clock = TestClock(start)
+        let write = TestClock(start)
+        // Both built before either ran — as an app and a daemon would be.
+        let app = try fixture.probe(runner: runner, clock: clock, lastWrite: write)
+        let daemon = try fixture.probe(runner: runner, clock: clock, lastWrite: write)
+        #expect(await app.refreshIfDue().reading != nil)
+        clock.advance(120)
+        write.set(clock.now)
+        let status = await daemon.refreshIfDue()
+        #expect(await runner.quotaRuns.count == 1)
+        #expect(status.reading != nil) // the app's reading, read from disk
+    }
+
+    @Test("a retired probe neither runs nor writes")
+    func retired() async throws {
+        let fixture = try ProbeFixture()
+        defer { fixture.tearDown() }
+        let runner = try realRunner()
+        let probe = try fixture.probe(
+            runner: runner, clock: TestClock(start), lastWrite: TestClock(start))
+        probe.retire()
+        _ = await probe.refreshIfDue()
+        #expect(await runner.invocations.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: fixture.state.path))
     }
 
     @Test("a version run that doesn't finish is an attempt: the floor holds, and it shows")

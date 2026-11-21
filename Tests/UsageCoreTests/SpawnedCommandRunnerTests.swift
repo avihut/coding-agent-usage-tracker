@@ -77,14 +77,25 @@ struct SpawnedCommandRunnerTests {
         #expect(gone)
     }
 
-    @Test("a grandchild holding stdout open can't stall the result")
+    @Test("a grandchild holding stdout open can't stall the result, nor outlive the run")
     func grandchildHoldsOutput() async throws {
         let result = await sh("/bin/sleep 30 & echo $!", timeout: 20)
         #expect(result.termination == .exited(0))
         #expect(result.duration < 5)
-        if let leftover = pid_t(text(result.stdout).trimmingCharacters(in: .newlines)) {
-            kill(leftover, SIGKILL)
+        let leftover = try #require(pid_t(text(result.stdout).trimmingCharacters(in: .newlines)))
+        var gone = false
+        for _ in 0..<50 where !gone {
+            gone = kill(leftover, 0) != 0
+            if !gone { try await Task.sleep(for: .milliseconds(50)) }
         }
+        if !gone { kill(leftover, SIGKILL) }
+        #expect(gone)
+    }
+
+    @Test("a clean exit's status survives the group kill")
+    func cleanExitStatus() async {
+        let result = await sh("exit 3", timeout: 5)
+        #expect(result.termination == .exited(3))
     }
 
     @Test("output past its cap is a failure, and stops the run")

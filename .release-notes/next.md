@@ -40,8 +40,9 @@ Features
   its own local transcripts. Its plan limits — the Gemini session and
   weekly limits, the Claude + GPT pool, and Gemini 4 Argon's own weekly —
   appear with nothing to set up: while you use Antigravity, the app asks
-  the CLI itself (`agy -p /quota`, its read-only limits report) at most
-  every ten minutes; it spends no quota, and the CLI uses its own sign-in.
+  the CLI itself (`agy -p /quota`, its own limits report — no agent turn)
+  at most every ten minutes; it spends no quota, and the CLI uses its own
+  sign-in.
   Without the CLI installed it shows tokens without limits, and an agent
   with no limits to show no longer takes the bar's lead unless you pin it.
 - Gemini CLI, which Antigravity succeeds for Google's plans, is labelled

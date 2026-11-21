@@ -308,9 +308,6 @@ struct MultiHarnessHostTests {
         #expect(!FileManager.default.fileExists(atPath: state.path))
     }
 
-    /// The next launch (or a host taking over) must not lead with the
-    /// meterless harness even for the moment before its first read: focus
-    /// answers from the cached last fetch, synchronously, at start.
     @Test("a CLI that times out: Antigravity reads its failure, and focus stays put")
     func failedProbeKeepsFocus() async throws {
         let fixture = try Fixture()
@@ -336,6 +333,9 @@ struct MultiHarnessHostTests {
         #expect(await runner.quotaRuns.count == 1)
     }
 
+    /// The next launch (or a host taking over) must not lead with the
+    /// meterless harness even for the moment before its first read: focus
+    /// answers from the cached last fetch, synchronously, at start.
     @Test("a launch reads meter presence from the cache, before the first read")
     func meterlessFocusAtLaunch() async throws {
         let fixture = try Fixture()

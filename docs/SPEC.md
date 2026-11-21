@@ -271,7 +271,11 @@ updated, Refresh, and the settings link.
 Non-negotiable; flag rather than work around:
 
 - No writes to the Keychain, ever. No reads or use of the refresh token — for
-  ANY provider's credential store.
+  ANY provider's credential store. These bind the app. BY PROXY (amendment
+  2026-11-21, second, below): the Antigravity CLI the quota probe spawns
+  manages its own sign-in as it does whenever it starts — it may refresh
+  it and write it back to its own Keychain item — while the app reads,
+  writes and passes no credential of its.
 - No consent-prompt regressions (amendment 2026-08-25, user-directed): under
   no circumstances may a feature require the user to enter system
   credentials — Keychain consent, admin authorization, TCC dialogs — for the
@@ -516,7 +520,9 @@ Non-negotiable; flag rather than work around:
     status-line export, which is retired with its single-writer carve-out;
     measurements in `docs/plans/antigravity-zero-setup.md`). The engine
     host — usaged, or the app while it hosts; never a client, `usage-cli`,
-    a test or a snapshot, whose hosts are given no runner — spawns the CLI's
+    a test or a snapshot, whose hosts are given no runner (the one
+    exception: an opt-in live test, `ANTIGRAVITY_LIVE_QUOTA=1`, run by hand
+    to check the real CLI) — spawns the CLI's
     documented print mode, exactly
     `<agy> -p /quota --output-format json --log-file /dev/null`, with the
     environment `HOME USER LOGNAME TMPDIR`, `PATH=/usr/bin:/bin:/usr/sbin:/sbin`
@@ -524,19 +530,26 @@ Non-negotiable; flag rather than work around:
     `/dev/null`, no inherited descriptors, utility QoS, its own process
     group. `<agy>` is the first of `~/.local/bin/agy`,
     `/opt/homebrew/bin/agy`, `/usr/local/bin/agy` that resolves outside any
-    `.app` bundle and whose `--version` prints a single version line
-    (checked once per file identity, a run that doesn't finish counting
-    against the floor like any other; `--version` writes nothing). Nothing else of
-    the CLI is ever run: no agent turn, no other subcommand.
+    `.app` bundle and whose `--version` ends on a version line (checked
+    once per file identity; only a check that times out is retried, and it
+    counts against the floor like any attempt; `--version` writes
+    nothing). Nothing else of the CLI is ever run: no agent turn, no other
+    subcommand — and should a run ever READ as an agent turn (turns,
+    tokens or a conversation reported) or carry no command result, that
+    binary is never asked again until the file changes.
     - How often: at most once per 10 minutes (persisted from the last
-      ATTEMPT, so a restart, a handover or a manual refresh can't beat it),
-      only when a conversation was written since the last reading began
-      (the first reading: within the last 7 days), one at a time, killed
-      with its process group at 30 s, backing off to 2 hours after
-      failures. A Mac that doesn't use Antigravity runs nothing.
+      ATTEMPT before its first spawn, and re-read before every decision, so
+      a restart, a handover or a manual refresh can't beat it), only when a
+      conversation was written since the last reading began (the first
+      reading: within the last 7 days), one at a time, killed with its
+      process group at 30 s (and whatever it leaves in that group killed
+      when it exits), backing off to 2 hours after failures — a manual
+      refresh skips the backoff, never the floor. A Mac that doesn't use
+      Antigravity runs nothing.
     - What the VENDOR'S process writes inside its own home, measured (the
       superset of every run): mtime stamps on `cache/onboarding.json`,
-      `conversation_summaries.db` and `crashes/`; and — were the CLI to
+      `conversation_summaries.db` and `crashes/` (and so on the folders
+      holding them); and — were the CLI to
       ignore its documented log path and update switch — a log in `log/`,
       the `cli.log` link, an `implicit/*.pb`, and the update check's
       `last_check.timestamp` / `updater/` (possibly an update). It may
@@ -555,7 +568,10 @@ Non-negotiable; flag rather than work around:
       (`UsageProvider.quotaCommand`).
     - What the app keeps: each bucket's id, remaining fraction and absolute
       reset, in `<bundle>/antigravity/default/quota-probe.json` (mode 0600,
-      written by the `engine.lock` holder like every other file there).
+      written by the `engine.lock` holder like every other file there),
+      beside each candidate's path, size, date and verdict, the last
+      attempt's time and failure counters; the reading also lands in the
+      engine's usage cache like any provider's response.
       The payload's text, names and descriptions are dropped before anything
       touches the disk; stdout and stderr are never logged. The app never
       reads a token, a cookie, an OAuth file or the Keychain for it, never
