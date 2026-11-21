@@ -273,3 +273,25 @@ build runs long.
 
 - `scripts/release-reminder.sh` still prints the pre-2026-09-20 manual ritual
   (bump, commit, tag by hand) where `mise run release` is the step now.
+
+## Changed while building (2026-11-22)
+
+- **The note is read from the squash commit first.** An automated security
+  review of the first build pointed out that a description stays editable
+  after its merge, so `gh pr view` at release time would carry an author's
+  later edit, never reviewed, into the tag. GitHub's squash commits on main
+  carry the PR description as their body (#37–#44 all do), so `assemble`
+  reads the note from there: frozen as merged, and offline. The live
+  description, through gh or the fixture, is the fallback only when that
+  body has no usable note (a hand-written merge message, a local merge),
+  and its entries are flagged "review before pushing".
+- **A pre-existing release.sh bug, fixed here.** The bump test piped the
+  range's log into `grep -q` under pipefail. Once the log outgrew the
+  pipe's buffer (squash bodies are whole descriptions: v0.103.0..main is
+  114 KB), grep's early exit SIGPIPE'd the printf, and a range full of
+  feat and fix read as "nothing releasable". The next real release on main
+  would have hit it. Here-strings now; test-hooks pushes a 128 KB log
+  through it.
+- The template's section sits after "What and why", where the change is
+  still in mind.
+- Guard rule 7 (§7) was built: 3 checks in test-hooks.
