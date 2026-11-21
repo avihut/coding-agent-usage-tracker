@@ -191,6 +191,20 @@ fails "$scripts/guard.sh"
 fails "$scripts/guard.sh" --staged
 git reset -q --hard "$base"
 
+# Every check the merge ruleset requires is a job a workflow defines.
+mkdir -p .github/rulesets
+printf '{"rules": [{"parameters": {"required_status_checks": [{ "context": "ci-gate" }]}}]}\n' \
+    >.github/rulesets/main-merge-requirements.json
+git add -A
+passes "$scripts/guard.sh" --staged
+printf '{"rules": [{"parameters": {"required_status_checks": [{ "context": "ghost" }]}}]}\n' \
+    >.github/rulesets/main-merge-requirements.json
+git add -A
+fails "$scripts/guard.sh"
+fails "$scripts/guard.sh" --staged
+git reset -q --hard "$base"
+git clean -qfd
+
 # --staged reads the INDEX: a violation staged and then fixed only in the
 # working tree is still what the commit would record.
 printf 'let beacon = "https://telemetry.example.com/collect"\n' >>Sources/UsageCore/Links.swift

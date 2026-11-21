@@ -120,6 +120,25 @@ if ci_text=$(show "$ci" 2>/dev/null); then
     done
 fi
 
+# 7. Every status check the merge ruleset requires is a job some workflow
+#    defines (its `name:`, or its id). A required check that nothing reports
+#    leaves every pull request "Expected — waiting" forever: renaming
+#    `release-note` or `conventional-title` would do exactly that.
+ruleset=.github/rulesets/main-merge-requirements.json
+if rules=$(show "$ruleset" 2>/dev/null); then
+    workflows=""
+    while IFS= read -r workflow; do
+        workflows+=$(show "$workflow")$'\n'
+    done < <(git ls-files -- '.github/workflows/*.yml' '.github/workflows/*.yaml')
+    contexts=$(grep -oE '"context": *"[^"]+"' <<<"$rules" | sed -E 's/.*"([^"]+)"$/\1/' || true)
+    for context in $contexts; do
+        if ! grep -qxE "  $context:[[:space:]]*|    name: \"?$context\"?[[:space:]]*" <<<"$workflows"; then
+            fail "$ruleset requires the check '$context', and no workflow job is named that" \
+                "a required check nothing reports blocks every pull request; rename both, or neither"
+        fi
+    done
+fi
+
 if [ "$failures" -gt 0 ]; then
     printf '\nguard: %d rule(s) tripped\n' "$failures" >&2
     exit 1

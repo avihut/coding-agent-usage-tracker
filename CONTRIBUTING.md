@@ -53,8 +53,13 @@ one needs to say so up front (they are spec §10; most are enforced by
   Commits inside the PR are yours to shape; they're squashed away.
 - **Don't touch the version.** No bump to `AppIdentity.version`, no `release:`
   commit, no tag — the release is cut on `main` after the merge.
-- Optional but appreciated: describe a user-visible change in
-  `.release-notes/next.md` (prose; it becomes the release notes).
+- **The release note is in the description.** Under `## Release note`
+  (the template has it), say what a user will notice, in one paragraph
+  starting with `Fixes:`, `New:` or `Features:` — repeat the label for a
+  second entry — or write `none`. The release notes are collected from
+  there when a release is cut, so please don't edit
+  `.release-notes/next.md`: it is the maintainer's file. CI checks the
+  section is there.
 - Behavior gets a test; decode/parse behavior gets a fixture test, and
   malformed input must degrade, not crash. Tests never touch the network.
 - Warnings are errors. The layout of the code is deliberate — the formatter
@@ -65,7 +70,9 @@ one needs to say so up front (they are spec §10; most are enforced by
   "Lint, format & repo rules" (`mise run gate-lint`), "Swift: strict build +
   tests" (`mise run gate-swift`) and "TUI (Rust): clippy + tests"
   (`mise run gate-tui`) — and `ci-gate` is green when all three are.
-  `conventional-title` is the PR title check above.
+  `conventional-title` is the PR title check above, and `release-note` the
+  description check (`mise run release-notes -- check < description.md`
+  runs it locally).
 
 ## Licensing
 

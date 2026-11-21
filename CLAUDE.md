@@ -270,9 +270,12 @@ there beats adding a paragraph here.
   holds it to that. (`CONTRIBUTING.md`)
 - NOTHING ON A BRANCH NAMES A VERSION — no bump to `AppIdentity.version`,
   no `release:` commit, no tag. The release is cut on `main` after the
-  merge, by the maintainer; describe a user-visible change in
-  `.release-notes/next.md` instead. Cutting, pushing and publishing a
-  release are the maintainer's steps and nobody else's.
+  merge, by the maintainer; describe a user-visible change under
+  `## Release note` in the PR DESCRIPTION instead (`Fixes:` / `New:` /
+  `Features:` + prose, or `none`; CI's `release-note` check holds it), and
+  NEVER edit `.release-notes/next.md` — it is the maintainer's file, and
+  every PR editing it conflicted with every other. Cutting, pushing and
+  publishing a release are the maintainer's steps and nobody else's.
   (`docs/WORKFLOW.md`)
 - The daft layout above is the maintainer's; a plain `git clone` works
   too, and then ordinary git branching is fine. daft itself is still needed
