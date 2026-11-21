@@ -10,6 +10,17 @@ Fixes
   name comes from what Claude Code records for your plan, so a future rename
   shows up without an update. Codex's ChatGPT plans read by name too ("Pro
   Lite", not "Prolite").
+- Codex: the heatmap, totals, cost and sessions list no longer lose every
+  session older than about a week. Codex compresses a session's file once
+  it has gone a week unused, and this app couldn't read the compressed
+  form, so each day another day of history disappeared — on the reporting
+  Mac, more than half of all sessions. Compressed sessions now read exactly
+  like the rest, through the app's own decoder (macOS ships none, and the
+  app takes no third-party code); a session Codex is in the middle of
+  compressing counts once, and nothing is ever written inside `~/.codex`.
+  The first scan after updating reads the backlog once, and scanning Codex
+  now takes a fraction of the memory it did (490 MB → 110 MB at peak on
+  the reporting Mac).
 
 Features
 - Antigravity CLI is metered. It sits in the menu bar beside the other

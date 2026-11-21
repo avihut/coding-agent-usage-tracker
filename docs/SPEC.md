@@ -291,7 +291,10 @@ Non-negotiable; flag rather than work around:
   active provider's).
 - Codex provider (amendment 2026-08-15): reads `~/.codex/sessions` strictly
   read-only — the rollout JSONLs where Codex itself records per-turn token
-  usage and the server's rate-limit snapshots. `~/.codex/auth.json` is never
+  usage and the server's rate-limit snapshots, plain or in the `.jsonl.zst`
+  form Codex compresses week-old ones into (2026-11-21: the same files,
+  decompressed in memory by the app's own decoder; no new path, nothing
+  written). `~/.codex/auth.json` is never
   read, no credentials are used, and the provider adds zero network
   destinations. Harness auto-detection stats session-file mtimes under the
   same tree, read-only. Sessions (v0.31.0): each rollout file lists as one

@@ -41,6 +41,59 @@ a face is in [ARCHITECTURE.md](ARCHITECTURE.md).
   (and its stampede). Feeds the per-meter window breakdowns via
   `WindowTokens`.
 
+## Compressed transcripts
+
+- COMPRESSED TRANSCRIPTS (2026-11-21): Codex archives rollouts older than a
+  week as `.jsonl.zst` ([HARNESSES.md](HARNESSES.md) → Codex), and macOS
+  ships no zstd — the Compression framework has zlib, LZMA, LZFSE, LZ4 and
+  Brotli. Zero dependencies rules out libzstd and shelling out to a
+  Homebrew binary, so UsageCore carries its own read-only DECODER
+  (`Sources/UsageCore/Compression/`, RFC 8878): frames, skippable frames,
+  several frames per file, raw/RLE/compressed blocks, raw/RLE/Huffman
+  (1 and 4 streams, treeless) literals, predefined/RLE/FSE/repeat sequence
+  tables, repeat offsets, the XXH64 content checksum. NOT dictionaries — a
+  frame naming one is refused. `LineReader` sits on top and yields lines
+  exactly as `Data.split(separator: 0x0A)` did, for plain files too.
+  IT RUNS IN THE DAEMON, over files this app didn't write: malformed,
+  truncated or hostile input ends in a `ZstdError` — never a trap, a hang
+  or an unbounded allocation. Every read is range-checked first; every loop
+  is bounded by input bytes, a sequence count or the block's output budget.
+  LIMITS: window ≤ 2^27 = 128 MiB (the reference decoder's own default, so
+  anything `zstd -d` takes without `--memory` decodes; only the window a
+  frame actually fills is allocated), ≤ 1 GiB out per file (8× the largest
+  plain rollout seen, 120 MB — bounds a decompression bomb's CPU), a line
+  ≤ 64 MiB (~5× the longest real one, 13.6 MB; a longer line is skipped
+  unbuffered). MEMORY: it streams a block (≤ 128 KiB) at a time and keeps
+  only the window plus a slack; the compressed file is read in 256 KiB
+  chunks, plain files in 1 MiB ones — neither is ever held whole any more.
+  EVERY FILE READ DRAINS ITS OWN AUTORELEASE POOL: `FileHandle` chunks are
+  autoreleased, and a thread with no pool of its own kept them all — 365 MB
+  peak decoding the 801-file backlog, 24 MB pooled. Peak memory of a cold
+  Codex scan fell from 490 MB to 110 MB, mostly from no longer reading
+  120 MB rollouts whole.
+  FAILURE: a stream that fails part-way counts for NOTHING, never half a
+  file. Bad bytes are cached as `undecodable: <ZstdDecoder.revision>` —
+  bump the revision with any change that could accept bytes an older one
+  refused, or a compressed rollout (which never changes) stays skipped
+  forever. A read failure (vanished, permissions, I/O) is not cached at all:
+  retried next scan. The rest of the scan renders normally.
+  CACHE: `CodexActivitySource.cacheVersion` stays 2. `undecodable` is
+  additive and optional, every v2 record is still right, and a `.jsonl.zst`
+  path is simply new to the cache — while a bump would re-parse the whole
+  2 GB plain corpus for nothing (the cold-cache stampede above). An older
+  build reading the new cache ignores the key and drops `.zst` paths.
+  The one-time cost is parsing the compressed backlog on the first scan.
+  VERIFIED (2026-11-21, reporting Mac): all 801 real `.jsonl.zst`
+  (348 MB → 1,631 MB) decode SHA-256-identical to `zstd -dc`, at
+  ~200–240 MB/s in a release build; 207 differential inputs (text, binary,
+  noise, tiny alphabets, runs, empty, block-boundary sizes × levels −1…−22,
+  `--fast`, `--long`, small windows, raw literals, multithreaded, piped,
+  concatenated) match `zstd -dc`. Cold scan 13.3 s (16.8 s before, over
+  half the data), warm 0.40 s (0.23), cache 4.6 MB (2.8). Fixtures are
+  synthetic (`mise run fixtures-zstd`), and a coverage test fails if any
+  decoding path goes unexercised — an unhit path wants a fixture, never a
+  dropped assertion.
+
 ## How a call is counted
 
 - HOW A CALL IS COUNTED (2026-08-17, v0.85.0): measured against ccusage
