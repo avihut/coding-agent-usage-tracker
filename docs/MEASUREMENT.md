@@ -119,6 +119,23 @@ a face is in [ARCHITECTURE.md](ARCHITECTURE.md).
   under-bill silently. Same for a `speed: "fast"` multiplier (every
   entry in this corpus is `"standard"`).
 
+## Antigravity's calls (2026-11-21)
+
+- A row of a conversation's `transcript.jsonl` is one model call when it
+  states a `model` and both `input_tokens` and `output_tokens`; there is
+  no streaming restatement to collapse (one row per finished step).
+  `input_tokens` is the UNCACHED slice and `cache_read_tokens` the cached
+  one — disjoint, like Claude's; `output_tokens` already includes
+  thinking. Cache creation is 0 (none is reported). Checked call for call
+  against the CLI's own conversation store during the investigation, and
+  92/92 calls and 17.06M tokens against a `jq` pass on the person's Mac.
+- A forked conversation copies its parent's rows into its own file, so
+  calls are claimed by VALUE (timestamp, model, the three counts) and
+  prompts by timestamp and source, visiting files in path order: the same
+  call in two files counts once, in whichever file sorts first.
+- Days are local days of each call's own UTC timestamp, through the
+  injected calendar; the minute timeline keeps the scanner's 56 days.
+
 ## Cost estimates
 
 - Cost estimates: `PricingTable` (per-token `ModelRates`, exact-id then
