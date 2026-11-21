@@ -75,14 +75,22 @@ a face is in [ARCHITECTURE.md](ARCHITECTURE.md).
   file. Bad bytes are cached as `undecodable: <ZstdDecoder.revision>` —
   bump the revision with any change that could accept bytes an older one
   refused, or a compressed rollout (which never changes) stays skipped
-  forever. A read failure (vanished, permissions, I/O) is not cached at all:
-  retried next scan. The rest of the scan renders normally.
-  CACHE: `CodexActivitySource.cacheVersion` stays 2. `undecodable` is
-  additive and optional, every v2 record is still right, and a `.jsonl.zst`
-  path is simply new to the cache — while a bump would re-parse the whole
-  2 GB plain corpus for nothing (the cold-cache stampede above). An older
-  build reading the new cache ignores the key and drops `.zst` paths.
-  The one-time cost is parsing the compressed backlog on the first scan.
+  forever; and bump `cacheVersion` with any fix that changes the OUTPUT of
+  a frame the decoder already accepted, since only `undecodable` records
+  are retried (Codex writes no content checksum to catch it). A read
+  failure (vanished, permissions, I/O) caches nothing: the next scan
+  retries, and a record already held stands until then. The session detail
+  view's reads stop when its task is cancelled; a scan's never do.
+  CACHE: reading compressed rollouts needed no `cacheVersion` bump (it was
+  2 then). `undecodable` is additive and optional, no record a plain file
+  produces changed, and a `.jsonl.zst` path is simply new to the cache —
+  while a bump re-parses the whole corpus (the cold-cache stampede above).
+  An older build reading the new cache ignores the key and drops `.zst`
+  paths. The one-time cost is parsing the compressed backlog on the first
+  scan. KNOWN, AND OLDER THAN THIS: a client-mode app scans read-only over
+  the daemon's cache, so while the app and the daemon are different builds
+  whose caches disagree, the app re-parses what the daemon's cache lacks on
+  every 60 s scan — with an older daemon, now the compressed backlog too.
   VERIFIED (2026-11-21, reporting Mac): all 801 real `.jsonl.zst`
   (348 MB → 1,631 MB) decode SHA-256-identical to `zstd -dc`, at
   ~200–240 MB/s in a release build; 207 differential inputs (text, binary,

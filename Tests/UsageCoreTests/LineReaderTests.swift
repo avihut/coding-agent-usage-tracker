@@ -80,6 +80,24 @@ struct LineReaderTests {
         #expect(Array(plain.prefix(lines.count)) == lines, "only whole lines before the failure")
     }
 
+    @Test("a cancelled task's read stops only when asked to — never in a scan")
+    func cancellation() async throws {
+        let data = try ZstdFixture.data("tiny.wlog10.jsonl.zst")
+        let expected = Self.split(try ZstdFixture.data("tiny.jsonl")).count
+        let task = Task.detached { () -> [(Int, ZstdError?)] in
+            while !Task.isCancelled { await Task.yield() }
+            return [true, false].map { stops in
+                let reader = LineReader(data: data, compressed: true)
+                reader.stopsWhenCancelled = stops
+                return (Array(reader).count, reader.failure)
+            }
+        }
+        task.cancel()
+        let results = await task.value
+        #expect(results[0].0 == 0 && results[0].1 == .unreadable("cancelled"))
+        #expect(results[1].0 == expected && results[1].1 == nil)
+    }
+
     @Test("a file that can't be opened is nil, not an empty read")
     func unopenable() {
         let url = URL(fileURLWithPath: "/nonexistent-\(UUID().uuidString).jsonl")

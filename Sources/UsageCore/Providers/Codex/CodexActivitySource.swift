@@ -44,8 +44,13 @@ public struct CodexActivitySource: LocalActivitySource {
                record.undecodable.map({ $0 == ZstdDecoder.revision }) ?? true {
                 continue
             }
-            // Nil (the file couldn't be read) leaves no entry: retried next scan.
-            cache.files[path] = parse(url: url, mtime: mtime, size: size)
+            // Nil — the file couldn't be read (gone between the walk and the
+            // open, permissions, I/O) — caches nothing: the next scan retries,
+            // and a record already held stands until then rather than the
+            // session vanishing for a scan. A file really gone leaves `seen`.
+            if let record = parse(url: url, mtime: mtime, size: size) {
+                cache.files[path] = record
+            }
         }
         cache.files = cache.files.filter { seen.contains($0.key) }
         if persistCache { saveCache(cache) }
@@ -124,9 +129,8 @@ public struct CodexActivitySource: LocalActivitySource {
     /// One rollout = one session; there is no subagent join and no
     /// headless marker (all Codex sessions read as interactive).
     public func sessionDetail(id: String) -> SessionDetail? {
-        guard let (url, record) = readableRollout(id: id),
-              let summary = sessionSummary(id: id, record: record),
-              let lines = CodexRollouts.lines(of: url)
+        guard let (record, lines) = readableRollout(id: id),
+              let summary = sessionSummary(id: id, record: record)
         else { return nil }
 
         var rows: [SessionEvent] = []
@@ -181,21 +185,26 @@ public struct CodexActivitySource: LocalActivitySource {
         return SessionDetail(summary: summary, rows: rows)
     }
 
-    /// The rollout behind a session id, parsed: the plain file first, its
-    /// compressed twin if the plain one is gone or unreadable.
-    private func readableRollout(id: String) -> (URL, FileRecord)? {
+    /// The rollout behind a session id, parsed, and its lines opened again
+    /// for the rows: the plain file first, its compressed twin if the plain
+    /// one is gone, unreadable or vanishes between the two opens. Both reads
+    /// stop on cancellation — a click through the sidebar must not queue
+    /// whole-file decodes nobody will see.
+    private func readableRollout(id: String) -> (FileRecord, LineReader)? {
         let candidates = CodexRollouts.rolloutFiles(root: root)
             .filter { CodexRollouts.rolloutID(of: $0) == id }
             .sorted { !CodexRollouts.isCompressed($0) && CodexRollouts.isCompressed($1) }
         for url in candidates {
+            guard !Task.isCancelled else { return nil }
             guard let values = try? url.resourceValues(
                 forKeys: [.contentModificationDateKey, .fileSizeKey]),
                 let record = parse(
                     url: url, mtime: values.contentModificationDate ?? .distantPast,
-                    size: values.fileSize ?? 0),
-                record.undecodable == nil
+                    size: values.fileSize ?? 0, stopsWhenCancelled: true),
+                record.undecodable == nil,
+                let lines = CodexRollouts.lines(of: url, stopsWhenCancelled: true)
             else { continue }
-            return (url, record)
+            return (record, lines)
         }
         return nil
     }
@@ -268,9 +277,11 @@ public struct CodexActivitySource: LocalActivitySource {
         /// for nothing; a newer revision retries it (a compressed rollout
         /// never changes, so a verdict without one would be permanent).
         /// Optional, so every cache entry written before it still decodes —
-        /// which is why compressed rollouts (2026-11-21) didn't bump
-        /// `cacheVersion`: every record is still right, a `.jsonl.zst` path
-        /// is simply new, and a bump would re-parse the whole corpus.
+        /// which is why reading compressed rollouts (2026-11-21) needed no
+        /// `cacheVersion` bump: it changed no record a plain file produces, a
+        /// `.jsonl.zst` path is simply new, and a bump costs a whole-corpus
+        /// re-parse. A decoder fix that changes the OUTPUT of a frame it
+        /// already accepted does need one: only `undecodable` is retried.
         var undecodable: Int? = nil
 
         enum CodingKeys: String, CodingKey {
@@ -304,7 +315,9 @@ public struct CodexActivitySource: LocalActivitySource {
 
     /// Nil when the file couldn't be read at all (gone, permissions, I/O) —
     /// not cached, so the next scan retries it.
-    private func parse(url: URL, mtime: Date, size: Int) -> FileRecord? {
+    private func parse(
+        url: URL, mtime: Date, size: Int, stopsWhenCancelled: Bool = false
+    ) -> FileRecord? {
         var slots: [SlotKey: TokenTally] = [:]
         var days: [Date: DayTally] = [:]
         var currentModel = "unknown"
@@ -316,7 +329,7 @@ public struct CodexActivitySource: LocalActivitySource {
             if meta.end.map({ date > $0 }) ?? true { meta.end = date }
         }
 
-        if let lines = CodexRollouts.lines(of: url) {
+        if let lines = CodexRollouts.lines(of: url, stopsWhenCancelled: stopsWhenCancelled) {
             for line in lines {
                 guard let record = try? JSONDecoder().decode(
                     CodexRollouts.RolloutLine.self, from: Data(line))

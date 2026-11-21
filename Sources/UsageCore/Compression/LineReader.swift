@@ -18,6 +18,10 @@ final class LineReader: Sequence, IteratorProtocol {
     private var handle: FileHandle?
     private var decoder: ZstdDecoder?
     private(set) var failure: ZstdError?
+    /// When set, a cancelled task's read ends at the next chunk with an
+    /// `.unreadable("cancelled")` failure. Off for scans: a scan must never
+    /// count a file it stopped reading.
+    var stopsWhenCancelled = false
 
     private var chunk: [UInt8] = []
     private var cursor = 0
@@ -110,6 +114,7 @@ final class LineReader: Sequence, IteratorProtocol {
         chunk = []
         cursor = 0
         do throws(ZstdError) {
+            if stopsWhenCancelled, Task.isCancelled { throw .unreadable("cancelled") }
             if decoder != nil {
                 // Mutated in place: a local copy would share the decoder's
                 // window and copy it on every block.

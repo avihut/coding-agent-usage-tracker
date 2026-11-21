@@ -125,8 +125,10 @@ enum CodexRollouts {
 
     /// The rollout's lines, decompressed when it is a `.jsonl.zst`; nil when
     /// it can't be opened. Check `failure` after the loop.
-    static func lines(of url: URL) -> LineReader? {
-        LineReader(url: url, compressed: isCompressed(url))
+    static func lines(of url: URL, stopsWhenCancelled: Bool = false) -> LineReader? {
+        let reader = LineReader(url: url, compressed: isCompressed(url))
+        reader?.stopsWhenCancelled = stopsWhenCancelled
+        return reader
     }
 
     /// Newest-first rollout files, ordered by mtime; on a tie (a rollout

@@ -118,6 +118,22 @@ struct CodexCompressedRolloutTests {
         #expect(Self.scan(tree, persist: true) == expected)
     }
 
+    @Test("a re-parse that can't read the file keeps the record it had, for that scan")
+    func heldRecordStands() throws {
+        let tree = try Self.plainTree()
+        defer { tree.tearDown() }
+        let before = Self.scan(tree, persist: true)
+        // The file grows (a cache miss) and can't be opened when re-read.
+        let path = "\(Self.day)/\(Self.id).jsonl"
+        let grown = try ZstdFixture.data("rollout.jsonl") + Data("\n".utf8) + Self.extraTurn
+        try tree.write(path, grown)
+        try tree.setReadable(path, false)
+        #expect(Self.scan(tree, persist: true) == before)
+        try tree.setReadable(path, true)
+        let after = Self.scan(tree, persist: true)
+        #expect(after.sessions.first?.apiCalls == (before.sessions.first?.apiCalls ?? 0) + 1)
+    }
+
     @Test("session detail falls back to the compressed twin when the plain file can't be read")
     func detailFallsBack() throws {
         let tree = try Self.plainTree()

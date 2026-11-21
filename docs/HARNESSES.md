@@ -409,8 +409,8 @@ succeeds it for Google's plans, and it stays metered for API-key use.
   resolve "the plain rollout before its compressed sibling"): both names
   exist at once for a moment at compression and at resume, and the plain
   copy is then the original or the live, appended one. `sessionDetail`
-  tries the plain file, then its twin. The parse cache stays version 2;
-  why is in MEASUREMENT.md. Measured on the reporting Mac against the
+  tries the plain file, then its twin. The parse cache needed no version
+  bump; why, and when a decoder change does need one, is in MEASUREMENT.md. Measured on the reporting Mac against the
   pre-fix scanner: 8 → 38 active days (Feb 7 → Nov 18), 737 → 1,528
   sessions, 7.62 B → 10.95 B tokens; every one of the 737 sessions the old
   scanner saw is identical in the new scan, and the token difference is
