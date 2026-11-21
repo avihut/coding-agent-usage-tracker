@@ -14,7 +14,13 @@ weeks each. Everything is seeded, so two runs differ only by the
 clock: every stamp is laid out relative to now, because a digest whose
 resets are in the past renders as stale.
 
-usage: demo-digest.py <out.json>
+`--several` adds a second Claude Code account (two Sonnet versions, so the
+Activity outline's family fold has something to fold) and Gemini CLI, whose
+traces carry prompts and no tokens — the merged consumption scope's edge
+states. The default output is unchanged by it (the extras draw their
+randomness after everything else).
+
+usage: demo-digest.py [--several] <out.json>
 """
 
 import copy
@@ -42,6 +48,15 @@ CLAUDE_MODELS = [
 ]
 CODEX_MODELS = [
     ("gpt-5.2-codex", "GPT 5.2 Codex", rgb(0.063, 0.639, 0.498), 1.0, 0.45),
+]
+WORK_MODELS = [
+    ("claude-sonnet-5", "Sonnet 5", rgb(0.353, 0.557, 0.918), 0.55, 0.75),
+    ("claude-sonnet-4-5", "Sonnet 4.5", rgb(0.420, 0.620, 0.970), 0.30, 0.75),
+    ("claude-haiku-4-5", "Haiku 4.5", rgb(0.478, 0.757, 0.553), 0.15, 0.375),
+]
+WORK_SESSIONS = [
+    ("Quarterly report pipeline", "reports", "feat/q3"),
+    ("Tidy the CI matrix", "infra", "chore/ci-matrix"),
 ]
 CLAUDE_SESSIONS = [
     ("Add retry with backoff to the sync client", "sync-client", "fix/retry-backoff"),
@@ -240,7 +255,66 @@ def face(now, rng, section, *, models, meters, titles, typical, engine):
     return built
 
 
-def build(now):
+def prompt_only(now, rng, days=84):
+    """An agent whose traces count prompts and no tokens (Gemini CLI)."""
+    today = now.date()
+    rollups = []
+    for back in range(days - 1, -1, -1):
+        day = today - timedelta(days=back)
+        if day.weekday() >= 5 or rng.random() < 0.3:
+            continue
+        rollups.append({"dayKey": day.isoformat(), "tokens": 0, "cost": 0,
+                        "prompts": rng.randint(8, 60)})
+    return {
+        "timeZone": "GMT", "days": rollups, "modelDays": [], "hourDays": [],
+        "todayHours": [], "todayTokens": 0, "todayCost": 0,
+        "todayPrompts": rollups[-1]["prompts"] if rollups else 0,
+    }
+
+
+def add_several(now, rng, state, sections, cells):
+    """A second Claude Code account and Gemini CLI (see the module doc)."""
+    hours, days = lambda n: timedelta(hours=n), lambda n: timedelta(days=n)
+    # The golden's extra sections are deliberately sparse; give them the
+    # standard section's shape for whatever they leave out.
+    for key in ("c982130e", "gemini"):
+        for field, value in sections["default"].items():
+            sections[key].setdefault(field, copy.deepcopy(value))
+    work = face(
+        now, rng, sections["c982130e"], models=WORK_MODELS, titles=WORK_SESSIONS,
+        typical=12e6, engine={},
+        meters=[
+            meter(now, rng, WORK_MODELS, ident="session", label="Session (5h)", tag="S",
+                  rank=0, window=hours(5), elapsed=hours(1), percent=12,
+                  projected=30, verdict="green", severity=0, step_minutes=5),
+            meter(now, rng, WORK_MODELS, ident="weekly_all", label="Weekly (all)", tag="W",
+                  rank=1, window=days(7), elapsed=days(3), percent=27,
+                  projected=55, verdict="green", severity=0, step_minutes=120),
+        ])
+    work.update({"label": "work@example.com", "monogram": "W", "isFocused": False})
+    gemini = face(
+        now, rng, sections["gemini"], models=[], titles=[], typical=1, engine={},
+        meters=[
+            meter(now, rng, [], ident="session", label="Daily · counted locally", tag="S",
+                  rank=0, window=hours(24), elapsed=hours(9), percent=18,
+                  projected=40, verdict="green", severity=0, step_minutes=60),
+        ])
+    gemini.update({"activity": prompt_only(now, rng), "models": [], "sessions": [],
+                   "isFocused": False})
+    state["profiles"] += [work, gemini]
+    harnesses = {h["id"]: h for h in state["harnesses"]}
+    for section, template in ((work, "default"), (gemini, "codex")):
+        cell = copy.deepcopy(cells[template])
+        harness = harnesses[section["providerID"]]
+        cell.update({"profile": section["id"], "providerID": section["providerID"],
+                     "glyph": harness["glyph"], "accent": harness["accent"],
+                     "segments": section["menuBar"], "monogram": section["monogram"],
+                     "stale": False, "indicator": False,
+                     "worstSeverity": max(s["severity"] for s in section["menuBar"])})
+        state["menuBarCells"].append(cell)
+
+
+def build(now, several=False):
     rng = random.Random(5)
     state = json.loads(GOLDEN.read_text())
     sections = {section["id"]: section for section in state["profiles"]}
@@ -286,6 +360,7 @@ def build(now):
     for key in ("serviceStatus", "outages", "appUpdate", "accountPresence"):
         state.pop(key, None)
     cells = {cell["profile"]: cell for cell in state["menuBarCells"]}
+    templates = copy.deepcopy(cells)
     state["menuBarCells"] = []
     for section in (claude, codex):
         cell = cells[section["id"]]
@@ -293,9 +368,13 @@ def build(now):
                      "stale": False, "indicator": False,
                      "worstSeverity": max(s["severity"] for s in section["menuBar"])})
         state["menuBarCells"].append(cell)
-    state["harnesses"] = [h for h in state["harnesses"] if h["id"] in ("claude", "codex")]
+    kept = ("claude", "codex", "gemini") if several else ("claude", "codex")
+    state["harnesses"] = [h for h in state["harnesses"] if h["id"] in kept]
+    if several:
+        add_several(now, rng, state, sections, templates)
     for harness in state["harnesses"]:
-        harness.update({"accountCount": 1, "present": True, "shown": True,
+        count = sum(1 for p in state["profiles"] if p["providerID"] == harness["id"])
+        harness.update({"accountCount": count, "present": True, "shown": True,
                         "notices": copy.deepcopy(quiet), "outages": [],
                         "newestActivityAt": stamp(now - timedelta(minutes=4))})
         harness.pop("serviceStatus", None)
@@ -303,10 +382,13 @@ def build(now):
 
 
 def main():
-    if len(sys.argv) != 2:
+    args = sys.argv[1:]
+    several = "--several" in args
+    paths = [a for a in args if a != "--several"]
+    if len(paths) != 1:
         sys.exit(__doc__.strip().splitlines()[-1])
     now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
-    Path(sys.argv[1]).write_text(json.dumps(build(now), indent=1, sort_keys=True) + "\n")
+    Path(paths[0]).write_text(json.dumps(build(now, several), indent=1, sort_keys=True) + "\n")
 
 
 if __name__ == "__main__":

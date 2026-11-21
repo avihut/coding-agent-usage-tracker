@@ -17,8 +17,8 @@ struct ModelBreakdownGrid: View {
     @Binding var hoveredModel: String?
     @State private var costDetail: String?
 
-    private static let tokenColumnWidth: CGFloat = 44
-    private static let costColumnWidth: CGFloat = 54
+    static let tokenColumnWidth: CGFloat = 44
+    static let costColumnWidth: CGFloat = 54
 
     var body: some View {
         let priced = rows.map { row in (row: row, rates: pricing.rates(for: row.model)) }
@@ -191,7 +191,9 @@ struct CostMathView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(width: 230, alignment: .leading)
             } else {
-                Text("No list price for \(row.model)")
+                // A merged scope's key is agent␟account␟model; the id is the
+                // model's own.
+                Text("No list price for \(ConsumptionKey.model(of: row.model))")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Text("The pricing feed has no entry for this model id, so its tokens aren't in the totals.")

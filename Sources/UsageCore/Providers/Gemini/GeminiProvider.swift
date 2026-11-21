@@ -21,6 +21,9 @@ public struct GeminiProvider: UsageProvider {
     public let accent = ProviderAccent(red: 0.259, green: 0.522, blue: 0.957)
     public let networkDestinations: [String] = []
     public let credentials: CredentialChain
+    /// Its session logs carry prompts, not token counts — activity is
+    /// prompt days only (see `scanTranscripts`).
+    public var reportsTokens: Bool { false }
     let tmpRoot: URL
     /// Test injection; the app path reads the preference key.
     let dailyCapOverride: Int?

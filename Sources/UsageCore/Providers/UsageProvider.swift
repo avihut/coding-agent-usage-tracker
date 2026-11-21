@@ -53,6 +53,10 @@ public protocol UsageProvider: Sendable {
     /// local-only, read-only, and never credential stores; the privacy
     /// card renders the source's path on its own line.
     var accountIdentity: (any AccountIdentitySource)? { get }
+    /// Whether the agent's traces record tokens at all. False for an agent
+    /// whose activity is prompt counts only — a cross-agent consumption
+    /// total names it ("reports no tokens") instead of counting it as zero.
+    var reportsTokens: Bool { get }
 
     /// Read-only places the agent's access token can be found. Read fresh
     /// every refresh cycle, never cached, never written back (spec §5/§10).
@@ -144,6 +148,8 @@ extension UsageProvider {
     public var statusFeed: StatusFeed? { nil }
     /// Opt-in: a provider without a declared source tracks no accounts.
     public var accountIdentity: (any AccountIdentitySource)? { nil }
+    /// Opt-out: traces carry tokens unless the provider says otherwise.
+    public var reportsTokens: Bool { true }
     /// Opt-in: one home, the implicit default profile.
     public var supportsMultipleHomes: Bool { false }
     public var homeDirectory: URL? { nil }

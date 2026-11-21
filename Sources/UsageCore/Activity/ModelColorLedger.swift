@@ -127,6 +127,43 @@ public enum ModelColorMath {
         return rgb(hue: h, saturation: min(1, s * step.saturation), brightness: min(1, b * step.brightness))
     }
 
+    /// Tones of one hue for a chart that stacks several agents: the agent
+    /// owns the hue (its accent), each model FAMILY a tone, so no two
+    /// vendors' models can wear look-alike colors. Indexed by the family's
+    /// persistent hue slot — fixed for life, like the ledger's own colors.
+    public static let agentTones: [(saturation: Double, brightness: Double)] = [
+        (1.00, 1.00),
+        (0.50, 1.30),
+        (1.20, 0.62),
+        (0.30, 1.45),
+        (1.35, 0.45),
+        (0.75, 0.82),
+    ]
+
+    /// A model's color when agents share a chart: the agent's accent at the
+    /// family's tone, each later version a step further from it — darker
+    /// when the tone is bright, lighter when it is deep, so the step always
+    /// has room (a light tone pushed lighter clamps at white and two
+    /// versions came out the same). Both slots come from the agent's own
+    /// ledger, so the color never moves between periods.
+    public static func agentShade(hueSlot: Int, shadeSlot: Int, accent: RGBColor) -> RGBColor {
+        let tone = agentTones[hueSlot % agentTones.count]
+        let (hue, saturation, brightness) = hsb(from: accent)
+        var s = min(1, saturation * tone.saturation)
+        var b = min(1, brightness * tone.brightness)
+        if shadeSlot > 0 {
+            let step = 0.24 * Double(shadeSlot)
+            if b > 0.6 {
+                b *= max(0.3, 1 - step)
+                s = min(1, s * (1 + step * 0.6))
+            } else {
+                b = min(1, b * (1 + step * 1.4))
+                s *= max(0.3, 1 - step * 0.5)
+            }
+        }
+        return rgb(hue: hue, saturation: min(1, max(0, s)), brightness: min(1, max(0.12, b)))
+    }
+
     /// Standard RGB→HSB (hexcone) — matches AppKit's conversion for sRGB
     /// inputs, minus AppKit.
     static func hsb(from color: RGBColor) -> (hue: Double, saturation: Double, brightness: Double) {

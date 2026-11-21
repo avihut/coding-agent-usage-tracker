@@ -218,6 +218,15 @@ a face is in [ARCHITECTURE.md](ARCHITECTURE.md).
   refreshed when >24h old (attempted at most hourly, piggybacked on usage
   refreshes), `PricingTable.bundled` as the offline floor. Estimates are
   list-price counterfactuals; subscription plans don't bill per token.
+- Across agents (the Activity section's merged scope, 2026-11-21): each
+  model is priced by ITS OWN harness's table (`ConsumptionMerge.pricing`
+  keys rates by `agent␟account␟model`), so the total is a sum of per-vendor
+  estimates. An unpriced model is left out of every sum and counted ("N
+  unpriced"); a node with nothing priced reads "—", never $0. Tokens sum
+  as each vendor counts them — every agent's tokenizer is its own — so a
+  cross-agent token total is scale, not an exact common unit; an agent
+  whose traces carry no tokens (`reportsTokens == false`) is named, not
+  summed. Details in [CHARTS.md](CHARTS.md#the-consumption-scope).
 
 ## Predictions
 

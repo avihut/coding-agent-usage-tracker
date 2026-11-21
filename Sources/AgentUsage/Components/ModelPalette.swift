@@ -14,15 +14,22 @@ import UsageCore
 /// the scope key and the accent come from the harness being drawn (0.101.0) —
 /// passed in, never read off a global: with Claude and Codex metered at once
 /// a global would paint one vendor's models in the other's brand.
+@MainActor
 enum ModelPalette {
+    /// Set once, for a `--demo-digest` run: its bundle shares the live
+    /// install's defaults domain, so a demo that grew the ledger there would
+    /// write this Mac's colors (and borrow them, making the README's
+    /// pictures depend on whose Mac drew them). A demo keeps its ledgers in
+    /// memory instead, starting empty — the demo hatch's no-leak rule.
+    static var isEphemeral = false
+    private static var ephemeralLedgers: [String: ModelColorLedger] = [:]
+
     /// Colors for these models (and every model ever seen) from the
     /// persistent ledger, growing and saving it when new models appear.
     /// Persistence lives with core `ModelColorLedger` — the engine's
     /// usage-ordered seed and this lookup share the one write path.
     static func assignment(for models: [String], style: HarnessStyle) -> [String: Color] {
-        let grown = ModelColorLedger.grow(
-            models.map { ($0, ModelFamily.familyName($0)) },
-            defaults: .standard, providerID: style.providerID)
+        let grown = ledger(growing: models, providerID: style.providerID)
         var result: [String: Color] = [:]
         for (family, familyShades) in grown.shades {
             guard let hue = grown.hues[family] else { continue }
@@ -31,6 +38,39 @@ enum ModelPalette {
             }
         }
         return result
+    }
+
+    /// The harness's ledger grown by any unseen models — persisted through
+    /// core's one write path, or held in memory for a demo.
+    /// Colors for one agent's models when several agents share a chart: the
+    /// agent's accent at a tone per family (`ModelColorMath.agentShade`),
+    /// read from — and growing — that agent's own ledger, so the slots and
+    /// therefore the colors are as fixed as the ones above. Raw model ids
+    /// only; the caller keys the result however its chart needs.
+    static func agentShades(for models: [String], style: HarnessStyle) -> [String: Color] {
+        let grown = ledger(growing: models, providerID: style.providerID)
+        var result: [String: Color] = [:]
+        for model in models {
+            guard let slots = grown.slots(for: model, family: ModelFamily.familyName(model)) else { continue }
+            let rgb = ModelColorMath.agentShade(
+                hueSlot: slots.hue, shadeSlot: slots.shade, accent: style.accent)
+            result[model] = Color(red: rgb.red, green: rgb.green, blue: rgb.blue)
+        }
+        return result
+    }
+
+    static func ledger(growing models: [String], providerID: String) -> ModelColorLedger {
+        // A merged scope's composite key (agent␟account␟model) is a chart's
+        // key, never a model: saved here it would hold a slot forever.
+        let entries = models
+            .filter { !ConsumptionKey.isComposite($0) }
+            .map { ($0, ModelFamily.familyName($0)) }
+        guard isEphemeral else {
+            return ModelColorLedger.grow(entries, defaults: .standard, providerID: providerID)
+        }
+        let grown = (ephemeralLedgers[providerID] ?? ModelColorLedger()).assigning(entries)
+        ephemeralLedgers[providerID] = grown
+        return grown
     }
 
     /// The family's base hue re-shaded for a version's slot — core

@@ -26,8 +26,8 @@ extension AppDelegate {
             // bare hosted view has none, so it is given the window's.
             let host = NSHostingController(
                 rootView: UsagePanelView(
-                    registry: registry, onOpenSettings: { _ in }, onOpenSessions: {},
-                    onOpenSession: { _ in })
+                    registry: registry, onOpenSettings: { _ in }, onOpenSessions: { _ in },
+                    onOpenSession: { _, _ in })
                     .background(Color(nsColor: .windowBackgroundColor)))
             // As the popover sizes it: the ScrollView's ideal height is its
             // content's, which `fittingSize` on a bare view collapses.

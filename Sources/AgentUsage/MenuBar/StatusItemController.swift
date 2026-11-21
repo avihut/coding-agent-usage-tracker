@@ -131,11 +131,11 @@ final class StatusItemController: NSResponder {
                 onOpenSettings: { [weak self] landing in
                     self?.showSettings(pane: .accounts, landing: landing)
                 },
-                onOpenSessions: { [weak self] in
-                    self?.showSessions()
+                onOpenSessions: { [weak self] owner in
+                    self?.showSessions(in: owner)
                 },
-                onOpenSession: { [weak self] id in
-                    self?.showSessions(selecting: id)
+                onOpenSession: { [weak self] id, owner in
+                    self?.showSessions(selecting: id, in: owner)
                 }))
         host.sizingOptions = .preferredContentSize
         return host
@@ -391,6 +391,12 @@ final class StatusItemController: NSResponder {
     private func openPanel(from button: NSStatusBarButton) {
         let store = registry.focusedStore
         store.scanActivity()
+        // The Activity section counts its scope's accounts, not only the
+        // focused one: nudge each once (every store's own throttle rations
+        // it; asking the focused store twice would owe it a catch-up scan).
+        for other in registry.consumptionStores(registry.consumptionScope) where other !== store {
+            other.scanActivity()
+        }
         // A window opening on an aging status card asks for a fresh one
         // (decision D6). Fire-and-forget, and rationed by the feed's own
         // cache window — this is here rather than in the panel's
@@ -435,10 +441,12 @@ final class StatusItemController: NSResponder {
     }
 
     /// Opens the Sessions window; also the `--sessions` launch hatch. A
-    /// session id (the panel shortlist's click) lands the sidebar on it.
-    func showSessions(selecting sessionID: String? = nil) {
+    /// session id (the panel shortlist's click) lands the sidebar on it, in
+    /// the window of the account that owns it — a merged Activity scope
+    /// lists several accounts' sessions. No owner = the focused account.
+    func showSessions(selecting sessionID: String? = nil, in owner: String? = nil) {
         if popover.isShown { popover.performClose(nil) }
-        let store = registry.focusedStore
+        let store = owner.flatMap { registry.store(for: $0) } ?? registry.focusedStore
         if sessionsController == nil || sessionsStore !== store {
             sessionsController?.close()
             sessionsController = SessionsWindowController(store: store, registry: registry)

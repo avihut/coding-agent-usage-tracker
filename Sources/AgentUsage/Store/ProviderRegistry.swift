@@ -59,6 +59,20 @@ final class ProviderRegistry {
     @ObservationIgnored private var wakeObserver: NSObjectProtocol?
     @ObservationIgnored private var observationGeneration = 0
     @ObservationIgnored private var lastFocusedID: String?
+    /// The merged Activity scope's last input (ProviderRegistry+Consumption).
+    @ObservationIgnored let consumptionCache = ConsumptionCache()
+    /// Whose consumption the Activity section counts (`ConsumptionScope`'s
+    /// raw value), set through `setConsumptionScope`. Persisted in the app's
+    /// defaults — except under `--demo-digest`, whose bundle shares the live
+    /// install's domain: a demo reads only its launch arguments (the
+    /// volatile argument domain) and writes nothing.
+    private(set) var consumptionScopeRaw = ConsumptionScope.all.rawValue
+
+    func setConsumptionScope(_ scope: ConsumptionScope) {
+        consumptionScopeRaw = scope.rawValue
+        guard !isDemo else { return }
+        UserDefaults.standard.set(scope.rawValue, forKey: ConsumptionScope.storageKey)
+    }
 
     /// `demo` is the `--demo-digest` hatch (screenshots that show nobody's
     /// real usage): the process is a client of that fixed digest and stays
@@ -71,6 +85,10 @@ final class ProviderRegistry {
         self.providers = providers
         self.bundleID = bundleID
         self.isDemo = demo != nil
+        // Before any view asks for a model color: a demo shares this Mac's
+        // defaults domain, so its colors live in memory (see ModelPalette).
+        if demo != nil { ModelPalette.isEphemeral = true }
+        consumptionScopeRaw = Self.initialConsumptionScope(demo: demo != nil)
         // The catalog spans every harness this build can meter and never
         // changes again (0.101.0): with two vendors' models in one grid, a
         // name must come from the vendor whose grammar the id belongs to.
@@ -385,6 +403,16 @@ final class ProviderRegistry {
 
     // MARK: - Faces
 
+    /// The profile id behind a demo section's key — the inverse of
+    /// `ProfileKey.make`: a bundled harness's key IS its id, another
+    /// harness's non-standard key is its scope prefix, a dot, and the id.
+    static func demoProfileID(key: String, providerID: String) -> String? {
+        if providerID == HarnessResolution.bundledProviderID { return key }
+        let base = StorageScope.scopePrefix(providerID: providerID, profileID: Profile.defaultID)
+        guard key.hasPrefix(base + ".") else { return nil }
+        return String(key.dropFirst(base.count + 1))
+    }
+
     func loadProfiles() {
         // A demo's accounts are the digest's sections, not this Mac's. The
         // one thing taken from here is how the person DRAWS an account they
@@ -396,6 +424,13 @@ final class ProviderRegistry {
                 guard let provider = providers.first(where: { $0.id == section.providerID })
                 else { return nil }
                 var profile = Profile.standard(for: provider, addedAt: Date())
+                // A second account of a harness keeps its own key (the
+                // digest names sections by key); without this every section
+                // of one harness collapsed onto the standard account.
+                if section.id != profile.key,
+                   let id = Self.demoProfileID(key: section.id, providerID: provider.id) {
+                    profile = Profile(id: id, providerID: provider.id, home: nil, addedAt: Date())
+                }
                 if let own = stored.first(where: { $0.key == profile.key }) {
                     profile.menuBarForm = own.menuBarForm
                     profile.menuBarElements = own.menuBarElements

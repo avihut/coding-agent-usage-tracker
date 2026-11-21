@@ -141,13 +141,15 @@ public enum ModelNames {
     /// settled value, which is what makes the unsafe opt-out honest.
     nonisolated(unsafe) public static var catalog: ModelCatalog = .claude
 
+    /// A merged consumption scope's composite key (`ConsumptionKey`) names
+    /// its model, so every surface that names a key names it right.
     public static func display(_ id: String) -> String {
-        catalog.displayName(id)
+        catalog.displayName(ConsumptionKey.model(of: id))
     }
 
     /// "claude-opus-4-8" → "Opus". Also the model-color ledger's family key.
     public static func family(_ id: String) -> String {
-        catalog.familyName(id)
+        catalog.familyName(ConsumptionKey.model(of: id))
     }
 
     /// Capability-tier position of a family name; smaller sorts first.
