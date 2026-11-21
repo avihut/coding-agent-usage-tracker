@@ -223,7 +223,9 @@ gives each stack band its own density glyph.
     engine persists it exactly as the ⋯ menu's picks do.
 34. [S][✓] Account focus — the panel strip and the menu bar's click on
     a mark, as keys (user-requested 2026-10-05). `a` pins the next
-    account, `A` is Auto; another harness's header cell is a
+    account, `A` is Auto (a shown harness with no meters keeps its
+    header mark with a dash, as the bar's `A–` — 2026-11-21); another
+    harness's header cell is a
     `Hit::Account` (click/enter), registered only when painted whole and
     only for an account the engine will focus. It moves the ENGINE's pin
     (`focusProfile` over the socket), shared with the menu bar — never a
