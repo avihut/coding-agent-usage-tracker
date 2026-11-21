@@ -1200,6 +1200,27 @@ public enum LiveStateBuilder {
         }
     }
 
+    /// The inverse of `errorCode`, for a face that rebuilds state from the
+    /// digest: every code this side writes comes back as its own case (a
+    /// test round-trips them all), and a code from a NEWER writer reads as
+    /// `.network` — readable, never a crash. Retry-After isn't carried.
+    public static func usageError(code: String, httpStatus: Int?) -> UsageError {
+        switch code {
+        case "noCredentials": .noCredentials
+        case "keychainDenied": .keychainDenied
+        case "credentialsUnreadable": .credentialsUnreadable
+        case "signInExpired": .signInExpired
+        case "rateLimited": .rateLimited(retryAfter: nil)
+        case "http": .http(httpStatus ?? 0)
+        case "schema": .schema
+        case "noLocalData": .noLocalData
+        case "agentTimedOut": .agentTimedOut
+        case "agentOutputUnreadable": .agentOutputUnreadable
+        case "agentCommandFailed": .agentCommandFailed
+        default: .network
+        }
+    }
+
     /// Rank vocabulary as the menu bar speaks it: S, W, or the scoped
     /// model's initial.
     static func tag(for meter: Meter) -> String { UsageFormatting.tag(for: meter) }

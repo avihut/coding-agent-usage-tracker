@@ -353,6 +353,36 @@ struct AgentQuotaProbeTests {
         #expect(await probe.refreshIfDue().reading != nil)
     }
 
+    @Test("a version run that doesn't finish is an attempt: the floor holds, and it shows")
+    func unsettledVersion() async throws {
+        let fixture = try ProbeFixture()
+        defer { fixture.tearDown() }
+        let runner = try realRunner()
+        await runner.set(version: AgentCommandResult(
+            termination: .timedOut, stdout: Data(), stderr: Data(), duration: 10))
+        let clock = TestClock(start)
+        let write = TestClock(start)
+        let probe = try fixture.probe(runner: runner, clock: clock, lastWrite: write)
+        #expect(await probe.refreshIfDue().failure == .timedOut)
+        #expect(await runner.versionRuns == 1)
+        #expect(await runner.quotaRuns.isEmpty)
+        // Every poll inside the floor and the backoff: no new spawn.
+        for _ in 0..<5 {
+            clock.advance(60)
+            write.set(clock.now)
+            _ = await probe.refreshIfDue()
+        }
+        #expect(await runner.versionRuns == 1)
+        // Past the first backoff step, the check runs again, and a good
+        // answer clears the failure.
+        await runner.set(version: .exited(stdout: Data("1.5.14\n".utf8)))
+        clock.advance(20 * 60)
+        write.set(clock.now)
+        let status = await probe.refreshIfDue()
+        #expect(await runner.versionRuns == 2)
+        #expect(status.failure == nil && status.reading != nil)
+    }
+
     @Test("a same-named program that isn't the CLI is never asked for quota")
     func wrongBinary() async throws {
         let fixture = try ProbeFixture()
@@ -384,6 +414,9 @@ struct AgentQuotaProbeTests {
 
         #expect(AntigravityQuota.acceptsVersion(Data("1.5.14\n".utf8)))
         #expect(AntigravityQuota.acceptsVersion(Data("2.0\n".utf8)))
+        #expect(AntigravityQuota.acceptsVersion(Data("agy v1.6.0-beta.2\n".utf8)))
+        #expect(AntigravityQuota.acceptsVersion(Data("1.6.0+build.7\n".utf8)))
+        #expect(!AntigravityQuota.acceptsVersion(Data("Antigravity CLI is starting…\n".utf8)))
         #expect(!AntigravityQuota.acceptsVersion(Data("1.107.0\nabc\narm64\n".utf8)))
         #expect(!AntigravityQuota.acceptsVersion(Data("agy version 1.5.14\n".utf8)))
         #expect(!AntigravityQuota.acceptsVersion(Data()))
@@ -458,5 +491,24 @@ struct AgentQuotaServiceTests {
         #expect(UsageEngine.quotaProbe(
             provider: antigravity, runner: runner, directory: fixture.root, activity: nil) != nil)
         #expect(MeteringHost.Configuration(bundleID: "x", kind: .daemon).agentCommandRunner == nil)
+    }
+}
+
+@Suite("Digest error codes")
+struct DigestErrorCodeTests {
+    /// A client face rebuilds its error from the digest's code: every case
+    /// the host writes must come back as itself, not as a network error.
+    @Test("every error the host writes reads back as itself")
+    func roundTrip() {
+        let every: [UsageError] = [
+            .noCredentials, .keychainDenied, .credentialsUnreadable, .signInExpired,
+            .rateLimited(retryAfter: nil), .http(502), .network, .schema, .noLocalData,
+            .agentTimedOut, .agentOutputUnreadable, .agentCommandFailed,
+        ]
+        for error in every {
+            let (code, status) = LiveStateBuilder.errorCode(error)
+            #expect(LiveStateBuilder.usageError(code: code, httpStatus: status) == error)
+        }
+        #expect(LiveStateBuilder.usageError(code: "fromTheFuture", httpStatus: nil) == .network)
     }
 }

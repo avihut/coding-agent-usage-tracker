@@ -49,9 +49,9 @@ public enum UsageError: Error, Sendable, Equatable {
         case .schema: "The undocumented API may have changed shape."
         case .noLocalData: "Run \(agent) once on this Mac — usage is read from its session files."
         case .agentTimedOut, .agentCommandFailed:
-            "The last limits stay shown; \(agent) is asked again in a few minutes."
+            "\(agent) is asked again in a few minutes; limits already read stay shown."
         case .agentOutputUnreadable:
-            "A \(agent) update may have changed what it prints; the last limits stay shown."
+            "A \(agent) update may have changed what it prints; limits already read stay shown."
         case .http, .network, .credentialsUnreadable: nil
         }
     }

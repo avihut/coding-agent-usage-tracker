@@ -73,8 +73,23 @@ public actor AgentQuotaProbe {
     }
 
     private func attempt(startedAt: Date) async {
-        // No tool: a quiet absence — no attempt recorded, nothing shown.
-        guard let executable = await resolveExecutable() else { return }
+        let executable: URL
+        switch await resolveExecutable() {
+        case .found(let url):
+            executable = url
+        case .absent:
+            // No tool: a quiet absence — no attempt recorded, nothing shown.
+            return
+        case .unsettled(let failure):
+            // A candidate whose version run didn't finish: that run was a
+            // spawn like any other, so it counts as the attempt — the
+            // floor and the backoff hold, and the failure is shown.
+            state.lastAttemptAt = startedAt
+            state.lastFailure = failure
+            state.consecutiveFailures += 1
+            state.save(to: stateURL)
+            return
+        }
         state.lastAttemptAt = startedAt
         state.save(to: stateURL)
         let result = await runner.run(AgentCommandInvocation(
@@ -105,30 +120,47 @@ public actor AgentQuotaProbe {
         state.save(to: stateURL)
     }
 
+    private enum Resolution {
+        case found(URL)
+        /// No candidate is the tool (none there, or each one's verdict is
+        /// a settled no).
+        case absent
+        /// None found, and a version run didn't finish: retried at the
+        /// next due attempt, not held against the file.
+        case unsettled(AgentQuotaFailure)
+    }
+
     /// The first candidate that is really the tool: a regular executable
     /// outside any app bundle (a same-named launcher inside one is the
     /// wrong program), whose version output the provider accepts. A
-    /// verdict is remembered per file identity; a version run that
-    /// couldn't finish is retried next time rather than held against it.
-    private func resolveExecutable() async -> URL? {
+    /// verdict is remembered per file identity.
+    private func resolveExecutable() async -> Resolution {
+        var unsettled: AgentQuotaFailure?
         for candidate in command.executableCandidates {
             guard let identity = AgentQuotaProbeState.Binary.identify(candidate) else { continue }
             if let known = state.binaries.first(where: { $0.sameFile(as: identity) }) {
-                if known.accepted { return candidate }
+                if known.accepted { return .found(candidate) }
                 continue
             }
             let result = await runner.run(AgentCommandInvocation(
                 executable: candidate, arguments: command.versionArguments,
                 environment: environment, timeout: Self.versionTimeout))
-            guard case .exited(0) = result.termination else { continue }
+            guard case .exited(0) = result.termination else {
+                if unsettled == nil {
+                    if case .timedOut = result.termination { unsettled = .timedOut } else {
+                        unsettled = .failed
+                    }
+                }
+                continue
+            }
             var verdict = identity
             verdict.accepted = command.acceptsVersion(result.stdout)
             state.binaries.removeAll { $0.path == verdict.path }
             state.binaries.append(verdict)
             state.save(to: stateURL)
-            if verdict.accepted { return candidate }
+            if verdict.accepted { return .found(candidate) }
         }
-        return nil
+        return unsettled.map(Resolution.unsettled) ?? .absent
     }
 }
 

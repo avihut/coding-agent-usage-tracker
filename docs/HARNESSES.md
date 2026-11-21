@@ -502,7 +502,9 @@ succeeds it for Google's plans, and it stays metered for API-key use.
   not signed in) — a snapshot, so focus sees one. Binary candidates:
   `~/.local/bin/agy`, `$HOMEBREW_PREFIX/bin/agy`; a candidate inside an
   `.app` (the desktop editor's same-named launcher) or whose `--version`
-  isn't one bare version is never asked; no `PATH` lookup.
+  isn't a single version line is never asked; no `PATH` lookup. A version
+  run that doesn't finish is an attempt — floor, backoff and a shown
+  failure — and is retried, not held against the file.
   Buckets map by id (the real ids, settled 2026-11-21): `gemini-5h` →
   "Session (5h)" (rank 0, S), `gemini-weekly` → "Weekly" (rank 1, W),
   `3p-5h`/`3p-weekly` → scoped "Claude + GPT (5h)" / "(7d)" (rank 2, C),

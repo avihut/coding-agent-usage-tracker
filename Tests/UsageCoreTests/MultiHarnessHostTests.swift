@@ -311,6 +311,31 @@ struct MultiHarnessHostTests {
     /// The next launch (or a host taking over) must not lead with the
     /// meterless harness even for the moment before its first read: focus
     /// answers from the cached last fetch, synchronously, at start.
+    @Test("a CLI that times out: Antigravity reads its failure, and focus stays put")
+    func failedProbeKeepsFocus() async throws {
+        let fixture = try Fixture()
+        defer { fixture.tearDown() }
+        try fixture.claudeSession(daysAgo: 0.2)
+        for day in 1...5 { try fixture.antigravityConversation(daysAgo: Double(day) + 0.3) }
+        try FileManager.default.createDirectory(
+            at: fixture.agyBinary.deletingLastPathComponent(), withIntermediateDirectories: true)
+        FileManager.default.createFile(
+            atPath: fixture.agyBinary.path, contents: Data("#!/bin/sh\n".utf8),
+            attributes: [.posixPermissions: 0o755])
+        let runner = FakeAgentRunner(quota: AgentCommandResult(
+            termination: .timedOut, stdout: Data(), stderr: Data(), duration: 30))
+        let host = fixture.makeHost([fixture.claude, fixture.antigravity], runner: runner)
+        host.start()
+        defer { host.shutdown() }
+
+        let failed = await eventually { host.engines["antigravity"]?.state.error == .agentTimedOut }
+        #expect(failed)
+        // A snapshot either way — the harness renders, it just has no limits.
+        #expect(host.engines["antigravity"]?.state.snapshot?.meters.isEmpty == true)
+        #expect(host.focusedProfileID == "default")
+        #expect(await runner.quotaRuns.count == 1)
+    }
+
     @Test("a launch reads meter presence from the cache, before the first read")
     func meterlessFocusAtLaunch() async throws {
         let fixture = try Fixture()

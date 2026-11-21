@@ -199,7 +199,7 @@ requires extra work from the user to start metering antigravity" —
 - **The network.** The CLI, not this app, contacts Google's Cloud Code
   backend (`daily-cloudcode-pa.googleapis.com`) with its own sign-in —
   the same requests any start of the CLI makes. This app opens no
-  connection and names no Google host; its four destinations stay four.
+  connection to Google; its four destinations stay four.
 - **Its sign-in.** The CLI reads its own sign-in from your login Keychain
   through Apple's `security` tool, which never prompts, and may refresh it
   and write it back, as it does whenever you run it. This app never sees,

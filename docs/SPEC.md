@@ -524,8 +524,9 @@ Non-negotiable; flag rather than work around:
     `/dev/null`, no inherited descriptors, utility QoS, its own process
     group. `<agy>` is the first of `~/.local/bin/agy`,
     `/opt/homebrew/bin/agy`, `/usr/local/bin/agy` that resolves outside any
-    `.app` bundle and whose `--version` prints one bare version (checked
-    once per file identity; `--version` writes nothing). Nothing else of
+    `.app` bundle and whose `--version` prints a single version line
+    (checked once per file identity, a run that doesn't finish counting
+    against the floor like any other; `--version` writes nothing). Nothing else of
     the CLI is ever run: no agent turn, no other subcommand.
     - How often: at most once per 10 minutes (persisted from the last
       ATTEMPT, so a restart, a handover or a manual refresh can't beat it),

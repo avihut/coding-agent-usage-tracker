@@ -19,7 +19,7 @@ Branch `fix/antigravity-zero-setup`, cut from main at 542aa67. Follows
 | Status line | REMOVED: `usage-cli export-statusline`, `UsageProvider.statusLineExport`, `StatusLineExport`, the single-writer carve-out and every "paste this" string (see "The status line" below) |
 | Meters | EVERY pool the plan's reading reports (FINAL, the person ~23:22: "don't have the agent working on it remove these limits. I want to see them while they're available" — supersedes the earlier ADDED SCOPE / REVISED notes): `gemini-5h` → Session (5h), `gemini-weekly` → Weekly, `3p-5h` / `3p-weekly` → scoped "Claude + GPT (5h)" / "Claude + GPT (7d)" (tag C), all as #36 built them, plus NEW `gemini-argon-wtu-weekly` → scoped "Argon (7d)" (tag A). No "show once used" gating: an untouched pool shows its real reading (0% used, no reset — the epoch); a pool Google stops reporting simply has no meter. Every other bucket id is skipped |
 | Models and prices | Unchanged from #36: Gemini's, Anthropic's and OpenAI's feed slices, so a pool model's cost reads in dollars; the display grammar union stays. NEW: rates LISTINGS show what is relevant — every model the harness has seen, then the unseen rows the provider marks as its own (Gemini's), never the whole Anthropic and OpenAI catalogues (a vendor-neutral provider hook, default "list everything" for every other harness) |
-| Model scope | Unchanged for the pool (`claude`, `gpt`) and the Gemini meters (`gemini`); Argon counts `argon`. On Pro, Argon's quota is SEPARATE ("For paid Pro plans, Argon quota is separate") and scope matching is include-only by substring, so `gemini` alone would also count `gemini-4-argon` calls against the Gemini meters: an additive, vendor-neutral `Meter.modelScopeExcluded` (and `LiveMeter.modelScopeExcluded`, omitted when nil) lets the Gemini meters exclude `argon` exactly when the reading carries an Argon bucket. `Meter.inScope` = an included needle and no excluded one; the lockout rule's "same scope" compares both lists. Golden regenerated with `UPDATE_GOLDENS=1` and the diff read; Rust decodes `model_scope` but never filters on it, and ignores the new key |
+| Model scope | Unchanged for the pool (`claude`, `gpt`) and the Gemini meters (`gemini`); Argon counts `argon`. On Pro, Argon's quota is SEPARATE ("For paid Pro plans, Argon quota is separate") and scope matching is include-only by substring, so `gemini` alone would also count `gemini-4-argon` calls against the Gemini meters: the Gemini meters' scope becomes `["gemini", "!argon"]` exactly when the reading carries an Argon bucket — a `!`-prefixed needle EXCLUDES (`Meter.inScope`; as built, see Assumed #9: no new digest field, where the plan first drew an additive `modelScopeExcluded`), and the lockout rule treats a scoped meter as covering a longer one only with the same scope |
 | Density | The bar draws one segment per rank: S, W, and ONE scoped segment = the most-used scoped meter (the existing `scopedMax` rule), tagged by that meter (C or A) — five meters read as three in the bar; the panel, TUI and `usage-cli limits` list all five. Checked with snapshots in the build |
 | Failures | Never thrown from the fetch. The service turns the probe's standing outcome into `.cached(snapshot, error)`, so focus always sees a snapshot (empty or not) and the reason travels in the digest's existing error text, hint and code. A missing CLI is silent |
 | Classification | `networkDestinations` stays `[]` (the app connects nowhere new; `isLocalProvider` unchanged). The by-proxy run is declared separately (`UsageProvider.quotaCommand`) and rendered on its own privacy-card lines |
@@ -88,7 +88,8 @@ a shape dumper (key paths, value types, values at allowlisted keys).
   `daily-cloudcode-pa.googleapis.com` (`v1internal:loadCodeAssist` ×4,
   `v1internal:fetchAvailableModels` ×1), its experiment-flag refresh and one
   mention of `jetski-webchannel.googleapis.com`, all under its own sign-in.
-  This app opens no socket and names no Google host in its sources.
+  This app opens no connection to Google (its sources name one Google
+  URL, the plan-upgrade link a click opens in the browser).
 - **Spending.** None. Runs 2–5 returned bit-identical fractions and resets
   over 10 minutes with no conversation written, the result reports
   `num_turns: 0` and zero tokens, and no conversation was created.
@@ -258,10 +259,12 @@ goes to Google under its own sign-in, and is not an app destination
 - `AgentQuotaProbe` (an actor, one per engine): the gate (`AgentQuotaSchedule`,
   pure, unit-tested), single flight (a second caller during a run waits for
   it and gets its outcome, never a second spawn), the binary check, and
-  `AgentQuotaProbeStore` — `quota-probe.json` in the engine's support folder:
-  `{version, binary identity + accepted, lastAttemptAt, lastOutcome,
-  consecutiveFailures, reading: {startedAt, capturedAt, data}}`, atomic,
-  0600. The gate:
+  its state — `quota-probe.json` in the engine's support folder
+  (`AgentQuotaProbeState`, as built): `{version, binaries: [identity +
+  accepted], lastAttemptAt, lastFailure, consecutiveFailures, reading:
+  {startedAt, capturedAt, buckets}}`, atomic, 0600. A version run that
+  doesn't finish counts as the attempt (as built: floor and backoff hold).
+  The gate:
   - binary resolved and accepted, else nothing runs and nothing is shown;
   - not in flight;
   - `now ≥ lastAttemptAt + interval`, interval = floor (10 min, 30 s
@@ -289,23 +292,23 @@ goes to Google under its own sign-in, and is not an app destination
 - `UsageEngine` builds an `AgentQuotaProbe` when both the provider declares a
   command and the host supplied a runner, and hands it to `UsageService`
   (three lines; the engine file is already past 600 and gets no logic).
-- `UsageService.refresh`: `await probe?.runIfDue(now:)` before the fetch,
+- `UsageService.refresh`: `await probe?.refreshIfDue()` before the fetch,
   then the provider's ordinary `fetchRawUsage`, then, if the probe's STANDING
   outcome (persisted, so a restart restores it) is a failure newer than its
   reading, `.cached(snapshot, error)` instead of `.live`, and the body is
   still cached. Focus then always sees a snapshot; the error renders where
   every other fetch error already does (panel error block, digest error,
   TUI, `usage-cli`).
-- `AntigravityProvider.fetchRawUsage` reads the probe's reading from
-  `quota-probe.json` (the provider computes the same scoped path it computes
-  for the export file today) and keeps today's rules: no reading and no
+- `AntigravityProvider.fetchRawUsage(accessToken:quota:)` is HANDED the
+  probe's reading by the service (as built — the provider never opens
+  `quota-probe.json`; the engine owns it) and keeps today's rules: no reading and no
   transcripts → `noLocalData`; a reading or transcripts → the payload, with
   `fetchedAt` = the run's finish.
 
 ### Provider
 
 - `AntigravityProvider.quotaCommand`: the candidates above, `--version`
-  accepted when it prints one line matching `^\d+\.\d+(\.\d+)?$`, the
+  accepted when it prints ONE line holding a version (as built, loosened: an optional name and `v` before it, a pre-release or build suffix after it), the
   arguments and the update switch above, timeout 30 s (12× the measured
   wall, room for a loaded Mac and a slow network), floor 10 min (1/30 of the
   shortest window, so a reading is never more than ~3% of it stale; six runs
@@ -465,6 +468,12 @@ machine is simply never read again.
 14. `shape(of:)` keeps #36's grammar for two-word ids (`gemini-<window>`,
     `3p-<window>`) and adds the one Argon id, rather than the plan's
     explicit table: same meters today, and a new window word still reads.
+15. The `--version` check accepts one line with a version in it (a name
+    before it, a suffix after it), not only a bare `x.y.z`: the line count
+    is what tells the CLI from the editor's launcher, and a cosmetic change
+    to the CLI's version line shouldn't make the limits vanish silently.
+16. The failure hints say "limits already read stay shown", which holds
+    whether or not a reading exists.
 
 ## Build record (2026-11-21)
 
@@ -473,7 +482,10 @@ machine is simply never read again.
   scratch folder): 2.72 s, five buckets, meters Session (5h) 25%, Weekly
   23%, Claude + GPT (5h) 2%, Claude + GPT (7d) 1%, Argon (7d) 2% — the
   pool had been used since the 21:08 reading, and its resets turned real
-  (02:11:05Z, 21:11:05Z). Path listing around it: the same five mtime
+  (02:11:05Z, 21:11:05Z): the pool's window began at 21:11:05Z, i.e. the
+  person ran a Claude or GPT turn between the two readings, while the
+  Gemini and Argon fractions stayed exactly as they were — the `/quota`
+  runs themselves still spent nothing. Path listing around it: the same five mtime
   stamps as every measured lever run, nothing under `~/Library/Keychains`.
 - The raw `/quota` captures were deleted from the session scratchpad once
   the placeholdered fixture existed.

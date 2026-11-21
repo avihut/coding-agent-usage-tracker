@@ -58,8 +58,13 @@ enum AntigravityQuota {
         guard let text = String(data: stdout, encoding: .utf8) else { return false }
         let lines = text.split(whereSeparator: \.isNewline)
         guard lines.count == 1 else { return false }
+        // One line is the discriminator (the desktop editor's launcher
+        // prints three); within it, tolerate a name before the number, a
+        // `v`, and a pre-release or build suffix after it, so a cosmetic
+        // change to the CLI's version line can't make the limits vanish.
         return lines[0].trimmingCharacters(in: .whitespaces)
-            .range(of: #"^\d+\.\d+(\.\d+)?$"#, options: .regularExpression) != nil
+            .range(of: #"^(\S+\s+)?v?\d+\.\d+(\.\d+)?([-+.]\S*)?$"#,
+                   options: .regularExpression) != nil
     }
 
     // MARK: Reduce
