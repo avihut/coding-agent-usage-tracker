@@ -1,0 +1,78 @@
+{
+  "conversation_id": "",
+  "status": "SUCCESS",
+  "response": "<text table, placeholder>",
+  "duration_seconds": 0,
+  "num_turns": 0,
+  "usage": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "thinking_tokens": 0,
+    "cache_read_tokens": 0,
+    "total_tokens": 0
+  },
+  "command": {
+    "name": "usage",
+    "data": {
+      "description": "<group footer, placeholder>",
+      "groups": [
+        {
+          "name": "<group 0 name>",
+          "description": "<group 0 description>",
+          "buckets": [
+            {
+              "id": "gemini-weekly",
+              "name": "<bucket gemini-weekly name>",
+              "description": "<bucket gemini-weekly description>",
+              "window": "weekly",
+              "remaining_fraction": 0.7686160206794739,
+              "reset_time": "2026-11-28T14:02:05Z"
+            },
+            {
+              "id": "gemini-5h",
+              "name": "<bucket gemini-5h name>",
+              "description": "<bucket gemini-5h description>",
+              "window": "5h",
+              "remaining_fraction": 0.7461943626403809,
+              "reset_time": "2026-11-22T00:02:05Z"
+            }
+          ]
+        },
+        {
+          "name": "<group 1 name>",
+          "description": "<group 1 description>",
+          "buckets": [
+            {
+              "id": "3p-weekly",
+              "name": "<bucket 3p-weekly name>",
+              "window": "weekly",
+              "remaining_fraction": 1,
+              "reset_time": "1970-01-01T00:00:00Z"
+            },
+            {
+              "id": "3p-5h",
+              "name": "<bucket 3p-5h name>",
+              "window": "5h",
+              "remaining_fraction": 1,
+              "reset_time": "1970-01-01T00:00:00Z"
+            }
+          ]
+        },
+        {
+          "name": "<group 2 name>",
+          "description": "<group 2 description>",
+          "buckets": [
+            {
+              "id": "gemini-argon-wtu-weekly",
+              "name": "<bucket gemini-argon-wtu-weekly name>",
+              "description": "<bucket gemini-argon-wtu-weekly description>",
+              "window": "weekly",
+              "remaining_fraction": 0.9820021390914917,
+              "reset_time": "2026-11-28T14:00:46Z"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

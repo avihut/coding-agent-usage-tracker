@@ -10,7 +10,6 @@ struct AntigravityFixture {
     let root: URL
     var home: URL { root.appending(path: "antigravity-cli") }
     var cache: URL { root.appending(path: "cache") }
-    var export: URL { root.appending(path: "support/statusline-export.json") }
 
     init() throws {
         root = FileManager.default.temporaryDirectory
@@ -91,7 +90,7 @@ struct AntigravityFixture {
     }
 
     func provider() -> AntigravityProvider {
-        AntigravityProvider(home: home, exportURL: export)
+        AntigravityProvider(home: home, userHome: root, agyCandidates: [])
     }
 
     /// Every file under the home with its mtime — what "nothing was written

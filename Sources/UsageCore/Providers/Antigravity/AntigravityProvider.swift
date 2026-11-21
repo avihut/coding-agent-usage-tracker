@@ -34,13 +34,20 @@ public struct AntigravityProvider: UsageProvider {
     public let networkDestinations: [String] = []
     public let credentials: CredentialChain
     let home: URL
-    /// The user's home, which the CLI's install location hangs off.
-    let userHome: URL
+    /// Where the CLI may be installed: the install script's documented
+    /// default and Homebrew's `bin` (its cask's wrapper). NOT
+    /// `~/.antigravity/antigravity/bin/agy` — the desktop app's editor
+    /// launcher of the same name. Tests point it at a fixture.
+    let agyCandidates: [URL]
 
-    public init(home: URL? = nil, userHome: URL? = nil) {
+    public init(home: URL? = nil, userHome: URL? = nil, agyCandidates: [URL]? = nil) {
         let userHome = userHome ?? FileManager.default.homeDirectoryForCurrentUser
-        self.userHome = userHome
         self.home = home ?? userHome.appending(path: ".gemini/antigravity-cli")
+        self.agyCandidates = agyCandidates ?? [
+            userHome.appending(path: ".local/bin/agy"),
+            URL(fileURLWithPath: "/opt/homebrew/bin/agy"),
+            URL(fileURLWithPath: "/usr/local/bin/agy"),
+        ]
         self.credentials = CredentialChain(sources: [
             StaticCredentialSource(name: "local Antigravity CLI files")
         ])
@@ -65,20 +72,13 @@ public struct AntigravityProvider: UsageProvider {
             conversationWrittenAt: tree.newestConversationWrite()))
     }
 
-    /// The CLI's own print mode, exactly as the §10 amendment states it. The
-    /// candidates are the install script's documented default and
-    /// Homebrew's `bin` (its cask's wrapper); NOT
-    /// `~/.antigravity/antigravity/bin/agy`, the desktop app's editor
-    /// launcher of the same name. `--log-file /dev/null` and the documented
+    /// The CLI's own print mode, exactly as the §10 amendment states it.
+    /// `--log-file /dev/null` and the documented
     /// update switch keep a run from writing a log or checking for an update
     /// (measured: what's left is three mtime stamps).
     public var quotaCommand: AgentQuotaCommand? {
         AgentQuotaCommand(
-            executableCandidates: [
-                userHome.appending(path: ".local/bin/agy"),
-                URL(fileURLWithPath: "/opt/homebrew/bin/agy"),
-                URL(fileURLWithPath: "/usr/local/bin/agy"),
-            ],
+            executableCandidates: agyCandidates,
             versionArguments: ["--version"],
             acceptsVersion: { AntigravityQuota.acceptsVersion($0) },
             arguments: ["-p", "/quota", "--output-format", "json", "--log-file", "/dev/null"],

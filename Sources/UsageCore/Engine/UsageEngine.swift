@@ -262,7 +262,7 @@ public final class UsageEngine {
 
     /// The provider's quota probe — only when it declares a command AND the
     /// host supplied a runner (spec §10 amendment 2026-11-21, second).
-    static func quotaProbe(
+    nonisolated static func quotaProbe(
         provider: any UsageProvider, runner: (any AgentCommandRunner)?, directory: URL,
         activity: (any LocalActivitySource)?
     ) -> AgentQuotaProbe? {
