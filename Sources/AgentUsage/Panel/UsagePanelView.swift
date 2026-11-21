@@ -857,7 +857,6 @@ struct UsagePanelView: View {
                     Text("No sessions in this period")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
-                        .padding(.horizontal, 4)
                         .padding(.vertical, 2)
                 }
                 ForEach(shortlist.rows) { owned in
@@ -873,7 +872,6 @@ struct UsagePanelView: View {
                     }
                     .buttonStyle(.plain)
                     .pointerStyle(.link)
-                    .padding(.horizontal, 4)
                     .padding(.top, 2)
                 }
             }
@@ -958,7 +956,7 @@ struct UsagePanelView: View {
             accounts: (owner.accountPresence?.distinctAccounts ?? 0) >= 2
                 ? owner.sessionAccountLabels(session) : nil,
             mark: marked ? (owner.style, owner.provider.agentName) : nil)
-            .padding(.horizontal, 6)
+            .padding(.horizontal, Self.sessionRowInset)
             .padding(.vertical, 3)
             .background(
                 RoundedRectangle(cornerRadius: 5)
@@ -973,7 +971,13 @@ struct UsagePanelView: View {
             }
             .pointerStyle(.link)
             .onTapGesture { onOpenSession(session.id, owned.owner) }
+            // The card's padding is the highlight's room, not an inset: taken
+            // back, the glyph, title and cost sit on the panel's content
+            // edges and the highlight bleeds into the margin.
+            .padding(.horizontal, -Self.sessionRowInset)
     }
+
+    private static let sessionRowInset: CGFloat = 6
 
     /// The Activity section for the scope: one account's section as it
     /// always was (narrowed to an account, or the only one there is), or the

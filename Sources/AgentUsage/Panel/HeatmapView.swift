@@ -175,7 +175,14 @@ struct HeatmapView: View {
                                 .animation(Self.drillAnimation))
                     }
                 }
+                // Clipped a row inset wider than the frame, layout unchanged:
+                // the tables' hover highlight bleeds that far into the panel
+                // margin (their text sits on the content edge), and a plain
+                // clip cut it flush with the text. Anything further out — the
+                // drill's sliding pages — stays masked.
+                .padding(.horizontal, ModelBreakdownGrid.rowInset)
                 .clipped()
+                .padding(.horizontal, -ModelBreakdownGrid.rowInset)
             }
         }
         .onChange(of: activity, initial: true) { rebuildLayout(for: period) }
@@ -435,15 +442,20 @@ struct HeatmapView: View {
             if period == .week, consumption == nil {
                 weeklyTrendCaption
             }
-            if let consumption {
-                ConsumptionOutlineGrid(
-                    outline: outline, input: consumption, hoveredNode: $hoveredNode,
-                    litModel: hoveredModel)
-            } else {
-                ModelBreakdownGrid(
-                    rows: summaryRows, colors: modelColors, pricing: pricing,
-                    hoveredModel: $hoveredModel)
+            Group {
+                if let consumption {
+                    ConsumptionOutlineGrid(
+                        outline: outline, input: consumption, hoveredNode: $hoveredNode,
+                        litModel: hoveredModel)
+                } else {
+                    ModelBreakdownGrid(
+                        rows: summaryRows, colors: modelColors, pricing: pricing,
+                        hoveredModel: $hoveredModel)
+                }
             }
+            // The table's text on the panel's content edges, like every
+            // other section; the rows' hover highlight bleeds into the margin.
+            .padding(.horizontal, -ModelBreakdownGrid.rowInset)
         }
     }
 
@@ -753,7 +765,11 @@ struct HeatmapView: View {
                 dayDetail(entry, rows: rows)
                     .offset(x: slideX)
             }
+            // A row inset wider than the frame, as the drill's own clip: the
+            // day table's highlight bleeds into the margin.
+            .padding(.horizontal, ModelBreakdownGrid.rowInset)
             .clipped()
+            .padding(.horizontal, -ModelBreakdownGrid.rowInset)
             .overlay(alignment: .topLeading) {
                 dayStepArrow(for: entry, rows: rows, direction: -1)
             }
@@ -808,19 +824,22 @@ struct HeatmapView: View {
     /// outline over that one day.
     @ViewBuilder
     private func dayBreakdown(_ entry: DailyActivity, rows: [ModelTokenUsage]) -> some View {
-        if let consumption {
-            let next = Calendar.current.date(byAdding: .day, value: 1, to: entry.day)
-                ?? entry.day.addingTimeInterval(86400)
-            ConsumptionOutlineGrid(
-                outline: ConsumptionOutline.build(
-                    consumption.accounts, in: DateInterval(start: entry.day, end: next),
-                    foldFamilies: false),
-                input: consumption, hoveredNode: $hoveredNode, litModel: hoveredModel)
-        } else {
-            ModelBreakdownGrid(
-                rows: rows, colors: modelColors, pricing: pricing,
-                hoveredModel: $hoveredModel)
+        Group {
+            if let consumption {
+                let next = Calendar.current.date(byAdding: .day, value: 1, to: entry.day)
+                    ?? entry.day.addingTimeInterval(86400)
+                ConsumptionOutlineGrid(
+                    outline: ConsumptionOutline.build(
+                        consumption.accounts, in: DateInterval(start: entry.day, end: next),
+                        foldFamilies: false),
+                    input: consumption, hoveredNode: $hoveredNode, litModel: hoveredModel)
+            } else {
+                ModelBreakdownGrid(
+                    rows: rows, colors: modelColors, pricing: pricing,
+                    hoveredModel: $hoveredModel)
+            }
         }
+        .padding(.horizontal, -ModelBreakdownGrid.rowInset)
     }
 
     /// The drilled day as a 24h session-meter timeline: its 5h windows'

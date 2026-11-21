@@ -46,8 +46,11 @@ CLAUDE_MODELS = [
     ("claude-sonnet-5", "Sonnet 5", rgb(0.353, 0.557, 0.918), 0.30, 0.75),
     ("claude-haiku-4-5", "Haiku 4.5", rgb(0.478, 0.757, 0.553), 0.08, 0.375),
 ]
+# The review model's long name is the panel's widest real one ("Codex Auto
+# Review", 92.7pt): it keeps every snapshot honest about name overflow.
 CODEX_MODELS = [
-    ("gpt-5.2-codex", "GPT 5.2 Codex", rgb(0.063, 0.639, 0.498), 1.0, 0.45),
+    ("gpt-5.2-codex", "GPT 5.2 Codex", rgb(0.063, 0.639, 0.498), 0.96, 0.45),
+    ("codex-auto-review", "Codex Auto Review", rgb(0.420, 0.620, 0.970), 0.04, 0.45),
 ]
 WORK_MODELS = [
     ("claude-sonnet-5", "Sonnet 5", rgb(0.353, 0.557, 0.918), 0.55, 0.75),

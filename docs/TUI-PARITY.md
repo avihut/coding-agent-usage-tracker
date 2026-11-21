@@ -61,7 +61,9 @@ carry sessions WITH titles; the project label is a directory BASENAME and
 the full-path ban is untouched; the relaxation explicitly does not travel
 to any transported digest). Item 20 publishes LiveMeter.modelSeries built
 by the same core ModelCurves the app's popover draws, thinned to curveCap
-(they multiply by model count) and coloured from the ledger; the TUI draws
+(they multiply by model count) and coloured from the ledger (every
+digest model colour is the DARK-appearance variant, CHARTS.md "Model
+color legibility" — the TUI never derives one); the TUI draws
 them behind the percent trace with a breakdown legend whose row is
 RESERVED from the chart, since the readout already owns the last row.
 Item 25 publishes LiveState.sessions with the basename rule enforced in

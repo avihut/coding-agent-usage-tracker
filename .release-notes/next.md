@@ -33,6 +33,17 @@ Fixes
 - The terminal dashboard shows a harness that has no limits to show yet
   (Antigravity before its limits arrive) beside the focused account's, as
   its mark and a dash, the way the menu bar does. It used to leave it out.
+- The panel keeps its margins with every agent's models in the Activity
+  table. A long model name ("Codex Auto Review") pushed the content wider
+  than the panel and squeezed every section's side margin to almost
+  nothing; long names now shorten with "…" (the full name on hover). The
+  table also lines up with the rest of the panel, each model sits under its
+  agent's name, and the Sessions list's edges match the sections above it.
+- Model colours stay readable on both the dark and the light panel: no
+  colour sinks into the background as a near-black (Opus 5.5's brown read
+  as disabled) or fades out as a near-white, and consecutive versions of a
+  model stay distinct. Each colour now meets a 3:1 contrast against the
+  panel in each appearance, keeping its agent's hue.
 
 Features
 - Antigravity CLI is metered. It sits in the menu bar beside the other

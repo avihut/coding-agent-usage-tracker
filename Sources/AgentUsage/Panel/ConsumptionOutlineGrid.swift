@@ -23,21 +23,50 @@ struct ConsumptionOutlineGrid: View {
     @State private var openFamilies: Set<String> = []
     @State private var costDetail: String?
 
-    private static let indent: CGFloat = 8
     private static let tokenWidth = ModelBreakdownGrid.tokenColumnWidth
     private static let costWidth = ModelBreakdownGrid.costColumnWidth
+
+    // MARK: - Outline geometry
+    //
+    // Every row is [chevron slot][mark][name], the chevron slot reserved even
+    // where there is nothing to fold, so marks stand in columns (a prompt-only
+    // agent's glyph under the others'). A child's mark sits under its
+    // parent's NAME: its leading edge is the parent's plus the parent's mark
+    // and one gap. A name gets what the number columns and the minimum gap
+    // leave of the row (114pt at 360pt, docs/UI.md) less its own offset.
+
+    private static let chevronSlot: CGFloat = 8
+    private static let leadSpacing: CGFloat = 4
+    private static let swatchSide: CGFloat = 7
+    private static let agentInk: CGFloat = 9
+    private static let monogramSide: CGFloat = 12
+
+    private static func markWidth(_ node: ConsumptionOutline.Node) -> CGFloat {
+        switch node.kind {
+        case .agent: HarnessMark.side(ink: agentInk)
+        case .account: monogramSide
+        case .family, .model: swatchSide
+        }
+    }
+
+    /// Where a row's name starts, from the row's own leading edge.
+    private static func nameOffset(_ node: ConsumptionOutline.Node, leading: CGFloat) -> CGFloat {
+        leading + chevronSlot + leadSpacing + markWidth(node) + leadSpacing
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             headline
             columnHeader
             ForEach(visibleRows, id: \.node.id) { row in
-                rowView(row.node, depth: row.depth)
+                rowView(row.node, leading: row.leading, underFamily: row.underFamily)
                 if !row.node.reportsTokens {
+                    // Under the row's name, which sits inside the row's inset.
                     Text("\(row.node.prompts.formatted()) prompts · reports no tokens · not in the totals")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
-                        .padding(.leading, 4 + CGFloat(row.depth + 1) * Self.indent + 12)
+                        .lineLimit(1)
+                        .padding(.leading, ModelBreakdownGrid.rowInset + Self.nameOffset(row.node, leading: row.leading))
                 }
             }
         }
@@ -58,35 +87,45 @@ struct ConsumptionOutlineGrid: View {
                 .foregroundStyle(.tertiary)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 2)
+        .padding(.top, 2)
+        .padding(.bottom, 2 + ModelBreakdownGrid.headlineGap)
     }
 
     private var columnHeader: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 0) {
             Text(input.spansAgents ? "agent · model" : "account · model")
-            Spacer(minLength: 8)
-            Text("input").frame(width: Self.tokenWidth, alignment: .trailing)
-            Text("cached").frame(width: Self.tokenWidth, alignment: .trailing)
-            Text("output").frame(width: Self.tokenWidth, alignment: .trailing)
-            Text("est. cost").frame(width: Self.costWidth, alignment: .trailing)
+            Spacer(minLength: ModelBreakdownGrid.nameGap)
+            HStack(spacing: ModelBreakdownGrid.columnSpacing) {
+                Text("input").frame(width: Self.tokenWidth, alignment: .trailing)
+                Text("cached").frame(width: Self.tokenWidth, alignment: .trailing)
+                Text("output").frame(width: Self.tokenWidth, alignment: .trailing)
+                Text("est. cost").frame(width: Self.costWidth, alignment: .trailing)
+            }
         }
         .font(.caption2)
         .foregroundStyle(.tertiary)
-        .padding(.horizontal, 4)
+        .padding(.horizontal, ModelBreakdownGrid.rowInset)
     }
 
     // MARK: - Rows
 
-    /// The open part of the tree, depth-first.
-    private var visibleRows: [(node: ConsumptionOutline.Node, depth: Int)] {
-        var rows: [(ConsumptionOutline.Node, Int)] = []
-        func walk(_ nodes: [ConsumptionOutline.Node], depth: Int) {
+    /// The open part of the tree, depth-first, each row with its leading
+    /// edge (a child's mark under its parent's name) and whether its parent
+    /// is a family — whose members differ only by version.
+    private var visibleRows: [(node: ConsumptionOutline.Node, leading: CGFloat, underFamily: Bool)] {
+        var rows: [(ConsumptionOutline.Node, CGFloat, Bool)] = []
+        func walk(_ nodes: [ConsumptionOutline.Node], leading: CGFloat, underFamily: Bool) {
             for node in nodes {
-                rows.append((node, depth))
-                if isOpen(node) { walk(node.children, depth: depth + 1) }
+                rows.append((node, leading, underFamily))
+                if isOpen(node) {
+                    walk(
+                        node.children,
+                        leading: Self.nameOffset(node, leading: leading) - Self.chevronSlot - Self.leadSpacing,
+                        underFamily: isFamily(node))
+                }
             }
         }
-        walk(outline.roots, depth: 0)
+        walk(outline.roots, leading: 0, underFamily: false)
         return rows
     }
 
@@ -105,23 +144,28 @@ struct ConsumptionOutlineGrid: View {
         }
     }
 
-    private func rowView(_ node: ConsumptionOutline.Node, depth: Int) -> some View {
-        HStack(spacing: 8) {
-            HStack(spacing: 4) {
+    private func rowView(
+        _ node: ConsumptionOutline.Node, leading: CGFloat, underFamily: Bool
+    ) -> some View {
+        HStack(spacing: 0) {
+            HStack(spacing: Self.leadSpacing) {
                 lead(node)
-                nameText(node, depth: depth)
+                nameText(node, underFamily: underFamily)
                 if case .family = node.kind {
                     Text("\(node.children.count)")
                         .foregroundStyle(.tertiary)
+                        .fixedSize()
                 }
             }
-            .padding(.leading, CGFloat(depth) * Self.indent)
+            .padding(.leading, leading)
             .layoutPriority(1)
-            Spacer(minLength: 4)
-            cells(node)
+            Spacer(minLength: ModelBreakdownGrid.nameGap)
+            HStack(spacing: ModelBreakdownGrid.columnSpacing) {
+                cells(node)
+            }
         }
         .font(.caption2.monospacedDigit())
-        .padding(.horizontal, 4)
+        .padding(.horizontal, ModelBreakdownGrid.rowInset)
         .padding(.vertical, 2)
         .background(
             RoundedRectangle(cornerRadius: 4)
@@ -167,27 +211,27 @@ struct ConsumptionOutlineGrid: View {
         .padding(.vertical, -1)
     }
 
-    /// Names at the outline's first two levels never truncate — the
-    /// per-model table's rule. An account label (a sign-in can be long) gives
-    /// way in the middle, and a model name nested under an account at the
-    /// tail, rather than shove the number columns out of the 360pt panel;
-    /// either carries its full name as a tooltip.
-    @ViewBuilder private func nameText(_ node: ConsumptionOutline.Node, depth: Int) -> some View {
+    /// A name gives way rather than widen the panel: a name that insisted
+    /// on its width ("Codex Auto Review" is 92.7pt) pushed the content past
+    /// 360pt and collapsed EVERY section's margin (user-reported
+    /// 2026-11-21). An account label (a sign-in can be long) gives way in the
+    /// middle, and so does a model inside an opened family — its siblings
+    /// differ only by the version at the end ("Son…4.5"), and that row is
+    /// the deepest, with ~48pt for a name. Everything else gives way at the
+    /// tail. Each carries its full name as a tooltip; a host with room still
+    /// shows it whole.
+    @ViewBuilder private func nameText(_ node: ConsumptionOutline.Node, underFamily: Bool) -> some View {
         let name = title(node)
-        let text = Text(name)
+        Text(name)
             .foregroundStyle(isGroup(node) && !isFamily(node) ? .primary : .secondary)
-        switch node.kind {
-        case .account:
-            text.lineLimit(1).truncationMode(.middle).help(name)
-        case .model, .family:
-            if depth >= 2 {
-                text.lineLimit(1).truncationMode(.tail).help(name)
-            } else {
-                text.fixedSize(horizontal: true, vertical: false)
-            }
-        case .agent:
-            text.fixedSize(horizontal: true, vertical: false)
-        }
+            .lineLimit(1)
+            .truncationMode(isAccount(node) || underFamily ? .middle : .tail)
+            .help(name)
+    }
+
+    private func isAccount(_ node: ConsumptionOutline.Node) -> Bool {
+        if case .account = node.kind { return true }
+        return false
     }
 
     private func isLit(_ node: ConsumptionOutline.Node) -> Bool {
@@ -202,19 +246,25 @@ struct ConsumptionOutlineGrid: View {
     }
 
     @ViewBuilder private func lead(_ node: ConsumptionOutline.Node) -> some View {
-        if isGroup(node) {
-            Image(systemName: isOpen(node) ? "chevron.down" : "chevron.right")
-                .font(.system(size: 7, weight: .bold))
-                .foregroundStyle(.tertiary)
-                .frame(width: 8)
+        Group {
+            if isGroup(node) {
+                Image(systemName: isOpen(node) ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 7, weight: .bold))
+                    .foregroundStyle(.tertiary)
+            } else {
+                Color.clear
+            }
         }
+        .frame(width: Self.chevronSlot)
         switch node.kind {
         case .agent(let agent):
             if let style = input.agents[agent]?.style {
-                HarnessMark(style: style, ink: 9)
+                HarnessMark(style: style, ink: Self.agentInk)
+            } else {
+                Color.clear.frame(width: Self.markWidth(node), height: 1)
             }
         case .account(_, let account):
-            MonogramTile(monogram: input.accountFaces[account]?.monogram ?? "?", size: 12)
+            MonogramTile(monogram: input.accountFaces[account]?.monogram ?? "?", size: Self.monogramSide)
         case .family:
             swatch(node.children.first.flatMap(firstKey))
         case .model(let key, _):
@@ -225,7 +275,7 @@ struct ConsumptionOutlineGrid: View {
     private func swatch(_ key: String?) -> some View {
         RoundedRectangle(cornerRadius: 2)
             .fill(key.flatMap { input.colors[$0] } ?? Color.gray)
-            .frame(width: 7, height: 7)
+            .frame(width: Self.swatchSide, height: Self.swatchSide)
     }
 
     private func firstKey(_ node: ConsumptionOutline.Node) -> String? {

@@ -32,6 +32,10 @@ struct HarnessMark: View {
             .accessibilityHidden(true)
     }
 
+    /// The mark's square, the same for every glyph: layouts that line text
+    /// up after a mark (the consumption outline) read it from here.
+    static func side(ink: CGFloat) -> CGFloat { (ink * 1.25).rounded(.up) }
+
     static func image(glyph: String, color: NSColor, ink: CGFloat) -> NSImage {
         func bounds(_ font: NSFont) -> NSRect {
             NSAttributedString(string: glyph, attributes: [.font: font])
@@ -42,7 +46,7 @@ struct HarnessMark: View {
         let larger = max(measured.width, measured.height)
         let font = NSFont.systemFont(
             ofSize: larger > 0.5 ? 12 * ink / larger : ink, weight: .semibold)
-        let side = (ink * 1.25).rounded(.up)
+        let side = side(ink: ink)
         return NSImage(size: NSSize(width: side, height: side), flipped: false) { _ in
             StatusItemRenderer.drawMark(
                 glyph, color: color, font: font,

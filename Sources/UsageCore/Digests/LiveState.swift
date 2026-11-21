@@ -743,6 +743,10 @@ public enum LiveStateBuilder {
         let snapshot = state.snapshot
         let accent = RGBColor(provider.accent)
         let catalog = provider.modelCatalog
+        // The digest carries ONE color per model: the dark-appearance
+        // variant, pinned like `RiskRamp` — terminals draw on dark, and the
+        // app never draws a digest color (it asks `ModelPalette`, which
+        // holds both variants).
 
         func modelRow(_ id: String, tally: TokenTally) -> ModelRow {
             let family = catalog.familyName(id)
@@ -752,7 +756,7 @@ public enum LiveStateBuilder {
                 id: id,
                 displayName: catalog.displayName(id),
                 color: ModelColorMath.rgb(
-                    hueSlot: slots.hue, shadeSlot: slots.shade, accent: accent),
+                    hueSlot: slots.hue, shadeSlot: slots.shade, accent: accent, on: .dark),
                 tally: tally,
                 cost: rates.map { $0.dollars(for: tally) })
         }
@@ -1015,7 +1019,7 @@ public enum LiveStateBuilder {
                             for: entry.key, family: catalog.familyName(entry.key))
                             ?? (hue: 0, shade: 0)
                         return ModelColorMath.rgb(
-                            hueSlot: slots.hue, shadeSlot: slots.shade, accent: accent)
+                            hueSlot: slots.hue, shadeSlot: slots.shade, accent: accent, on: .dark)
                     },
                     accounts: timeline.map { sessionAccountLabels(session, timeline: $0) })
             }
@@ -1057,7 +1061,7 @@ public enum LiveStateBuilder {
                 model: curve.model,
                 displayName: catalog.displayName(curve.model),
                 color: ModelColorMath.rgb(
-                    hueSlot: slots.hue, shadeSlot: slots.shade, accent: accent),
+                    hueSlot: slots.hue, shadeSlot: slots.shade, accent: accent, on: .dark),
                 // curveCap, not seriesCap: these are OVERLAY curves like the
                 // forecast trajectory, and they multiply by model count —
                 // 120 points per model per meter bloated the digest by ~2k

@@ -403,9 +403,10 @@ the same models. But for consumption it makes sense"). Design record:
   with nothing priced read "—" (stats line, ring centre, day tooltip).
 - COLORS: one agent in scope keeps the model colors it wears everywhere.
   Several agents paint each model in its AGENT's accent at a tone picked
-  by the family's persistent ledger slot (`ModelColorMath.agentShade`;
-  versions step darker from a bright tone, lighter from a deep one) — two
-  vendors' second families both landed on the fixed blue before. Each
+  by the family's persistent ledger slot (`ModelColorMath.agentShade`: a
+  place in the band and a chroma per family, versions a level along the
+  band from it; see "Model color legibility") — two vendors' second
+  families both landed on the fixed blue before. Each
   agent's ledger grows with its own raw ids only; `ModelPalette` refuses a
   composite key. The heatmap ramp is neutral (`Color.primary`) when
   agents share it — no one vendor owns the total.
@@ -422,6 +423,60 @@ the same models. But for consumption it makes sense"). Design record:
 - Not yet (follow-ups in the design record): the Sessions window's own
   scope, the total in the digest for the CLI and TUI, the family view at
   every period.
+
+## Model color legibility
+
+- (2026-11-21, user-reported: "the opus 5.5 color makes it look disabled
+  or unavailable".) EVERY model color holds WCAG 2.2 SC 1.4.11's 3:1 for
+  graphical objects against the ground it is drawn on, keeps an OKLab
+  lightness that reads as a hue (≤ 0.90 on dark, ≥ 0.40 on light), and
+  keeps its family's OKLCH hue. Core `ModelColorLegibility` (pure sRGB /
+  OKLab, no AppKit) owns it; `ModelColorLegibilityTests` holds it over the
+  whole slot grid (every hue slot × shade slots 0–9 × the four harness
+  accents and five stress accents × both appearances).
+- THE GROUNDS are pinned at the BINDING one per theme — the plausible
+  ground closest to the marks: dark (50,50,50) (the snapshot's panel,
+  `windowBackgroundColor`; the live popover over a dark desktop measured
+  (27,27,28), easier), light (236,236,236). The live light popover is
+  unmeasured.
+- PER APPEARANCE, because one color can't serve both: 3:1 against both
+  grounds leaves a relative luminance of [0.196, 0.246], no room for a
+  family of shades. `ModelPalette` hands out one `Color` holding both
+  variants (an appearance-provider `NSColor`, memoized per slot and
+  accent), so Charts, Canvas and shapes draw the right one, and so does the
+  snapshot hatch's light window. THE DIGEST carries one color per model:
+  the DARK variant, pinned like `RiskRamp` — the TUI draws it; the app
+  never draws a digest color.
+- THE DERIVATION: the design color (slot 0 = the harness accent, then the
+  fixed hues; in a merge the agent's accent at the family tone) is placed
+  in its BAND — the lightnesses where, at that hue and chroma, 3:1 holds
+  (found by bisection on the color as drawn, gamut-mapped by giving up
+  chroma only, against 3.05 — headroom for the screen's 8-bit rounding,
+  which put colors placed exactly on 3.0 at 2.98–2.99; the test checks the
+  drawn bytes) and the hue still reads. The design lightness is fitted
+  into the band; a version moves a fixed fraction of the band's width up
+  from it, wrapping: two fifths per slot (slot 0 the family's own, then
+  2/5, 4/5, 1/5, 3/5), each later round of five shifted a tenth so the
+  step between rounds is half the band and no round repeats another —
+  consecutive versions ≥ ΔE_ok 0.12 apart on dark, 0.084 on light, at
+  every slot. A color that needs no move comes back bit-identical: slot 0
+  IS the brand accent wherever the accent holds (dark: all but
+  Antigravity's, 2.81:1, nudged lighter; light: Claude's is 2.6:1 and
+  deepens, as do Codex's and the fixed hues tuned for dark).
+- WHY LEVELS, NOT STEPS: ledger slots are kept for life, so the version in
+  use holds its family's HIGHEST slot. The old HSB steps grew with the slot
+  and clamped — a fifth Opus version was #411204 (1.08:1), and merged
+  versions 3 and 4 came out identical.
+- CAPACITY, honestly: one hue in a band ~0.32 of lightness wide (dark) or
+  ~0.23 (light) cannot keep every (family, version) pair of one agent
+  apart. The merged tones are tuned for the widest gap between an agent's
+  first four families (ΔE_ok ≥ 0.071 dark / 0.052 light, measured over the
+  four harness accents) and the fewest cross-family look-alikes at any
+  slot (over shades 0–9, 5–15% of pairs under ΔE 0.04 by accent and
+  appearance — Codex on light is the 15% — ~9% on average, up from ~3%
+  when shades ran to near-black). The outline and hover remain
+  the disambiguator. Known narrow pair: Gemini's accent and the first fixed
+  hue are both blues, 0.038 apart on light.
 
 ## The window ledger and the audit views
 

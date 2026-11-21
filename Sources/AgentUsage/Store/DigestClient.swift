@@ -76,6 +76,13 @@ final class DigestClient {
     let provider: any UsageProvider
     let localActivity: (any LocalActivitySource)?
     private let scansLocally: Bool
+    /// Whether this account offers sessions: its local source says so — or,
+    /// in a `--demo-digest` run that reads no transcript, the digest carried
+    /// some, so the panel's Sessions strip can be drawn (and checked) from
+    /// fixture data. A demo session has no detail behind it.
+    var providesSessions: Bool {
+        scansLocally ? (localActivity?.providesSessions ?? false) : !sessions.isEmpty
+    }
     private(set) var isShutDown = false
     /// True while the host's digest carries no section for this profile —
     /// a pre-profile daemon asked about a second account, or a profile the

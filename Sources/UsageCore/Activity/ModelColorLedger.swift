@@ -91,13 +91,21 @@ extension ModelColorLedger {
 
 // MARK: - Slot colors
 
-/// The slot→color math, pure sRGB: family base hues (slot 0 is the active
-/// provider's brand accent) and alternating washed/deep shade rescales per
-/// version. One implementation feeds both the app's SwiftUI palette and the
-/// digest's encoded colors, so a model looks identical on every surface in
-/// every process — no NSColor anywhere in the derivation.
+/// The slot→color math: family base hues (slot 0 is the harness's brand
+/// accent), each version a lightness level of its family's hue, every
+/// result placed inside the legibility band of the appearance it is drawn
+/// in (`ModelColorLegibility`: 3:1 against that ground, a lightness that
+/// keeps the hue). One implementation feeds both the app's SwiftUI palette
+/// and the digest's encoded colors, so a model looks identical on every
+/// surface in every process — no NSColor anywhere in the derivation.
+///
+/// Slots are kept for life, so the version a person uses NOW holds its
+/// family's highest slot: every slot must be as legible as slot 0 (the old
+/// HSB steps grew with the slot and ran to near-black — #411204 at 1.08:1
+/// for a fifth Opus version, user-reported 2026-11-21).
 public enum ModelColorMath {
-    /// Fixed hues after the accent slot, tuned to read on dark material.
+    /// Fixed hues after the accent slot — the DESIGN colors; each is fitted
+    /// into the appearance's band when drawn.
     public static let fixedHues: [RGBColor] = [
         RGBColor(red: 0.420, green: 0.620, blue: 0.970),  // blue
         RGBColor(red: 0.480, green: 0.780, blue: 0.420),  // green
@@ -108,103 +116,80 @@ public enum ModelColorMath {
         RGBColor(red: 0.610, green: 0.650, blue: 0.710),  // slate
     ]
 
-    /// Saturation/brightness scaling per shade slot past the family's first
-    /// version — alternating washed/deep so consecutive versions contrast.
-    public static let shadeSteps: [(saturation: Double, brightness: Double)] = [
-        (0.55, 1.25),
-        (1.20, 0.68),
-        (0.35, 1.40),
-        (1.30, 0.50),
+    /// A family's first five versions: where each sits in its band (a
+    /// fraction of the band's width above the family's own lightness,
+    /// wrapping) and how saturated — five levels a fifth of the band apart,
+    /// ordered so consecutive versions sit two fifths apart; slot 0 is the
+    /// family's own color. Later slots keep stepping two fifths
+    /// (`versionLevel`).
+    public static let versionLevels: [(offset: Double, chroma: Double)] = [
+        (0.0, 1.00),
+        (0.4, 0.70),
+        (0.8, 1.10),
+        (0.2, 0.55),
+        (0.6, 0.85),
     ]
 
-    /// The family's base hue re-shaded for a version's slot.
-    public static func rgb(hueSlot: Int, shadeSlot: Int, accent: RGBColor) -> RGBColor {
+    /// The version level a shade slot wears: two fifths of the band past
+    /// the previous slot, and each round of five shifted a tenth, so the
+    /// step from one round into the next is half the band (not the fifth a
+    /// plain cycle gave slot 4 → 5) and a later round never repeats an
+    /// earlier one's lightness. Slots are kept for life, so the newest
+    /// version — the one in use — is the highest slot; it and its
+    /// predecessor share charts in a release week. Chroma cycles with the
+    /// first round's levels.
+    public static func versionLevel(_ shadeSlot: Int) -> (offset: Double, chroma: Double) {
+        guard shadeSlot > 0 else { return versionLevels[0] }
+        let round = Double(shadeSlot / versionLevels.count)
+        let offset = (0.4 * Double(shadeSlot) + 0.1 * round).truncatingRemainder(dividingBy: 1)
+        return (offset, versionLevels[1 + (shadeSlot - 1) % (versionLevels.count - 1)].chroma)
+    }
+
+    /// The family's base color re-shaded for a version's slot, for one
+    /// appearance.
+    public static func rgb(
+        hueSlot: Int, shadeSlot: Int, accent: RGBColor, on appearance: ModelColorAppearance
+    ) -> RGBColor {
         let palette = [accent] + fixedHues
         let base = palette[hueSlot % palette.count]
-        guard shadeSlot > 0 else { return base }
-        let step = shadeSteps[(shadeSlot - 1) % shadeSteps.count]
-        let (h, s, b) = hsb(from: base)
-        return rgb(hue: h, saturation: min(1, s * step.saturation), brightness: min(1, b * step.brightness))
+        var design = OKLCH(base)
+        let level = versionLevel(shadeSlot)
+        design.chroma *= level.chroma
+        return ModelColorLegibility.place(
+            design, offset: level.offset, on: appearance, exact: shadeSlot == 0 ? base : nil)
     }
 
     /// Tones of one hue for a chart that stacks several agents: the agent
-    /// owns the hue (its accent), each model FAMILY a tone, so no two
-    /// vendors' models can wear look-alike colors. Indexed by the family's
-    /// persistent hue slot — fixed for life, like the ledger's own colors.
-    public static let agentTones: [(saturation: Double, brightness: Double)] = [
-        (1.00, 1.00),
-        (0.50, 1.30),
-        (1.20, 0.62),
-        (0.30, 1.45),
-        (1.35, 0.45),
-        (0.75, 0.82),
+    /// owns the hue (its accent), each model FAMILY a tone — a place in the
+    /// band and a chroma — so no two vendors' models can wear look-alike
+    /// colors. Indexed by the family's persistent hue slot, fixed for life
+    /// like the ledger's own colors. Tuned (2026-11-21) over the four
+    /// harness accents for the widest gap between the first four families'
+    /// tones and the fewest cross-family look-alikes at any version slot.
+    public static let agentTones: [(offset: Double, chroma: Double)] = [
+        (0.00, 1.00),
+        (0.25, 1.25),
+        (0.06, 0.45),
+        (0.83, 0.45),
+        (0.32, 0.90),
+        (0.81, 1.25),
     ]
 
     /// A model's color when agents share a chart: the agent's accent at the
-    /// family's tone, each later version a step further from it — darker
-    /// when the tone is bright, lighter when it is deep, so the step always
-    /// has room (a light tone pushed lighter clamps at white and two
-    /// versions came out the same). Both slots come from the agent's own
-    /// ledger, so the color never moves between periods.
-    public static func agentShade(hueSlot: Int, shadeSlot: Int, accent: RGBColor) -> RGBColor {
+    /// family's tone, each version a level further along the band from it.
+    /// Both slots come from the agent's own ledger, so the color never moves
+    /// between periods.
+    public static func agentShade(
+        hueSlot: Int, shadeSlot: Int, accent: RGBColor, on appearance: ModelColorAppearance
+    ) -> RGBColor {
         let tone = agentTones[hueSlot % agentTones.count]
-        let (hue, saturation, brightness) = hsb(from: accent)
-        var s = min(1, saturation * tone.saturation)
-        var b = min(1, brightness * tone.brightness)
-        if shadeSlot > 0 {
-            let step = 0.24 * Double(shadeSlot)
-            if b > 0.6 {
-                b *= max(0.3, 1 - step)
-                s = min(1, s * (1 + step * 0.6))
-            } else {
-                b = min(1, b * (1 + step * 1.4))
-                s *= max(0.3, 1 - step * 0.5)
-            }
-        }
-        return rgb(hue: hue, saturation: min(1, max(0, s)), brightness: min(1, max(0.12, b)))
-    }
-
-    /// Standard RGB→HSB (hexcone) — matches AppKit's conversion for sRGB
-    /// inputs, minus AppKit.
-    static func hsb(from color: RGBColor) -> (hue: Double, saturation: Double, brightness: Double) {
-        let maxC = max(color.red, color.green, color.blue)
-        let minC = min(color.red, color.green, color.blue)
-        let delta = maxC - minC
-        let brightness = maxC
-        let saturation = maxC == 0 ? 0 : delta / maxC
-        var hue = 0.0
-        if delta != 0 {
-            if maxC == color.red {
-                hue = ((color.green - color.blue) / delta).truncatingRemainder(dividingBy: 6)
-            } else if maxC == color.green {
-                hue = (color.blue - color.red) / delta + 2
-            } else {
-                hue = (color.red - color.green) / delta + 4
-            }
-            hue /= 6
-            if hue < 0 { hue += 1 }
-        }
-        return (hue, saturation, brightness)
-    }
-
-    /// Standard HSB→RGB (hexcone inverse).
-    static func rgb(hue: Double, saturation: Double, brightness: Double) -> RGBColor {
-        guard saturation > 0 else {
-            return RGBColor(red: brightness, green: brightness, blue: brightness)
-        }
-        let sector = (hue - hue.rounded(.down)) * 6
-        let index = Int(sector) % 6
-        let fraction = sector - sector.rounded(.down)
-        let p = brightness * (1 - saturation)
-        let q = brightness * (1 - saturation * fraction)
-        let t = brightness * (1 - saturation * (1 - fraction))
-        switch index {
-        case 0: return RGBColor(red: brightness, green: t, blue: p)
-        case 1: return RGBColor(red: q, green: brightness, blue: p)
-        case 2: return RGBColor(red: p, green: brightness, blue: t)
-        case 3: return RGBColor(red: p, green: q, blue: brightness)
-        case 4: return RGBColor(red: t, green: p, blue: brightness)
-        default: return RGBColor(red: brightness, green: p, blue: q)
-        }
+        let level = versionLevel(shadeSlot)
+        var design = OKLCH(accent)
+        design.chroma *= tone.chroma * level.chroma
+        var offset = tone.offset + level.offset
+        if offset >= 1 { offset -= 1 }
+        return ModelColorLegibility.place(
+            design, offset: offset, on: appearance,
+            exact: hueSlot % agentTones.count == 0 && shadeSlot == 0 ? accent : nil)
     }
 }
