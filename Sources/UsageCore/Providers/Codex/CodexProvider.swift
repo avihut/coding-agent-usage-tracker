@@ -256,7 +256,7 @@ enum CodexMeterBuilder {
                 thresholds: thresholds, now: now))
         }
         let plan = payload.planType.map {
-            PlanInfo(subscriptionType: $0, rateLimitTier: nil)
+            PlanInfo(subscriptionType: $0, rateLimitTier: nil, displayName: CodexPlanName.name(for: $0))
         }
         return Snapshot(meters: meters, fetchedAt: payload.capturedAt, plan: plan)
     }

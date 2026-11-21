@@ -87,6 +87,22 @@ public struct ClaudeAccountIdentitySource: AccountIdentitySource {
         let displayName: String?
         let organizationName: String?
         let organizationRateLimitTier: String?
+        /// The plan's current name ("Ultra"), from the profile the agent
+        /// fetched — display only, never part of the identity.
+        let planDisplayName: String?
+    }
+
+    /// The plan's name as the agent records it, from the same `oauthAccount`
+    /// key — nil when this agent version records none. Display only: the plan
+    /// label prefers it over a name built from the raw type and tier.
+    public func planDisplayName() -> String? {
+        guard let data = try? Data(contentsOf: fileURL),
+              let shell = try? JSONDecoder().decode(Shell.self, from: data),
+              let name = shell.oauthAccount?.planDisplayName?
+                  .trimmingCharacters(in: .whitespacesAndNewlines),
+              !name.isEmpty
+        else { return nil }
+        return name
     }
 
     public func currentIdentity() -> AccountIdentity? {

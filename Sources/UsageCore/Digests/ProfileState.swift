@@ -411,6 +411,7 @@ extension EngineStatus {
             providerID: providerID, serviceName: serviceName, agentName: agentName,
             glyph: glyph, accent: accent, systemAccent: systemAccent, planLabel: planLabel,
             planSubscriptionType: planSubscriptionType, planRateLimitTier: planRateLimitTier,
+            planDisplayName: planDisplayName,
             appVersion: appVersion, pid: pid, host: host, generatedAt: generatedAt,
             fetchedAt: fetchedAt, nextPollAt: nextPollAt, backoffUntil: backoffUntil,
             stale: stale, isLocalProvider: isLocalProvider,

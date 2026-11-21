@@ -99,8 +99,14 @@ public struct ClaudeProvider: UsageProvider {
         thresholds: Thresholds
     ) throws -> Snapshot {
         let response = try UsageResponse.decode(from: body)
+        // The plan under the name Claude Code records for it (the same
+        // read-only `oauthAccount` key the identity comes from).
+        let recordedName = ClaudeAccountIdentitySource(fileURL: home.identityFileURL)
+            .planDisplayName()
         return MeterBuilder.snapshot(
-            from: response, fetchedAt: fetchedAt, plan: plan, thresholds: thresholds)
+            from: response, fetchedAt: fetchedAt,
+            plan: ClaudePlanName.resolve(plan, recordedName: recordedName),
+            thresholds: thresholds)
     }
 
     public func makeLocalActivity(cacheDirectory: URL) -> (any LocalActivitySource)? {
