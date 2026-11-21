@@ -42,14 +42,21 @@ struct ControlSocketLoadTests {
 
         let squatter = silentClient(url)
         defer { close(squatter) }
-        // Queued behind the squatter: answered once the server's read
-        // timeout drops it, well inside this caller's own wait.
-        let started = Date()
+        // Queued behind the squatter on a SERIAL loop: without the server's
+        // read timeout this caller is never served at all. The wait is
+        // deliberately generous — the property is "served", not "served
+        // fast": wall-clock bounds measure the machine (a CI runner took 7 s
+        // for a 2 s timeout), never the loop.
         let reply = await Task.detached {
-            ControlSocket.send(.status, to: url, timeout: ControlSocket.serverTimeout + 3)
+            ControlSocket.send(.status, to: url, timeout: ControlSocket.serverTimeout * 15)
         }.value
         #expect(reply == ControlReply(ok: true, message: "served"))
-        #expect(Date().timeIntervalSince(started) < ControlSocket.serverTimeout + 2)
+        // And the squatter was dropped, not merely outlived: the server
+        // closed its end, so it reads end-of-stream.
+        var tv = timeval(tv_sec: Int(ControlSocket.serverTimeout * 15), tv_usec: 0)
+        setsockopt(squatter, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+        var byte: UInt8 = 0
+        #expect(recv(squatter, &byte, 1, 0) == 0)
     }
 
     @Test("a host that answers late is busy (noAnswer), a missing one is notListening")
@@ -66,7 +73,9 @@ struct ControlSocketLoadTests {
         defer { socket.stop() }
         let late = await Task.detached { ControlSocket.exchange(.status, to: url, timeout: 0.1) }.value
         #expect(late == .noAnswer)
-        let patient = await Task.detached { ControlSocket.exchange(.status, to: url, timeout: 3) }.value
+        // Generous: it queues behind the late one on a serial loop, and a
+        // slow runner stretches both handlers.
+        let patient = await Task.detached { ControlSocket.exchange(.status, to: url, timeout: 30) }.value
         #expect(patient == .reply(ControlReply(ok: true, message: "late")))
     }
 
@@ -83,7 +92,7 @@ struct ControlSocketLoadTests {
         let line = Array(#"{"status":{}}"#.utf8) + [0x0A]
         #expect(Darwin.write(fd, line, line.count) == line.count)
         #expect(shutdown(fd, SHUT_WR) == 0)
-        var tv = timeval(tv_sec: 3, tv_usec: 0)
+        var tv = timeval(tv_sec: 30, tv_usec: 0)
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
         var reply = [UInt8](repeating: 0, count: 4096)
         let got = recv(fd, &reply, reply.count, 0)
@@ -151,6 +160,6 @@ struct ControlSocketLoadTests {
         }
         try socket.start()
         defer { socket.stop() }
-        #expect(DeepQuerySessionsCLI.engineLookup(socket: url, timeout: 2)("default", "abc") == .busy)
+        #expect(DeepQuerySessionsCLI.engineLookup(socket: url, timeout: 30)("default", "abc") == .busy)
     }
 }
