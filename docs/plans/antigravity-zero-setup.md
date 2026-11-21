@@ -445,15 +445,38 @@ machine is simply never read again.
    screen) is a scoped meter labelled "Argon (7d)" — not "Weekly · Argon",
    which would make `usage-cli limits weekly` match two meters — shown
    whenever the reading reports it (FINAL: no gating).
-9. The additive core `modelScopeExcluded` field, so Argon's separate quota
-   isn't double-counted in the Gemini meters' curves and overshoot. Fallback
-   if it proves bigger than planned: no exclusion, overlap documented.
+9. Argon's separate quota isn't double-counted in the Gemini meters' curves
+   and overshoot. BUILT as a `!`-prefixed exclusion needle inside the
+   existing `modelScope` (`["gemini", "!argon"]`, `Meter.inScope`), not as
+   the planned separate `modelScopeExcluded` field: every scope path already
+   funnels through `Meter.inScope`, so it is one function and no new digest
+   field, and an older reader takes `!argon` as a literal that matches
+   nothing, which degrades to counting the pool whole.
 10. Rates listings: seen models first, then only the provider's own unseen
     rows (Gemini's for Antigravity); pricing itself keeps all three slices.
 11. Bar density: S · W · one scoped segment (the most-used scoped meter,
     the existing rule); the panel, TUI and CLI list every meter.
 12. Scoped meters in the vendor's order: Claude + GPT (5h), (7d), then
     Argon (7d).
+13. The TUI's meter labels keep a trailing `(window)` when they must be cut
+    and at least four characters of the head remain ("Claude… (5h)" /
+    "Claude… (7d)" instead of two identical "Claude + GP…"); every other
+    label cuts as before.
+14. `shape(of:)` keeps #36's grammar for two-word ids (`gemini-<window>`,
+    `3p-<window>`) and adds the one Argon id, rather than the plan's
+    explicit table: same meters today, and a new window word still reads.
+
+## Build record (2026-11-21)
+
+- The real check (`ANTIGRAVITY_LIVE_QUOTA=1 swift test --filter liveQuota`,
+  the provider's own command through `SpawnedCommandRunner`, state in a
+  scratch folder): 2.72 s, five buckets, meters Session (5h) 25%, Weekly
+  23%, Claude + GPT (5h) 2%, Claude + GPT (7d) 1%, Argon (7d) 2% — the
+  pool had been used since the 21:08 reading, and its resets turned real
+  (02:11:05Z, 21:11:05Z). Path listing around it: the same five mtime
+  stamps as every measured lever run, nothing under `~/Library/Keychains`.
+- The raw `/quota` captures were deleted from the session scratchpad once
+  the placeholdered fixture existed.
 
 ## Found (belongs elsewhere)
 
