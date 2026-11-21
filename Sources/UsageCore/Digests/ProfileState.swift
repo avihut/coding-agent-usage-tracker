@@ -40,6 +40,10 @@ public struct ProfileState: Codable, Sendable, Equatable, Identifiable {
     public let activity: ActivityRollup?
     public let sessions: [SessionCard]?
     public let accountPresence: AccountPresenceCard?
+    /// Where this section's activity stands (2026-11-21). While `scanning`,
+    /// `activity`, `models` and `sessions` are nil — nothing known yet,
+    /// never zero.
+    public let activityStatus: ActivityStatus?
 
     public init(
         id: String, providerID: String, label: String, nickname: String?, monogram: String,
@@ -47,8 +51,9 @@ public struct ProfileState: Codable, Sendable, Equatable, Identifiable {
         homeDisplayPath: String?, engine: EngineStatus?, meters: [LiveMeter]?,
         menuBar: [SegmentStatus]?, models: [ModelRow]?, activity: ActivityRollup?,
         sessions: [SessionCard]?, accountPresence: AccountPresenceCard?,
-        accountID: String? = nil
+        accountID: String? = nil, activityStatus: ActivityStatus? = nil
     ) {
+        self.activityStatus = activityStatus
         self.id = id
         self.providerID = providerID
         self.accountID = accountID
@@ -190,17 +195,22 @@ public enum MeteringDigest {
         let engine = base.engine.replacing(generatedAt: now, nextPollAt: earliestPoll ?? nextReprobeAt)
 
         let profiles = sections.map { section in
-            ProfileState(
+            // A section whose first scan hasn't landed knows nothing about
+            // its activity yet: absent, never the empty rollup's zeros.
+            let scanning = section.state?.activityStatus?.isScanning ?? false
+            return ProfileState(
                 id: section.profile.key, providerID: section.profile.providerID,
                 label: section.label, nickname: section.profile.nickname,
                 monogram: section.monogram, enabled: section.profile.enabled,
                 isFocused: section.profile.key == focusedID, dormant: section.dormant,
                 lastActivityAt: section.lastActivityAt, homeDisplayPath: section.homeDisplayPath,
                 engine: section.state?.engine, meters: section.state?.meters,
-                menuBar: section.state?.menuBar, models: section.state?.models,
-                activity: section.state?.activity, sessions: section.state?.sessions,
+                menuBar: section.state?.menuBar,
+                models: scanning ? nil : section.state?.models,
+                activity: scanning ? nil : section.state?.activity,
+                sessions: scanning ? nil : section.state?.sessions,
                 accountPresence: section.state?.accountPresence,
-                accountID: section.profile.id)
+                accountID: section.profile.id, activityStatus: section.state?.activityStatus)
         }
         // A cell per shown account of a shown harness, in roster order. Its
         // own harness's glyph and accent ride along: the bar draws several
@@ -250,7 +260,8 @@ public enum MeteringDigest {
             harnesses: states, pinnedProfile: pinned,
             allAgents: AllAgentsDigest.build(
                 harnesses: harnesses, sections: sections, now: now, calendar: calendar,
-                cache: allAgentsCache))
+                cache: allAgentsCache),
+            activityStatus: base.activityStatus)
     }
 
     /// The one-harness call this host made before several were metered at
@@ -349,7 +360,8 @@ extension LiveState {
             notices: harness.map(\.notices) ?? notices,
             outages: harness.map(\.outages) ?? outages,
             focusedProfile: focusedProfile, profiles: profiles, menuBarCells: menuBarCells,
-            harnesses: harnesses, pinnedProfile: pinnedProfile, allAgents: allAgents)
+            harnesses: harnesses, pinnedProfile: pinnedProfile, allAgents: allAgents,
+            activityStatus: section.activityStatus)
     }
 
     /// Every SHOWN harness's pending notices in one card (0.101.0). The

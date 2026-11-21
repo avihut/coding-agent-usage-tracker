@@ -1,0 +1,15 @@
+{
+  "comment": "The engine-liveness rule's vectors, decoded by BOTH EngineHostBrokerLivenessTests (Swift) and tui/src/state.rs (Rust). Cutoff = max(2 x (nextPollAt - generatedAt), 180 s). Past it, a held lease is busy, a free one offline. A Rust freshness of Live, Stale or Backoff is 'live' here.",
+  "cases": [
+    { "name": "no digest, lease free", "generatedAt": null, "nextPollAt": null, "now": "2026-11-21T22:00:00Z", "leaseHeld": false, "expected": "offline" },
+    { "name": "no digest yet, lease held (a host still starting)", "generatedAt": null, "nextPollAt": null, "now": "2026-11-21T22:00:00Z", "leaseHeld": true, "expected": "busy" },
+    { "name": "fresh, lease free", "generatedAt": "2026-11-21T21:59:30Z", "nextPollAt": "2026-11-21T22:04:30Z", "now": "2026-11-21T22:00:00Z", "leaseHeld": false, "expected": "live" },
+    { "name": "inside the 180 s floor, no horizon", "generatedAt": "2026-11-21T21:57:01Z", "nextPollAt": null, "now": "2026-11-21T22:00:00Z", "leaseHeld": false, "expected": "live" },
+    { "name": "past the floor, lease held", "generatedAt": "2026-11-21T21:56:59Z", "nextPollAt": null, "now": "2026-11-21T22:00:00Z", "leaseHeld": true, "expected": "busy" },
+    { "name": "past the floor, lease free", "generatedAt": "2026-11-21T21:56:59Z", "nextPollAt": null, "now": "2026-11-21T22:00:00Z", "leaseHeld": false, "expected": "offline" },
+    { "name": "a 10 min horizon stretches the cutoff to 20 min", "generatedAt": "2026-11-21T21:45:00Z", "nextPollAt": "2026-11-21T21:55:00Z", "now": "2026-11-21T22:00:00Z", "leaseHeld": false, "expected": "live" },
+    { "name": "past twice the horizon, lease held (the 2026-11-21 starvation)", "generatedAt": "2026-11-21T21:39:00Z", "nextPollAt": "2026-11-21T21:49:00Z", "now": "2026-11-21T22:00:00Z", "leaseHeld": true, "expected": "busy" },
+    { "name": "past twice the horizon, lease free", "generatedAt": "2026-11-21T21:39:00Z", "nextPollAt": "2026-11-21T21:49:00Z", "now": "2026-11-21T22:00:00Z", "leaseHeld": false, "expected": "offline" },
+    { "name": "a horizon behind generatedAt counts as none", "generatedAt": "2026-11-21T21:56:00Z", "nextPollAt": "2026-11-21T21:50:00Z", "now": "2026-11-21T22:00:00Z", "leaseHeld": true, "expected": "busy" }
+  ]
+}

@@ -80,7 +80,7 @@ final class ProviderRegistry {
     /// profile record, installs no launch agent — and the caller hands it a
     /// `bundleID` of its own, so the per-account history a client reads
     /// beside the digest comes up empty instead of real.
-    init(bundleID: String, demo: LiveState? = nil) {
+    init(bundleID: String, demo: LiveState? = nil, demoLiveness: EngineLiveness = .live) {
         let providers = HarnessResolution.standardProviders()
         self.providers = providers
         self.bundleID = bundleID
@@ -105,7 +105,7 @@ final class ProviderRegistry {
             leaseHeldByOther: EngineLease.isHeld(at: lease.lockURL),
             daemonAlive: daemonAlive)
         if let demo {
-            role = .client(DigestFeed(fixed: demo))
+            role = .client(DigestFeed(fixed: demo, liveness: demoLiveness))
         } else if decided == .host, lease.acquire() {
             let previous = try? LiveState.decoder().decode(
                 LiveState.self, from: Data(contentsOf: LiveState.fileURL(bundleID: bundleID)))
@@ -142,14 +142,20 @@ final class ProviderRegistry {
 
         // Auto-install (spec §10 re-amendment 2026-08-16): every launch
         // converges the usaged launch agent — install when absent, repoint
-        // when the app moved, restart a stale-version daemon — honoring
-        // the sticky opt-out. Detached: launchctl round-trips are process
-        // spawns. When the daemon comes up, the ordinary arbitration
-        // yields to it within ~30s; nothing here touches the role.
+        // when the app moved, upgrade a plist this build would write
+        // differently, restart a daemon running an older build — honoring
+        // the sticky opt-out. This launch CLAIMS the agent (`.claim`): the
+        // person started this copy. Detached: launchctl round-trips are
+        // process spawns. When the daemon comes up, the ordinary arbitration
+        // yields to it within ~30s; nothing here touches the role. The
+        // outcome is logged, never dropped (issue #9: a failed repoint went
+        // unseen).
         let embedded = Self.embeddedUsagedBinary()
         Task.detached(priority: .utility) {
-            LaunchAgentInstaller.ensure(
-                binary: embedded, defaults: .standard, bundleID: bundleID)
+            let outcome = LaunchAgentInstaller.ensure(
+                binary: embedded, defaults: .standard, intent: .claim, bundleID: bundleID)
+            try? FileHandle.standardError.write(
+                contentsOf: Data("[AgentUsage] launch agent: \(outcome)\n".utf8))
         }
     }
 

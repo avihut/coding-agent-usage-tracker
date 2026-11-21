@@ -51,6 +51,9 @@ struct HeatmapView: View {
     var consumption: ConsumptionInput? = nil
     /// The scope control beside the title, while there is a choice.
     var scopeMenu: ActivityScopeMenu? = nil
+    /// Every account in scope is still on its first scan: its activity is
+    /// absent, so the stats line says so instead of "0 tokens".
+    var scanning = false
 
     enum Period: String, CaseIterable, Identifiable {
         case week = "7D"
@@ -146,7 +149,10 @@ struct HeatmapView: View {
             if pageOffset == 0, layout.isEmpty, !layout.hasOlder {
                 VStack(alignment: .leading, spacing: 8) {
                     titleRow
-                    Text(consumption == nil ? "No local \(agentName) activity found" : "No local activity found")
+                    // Absent ≠ none: before the first scan nothing has looked.
+                    Text(scanning
+                        ? "Scanning…"
+                        : consumption == nil ? "No local \(agentName) activity found" : "No local activity found")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -518,6 +524,8 @@ struct HeatmapView: View {
             }
             return "\(ModelNames.display(hoveredModel)) · \(value) · \(days) active days"
         }
+        // Absent ≠ zero: nothing in scope has been counted yet.
+        if scanning { return "Scanning…" }
         let value = switch dimension {
         case .tokens: "\(TokenFormat.compact(layout.totalTokens)) tokens"
         case .cost: costText(costIndex.byDay.isEmpty ? nil : costIndex.total, tokens: layout.totalTokens)

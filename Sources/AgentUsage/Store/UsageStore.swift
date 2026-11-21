@@ -65,6 +65,23 @@ final class UsageStore {
         case .client(let client): client.isRefreshing
         }
     }
+    /// Where this account's activity stands: nothing yet (`scanning`), the
+    /// previous run's cached scan, or this run's own (2026-11-21). Nil for a
+    /// harness with nothing to scan, and from a host before the marker.
+    var activityStatus: ActivityStatus? {
+        switch mode {
+        case .hosting: engine?.activityStatus
+        case .client(let client): client.activityStatus
+        }
+    }
+    /// Whether the host behind this face is publishing, alive but late, or
+    /// gone (`EngineHostBroker.liveness`). This process hosting is live.
+    var engineLiveness: EngineLiveness {
+        switch mode {
+        case .hosting: .live
+        case .client(let client): client.engineLiveness
+        }
+    }
     var activeInterval: TimeInterval {
         switch mode {
         case .hosting(let host): host.activeInterval

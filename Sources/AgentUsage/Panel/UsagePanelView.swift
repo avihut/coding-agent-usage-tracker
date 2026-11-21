@@ -173,6 +173,7 @@ struct UsagePanelView: View {
                     // scope change crossfades it fresh.
                     VStack(alignment: .leading, spacing: 12) {
                         Divider()
+                        activityProvenance
                         activitySection
                         sessionsSection
                     }
@@ -854,7 +855,10 @@ struct UsagePanelView: View {
                 }
                 .padding(.bottom, 2)
                 if shortlist.rows.isEmpty {
-                    Text("No sessions in this period")
+                    // Before the first scan, "none" would be a claim nobody
+                    // has checked.
+                    Text(activityStores.contains { $0.activityStatus?.isScanning ?? false }
+                        ? "Scanning…" : "No sessions in this period")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                         .padding(.vertical, 2)
@@ -982,6 +986,24 @@ struct UsagePanelView: View {
     /// The Activity section for the scope: one account's section as it
     /// always was (narrowed to an account, or the only one there is), or the
     /// merged reading of several — no per-account limit readings there.
+    /// Which accounts in scope are still scanning, or showing a cached scan.
+    private var provenanceEntries: [ActivityProvenanceCaption.Entry] {
+        let stores = activityStores
+        // The agent's name, unless two accounts of one agent are in scope.
+        let sharesAgent = Set(stores.map(\.provider.id)).count < stores.count
+        return stores.compactMap { owner in
+            guard let status = owner.activityStatus, status.state != .scanned else { return nil }
+            return ActivityProvenanceCaption.Entry(
+                name: sharesAgent ? registry.label(for: owner.profile) : owner.provider.agentName,
+                status: status)
+        }
+    }
+
+    @ViewBuilder private var activityProvenance: some View {
+        let entries = provenanceEntries
+        if !entries.isEmpty { ActivityProvenanceCaption(entries: entries) }
+    }
+
     @ViewBuilder private var activitySection: some View {
         let stores = activityStores
         if stores.count > 1 {
@@ -994,7 +1016,8 @@ struct UsagePanelView: View {
                 focus: $activityFocus,
                 samples: [], timeline: [], sessions: [], windowOutcomes: [],
                 sessionAuditMeter: nil, weeklyAuditMeter: nil,
-                consumption: input, scopeMenu: scopeMenu)
+                consumption: input, scopeMenu: scopeMenu,
+                scanning: stores.allSatisfy { $0.activityStatus?.isScanning == true })
         } else {
             let owner = stores.first ?? store
             HeatmapView(
@@ -1015,7 +1038,8 @@ struct UsagePanelView: View {
                 },
                 sessionAuditMeter: auditMeter(rank: 0, of: owner),
                 weeklyAuditMeter: auditMeter(rank: 1, of: owner),
-                scopeMenu: scopeMenu)
+                scopeMenu: scopeMenu,
+                scanning: owner.activityStatus?.isScanning == true)
         }
     }
 
@@ -1036,7 +1060,12 @@ struct UsagePanelView: View {
     /// gauge — the two-line row's bottom-left cell.
     private func statusDetailText(now: Date) -> Text? {
         var parts: [Text] = []
-        if let next = store.nextRefreshAt {
+        if store.engineLiveness == .busy {
+            // Alive and late (2026-11-21): the host holds its lease but
+            // hasn't published in a while — a countdown would be overdue
+            // and "offline" untrue. The stamp beside this keeps the age.
+            parts.append(Text("Engine busy — updating…").foregroundStyle(.orange))
+        } else if let next = store.nextRefreshAt {
             parts.append(Text(UsageFormatting.countdownText(to: next, now: now)))
         }
         // Why "next in 20m" instead of 5: quiet decayed the cadence. Activity

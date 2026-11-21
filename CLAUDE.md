@@ -194,6 +194,11 @@ may not realise you are standing. The doc named beside each says why.
   its path: Codex compresses it in place to `.jsonl.zst`, and both names
   exist at once mid-hand-over — keyed by path, it counts twice.
   (`docs/HARNESSES.md`)
+- Never put the launch agent back on `ProcessType = Background`, and never
+  run engine work at background QoS: both are priority 4, and under a
+  normal 20-agent load the daemon got no CPU for minutes while holding the
+  lease. Interactive process, utility-QoS heavy work (`EngineWork`);
+  swiftlint holds it. (`docs/DAEMON.md` "Under load")
 - Never poll faster than 180s (`TriggerGate.floor`) — the endpoint
   rate-limits sustained sub-3-minute polling, and adaptive cadence may
   only ever slow polling down. (`docs/ARCHITECTURE.md`)
@@ -202,7 +207,7 @@ may not realise you are standing. The doc named beside each says why.
 
 Rules a grep can hold are mechanized rather than remembered:
 `.swiftlint.yml` `custom_rules` (headless core, native `SecItem`, key
-strategies, `chartScrollableAxes`) and `scripts/guard.sh` (token-shaped
+strategies, `chartScrollableAxes`, background engine priority) and `scripts/guard.sh` (token-shaped
 strings, signing identities, dependencies, the §10 host allowlist,
 script↔task pairing, CI covering every half of the gate). Adding a rule
 there beats adding a paragraph here.

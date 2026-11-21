@@ -269,6 +269,13 @@ public protocol LocalActivitySource: Sendable {
     /// consumers (usage-cli, the app rendering a daemon's digest), so the
     /// engine host stays the sole cache writer.
     func scanTranscriptsReadOnly(now: Date) -> TranscriptScan
+    /// The previous complete scan exactly as its parse cache saved it — no
+    /// stat, no parse, no write — and when that scan finished (the cache
+    /// file's mtime). What a starting host publishes at once, marked with
+    /// that real age, while the full re-validation runs behind it (2026-11-21:
+    /// a starved first scan published 0 tokens for minutes). Nil when there
+    /// is no usable cache, and from a source that keeps none.
+    func cachedScan(now: Date) -> CachedScan?
     /// Per-day prompt counts from a log that outlives transcript cleanup;
     /// empty when the agent keeps no such log.
     func scanPromptDays() -> [Date: Int]
@@ -297,6 +304,7 @@ public protocol LocalActivitySource: Sendable {
 }
 
 extension LocalActivitySource {
+    public func cachedScan(now: Date) -> CachedScan? { nil }
     public var providesSessions: Bool { false }
     public var displayPaths: [String] { [displayPath] }
     public func sessionDetail(id: String) -> SessionDetail? { nil }

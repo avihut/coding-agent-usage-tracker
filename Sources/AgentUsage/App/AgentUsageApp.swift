@@ -56,8 +56,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // one) — how the README's pictures show nobody's real usage. Its
         // own storage scope keeps this Mac's history out of the charts.
         let demo = Self.launchDemoDigest()
+        // `--demo-engine-busy` beside it: the demo host reads as alive but
+        // late, so the busy row can be pictured without starving a daemon.
         let registry = ProviderRegistry(
-            bundleID: demo == nil ? bundleID : bundleID + ".demo", demo: demo)
+            bundleID: demo == nil ? bundleID : bundleID + ".demo", demo: demo,
+            demoLiveness: CommandLine.arguments.contains("--demo-engine-busy") ? .busy : .live)
         controller = StatusItemController(registry: registry)
         // ⌘, wherever this app is key — the panel, a hosted window. A
         // LOCAL monitor rather than a main-menu item: SwiftUI owns that

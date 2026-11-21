@@ -15,20 +15,28 @@ public struct UsageService: Sendable {
     /// The provider's quota probe, when its host may run one (spec §10
     /// amendment 2026-11-21, second); nil everywhere else.
     let probe: AgentQuotaProbe?
+    /// Never reads a credential and never fetches: every refresh serves the
+    /// cache as a network failure would. Only `usaged run-isolated` builds
+    /// one — a measuring copy of the engine must not be a second poller of
+    /// the person's account, nor read their token.
+    let offline: Bool
 
     public init(
         provider: any UsageProvider,
         cache: UsageCache,
         retryDelay: Duration = .seconds(2),
-        probe: AgentQuotaProbe? = nil
+        probe: AgentQuotaProbe? = nil,
+        offline: Bool = false
     ) {
         self.provider = provider
         self.cache = cache
         self.retryDelay = retryDelay
         self.probe = probe
+        self.offline = offline
     }
 
     public func refresh(thresholds: Thresholds = .standard, manual: Bool = false) async -> DisplayState {
+        if offline { return fallback(.network, thresholds: thresholds) }
         // The token is re-read every cycle (the agent rotates it) and lives
         // only in this frame for the duration of one request (spec §5).
         let token: String

@@ -88,6 +88,20 @@ set -g status-right '#(usage-tui --status)'
 `NO_COLOR` switches risk to `!` markers and the heat ramp to ░▒▓█ density;
 non-UTF-8 locales (or `USAGE_TUI_ASCII=1`) drop to a plain-ASCII alphabet.
 
+A host that holds its lease but hasn't rewritten the digest past the
+heartbeat cutoff is BUSY, not offline (2026-11-21): the header reads
+"engine busy — updating… · last update 4m ago" with the meters drawn, the
+strip says `busy`, and the pane never runs `usaged ensure` for it — that
+nudge is for a truly absent host. The lease probe (`state::lease_held`) is
+a shared `flock` via std's `File::try_lock_shared`, the same rule and
+vectors as the app's (`Tests/UsageCoreTests/Fixtures/liveness-cases.json`).
+With no digest yet and the lease held, the pane says "engine busy —
+starting…" instead of the launch nudge. While the digest's
+`activityStatus` says `scanning`, TODAY, MODELS, SESSIONS and the ACTIVITY
+chart say "scanning…" — never "0 tok", an empty chart or "no sessions
+recorded yet" — and while it says `cached` their titles carry "as of
+HH:MM".
+
 The digest schema is pinned on both sides of the language boundary: the
 Swift tests and the TUI's serde tests decode the same golden fixtures in
 `Tests/UsageCoreTests/Fixtures/digest/`.

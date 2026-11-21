@@ -46,6 +46,13 @@ pub struct LiveState {
     /// "no account".
     #[serde(default)]
     pub account_presence: Option<AccountPresenceCard>,
+    /// Whether `activity`, `models` and `sessions` are this run's scan, the
+    /// previous run's cached one, or nothing yet (2026-11-21). `None` = a
+    /// writer before the marker, or a harness with nothing to scan: read
+    /// the activity as always. While `scanning`, the top level's empty
+    /// rollup is NOT zero usage — draw "scanning…".
+    #[serde(default)]
+    pub activity_status: Option<ActivityStatus>,
     /// Pending notifications — vendor resets, outages past and present —
     /// pre-phrased by the writer. `None` means the writer emits none (a
     /// digest older than 0.93.0); an empty `items` means nothing is
@@ -202,6 +209,36 @@ pub struct ProfileState {
     pub sessions: Option<Vec<SessionCard>>,
     #[serde(default)]
     pub account_presence: Option<AccountPresenceCard>,
+    /// Where this section's activity stands; while `scanning` its
+    /// activity, models and sessions are absent.
+    #[serde(default)]
+    pub activity_status: Option<ActivityStatus>,
+}
+
+/// Mirror of `ActivityStatus` (2026-11-21).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivityStatus {
+    /// "scanning" | "cached" | "scanned" — an unknown state reads as
+    /// scanned (show the numbers), the forward-compatible default.
+    pub state: String,
+    #[serde(with = "time::serde::rfc3339::option", default)]
+    pub as_of: Option<OffsetDateTime>,
+}
+
+impl ActivityStatus {
+    pub fn is_scanning(&self) -> bool {
+        self.state == "scanning"
+    }
+
+    /// When the shown activity is the previous run's: its scan's end.
+    pub fn cached_as_of(&self) -> Option<OffsetDateTime> {
+        if self.state == "cached" {
+            self.as_of
+        } else {
+            None
+        }
+    }
 }
 
 /// Mirror of `MenuBarCell`: one profile's cell in the menu bar, decided by
@@ -1453,5 +1490,33 @@ mod wave4_tests {
         // The card's profile is absent for legacy and account-wide rows.
         let notices = state.notices.as_ref().unwrap();
         assert!(notices.items.iter().all(|n| n.profile.is_none()));
+    }
+
+    #[test]
+    fn activity_status_decodes_in_every_state() {
+        let state = named_golden("live-state-v1-harnesses.json");
+        let top = state.activity_status.as_ref().expect("top-level marker");
+        assert_eq!(top.state, "cached");
+        assert!(top.cached_as_of().is_some());
+        let sections = state.profiles.as_ref().expect("profiles");
+        let by_id = |id: &str| sections.iter().find(|p| p.id == id).expect("section");
+        assert_eq!(
+            by_id("default")
+                .activity_status
+                .as_ref()
+                .map(|s| s.state.as_str()),
+            Some("scanned")
+        );
+        // A scanning section carries no activity at all — absent, not zero.
+        let gemini = by_id("gemini");
+        assert!(
+            gemini
+                .activity_status
+                .as_ref()
+                .is_some_and(|s| s.is_scanning())
+        );
+        assert!(gemini.activity.is_none() && gemini.models.is_none() && gemini.sessions.is_none());
+        // The base golden carries it on its top level too.
+        assert!(named_golden("live-state-v1.json").activity_status.is_some());
     }
 }

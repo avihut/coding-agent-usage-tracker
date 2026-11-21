@@ -3,12 +3,12 @@ import Foundation
 /// Writes the live-state digest to disk so consumer interfaces can render
 /// without holding the engine. Atomic by construction — encode to a temp
 /// file, then rename — so a reader polling the file's mtime never sees a
-/// torn write. Encoding and IO run on one serial utility queue off the
+/// torn write. Encoding and IO run on one serial responsive-QoS queue off the
 /// main actor; publishes queue in order, newest state lands last.
 final class StatePublisher: Sendable {
     private let fileURL: URL
     private let queue = DispatchQueue(
-        label: "\(AppIdentity.bundleID).state-publisher", qos: .utility)
+        label: "\(AppIdentity.bundleID).state-publisher", qos: EngineWork.responsiveQoS)
 
     init(fileURL: URL) {
         self.fileURL = fileURL

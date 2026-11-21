@@ -19,7 +19,7 @@ extension AppDelegate {
               let data = try? Data(contentsOf: URL(fileURLWithPath: arguments[flag + 1])),
               let live = try? LiveState.decoder().decode(LiveState.self, from: data)
         else {
-            FileHandle.standardError.write(Data("--demo-digest: no readable digest\n".utf8))
+            try? FileHandle.standardError.write(contentsOf: Data("--demo-digest: no readable digest\n".utf8))
             exit(2)
         }
         return live

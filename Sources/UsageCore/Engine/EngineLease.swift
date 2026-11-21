@@ -23,9 +23,17 @@ public final class EngineLease {
         guard fd < 0 else { return true }
         try? FileManager.default.createDirectory(
             at: lockURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let handle = open(lockURL.path, O_CREAT | O_RDWR, 0o600)
+        let handle = open(lockURL.path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
         guard handle >= 0 else { return false }
-        guard flock(handle, LOCK_EX | LOCK_NB) == 0 else {
+        // A prober's shared trial lock (`isHeld`) also refuses LOCK_EX for
+        // the instant it is held: two short retries absorb that, so a free
+        // lease is never read as taken because someone was asking.
+        var locked = flock(handle, LOCK_EX | LOCK_NB) == 0
+        for _ in 0..<2 where !locked && errno == EWOULDBLOCK {
+            usleep(2000)
+            locked = flock(handle, LOCK_EX | LOCK_NB) == 0
+        }
+        guard locked else {
             close(handle)
             return false
         }
@@ -41,13 +49,17 @@ public final class EngineLease {
     }
 
     /// Probe without taking: true when SOME process holds the lease right
-    /// now. Uses its own descriptor, so a successful trial acquisition is
-    /// released immediately and never disturbs a real holder.
-    public static func isHeld(at lockURL: URL) -> Bool {
-        let handle = open(lockURL.path, O_RDWR)
+    /// now. A SHARED trial lock on its own descriptor: it fails only against
+    /// the holder's exclusive lock, so two probers — the app and a TUI, both
+    /// asking whether a starved host is alive — never mistake each other for
+    /// a holder (an exclusive trial would). Released at once, it never
+    /// disturbs a real holder; a host's own 2 s acquire retry absorbs the
+    /// microseconds it is held. Read-only: the file is opened, never written.
+    nonisolated public static func isHeld(at lockURL: URL) -> Bool {
+        let handle = open(lockURL.path, O_RDONLY | O_CLOEXEC)
         guard handle >= 0 else { return false }
         defer { close(handle) }
-        guard flock(handle, LOCK_EX | LOCK_NB) == 0 else { return true }
+        guard flock(handle, LOCK_SH | LOCK_NB) == 0 else { return true }
         flock(handle, LOCK_UN)
         return false
     }

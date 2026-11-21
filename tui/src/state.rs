@@ -4,7 +4,7 @@
 use crate::digest::{ActivityRollup, AllAgentsState, LiveState, ProfileState};
 use ratatui::layout::Rect;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::{Instant, SystemTime};
 use time::{Duration, OffsetDateTime, UtcOffset};
@@ -378,14 +378,76 @@ pub enum Freshness {
     Stale,
     /// A 429 backoff is in force until the carried instant.
     Backoff,
-    /// Nobody rewrites the digest — no engine is running.
+    /// The digest is past the heartbeat cutoff (or not written yet), but a
+    /// process holds the engine lease: the host is alive and late — starved
+    /// under load, still scanning. Its numbers stand, as of their real age.
+    Busy,
+    /// Nobody rewrites the digest and nobody holds the lease — no engine.
     EngineOffline,
+}
+
+/// The engine-liveness rule — Swift's `EngineHostBroker.liveness`, the same
+/// vectors pinning both (`Tests/UsageCoreTests/Fixtures/liveness-cases.json`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Liveness {
+    Live,
+    Busy,
+    Offline,
+}
+
+/// Past the heartbeat cutoff: stale beyond twice the digest's own poll
+/// horizon, floored at 3 min — the host broker's takeover rule.
+pub fn past_cutoff(
+    generated_at: OffsetDateTime,
+    next_poll_at: Option<OffsetDateTime>,
+    now: OffsetDateTime,
+) -> bool {
+    let age = now - generated_at;
+    let horizon = next_poll_at
+        .map(|next| (next - generated_at).max(Duration::ZERO))
+        .unwrap_or(Duration::ZERO);
+    age > horizon.saturating_mul(2).max(Duration::minutes(3))
+}
+
+pub fn liveness(
+    generated_at: Option<OffsetDateTime>,
+    next_poll_at: Option<OffsetDateTime>,
+    now: OffsetDateTime,
+    lease_held: impl FnOnce() -> bool,
+) -> Liveness {
+    match generated_at {
+        Some(generated) if !past_cutoff(generated, next_poll_at, now) => Liveness::Live,
+        // Past the cutoff, or nothing published yet: the lease decides.
+        _ if lease_held() => Liveness::Busy,
+        _ => Liveness::Offline,
+    }
+}
+
+/// True when some process holds `engine.lock` — a SHARED, non-blocking
+/// trial lock on a read-only descriptor, released at once: it fails only
+/// against the host's exclusive lock, so two probers (this pane and the
+/// app) never take each other for a host. Std's `try_lock_shared` is
+/// `flock(2)`, the call the host takes its lease with.
+pub fn lease_held(lock_path: &Path) -> bool {
+    let Ok(file) = std::fs::File::open(lock_path) else {
+        return false;
+    };
+    match file.try_lock_shared() {
+        Ok(()) => {
+            let _ = file.unlock();
+            false
+        }
+        Err(std::fs::TryLockError::WouldBlock) => true,
+        Err(_) => false,
+    }
 }
 
 pub struct App {
     pub digest_path: PathBuf,
     /// None when the pane reads a `--digest` file and may dial no engine.
     pub socket_path: Option<PathBuf>,
+    /// `engine.lock` beside the digest — whose holder is the host.
+    pub lock_path: PathBuf,
     pub digest: Option<LiveState>,
     pub decode_error: Option<String>,
     /// One-line echo of the last socket command's reply, cleared by the
@@ -449,6 +511,7 @@ impl App {
         local_offset: UtcOffset,
     ) -> Self {
         let mut app = Self {
+            lock_path: digest_path.with_file_name("engine.lock"),
             digest_path,
             socket_path,
             digest: None,
@@ -733,22 +796,26 @@ impl App {
     }
 
     pub fn freshness(&self, now: OffsetDateTime) -> Freshness {
+        self.freshness_given(now, || lease_held(&self.lock_path))
+    }
+
+    /// `freshness` with the lease probe injected. The probe runs only past
+    /// the heartbeat cutoff — a fresh digest needs no second opinion.
+    pub fn freshness_given(&self, now: OffsetDateTime, lease: impl FnOnce() -> bool) -> Freshness {
+        let engine = self.digest.as_ref().map(|digest| &digest.engine);
+        match liveness(
+            engine.map(|engine| engine.generated_at),
+            engine.and_then(|engine| engine.next_poll_at),
+            now,
+            lease,
+        ) {
+            Liveness::Live => {}
+            Liveness::Busy => return Freshness::Busy,
+            Liveness::Offline => return Freshness::EngineOffline,
+        }
         let Some(digest) = &self.digest else {
             return Freshness::EngineOffline;
         };
-        // The heartbeat rule is the host broker's: stale beyond twice the
-        // digest's own poll horizon (floored at 3 min) means nobody is
-        // rewriting it.
-        let age = now - digest.engine.generated_at;
-        let horizon = digest
-            .engine
-            .next_poll_at
-            .map(|next| (next - digest.engine.generated_at).max(Duration::ZERO))
-            .unwrap_or(Duration::ZERO);
-        let cutoff = horizon.saturating_mul(2).max(Duration::minutes(3));
-        if age > cutoff {
-            return Freshness::EngineOffline;
-        }
         if let Some(backoff) = digest.engine.backoff_until
             && backoff > now
         {
@@ -1200,5 +1267,73 @@ mod tests {
             app.freshness(datetime!(2026-08-16 12:07 UTC)),
             Freshness::EngineOffline
         );
+    }
+
+    #[test]
+    fn a_held_lease_past_the_cutoff_is_busy_not_offline() {
+        let app = app_with(golden_digest());
+        let late = datetime!(2026-08-16 12:07 UTC);
+        assert_eq!(app.freshness_given(late, || true), Freshness::Busy);
+        assert_eq!(
+            app.freshness_given(late, || false),
+            Freshness::EngineOffline
+        );
+        // Inside the cutoff the lease is never asked.
+        let fresh = datetime!(2026-08-16 12:04 UTC);
+        assert_eq!(
+            app.freshness_given(fresh, || panic!("a fresh digest needs no probe")),
+            Freshness::Live
+        );
+    }
+
+    /// The same vectors Swift's `EngineLivenessTests` decodes — the rule
+    /// can't drift between the faces.
+    #[test]
+    fn shared_liveness_vectors() {
+        use time::format_description::well_known::Rfc3339;
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../Tests/UsageCoreTests/Fixtures/liveness-cases.json");
+        let fixture: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path).expect("liveness vectors")).unwrap();
+        let at = |value: &serde_json::Value| {
+            value
+                .as_str()
+                .map(|text| OffsetDateTime::parse(text, &Rfc3339).expect("RFC 3339 instant"))
+        };
+        let cases = fixture["cases"].as_array().expect("cases");
+        assert!(cases.len() >= 8);
+        for case in cases {
+            let held = case["leaseHeld"].as_bool().unwrap();
+            let got = liveness(
+                at(&case["generatedAt"]),
+                at(&case["nextPollAt"]),
+                at(&case["now"]).unwrap(),
+                || held,
+            );
+            let expected = match case["expected"].as_str().unwrap() {
+                "live" => Liveness::Live,
+                "busy" => Liveness::Busy,
+                _ => Liveness::Offline,
+            };
+            assert_eq!(got, expected, "{}", case["name"]);
+        }
+    }
+
+    #[test]
+    fn the_lease_probe_sees_a_holder_and_never_another_prober() {
+        let dir = std::env::temp_dir().join(format!("tui-lease-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("engine.lock");
+        assert!(!lease_held(&path), "no file is no holder");
+        let holder = std::fs::File::create(&path).unwrap();
+        assert!(!lease_held(&path));
+        holder.lock().unwrap();
+        assert!(lease_held(&path));
+        holder.unlock().unwrap();
+        let prober = std::fs::File::open(&path).unwrap();
+        prober.lock_shared().unwrap();
+        assert!(!lease_held(&path), "a shared prober is not a holder");
+        drop(prober);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

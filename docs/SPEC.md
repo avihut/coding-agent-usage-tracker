@@ -642,8 +642,10 @@ Non-negotiable; flag rather than work around:
     "installed only by the user typing install"): installation is
     automatic — the menu bar app converges the agent at every launch
     (install when absent, repoint when the app moved, restart a
-    stale-version daemon), and the TUI spawns `usaged ensure` when it
-    finds no engine publishing. The user's control is the sticky opt-out
+    stale-version daemon — since 2026-11-21 a stale BUILD, and the TUI's
+    `ensure` never acts on a host that holds the lease; docs/DAEMON.md
+    "Under load"), and the TUI spawns `usaged ensure` when it finds no
+    engine publishing. The user's control is the sticky opt-out
     `daemonAutoInstall`: `usage-cli daemon uninstall` and the Settings
     toggle both remove the agent AND set it false, which every
     auto-install path honors; `daemon install` or toggling back on

@@ -128,6 +128,26 @@ public final class UsageEngine {
     /// True once a scan has landed `sessions` — before that, an empty index
     /// means "not looked yet", not "no such session".
     public private(set) var sessionsIndexed = false
+    /// Where `activity`, `tokenTimeline` and `sessions` stand: nothing yet,
+    /// the previous run's cached scan, or this run's own (2026-11-21). Nil
+    /// for a harness with nothing to scan.
+    public private(set) var activityStatus: ActivityStatus?
+    /// Startup bookkeeping (`StartupTrace`): the first poll has landed (or the
+    /// seeded gate denied it and the cache, fetched inside the floor, stands
+    /// in), and how many forecast passes are still running.
+    private(set) var metersSettled = false
+    private var predictionsInFlight = 0
+    /// Stamps each forecast pass; only the newest may land. Passes are no
+    /// longer single-flight: the cached snapshot's pass at init and the
+    /// launch poll's can overlap, and under load the older could finish last.
+    private var predictionGeneration = 0
+    /// Every first thing this engine owes a start has landed: meters, a scan
+    /// (when it has traces to scan), and the forecast pass over them.
+    public var startupSettled: Bool {
+        metersSettled && (localActivity == nil || sessionsIndexed) && predictionsInFlight == 0
+    }
+    /// "claude/default" — how the startup trace names this engine.
+    var traceName: String { "\(provider.id)/\(profileID)" }
 
     public static let defaultInterval: TimeInterval = 300
     static let intervalKey = "refreshIntervalSeconds"
@@ -240,24 +260,72 @@ public final class UsageEngine {
         // scan's attribution must run against a timeline that already
         // includes the present.
         observeAccountIdentity()
+        // What is already known is shown before anything is fetched
+        // (2026-11-21): the last fetch's meters from the cache, stamped with
+        // THEIR fetch time — the faces say how old they are, nothing is
+        // passed off as fresh. Every engine, the first one too: its launch
+        // poll used to leave it a loading shell until the network answered,
+        // which on a starved Mac was minutes. A seeded gate that denies the
+        // launch poll (a takeover inside the floor) and a staggered engine
+        // show the same snapshot until their poll lands.
+        if let snapshot = self.service.cachedSnapshot(thresholds: currentThresholds()) {
+            state = .live(snapshot)
+            recomputePredictions(for: snapshot)
+        }
         if launchDelay > 0 {
             scheduler.schedule(after: launchDelay)
             nextRefreshAt = scheduler.nextFireDate
         } else {
             refresh(.launch)
         }
-        // A seeded gate can deny that launch poll (the previous host
-        // fetched moments ago — a takeover inside the floor; isRefreshing
-        // stays false on the denied path), and a staggered engine hasn't
-        // polled yet. The cache holds the last fetch: present it as live
-        // rather than a loading shell — the scheduled poll replaces it
-        // soon enough.
-        if !isRefreshing, case .loading = state,
-           let snapshot = self.service.cachedSnapshot(thresholds: currentThresholds()) {
-            state = .live(snapshot)
-            recomputePredictions(for: snapshot)
+        // A launch poll the seeded gate denied is settled by the cache: the
+        // previous host fetched it inside the floor.
+        if launchDelay <= 0, !isRefreshing { noteMetersSettled(source: "cache inside the floor") }
+        activityStatus = localActivity == nil ? nil : .scanning
+        warmStart()
+    }
+
+    /// The previous run's activity at once, then this run's scan: the cached
+    /// pass (`LocalActivitySource.cachedScan` — the last complete scan as its
+    /// cache saved it, no stat, no parse) lands as `cached`, dated by when
+    /// that scan finished, and the full re-validation follows it. A full scan
+    /// that lands first wins; the cached pass then has nothing to add.
+    private func warmStart() {
+        guard let source = localActivity else { return }
+        let name = traceName
+        Task.detached(priority: EngineWork.startup) { [weak self] in
+            let started = Date()
+            let cached = source.cachedScan(now: started)
+            let merged = cached.map {
+                ActivityMerge.merge(transcripts: $0.scan.daily, prompts: source.scanPromptDays())
+            }
+            let elapsed = Int(Date().timeIntervalSince(started) * 1000)
+            await MainActor.run { [weak self] in
+                guard let self, !self.isShutDown else { return }
+                if let cached, let merged, self.landCachedScan(cached, activity: merged) {
+                    StartupTrace.shared.mark(
+                        "cached activity \(name)",
+                        "\(elapsed)ms, as of "
+                            + cached.asOf.formatted(.iso8601.time(includingFractionalSeconds: false)))
+                }
+                self.scanActivity()
+            }
         }
-        scanActivity()
+    }
+
+    /// Shows the previous run's scan unless this run's own already landed —
+    /// it never overwrites fresher data, and never counts as an index: the
+    /// socket's `session` verb still waits for a real scan. True when it
+    /// landed.
+    @discardableResult
+    func landCachedScan(_ cached: CachedScan, activity merged: [DailyActivity]) -> Bool {
+        guard !isShutDown, !sessionsIndexed else { return false }
+        activity = merged
+        tokenTimeline = cached.scan.timeline
+        sessions = cached.scan.sessions
+        activityStatus = .cached(asOf: cached.asOf)
+        publishState()
+        return true
     }
 
     /// The provider's quota probe — only when it declares a command AND the
@@ -406,10 +474,26 @@ public final class UsageEngine {
                 }
                 recomputePredictions(for: snapshot)
             }
+            noteMetersSettled(source: Self.traceSource(newState))
             // The heartbeat: every completed cycle rewrites the digest, so
             // its freshness IS the engine's liveness signal.
             publishState()
             await services.refreshPricingIfStale()
+        }
+    }
+
+    private func noteMetersSettled(source: String) {
+        guard !metersSettled else { return }
+        metersSettled = true
+        StartupTrace.shared.mark("meters \(traceName)", source)
+    }
+
+    private static func traceSource(_ state: DisplayState) -> String {
+        switch state {
+        case .live: "fetched"
+        case .cached(_, let error): "cache (\(error))"
+        case .unavailable(let error): "unavailable (\(error))"
+        case .loading: "loading"
         }
     }
 
@@ -448,6 +532,7 @@ public final class UsageEngine {
             presence: presence.map {
                 AccountPresenceInput(epochs: $0.epochs, observedAt: $0.observedAt)
             },
+            activityStatus: activityStatus,
             now: now)
         accountPresence = digest.accountPresence
         lastPublished = digest
@@ -570,7 +655,8 @@ public final class UsageEngine {
         // ingests are attributed against a timeline that includes right now,
         // so attribution is settled the first time it's computed.
         observeAccountIdentity()
-        Task.detached(priority: .utility) { [weak self] in
+        let started = Date()
+        Task.detached(priority: EngineWork.heavy) { [weak self] in
             let scan = source.scanTranscripts(now: Date())
             let activity = ActivityMerge.merge(
                 transcripts: scan.daily, prompts: source.scanPromptDays())
@@ -593,7 +679,14 @@ public final class UsageEngine {
                     defaults: self.defaults, providerID: self.provider.id)
                 // After the seed, so no render observes sessions first.
                 self.sessions = scan.sessions
+                if !self.sessionsIndexed {
+                    StartupTrace.shared.mark(
+                        "scan \(self.traceName)",
+                        "\(Int(Date().timeIntervalSince(started) * 1000))ms, "
+                            + "\(scan.sessions.count) sessions")
+                }
                 self.sessionsIndexed = true
+                self.activityStatus = .scanned(at: Date())
                 self.publishState()
                 self.follow(self.scanThrottle.finish(at: Date()))
             }
@@ -660,8 +753,9 @@ public final class UsageEngine {
 
     /// Rebuilds profiles and predictions off-main: walking two months of
     /// samples per meter is a few tens of milliseconds — background work,
-    /// not click-handler work. Refreshes are single-flighted, so runs
-    /// can't interleave.
+    /// not click-handler work. Two passes can overlap (the cached
+    /// snapshot's at init, then the launch poll's), so each is stamped and
+    /// a superseded one is dropped when it lands (`landPredictions`).
     private func recomputePredictions(for snapshot: Snapshot) {
         let now = Date()
         let samples = self.samples
@@ -670,7 +764,8 @@ public final class UsageEngine {
         // Read off the main actor's state here — the detached body cannot.
         let timeline = self.tokenTimeline
         let pricing = self.pricing
-        Task.detached(priority: .utility) { [weak self] in
+        let generation = beginPredictionPass()
+        Task.detached(priority: EngineWork.heavy) { [weak self] in
             var profiles: [String: WeeklyProfile] = [:]
             for meter in meters {
                 if let profile = WeeklyProfile.build(samples: samples, label: meter.label) {
@@ -696,13 +791,33 @@ public final class UsageEngine {
                 }
             }
             await MainActor.run { [profiles, fresh, overshoots] in
-                guard let self else { return }
-                self.profiles = profiles
-                self.predictions = fresh
-                self.forecastOvershoots = overshoots
-                self.publishState()
+                _ = self?.landPredictions(
+                    generation: generation, profiles: profiles, predictions: fresh, overshoots: overshoots)
             }
         }
+    }
+
+    func beginPredictionPass() -> Int {
+        predictionsInFlight += 1
+        predictionGeneration += 1
+        return predictionGeneration
+    }
+
+    /// Lands a forecast pass unless a newer one has begun since — the newer
+    /// pass carries newer samples and will land itself. Internal for tests.
+    @discardableResult
+    func landPredictions(
+        generation: Int, profiles: [String: WeeklyProfile], predictions: [String: UsagePrediction],
+        overshoots: [String: ForecastOvershoot]
+    ) -> Bool {
+        predictionsInFlight -= 1
+        guard generation == predictionGeneration else { return false }
+        self.profiles = profiles
+        self.predictions = predictions
+        self.forecastOvershoots = overshoots
+        StartupTrace.shared.mark("forecast \(traceName)")
+        publishState()
+        return true
     }
 
     /// The overall weekly meter's rhythm — the activity chart's typical-week

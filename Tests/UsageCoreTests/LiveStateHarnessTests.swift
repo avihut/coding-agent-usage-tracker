@@ -35,7 +35,7 @@ struct LiveStateHarnessTests {
     /// the fixture stays small and every field in it is deliberate.
     private func section(
         provider: any UsageProvider, percent: Int, label: String, tag: String,
-        usage: Usage? = nil
+        usage: Usage? = nil, activityStatus: ActivityStatus? = nil
     ) -> LiveState {
         let meter = Meter(
             id: "session", label: label, percent: percent,
@@ -47,7 +47,7 @@ struct LiveStateHarnessTests {
             pricing: provider.bundledRates, colorLedger: usage?.ledger ?? ModelColorLedger(),
             graceSeconds: ActivityGrace.defaultSeconds, activeInterval: 300, paceMultiplier: 1,
             nextPollAt: date("2026-09-19T12:03:00Z"), backoffUntil: nil, apiBudget: nil,
-            now: now, calendar: utc, locale: posix)
+            activityStatus: activityStatus, now: now, calendar: utc, locale: posix)
     }
 
     /// One account's scan, published in its own section AND handed to the
@@ -138,7 +138,8 @@ struct LiveStateHarnessTests {
                     profile: work, label: "work@example.com", monogram: "W", dormant: false,
                     lastActivityAt: date("2026-09-19T11:30:00Z"), homeDisplayPath: "~/.claude",
                     state: section(
-                        provider: claude, percent: 41, label: "Session (5h)", tag: "S", usage: workUsage),
+                        provider: claude, percent: 41, label: "Session (5h)", tag: "S", usage: workUsage,
+                        activityStatus: .scanned(at: date("2026-09-19T11:59:30Z"))),
                     consumption: workUsage.consumption),
                 ProfileSection(
                     profile: personal, label: "Personal", monogram: "P", dormant: true,
@@ -148,13 +149,15 @@ struct LiveStateHarnessTests {
                     profile: codexAccount, label: "Codex", monogram: "C", dormant: false,
                     lastActivityAt: date("2026-09-19T10:05:00Z"), homeDisplayPath: nil,
                     state: section(
-                        provider: codex, percent: 13, label: "Session", tag: "S", usage: codexUsage),
+                        provider: codex, percent: 13, label: "Session", tag: "S", usage: codexUsage,
+                        activityStatus: .cached(asOf: date("2026-09-19T11:40:00Z"))),
                     consumption: codexUsage.consumption),
                 ProfileSection(
                     profile: geminiAccount, label: "Gemini CLI", monogram: "G", dormant: false,
                     lastActivityAt: date("2026-09-17T08:00:00Z"), homeDisplayPath: nil,
                     state: section(
-                        provider: gemini, percent: 4, label: "Daily · counted locally", tag: "D")),
+                        provider: gemini, percent: 4, label: "Daily · counted locally", tag: "D",
+                        activityStatus: .scanning)),
             ],
             focused: "codex", pinned: nil, host: "daemon", pid: 909, appVersion: "0.101.0",
             systemAccent: nil, activeInterval: 300, appUpdate: nil,

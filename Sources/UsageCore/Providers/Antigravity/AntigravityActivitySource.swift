@@ -91,6 +91,17 @@ public struct AntigravityActivitySource: LocalActivitySource {
         return aggregate(cache.files, now: now)
     }
 
+    /// The previous complete scan as its cache saved it, dated by the cache
+    /// file's mtime (2026-11-21; see `LocalActivitySource.cachedScan`).
+    public func cachedScan(now: Date) -> CachedScan? {
+        guard let asOf = (try? FileManager.default.attributesOfItem(atPath: cacheURL.path))?[
+            .modificationDate] as? Date
+        else { return nil }
+        let files = loadCache().files
+        guard !files.isEmpty else { return nil }
+        return CachedScan(scan: aggregate(files, now: now), asOf: asOf)
+    }
+
     /// ONE CALL BELONGS TO ONE FILE: a forked conversation starts with a
     /// copy of the steps before its fork point, so the same call can sit in
     /// two transcripts. Files are visited smallest path first and a call an

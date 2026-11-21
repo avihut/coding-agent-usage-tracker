@@ -511,8 +511,39 @@ per-harness geometry of the bar is in [HARNESSES.md](HARNESSES.md).
   inserted in the same transaction that flips isPresented is silently
   dropped.
 
+## Busy, scanning, cached (2026-11-21)
+
+- ENGINE BUSY: in client mode the shared `DigestFeed` judges the host's
+  liveness on every 2 s tick (`EngineHostBroker.liveness`; the lease is
+  probed only past the heartbeat cutoff). A host past the cutoff that
+  still holds the lease is busy, and the panel's status row reads "Engine
+  busy — updating…" (orange) where the countdown would be — the
+  countdown would be overdue, and "offline" untrue. "Updated <stamp>"
+  beside it keeps the numbers' real age; the bar keeps its numbers and is
+  NOT greyed (busy is not an error). Offline keeps its old response: the
+  app takes over hosting. Picture it with `--demo-digest <file>
+  --demo-engine-busy --snapshot <dir>` — a fixed feed has no lease, so the
+  hatch supplies the verdict.
+- SCANNING / CACHED: `UsageStore.activityStatus` (the engine's while
+  hosting; while a client, the local read-only scan's own — scanning, then
+  the host's parse cache read as saved, then scanned — or, under
+  `--demo-digest`, the digest section's). A caption above Activity
+  (`ActivityProvenanceCaption`) NAMES every account in scope still
+  scanning ("Claude Code: scanning…"), so a merged total without it reads
+  as partial rather than whole — its activity is absent and contributes
+  nothing, never a counted zero — and says "as of 22:35 · rescanning" for
+  activity served from the previous run's scan. The Sessions strip says
+  "Scanning…" rather than "No sessions in this period" until a scan has
+  looked, and when every account in scope is scanning the Activity
+  section's stats line (or its empty state, in place of "No local activity
+  found") says "Scanning…". The caption disappears once every account in
+  scope has its own scan.
+
 ## The demo hatch
 
+- `scripts/demo-digest.py` marks every account's activity `scanned` (the
+  golden it templates on exercises `scanning` and `cached` too, which a
+  demo must show only when a picture asks for them).
 - `--demo-digest <live-state.json>` (2026-09-20, for the README's pictures,
   user-directed "use fixture data"): every face renders THAT file and
   nothing of this Mac. The registry becomes a client of a fixed

@@ -9,7 +9,13 @@ pub(super) fn today<'a>(
     all: Option<&AllAgentsState>,
     accent: Color,
     rect: Rect,
+    offset: UtcOffset,
 ) -> Paragraph<'a> {
+    // One account whose first scan hasn't landed: its empty rollup is not
+    // zero usage (2026-11-21). The all-agents total has its own rule below.
+    if all.is_none() && activity_scanning(digest) {
+        return scanning_lines("TODAY");
+    }
     let activity = match all {
         Some(all) => match &all.activity {
             Some(activity) => activity,
@@ -29,13 +35,21 @@ pub(super) fn today<'a>(
         },
         None => &digest.activity,
     };
-    let mut lines = vec![section_title(&today_title(
+    let mut title = today_title(
         activity.today_tokens,
         activity.today_cost,
         activity.today_prompts,
         all.map(|all| all.count_label.as_str()),
         rect.width as usize,
-    ))];
+    );
+    // One account's activity served from the previous run's scan says how
+    // old it is.
+    if all.is_none()
+        && let Some(as_of) = activity_as_of(digest, offset)
+    {
+        title.push_str(&as_of);
+    }
+    let mut lines = vec![section_title(&title)];
     // Agents share the spark: no one vendor's accent owns it.
     let accent = if all.is_some_and(crate::state::spans_agents) {
         rgb(NEUTRAL)
@@ -120,7 +134,11 @@ pub(super) fn models<'a>(
     shown: &[usize],
     hidden: usize,
     rect: Rect,
+    scanning: bool,
 ) -> Paragraph<'a> {
+    if scanning {
+        return scanning_lines("MODELS");
+    }
     let wide = rect.width >= 46;
     let name_width = (rect.width as usize)
         .saturating_sub(if wide { 36 } else { 20 })

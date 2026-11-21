@@ -74,4 +74,33 @@ public enum EngineHostBroker {
         let horizon = nextPollAt.map { max(0, $0.timeIntervalSince(generatedAt)) } ?? 0
         return age > max(2 * horizon, takeoverFloor)
     }
+
+    /// How a face speaks about the host (2026-11-21). A digest past the
+    /// heartbeat cutoff only says nobody REWROTE it lately; the lease says
+    /// whether anybody is there. Held means a live process — starved under
+    /// load, still scanning — so the honest word is "busy", with the digest's
+    /// numbers shown as of their real age. Only a free lease is offline.
+    /// The TUI's `freshness` is this rule in Rust; both decode the same
+    /// vectors (`Fixtures/liveness-cases.json`).
+    public static func liveness(
+        generatedAt: Date?, nextPollAt: Date?, now: Date, leaseHeld: Bool
+    ) -> EngineLiveness {
+        // No digest yet behind a held lease is a host still starting (its
+        // first publish can wait on a starved CPU): busy, not gone.
+        guard let generatedAt else { return leaseHeld ? .busy : .offline }
+        guard heartbeatStale(generatedAt: generatedAt, nextPollAt: nextPollAt, now: now)
+        else { return .live }
+        return leaseHeld ? .busy : .offline
+    }
+}
+
+/// Whether a face's host is publishing, alive but late, or gone.
+public enum EngineLiveness: String, Sendable, Equatable, Codable {
+    /// The digest is inside the heartbeat cutoff.
+    case live
+    /// Past the cutoff — or nothing published yet — while a process holds
+    /// the engine lease: alive, busy.
+    case busy
+    /// Past the cutoff (or no digest at all) with the lease free.
+    case offline
 }

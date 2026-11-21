@@ -189,6 +189,10 @@ public struct ClaudeActivitySource: LocalActivitySource {
         transcripts.scan(now: now, persistCache: false)
     }
 
+    public func cachedScan(now: Date) -> CachedScan? {
+        transcripts.cachedScan(now: now)
+    }
+
     public func scanPromptDays() -> [Date: Int] {
         prompts.scan()
     }
