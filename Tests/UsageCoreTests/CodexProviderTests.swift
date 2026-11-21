@@ -7,12 +7,16 @@ struct CodexProviderTests {
     /// Feb-2026 CLI schema: rate_limits carries primary/secondary directly.
     private static func tokenCountLine(
         stamp: String, primaryPercent: Double, primaryReset: Int,
-        secondaryPercent: Double, secondaryReset: Int, extras: String = ""
+        secondaryPercent: Double, secondaryReset: Int, extras: String = "",
+        call: Int = 1
     ) -> String {
-        """
+        // A real rollout's cumulative totals ADVANCE with every call; a line
+        // that repeats them is a restatement, and the scanner drops it.
+        let n = call - 1
+        return """
         {"timestamp":"\(stamp)","type":"event_msg","payload":{"type":"token_count",\
-        "info":{"total_token_usage":{"input_tokens":17685,"cached_input_tokens":4352,\
-        "output_tokens":474,"reasoning_output_tokens":275,"total_tokens":18159},\
+        "info":{"total_token_usage":{"input_tokens":\(17685 + n * 1000),"cached_input_tokens":\(4352 + n * 600),\
+        "output_tokens":\(474 + n * 200),"reasoning_output_tokens":\(275 + n * 50),"total_tokens":\(18159 + n * 1200)},\
         "last_token_usage":{"input_tokens":1000,"cached_input_tokens":600,\
         "output_tokens":200,"reasoning_output_tokens":50,"total_tokens":1200},\
         "model_context_window":258400},"rate_limits":{\(extras)"primary":{"used_percent":\(primaryPercent),\
@@ -45,6 +49,28 @@ struct CodexProviderTests {
         {"timestamp":"\(stamp)","type":"event_msg","payload":{"type":"user_message",\
         "info":null,"rate_limits":null}}
         """
+    }
+
+    @Test("Equal usage is distinct unless a valid cumulative snapshot also repeats")
+    func cumulativeRestatements() throws {
+        let fixture = try CodexFixture()
+        defer { fixture.tearDown() }
+        func row(_ total: String) -> String {
+            """
+            {"timestamp":"2026-08-15T10:00:30.000Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":100,"cached_input_tokens":0,"output_tokens":20},"total_token_usage":\(total)}}}
+            """
+        }
+        let a = "{\"input_tokens\":100,\"output_tokens\":20}"
+        let b = "{\"input_tokens\":200,\"output_tokens\":40}"
+        try fixture.writeRollout("2026/08/15/rollout-snapshots.jsonl", lines: [
+            row(a), row(a), row(b), row("null"), row("null"), row("{}"), row("{}")
+        ])
+        let source = CodexActivitySource(root: fixture.root, cacheDirectory: fixture.cacheDirectory)
+        let scan = source.scanTranscripts(now: Date())
+        let session = try #require(scan.sessions.first)
+        #expect(session.totalTokens == 720)
+        let detail = try #require(source.sessionDetail(id: "rollout-snapshots"))
+        #expect(detail.rows.count == 6)
     }
 
     @Test("meters map primary→session and secondary→weekly with served percents")
@@ -163,7 +189,7 @@ struct CodexProviderTests {
                 Self.tokenCountLine(
                     stamp: Self.stamp(base.addingTimeInterval(45)),
                     primaryPercent: 2, primaryReset: reset,
-                    secondaryPercent: 2, secondaryReset: reset),
+                    secondaryPercent: 2, secondaryReset: reset, call: 2),
             ])
         let source = CodexActivitySource(
             root: fixture.root, cacheDirectory: fixture.cacheDirectory)
@@ -241,7 +267,7 @@ struct CodexProviderTests {
                     secondaryPercent: 1, secondaryReset: reset),
                 Self.tokenCountLine(
                     stamp: "2026-08-15T10:20:30.000Z", primaryPercent: 2, primaryReset: reset,
-                    secondaryPercent: 2, secondaryReset: reset),
+                    secondaryPercent: 2, secondaryReset: reset, call: 2),
             ])
         let source = CodexActivitySource(
             root: fixture.root, cacheDirectory: fixture.cacheDirectory)
