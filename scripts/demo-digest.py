@@ -249,7 +249,7 @@ def build(now):
     claude = face(
         now, rng, sections["default"], models=CLAUDE_MODELS, titles=CLAUDE_SESSIONS,
         typical=28e6, engine={"apiBudgetUsed": 4, "apiBudgetFraction": 0.2,
-                              "planLabel": "Max plan · 5x",
+                              "planLabel": "Max plan", "planDisplayName": "Max",
                               "planRateLimitTier": "default_claude_max_5x"},
         meters=[
             meter(now, rng, CLAUDE_MODELS, ident="session", label="Session (5h)", tag="S",

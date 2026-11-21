@@ -46,15 +46,33 @@ enum CredentialsParser {
 public struct PlanInfo: Sendable, Equatable {
     public let subscriptionType: String?
     public let rateLimitTier: String?
+    /// The plan's name as its vendor shows it, when the provider knows it.
+    /// Vendors rename plans without touching the raw type and tier, so the
+    /// provider supplies the name and the label prefers it.
+    public let displayName: String?
 
-    public init(subscriptionType: String?, rateLimitTier: String?) {
+    public init(subscriptionType: String?, rateLimitTier: String?, displayName: String? = nil) {
         self.subscriptionType = subscriptionType
         self.rateLimitTier = rateLimitTier
+        self.displayName = displayName
     }
 
-    /// "max" (+ tier "…_20x") → "Max plan · 20x"; nil when the credentials
-    /// carry no plan facts, so the panel shows nothing rather than a guess.
+    /// The same facts under the provider's name for the plan (nil keeps the
+    /// one it already has).
+    public func named(_ name: String?) -> PlanInfo {
+        PlanInfo(
+            subscriptionType: subscriptionType, rateLimitTier: rateLimitTier,
+            displayName: name ?? displayName)
+    }
+
+    /// The provider's name when it gave one (a name N reads "N plan");
+    /// otherwise built from the raw facts (a type T reads "T plan", and a
+    /// tier ending in a multiplier like "_2x" adds " · 2x"); nil when there
+    /// are no plan facts, so the panel shows nothing rather than a guess.
     public var displayLabel: String? {
+        if let name = displayName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
+            return name.lowercased().hasSuffix(" plan") ? name : "\(name) plan"
+        }
         guard let type = subscriptionType?.trimmingCharacters(in: .whitespacesAndNewlines),
               !type.isEmpty
         else { return nil }

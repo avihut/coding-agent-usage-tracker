@@ -105,7 +105,9 @@ would silently blend two budgets into one history. The app therefore reads
 one key (`oauthAccount`) of `.claude.json` — the file `/login` itself
 maintains, `~/.claude.json` for the default home and its own copy inside
 every other metered home — strictly read-only, and keeps a small local
-ledger of which account was signed in when. Usage is attributed against that timeline
+ledger of which account was signed in when. The same key also gives the
+plan's current name (`planDisplayName`, which Claude Code fetches with your
+profile), so the panel calls the plan what Anthropic calls it. Usage is attributed against that timeline
 honestly: exactly inside observed stretches, only by agreement across
 unobserved gaps, and never at all for history from before the ledger
 existed — ambiguity is shown as ambiguity, not guessed away. The identity

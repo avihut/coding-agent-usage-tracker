@@ -160,6 +160,10 @@ public struct EngineStatus: Codable, Sendable, Equatable {
     /// PlanInfo verbatim. Same privacy standing as the label itself.
     public let planSubscriptionType: String?
     public let planRateLimitTier: String?
+    /// The plan's name as its vendor shows it ("Ultra"), when the provider
+    /// knows it — carried so a client-mode app's rebuilt PlanInfo keeps it.
+    /// Nil from engines that predate the field.
+    public let planDisplayName: String?
     public let appVersion: String
     public let pid: Int
     /// "app" | "daemon" — which host kind runs the engine.
@@ -194,7 +198,7 @@ public struct EngineStatus: Codable, Sendable, Equatable {
         providerID: String, serviceName: String, agentName: String, glyph: String,
         accent: RGBColor, systemAccent: RGBColor? = nil, planLabel: String?,
         planSubscriptionType: String?,
-        planRateLimitTier: String?, appVersion: String, pid: Int,
+        planRateLimitTier: String?, planDisplayName: String? = nil, appVersion: String, pid: Int,
         host: String, generatedAt: Date, fetchedAt: Date?, nextPollAt: Date?,
         backoffUntil: Date?, stale: Bool, isLocalProvider: Bool,
         activeIntervalSeconds: TimeInterval, paceMultiplier: Int,
@@ -211,6 +215,7 @@ public struct EngineStatus: Codable, Sendable, Equatable {
         self.planLabel = planLabel
         self.planSubscriptionType = planSubscriptionType
         self.planRateLimitTier = planRateLimitTier
+        self.planDisplayName = planDisplayName
         self.appVersion = appVersion
         self.pid = pid
         self.host = host
@@ -770,6 +775,7 @@ public enum LiveStateBuilder {
             planLabel: snapshot?.plan?.displayLabel,
             planSubscriptionType: snapshot?.plan?.subscriptionType,
             planRateLimitTier: snapshot?.plan?.rateLimitTier,
+            planDisplayName: snapshot?.plan?.displayName,
             appVersion: appVersion,
             pid: pid,
             host: host,

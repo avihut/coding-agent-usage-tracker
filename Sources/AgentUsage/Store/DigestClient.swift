@@ -320,10 +320,12 @@ final class DigestClient {
             let plan: PlanInfo? =
                 digest.engine.planSubscriptionType == nil
                     && digest.engine.planRateLimitTier == nil
+                    && digest.engine.planDisplayName == nil
                 ? nil
                 : PlanInfo(
                     subscriptionType: digest.engine.planSubscriptionType,
-                    rateLimitTier: digest.engine.planRateLimitTier)
+                    rateLimitTier: digest.engine.planRateLimitTier,
+                    displayName: digest.engine.planDisplayName)
             let snapshot = Snapshot(
                 meters: meters,
                 spendLine: digest.engine.spend.map {

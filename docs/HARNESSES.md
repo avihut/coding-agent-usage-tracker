@@ -538,6 +538,16 @@ succeeds it for Google's plans, and it stays metered for API-key use.
   carries no identity, rewrites per token refresh, and any new read there
   risks the v0.82.1 consent-prompt regression. Codex/Gemini declare no
   source; their credential files stay never-read.
+- PLAN NAMES (2026-11-21): vendors rename plans without touching the raw
+  facts — on 2026-10-30 Anthropic's Max 5x became "Max" and Max 20x
+  "Ultra" while the credentials still say `max` + `default_claude_max_20x`.
+  So a provider names the plan (`PlanInfo.displayName`) and the label
+  prefers that name over one built from type and tier. Claude:
+  `ClaudePlanName` takes `oauthAccount.planDisplayName` (same key, same
+  read-only file as the identity) and falls back to mapping the renamed
+  tiers. Codex: `CodexPlanName` maps the `plan_type` ids Codex knows
+  ("prolite" → "Pro Lite"). The digest carries it as
+  `engine.planDisplayName` (additive) so a client-mode app keeps it.
 - `AccountPresenceLedger` coalesces observations into epochs in the scoped
   `account-presence.json` (atomic rewrite like history.json; a transition
   persists immediately, heartbeats at most every 5 min plus shutdown
