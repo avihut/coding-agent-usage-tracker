@@ -454,4 +454,30 @@ struct MultiHarnessHostTests {
         _ = await eventually(1) { false }
         #expect(host.roster.rows.map(\.id) == ["claude", "gemini"])
     }
+
+    /// Cached activity counts in the all-agents total (2026-11-21): the
+    /// account's numbers are already on screen, stamped with their age, so
+    /// the total must never call it "scanning" beside them.
+    @Test("the all-agents total counts an account served from its cached scan, and names a scanning one")
+    func allAgentsCountsCachedActivity() throws {
+        let fixture = try Fixture()
+        defer { fixture.tearDown() }
+        try fixture.claudeSession(daysAgo: 0.1)
+        try fixture.codexRollout(daysAgo: 0.2)
+        let host = fixture.makeHost([fixture.claude, fixture.codex])
+        host.start()
+        defer { host.shutdown() }
+        let claude = try #require(host.engines["default"])
+        // Same main-actor turn as start(): no scan has landed anywhere.
+        let before = try #require(host.digest?.allAgents)
+        #expect(before.members.map(\.stateValue) == [.scanning, .scanning])
+        #expect(before.activity == nil)
+        let cached = CachedScan(
+            scan: TranscriptScan(daily: [], timeline: []), asOf: Date().addingTimeInterval(-900))
+        #expect(claude.landCachedScan(cached, activity: []))
+        let after = try #require(host.digest?.allAgents)
+        #expect(after.members.first { $0.profile == "default" }?.stateValue == .counted)
+        #expect(after.members.first { $0.profile == "codex" }?.stateValue == .scanning)
+        #expect(after.partial)
+    }
 }

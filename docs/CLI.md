@@ -12,7 +12,14 @@ stale under `--max-age` or `--max-data-age`, 22 `health --check` while an
 incident is open, 23 `notices --check` while anything is pending, and
 `headroom`'s answers: 24 at or over the cap, 25 a forecast fails
 `--forecast`, 26 nothing to judge, and 27 another transcript scan of the
-same account is already running (nothing was scanned).
+same account is already running, or the engine took a `session` question
+and was too busy to answer in time (nothing was scanned either way), and
+28 the selected account's first transcript scan hasn't finished — every
+reading of its activity (`activity`, `cost`, `models`, `model`, `sessions`
+and `session` without `--all`, `account`'s token fields, `get activity.*`)
+answers nothing rather than zero. `--all-agents` keeps its own rules
+(a `partial` note, exit 20 while no member is counted); on a one-account
+Mac its view IS that account's, so 28 applies there too.
 
 ## The query surface (v0.81.0)
 
@@ -283,6 +290,15 @@ same account is already running (nothing was scanned).
   answers; another account's engine never answers),
   `ControlCommandWireTests` (verb shape, payload, 32 concurrent connects),
   `TranscriptScanLockTests`.
+  A BUSY ENGINE IS NOT A MISS (2026-11-21): when the socket took the
+  question but no answer came back inside the 1 s (`ControlExchange.
+  noAnswer` — a host alive and starved under load, docs/DAEMON.md "Under
+  load"), or the engine is still on its first scan (`indexing: true`), the
+  lookup exits 27 "the engine is busy … nothing scanned; try again" — even
+  with `--all`. Before, late read as silence and `--all`
+  fell back to the whole-corpus scan: once per status line per tick, the
+  very load that made the host late. Only `notListening` (no host) and a
+  host's own "nothing for that account" count as silence now.
   CALLER RULE (the recipes, #15): a status line asks `session <id>
   --no-scan` and treats a miss as "no number yet". `--all` on a timer is
   no longer a storm (the engine answers it; with no engine, one scan per

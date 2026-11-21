@@ -45,23 +45,46 @@ public enum ControlCommand: Codable, Sendable, Equatable {
     case session(profile: String?, id: String)
 }
 
+/// How one exchange with the host ended. `noAnswer` is not `notListening`:
+/// a host that took the connection is alive — busy under load, answering
+/// late — and may still act on the command; nobody serves a socket that
+/// refuses the connect.
+public enum ControlExchange: Sendable, Equatable {
+    case reply(ControlReply)
+    /// Nothing accepted the connection: no host serves the socket.
+    case notListening
+    /// The host took the connection and no reply line came back in time.
+    case noAnswer
+
+    public var reply: ControlReply? {
+        if case .reply(let reply) = self { return reply }
+        return nil
+    }
+}
+
 public struct ControlReply: Codable, Sendable, Equatable {
     public let ok: Bool
     public let message: String?
     /// A `session` lookup's answer; nil for every other verb, and from a
     /// host that predates the verb (it answers "unreadable command").
     public let session: SessionAnswer?
+    /// True when a `session` question reached an engine whose first scan
+    /// hasn't indexed its sessions yet (2026-11-21): busy, not "no engine"
+    /// — a caller that scanned instead would duplicate the engine's own
+    /// first scan. Absent from older hosts and every other reply.
+    public let indexing: Bool?
 
-    public init(ok: Bool, message: String? = nil, session: SessionAnswer? = nil) {
+    public init(ok: Bool, message: String? = nil, session: SessionAnswer? = nil, indexing: Bool? = nil) {
         self.ok = ok
         self.message = message
         self.session = session
+        self.indexing = indexing
     }
 }
 
 /// The engine host's command channel: a unix-domain stream socket beside
 /// the digest, mode 0600 (same-user only — matching every other artifact).
-/// The accept loop blocks on its own utility queue and forwards one decoded
+/// The accept loop blocks on its own responsive-QoS queue and forwards one decoded
 /// command at a time to the MainActor handler; replies serialize naturally.
 /// Only the lease holder binds — the lease is what makes unlink-then-bind
 /// safe (a socket file with no live holder is by definition stale).
@@ -74,11 +97,21 @@ public final class ControlSocket: @unchecked Sendable {
     /// outright — which a caller can only read as "no engine". Four was
     /// enough while every verb was human-paced.
     static let backlog: Int32 = 64
+    /// How long the host waits on one connection's request line, and on its
+    /// reply's write. The loop is serial, so a client that connects and
+    /// never sends — or stops reading — would otherwise hold every caller
+    /// queued behind it (2026-11-21). A real client writes its line the
+    /// moment it connects.
+    static let serverTimeout: TimeInterval = 2
+    /// The default client wait: a person-paced verb's answer.
+    public static let clientTimeout: TimeInterval = 3
 
     public let socketURL: URL
     private let handler: Handler
+    /// Above the engine's heavy work (`EngineWork`): answering is the
+    /// responsiveness path, and it is tiny.
     private let queue = DispatchQueue(
-        label: "\(AppIdentity.bundleID).control-socket", qos: .utility)
+        label: "\(AppIdentity.bundleID).control-socket", qos: EngineWork.responsiveQoS)
     private var listenFD: Int32 = -1
 
     public init(socketURL: URL, handler: @escaping Handler) {
@@ -142,13 +175,17 @@ public final class ControlSocket: @unchecked Sendable {
     private func serve(_ connection: Int32) {
         defer { close(connection) }
         Self.noSignalOnClosedPeer(connection)
-        guard let line = Self.readLine(from: connection, limit: 64 * 1024),
-              let command = try? JSONDecoder().decode(ControlCommand.self, from: line)
-        else {
+        Self.setTimeouts(connection, seconds: Self.serverTimeout)
+        guard let line = Self.readLine(from: connection, limit: 64 * 1024) else { return }
+        guard let command = try? JSONDecoder().decode(ControlCommand.self, from: line) else {
             Self.write(
                 ControlReply(ok: false, message: "unreadable command"), to: connection)
             return
         }
+        // Every command is answered, even one whose caller may have given up:
+        // a peek can't tell a vanished caller from one that half-closed after
+        // sending (`printf … | nc -U`, `shutdown(SHUT_WR)`) and still waits
+        // for its reply, and the write to a vanished one is EPIPE, not death.
         // Block this (background) queue until the MainActor handler answers —
         // serial by design: the verbs are human-paced, and the one a status
         // line repeats (`session`) is a sub-millisecond lookup.
@@ -169,29 +206,42 @@ public final class ControlSocket: @unchecked Sendable {
     /// listens (no host, stale socket) — callers treat that as "engine
     /// offline", never an error state worth surfacing loudly.
     public static func send(
-        _ command: ControlCommand, to socketURL: URL, timeout: TimeInterval = 3
+        _ command: ControlCommand, to socketURL: URL, timeout: TimeInterval = clientTimeout
     ) -> ControlReply? {
-        guard let data = try? JSONEncoder().encode(command) else { return nil }
-        return sendLine(data, to: socketURL, timeout: timeout)
+        exchange(command, to: socketURL, timeout: timeout).reply
+    }
+
+    /// `send`, saying why no reply came back: a busy host (`noAnswer`) is not
+    /// an absent one (`notListening`), and a caller that would fall back to
+    /// doing the host's work itself must not do it for a host that is merely
+    /// late.
+    public static func exchange(
+        _ command: ControlCommand, to socketURL: URL, timeout: TimeInterval = clientTimeout
+    ) -> ControlExchange {
+        guard let data = try? JSONEncoder().encode(command) else { return .noAnswer }
+        return exchangeLine(data, to: socketURL, timeout: timeout)
     }
 
     /// The wire seam under `send`: one raw line out, one reply line back —
     /// how a test proves an unreadable verb is refused, not dropped.
     public static func sendLine(
-        _ line: Data, to socketURL: URL, timeout: TimeInterval = 3
+        _ line: Data, to socketURL: URL, timeout: TimeInterval = clientTimeout
     ) -> ControlReply? {
+        exchangeLine(line, to: socketURL, timeout: timeout).reply
+    }
+
+    static func exchangeLine(
+        _ line: Data, to socketURL: URL, timeout: TimeInterval
+    ) -> ControlExchange {
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
-        guard fd >= 0 else { return nil }
+        guard fd >= 0 else { return .notListening }
         defer { close(fd) }
         noSignalOnClosedPeer(fd)
-        var tv = timeval(
-            tv_sec: Int(timeout), tv_usec: Int32((timeout - timeout.rounded(.down)) * 1e6))
-        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
-        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+        setTimeouts(fd, seconds: timeout)
         var address = sockaddr_un()
         address.sun_family = sa_family_t(AF_UNIX)
         let path = socketURL.path
-        guard path.utf8.count < MemoryLayout.size(ofValue: address.sun_path) else { return nil }
+        guard path.utf8.count < MemoryLayout.size(ofValue: address.sun_path) else { return .notListening }
         withUnsafeMutableBytes(of: &address.sun_path) { buffer in
             path.utf8CString.withUnsafeBytes { bytes in
                 buffer.copyMemory(from: bytes)
@@ -203,15 +253,24 @@ public final class ControlSocket: @unchecked Sendable {
                 connect(fd, $0, size)
             }
         }
-        guard connected == 0 else { return nil }
+        guard connected == 0 else {
+            // A full accept queue refuses a connect with the same errno as a
+            // stale socket file. The lease beside the socket tells them
+            // apart: a host holding it is alive and behind — busy.
+            let refused = errno == ECONNREFUSED
+            let lease = socketURL.deletingLastPathComponent().appending(path: "engine.lock")
+            return refused && EngineLease.isHeld(at: lease) ? .noAnswer : .notListening
+        }
         var data = line
         data.append(0x0A)
         let sent = data.withUnsafeBytes { bytes in
             Darwin.send(fd, bytes.baseAddress, bytes.count, 0)
         }
-        guard sent == data.count else { return nil }
-        guard let line = readLine(from: fd, limit: 64 * 1024) else { return nil }
-        return try? JSONDecoder().decode(ControlReply.self, from: line)
+        guard sent == data.count,
+              let line = readLine(from: fd, limit: 64 * 1024),
+              let reply = try? JSONDecoder().decode(ControlReply.self, from: line)
+        else { return .noAnswer }
+        return .reply(reply)
     }
 
     // MARK: - Wire helpers
@@ -226,6 +285,13 @@ public final class ControlSocket: @unchecked Sendable {
     private static func noSignalOnClosedPeer(_ fd: Int32) {
         var on: Int32 = 1
         setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
+    }
+
+    private static func setTimeouts(_ fd: Int32, seconds: TimeInterval) {
+        var tv = timeval(
+            tv_sec: Int(seconds), tv_usec: Int32((seconds - seconds.rounded(.down)) * 1e6))
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
     }
 
     private static func readLine(from fd: Int32, limit: Int) -> Data? {

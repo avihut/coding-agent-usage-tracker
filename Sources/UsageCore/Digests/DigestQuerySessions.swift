@@ -43,6 +43,9 @@ extension DigestQuery {
             return badQuery("--background/--no-background need --all — the shortlist doesn't know a session's kind")
         }
         if let rejection = rejectScanContradiction(parsed) { return rejection }
+        // The shortlist of an account still on its first scan is absent, not
+        // empty: "no sessions" would be a zero. `--all` scans for itself.
+        if parsed.flags["all"] == nil, isScanning(digest) { return scanningOutput }
         if parsed.flags["all"] != nil {
             guard let scan else {
                 return badQuery("sessions --all needs the CLI's scan capability, not available through this entry point")
@@ -140,7 +143,7 @@ extension DigestQuery {
     static func runSession(
         parsed: ParsedArgs, digest: LiveState?, now: Date, calendar: Calendar, json: Bool,
         scan: DeepQuerySessions.Scan? = nil,
-        ask: ((String) -> SessionAnswer?)? = nil
+        ask: ((String) -> EngineSessionReply)? = nil
     ) -> QueryOutput {
         var positionals = parsed.positionals
         guard !positionals.isEmpty else {
@@ -170,7 +173,18 @@ extension DigestQuery {
             }
         }
 
-        if let answer = ask?(selectorToken), let resolution = answer.resolution {
+        let reply = ask?(selectorToken)
+        // A host that took the question and was slow to answer is alive and
+        // busy — under load, starved for CPU. Parsing every transcript here
+        // instead would add exactly the load that made it late, once per
+        // status line on every tick (2026-11-21). Its number waits a tick.
+        if reply == .busy {
+            return QueryOutput(
+                stdout: "",
+                note: "the engine is busy (late to answer, or still on its first scan) — nothing scanned; try again",
+                exitCode: DeepQuery.exitScanBusy)
+        }
+        if case .answer(let answer)? = reply, let resolution = answer.resolution {
             switch resolution {
             case .found(let card, let deep):
                 return renderSession(
@@ -184,6 +198,10 @@ extension DigestQuery {
             }
         }
 
+        // No engine answered. A digest whose account is still on its first
+        // scan has no shortlist to miss against: not counted yet, not "no
+        // such session".
+        if !all, isScanning(digest) { return scanningOutput }
         if noScan {
             // Two different failures, told apart: a digest answered and had
             // no such session (20, a real no-match), versus no digest to ask
@@ -199,8 +217,8 @@ extension DigestQuery {
                 "no session matches '\(selectorToken)'\(shortlistNote(digest))"
                     + " — --no-scan forbids the transcript scan")
         }
-        // No engine answered. A digest on disk means a host published, so a
-        // miss against it is no reason to parse every transcript.
+        // A digest on disk means a host published, so a miss against it is
+        // no reason to parse every transcript.
         if !all, let digest {
             return noMatch(
                 "no session matches '\(selectorToken)'\(shortlistNote(digest))"

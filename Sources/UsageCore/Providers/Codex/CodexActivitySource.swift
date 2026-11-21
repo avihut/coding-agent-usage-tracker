@@ -54,8 +54,23 @@ public struct CodexActivitySource: LocalActivitySource {
         }
         cache.files = cache.files.filter { seen.contains($0.key) }
         if persistCache { saveCache(cache) }
+        return aggregate(cache.files, now: now)
+    }
 
-        let rollouts = Self.onePerRollout(cache.files)
+    /// The previous complete scan as its cache saved it — no walk, no
+    /// parse, no write — dated by the cache file's mtime (2026-11-21; see
+    /// `LocalActivitySource.cachedScan`).
+    public func cachedScan(now: Date) -> CachedScan? {
+        guard let asOf = (try? FileManager.default.attributesOfItem(atPath: cacheURL.path))?[
+            .modificationDate] as? Date
+        else { return nil }
+        let files = loadCache().files
+        guard !files.isEmpty else { return nil }
+        return CachedScan(scan: aggregate(files, now: now), asOf: asOf)
+    }
+
+    private func aggregate(_ files: [String: FileRecord], now: Date) -> TranscriptScan {
+        let rollouts = Self.onePerRollout(files)
         var byDay: [Date: DailyActivity] = [:]
         var slots: [SlotKey: TokenTally] = [:]
         let timelineCutoff = now.addingTimeInterval(-TranscriptScanner.timelineRetention)

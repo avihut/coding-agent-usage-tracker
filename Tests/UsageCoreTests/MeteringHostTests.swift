@@ -412,4 +412,91 @@ struct MeteringHostTests {
         #expect(engine.state.snapshot == nil)
         #expect(engine.nextRefreshAt != nil)
     }
+
+    // MARK: - A fast first start (2026-11-21)
+
+    @Test("the first digest carries every engine's cached meters, stamped with their real fetch time")
+    func firstDigestCarriesCachedMeters() throws {
+        let fixture = try Fixture()
+        defer { fixture.tearDown() }
+        let fetchedAt = Date().addingTimeInterval(-3600)
+        UsageCache(directory: StorageScope.cachesDirectory(
+            bundleID: "com.test.host", providerID: "claude", profileID: "default", roots: fixture.roots))
+            .save(body: loadFixture("real-2026-08-07"), fetchedAt: fetchedAt)
+        let host = fixture.makeHost()
+        host.start()
+        defer { host.shutdown() }
+        // Synchronously, before the launch poll (in flight) or any scan has
+        // landed: the cache is on screen, as old as it really is.
+        let engine = try #require(host.engines["default"])
+        #expect(engine.isRefreshing)
+        let section = try #require(host.digest?.profiles?.first { $0.id == "default" })
+        #expect(section.meters?.isEmpty == false)
+        let stamped = try #require(section.engine?.fetchedAt)
+        #expect(abs(stamped.timeIntervalSince(fetchedAt)) < 1)
+    }
+
+    @Test("before the first scan, activity is ABSENT and says scanning — never zeros")
+    func activityAbsentUntilScanned() async throws {
+        let fixture = try Fixture()
+        defer { fixture.tearDown() }
+        try fixture.transcript(fixture.standard, id: "work-00", minutesAgo: 5)
+        let host = fixture.makeHost()
+        host.start()
+        defer { host.shutdown() }
+        let first = try #require(host.digest?.profiles?.first { $0.id == "default" })
+        #expect(first.activityStatus == .scanning)
+        #expect(first.activity == nil)
+        #expect(first.models == nil)
+        #expect(first.sessions == nil)
+        // The top level keeps the field old decoders require, beside the marker.
+        #expect(host.digest?.activityStatus == .scanning)
+
+        let scanned = await eventually {
+            host.digest?.profiles?.first { $0.id == "default" }?.activityStatus?.state == .scanned
+        }
+        #expect(scanned)
+        let landed = try #require(host.digest?.profiles?.first { $0.id == "default" })
+        #expect(landed.activity?.todayTokens == 150)
+        #expect(landed.sessions?.map(\.id) == ["work-00"])
+    }
+
+    @Test("a cached pass lands as cached, never over this run's scan, and never as an index")
+    func cachedPassRules() async throws {
+        let fixture = try Fixture()
+        defer { fixture.tearDown() }
+        try fixture.transcript(fixture.standard, id: "work-00", minutesAgo: 5)
+        let host = fixture.makeHost()
+        host.start()
+        defer { host.shutdown() }
+        let engine = try #require(host.engines["default"])
+        let asOf = Date().addingTimeInterval(-900)
+        let cached = CachedScan(scan: TranscriptScan(daily: [], timeline: []), asOf: asOf)
+        // Same main-actor turn as start(): nothing has landed yet.
+        #expect(engine.landCachedScan(cached, activity: []))
+        #expect(engine.activityStatus == .cached(asOf: asOf))
+        #expect(!engine.sessionsIndexed)
+        #expect(host.digest?.profiles?.first { $0.id == "default" }?.activityStatus == .cached(asOf: asOf))
+
+        let indexed = await eventually { engine.sessionsIndexed }
+        #expect(indexed)
+        #expect(!engine.landCachedScan(cached, activity: []))
+        #expect(engine.activityStatus?.state == .scanned)
+    }
+
+    @Test("a superseded forecast pass never lands over a newer one")
+    func stalePredictionPassIsDropped() throws {
+        let fixture = try Fixture()
+        defer { fixture.tearDown() }
+        let host = fixture.makeHost()
+        host.start()
+        defer { host.shutdown() }
+        let engine = try #require(host.engines["default"])
+        // One main-actor turn: the cached snapshot's pass (begun at init)
+        // and the launch poll's overlap; whichever began last wins.
+        let older = engine.beginPredictionPass()
+        let newer = engine.beginPredictionPass()
+        #expect(engine.landPredictions(generation: newer, profiles: [:], predictions: [:], overshoots: [:]))
+        #expect(!engine.landPredictions(generation: older, profiles: [:], predictions: [:], overshoots: [:]))
+    }
 }

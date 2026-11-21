@@ -871,7 +871,8 @@ struct SessionEngineTests {
     ) -> QueryOutput {
         DigestQuery.runSession(
             parsed: DigestQuery.parseArgs(args), digest: digest, now: fixtureNow, calendar: utcCalendar,
-            json: args.contains("--json"), scan: scan, ask: ask)
+            json: args.contains("--json"), scan: scan,
+            ask: ask.map { lookup in { lookup($0).map(EngineSessionReply.answer) ?? .silent } })
     }
 
     @Test("the engine's answer prints exactly what the scan prints for the same session")
@@ -971,6 +972,20 @@ struct SessionEngineTests {
         #expect(asked.exitCode == 0)
         let noDigest = run(["aaaa1", "source"], digest: nil, scan: { entries }, ask: silent)
         #expect(noDigest.stdout == "scan")
+    }
+
+    @Test("a busy engine is not a miss: even --all never scans for a host that answered late")
+    func busyEngineNeverTriggersTheScan() {
+        for args in [["aaaa1", "id", "--all"], ["aaaa1", "id"]] {
+            let out = DigestQuery.runSession(
+                parsed: DigestQuery.parseArgs(args), digest: missingShortlistDigest(), now: fixtureNow,
+                calendar: utcCalendar, json: false,
+                scan: { Issue.record("a busy engine must not be answered by a scan"); return [] },
+                ask: { _ in .busy })
+            #expect(out.exitCode == DeepQuery.exitScanBusy)
+            #expect(out.stdout.isEmpty)
+            #expect(out.note?.contains("busy") == true)
+        }
     }
 
     @Test("a shortlist hit never asks the engine")

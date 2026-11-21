@@ -253,10 +253,10 @@ struct UsageCLI {
                 note("digest: absent")
             }
             let socket = EngineHostBroker.socketURL(bundleID: AppIdentity.bundleID)
-            if let reply = ControlSocket.send(.status, to: socket) {
-                note("socket: \(reply.message ?? "ok")")
-            } else {
-                note("socket: no listener")
+            switch ControlSocket.exchange(.status, to: socket) {
+            case .reply(let reply): note("socket: \(reply.message ?? "ok")")
+            case .noAnswer: note("socket: busy — a host took the connection but didn't answer in time")
+            case .notListening: note("socket: no listener")
             }
         default:
             die("unknown daemon verb '\(verb)' — install|uninstall|start|stop|status", code: 18)

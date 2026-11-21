@@ -67,3 +67,10 @@ custom_rules:
     excluded_match_kinds: [comment, doccomment]
     message: "chartScrollableAxes never responded to trackpad scrolls here — pan through HorizontalPanCatcher (docs/CHARTS.md, chart contract clause 9)."
     severity: error
+  starved_engine_priority:
+    name: "Starved engine priority"
+    included: "Sources/(UsageCore|usaged)/.*\\.swift"
+    regex: '(priority:\s*\.background\b|qos:\s*\.background\b|"Background"|\bprocessType\s*=\s*"(Background|Adaptive)")'
+    excluded_match_kinds: [comment, doccomment]
+    message: "Background priority is 4: under a normal 20-agent load the daemon got no CPU for minutes while holding the lease (2026-11-21). The launch agent runs Interactive; engine work takes its QoS from EngineWork (docs/DAEMON.md, Under load)."
+    severity: error

@@ -176,6 +176,7 @@ struct LiveStateTests {
             apiBudget: (used: 7, ceiling: 20, fraction: 0.35),
             systemAccent: SystemAccentPalette.color(appleAccentColor: 4),
             presence: fixturePresence,
+            activityStatus: .scanned(at: date("2026-08-16T11:59:40Z")),
             now: now,
             calendar: utc,
             locale: posix)

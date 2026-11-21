@@ -280,6 +280,13 @@ gives each stack band its own density glyph.
     (as nothing) in the app's panel, which has no scanning state yet
     (follow-up).
 
+35. [S][✓] Busy ≠ offline, scanning ≠ zero (2026-11-21, with the app's
+    panel): `Freshness::Busy` past the cutoff with the lease held — header
+    "engine busy — updating… · last update Nm ago", strip `busy`, meters
+    not greyed, no `ensure` nudge; `activityStatus` scanning → "scanning…"
+    in TODAY/MODELS/SESSIONS, cached → "as of HH:MM" in their titles. The
+    rule is shared with Swift through `Fixtures/liveness-cases.json`.
+
 ### Intentionally different (do NOT "fix")
 32. Push/pop animation, pointer cursors, hover popovers — GUI idioms;
     surfaces/instant swaps are the terminal equivalents.

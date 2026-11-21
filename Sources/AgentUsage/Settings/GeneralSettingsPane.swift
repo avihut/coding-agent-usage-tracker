@@ -59,7 +59,12 @@ enum SettingsBindings {
                         .appending(path: "Contents/MacOS/usaged")
                     let binary = FileManager.default.fileExists(atPath: embedded.path)
                         ? embedded : nil
-                    LaunchAgentInstaller.ensure(binary: binary, defaults: .standard)
+                    // Off the main actor: a reload can wait seconds for
+                    // launchd to finish a teardown, and spawns launchctl.
+                    Task.detached(priority: .userInitiated) {
+                        LaunchAgentInstaller.ensure(binary: binary, defaults: .standard, intent: .claim)
+                        await MainActor.run { DaemonItemState.shared.refresh() }
+                    }
                 } else {
                     LaunchAgentInstaller.uninstall()
                 }

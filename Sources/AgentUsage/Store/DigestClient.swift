@@ -65,6 +65,12 @@ final class DigestClient {
     /// Optimistic: set when this process asks for a refresh, cleared when
     /// the next digest heartbeat lands.
     private(set) var isRefreshing = false
+    /// This face's activity provenance. With a local scan it is the local
+    /// scan's own — scanning, then the host's cached parse (read-only), then
+    /// scanned; with none (`--demo-digest`) it is the digest section's.
+    private(set) var activityStatus: ActivityStatus?
+    /// The host's liveness, as the shared feed last judged it.
+    var engineLiveness: EngineLiveness { feed.liveness }
     private(set) var activeInterval: TimeInterval = UsageEngine.defaultInterval
     private(set) var nextRefreshAt: Date?
     private(set) var digestGeneratedAt: Date?
@@ -128,9 +134,10 @@ final class DigestClient {
             selector: provider.pricingSelector)
         self.pricing = pricingService.current()
 
+        activityStatus = localActivity == nil ? nil : .scanning
         applyFromFeed()
         reloadArtifacts()
-        scanActivity(force: true)
+        warmStart()
         observeFeed()
     }
 
@@ -210,7 +217,7 @@ final class DigestClient {
         if !force, let last = lastScan, Date().timeIntervalSince(last) < 60 { return }
         lastScan = Date()
         isScanning = true
-        Task.detached(priority: .utility) { [weak self] in
+        Task.detached(priority: EngineWork.heavy) { [weak self] in
             let scan = source.scanTranscriptsReadOnly(now: Date())
             let activity = ActivityMerge.merge(
                 transcripts: scan.daily, prompts: source.scanPromptDays())
@@ -219,7 +226,36 @@ final class DigestClient {
                 self.activity = activity
                 self.tokenTimeline = scan.timeline
                 self.sessions = scan.sessions
+                self.activityStatus = .scanned(at: Date())
                 self.isScanning = false
+            }
+        }
+    }
+
+    /// The host's last complete scan at once, read from its parse cache
+    /// without writing it (`LocalActivitySource.cachedScan`), then this
+    /// face's own read-only scan — the same order the engine starts in.
+    private func warmStart() {
+        guard let source = localActivity else { return }
+        // The cached pass is the bounded step a person waits on (0.72 s at
+        // user-initiated, 52.7 s at utility under load — docs/DAEMON.md).
+        Task.detached(priority: EngineWork.startup) { [weak self] in
+            let cached = source.cachedScan(now: Date())
+            let merged = cached.map {
+                ActivityMerge.merge(transcripts: $0.scan.daily, prompts: source.scanPromptDays())
+            }
+            await MainActor.run { [weak self] in
+                guard let self, !self.isShutDown else { return }
+                // A scan that landed first (the feed's own) already did the
+                // full pass: neither the cached data nor a second scan.
+                let scanned = self.activityStatus?.state == .scanned
+                if let cached, let merged, self.activityStatus?.isScanning ?? false {
+                    self.activity = merged
+                    self.tokenTimeline = cached.scan.timeline
+                    self.sessions = cached.scan.sessions
+                    self.activityStatus = .cached(asOf: cached.asOf)
+                }
+                if !scanned { self.scanActivity(force: true) }
             }
         }
     }
@@ -275,6 +311,7 @@ final class DigestClient {
         if !scansLocally {
             activity = DigestActivity.daily(from: digest.activity)
             sessions = DigestActivity.sessions(from: digest.sessions, models: digest.models)
+            activityStatus = digest.activityStatus
         }
         serviceStatus = digest.serviceStatus
         appUpdate = digest.appUpdate
@@ -369,7 +406,7 @@ final class DigestClient {
         guard let meters = state.snapshot?.meters else { return }
         let samples = samples
         let labels = meters.map(\.label)
-        Task.detached(priority: .utility) { [weak self] in
+        Task.detached(priority: EngineWork.heavy) { [weak self] in
             var fresh: [String: WeeklyProfile] = [:]
             for label in labels {
                 if let profile = WeeklyProfile.build(samples: samples, label: label) {

@@ -173,7 +173,7 @@ public enum DeepQuerySessionsCLI {
 
     /// Asks a running engine for one session: (profile key, id prefix) →
     /// its answer, or nil when no engine answered at all.
-    public typealias EngineLookup = (_ profile: String, _ id: String) -> SessionAnswer?
+    public typealias EngineLookup = (_ profile: String, _ id: String) -> EngineSessionReply
 
     /// The real `EngineLookup`: one `session` request over the host's
     /// control socket. Silence — no listener, a host too old to know the
@@ -183,7 +183,12 @@ public enum DeepQuerySessionsCLI {
     /// answer in a second costs that line its number, never a stall.
     public static func engineLookup(socket: URL, timeout: TimeInterval = 1) -> EngineLookup {
         { profile, id in
-            ControlSocket.send(.session(profile: profile, id: id), to: socket, timeout: timeout)?.session
+            switch ControlSocket.exchange(.session(profile: profile, id: id), to: socket, timeout: timeout) {
+            case .reply(let reply):
+                if let session = reply.session { .answer(session) } else if reply.indexing == true { .busy } else { .silent }
+            case .notListening: .silent
+            case .noAnswer: .busy
+            }
         }
     }
 

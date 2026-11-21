@@ -12,6 +12,13 @@ import UsageCore
 final class DigestFeed {
     private(set) var digest: LiveState?
     private(set) var isShutDown = false
+    /// The host's liveness (2026-11-21): past the heartbeat cutoff with the
+    /// lease held it is BUSY — alive, starved, its numbers shown as of their
+    /// real age — and only with the lease free is it offline. Judged on every
+    /// 2 s tick; the lease is probed only past the cutoff. A fixed (demo)
+    /// feed carries what its hatch says.
+    private(set) var liveness: EngineLiveness = .live
+    @ObservationIgnored private var lockURL: URL?
 
     @ObservationIgnored let socketURL: URL
     @ObservationIgnored private let digestURL: URL
@@ -21,7 +28,9 @@ final class DigestFeed {
     init(bundleID: String) {
         digestURL = LiveState.fileURL(bundleID: bundleID)
         socketURL = EngineHostBroker.socketURL(bundleID: bundleID)
+        lockURL = EngineHostBroker.lockURL(bundleID: bundleID)
         reload()
+        judgeLiveness()
         // A 2s stat is the reload signal — cheaper and simpler than
         // re-arming a DispatchSource across the publisher's atomic renames.
         let timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
@@ -31,11 +40,13 @@ final class DigestFeed {
         watchTimer = timer
     }
 
-    /// A feed that never changes — the launch hatches' synthetic digest.
-    init(fixed: LiveState) {
+    /// A feed that never changes — the launch hatches' synthetic digest,
+    /// with the liveness the hatch asks for (`--demo-engine-busy`).
+    init(fixed: LiveState, liveness: EngineLiveness = .live) {
         digestURL = URL(fileURLWithPath: "/dev/null")
         socketURL = URL(fileURLWithPath: "/dev/null")
         digest = fixed
+        self.liveness = liveness
     }
 
     /// The digest heartbeat's age — the registry's takeover check reads it.
@@ -63,12 +74,27 @@ final class DigestFeed {
 
     private func tick() {
         guard !isShutDown else { return }
+        judgeLiveness()
         guard let attributes = try? FileManager.default.attributesOfItem(atPath: digestURL.path),
               let modified = attributes[.modificationDate] as? Date
         else { return }
         if let lastModified, modified <= lastModified { return }
         lastModified = modified
         reload()
+    }
+
+    private func judgeLiveness() {
+        guard let lockURL else { return }
+        let judged = EngineHostBroker.liveness(
+            generatedAt: digest?.engine.generatedAt, nextPollAt: digest?.engine.nextPollAt,
+            now: Date(), leaseHeld: false)
+        // The probe only past the cutoff: a fresh digest needs no second word.
+        let next = judged == .live
+            ? EngineLiveness.live
+            : EngineHostBroker.liveness(
+                generatedAt: digest?.engine.generatedAt, nextPollAt: digest?.engine.nextPollAt,
+                now: Date(), leaseHeld: EngineLease.isHeld(at: lockURL))
+        if next != liveness { liveness = next }
     }
 
     private func reload() {

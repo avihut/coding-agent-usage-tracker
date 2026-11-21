@@ -61,6 +61,13 @@ seam.
   (`grow(_:defaults:providerID:)`); the app's `ModelPalette` only maps
   stored slots to SwiftUI `Color`s. A face that computes a colour itself
   will disagree with the other faces.
+- STARTUP ORDER (2026-11-21, docs/DAEMON.md "Under load"): what is
+  already known publishes first — each engine's cached meters (real
+  `fetchedAt`) and its previous run's cached scan (`activityStatus`
+  `cached`, real `asOf`), folded into the host's first digest — then the
+  launch polls and the full scans at utility QoS (`EngineWork`). A face
+  never reads absent activity as zero: `scanning` draws "scanning…".
+  `StartupTrace` logs every stage to stderr.
 - Engine/Scheduler.swift is a one-shot Timer plus `NWPathMonitor`;
   Engine/AgentActivityWatcher.swift is FSEvents. Both descended into core
   with the engine — nothing schedules or watches from the app layer.

@@ -123,3 +123,16 @@ public struct SessionAnswer: Codable, Sendable, Equatable {
         case matches, card, deep
     }
 }
+
+/// What asking a running engine for one session came back with.
+public enum EngineSessionReply: Sendable, Equatable {
+    /// The engine answered — a hit, a miss, or "my index isn't built yet"
+    /// (`SessionAnswer.resolution` nil).
+    case answer(SessionAnswer)
+    /// Nobody answered for a reason that isn't load: no host listening, a
+    /// host too old for the verb, a profile with no engine.
+    case silent
+    /// The host took the question and didn't answer in time: alive, busy.
+    /// Never a reason to do its work instead.
+    case busy
+}

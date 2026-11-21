@@ -55,6 +55,19 @@ public struct TranscriptScan: Sendable, Equatable {
 /// credential files, nothing leaves the machine. Its only artifact is an
 /// mtime/size-keyed cache in this app's own Application Support directory so
 /// unchanged transcript files aren't re-parsed on every scan.
+/// A scan served from the previous run's parse cache, and when that run's
+/// scan finished — what is published, labelled `cached`, until this run's
+/// own scan lands.
+public struct CachedScan: Sendable, Equatable {
+    public let scan: TranscriptScan
+    public let asOf: Date
+
+    public init(scan: TranscriptScan, asOf: Date) {
+        self.scan = scan
+        self.asOf = asOf
+    }
+}
+
 public struct TranscriptScanner: Sendable {
     let root: URL
     let cacheURL: URL
@@ -518,6 +531,37 @@ public struct TranscriptScanner: Sendable {
             saveCache(CacheFile(version: Self.cacheVersion, files: files))
         }
 
+        return aggregate(files: files)
+    }
+
+    /// The previous complete scan's result exactly as its cache saved it —
+    /// no stat, no parse, no write (2026-11-21). What a starting host
+    /// publishes at once, while the full re-validation (tens of seconds to
+    /// minutes on a loaded Mac) runs behind it. Its age is the cache file's
+    /// mtime: when that scan finished. Minute slots older than the timeline's
+    /// retention are dropped against `now`, as a scan would; the days are
+    /// what they were. Nil when there is no usable cache.
+    public func cachedScan(now: Date = Date()) -> CachedScan? {
+        guard let asOf = (try? FileManager.default.attributesOfItem(atPath: cacheURL.path))?[
+            .modificationDate] as? Date
+        else { return nil }
+        let cache = loadCache()
+        guard !cache.files.isEmpty else { return nil }
+        let cutoff = now.addingTimeInterval(-Self.timelineRetention)
+        var files: [String: FileEntry] = [:]
+        for (path, entry) in cache.files {
+            files[path] = FileEntry(
+                mtime: entry.mtime, size: entry.size, days: entry.days,
+                slots: entry.slots.filter { $0.t >= cutoff },
+                session: entry.session, calls: entry.calls, excluded: entry.excluded,
+                slotsFrom: cutoff.timeIntervalSince1970)
+        }
+        return CachedScan(scan: aggregate(files: files), asOf: asOf)
+    }
+
+    /// Per-file entries → the day totals, the minute timeline and the
+    /// sessions: the half of a scan that never touches the disk.
+    private func aggregate(files: [String: FileEntry]) -> TranscriptScan {
         var totals: [String: DayCount] = [:]
         var slotTotals: [SlotKey: TokenTally] = [:]
         for entry in files.values {

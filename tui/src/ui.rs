@@ -25,7 +25,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph};
 use std::collections::HashMap;
 use std::sync::OnceLock;
-use time::{Date, OffsetDateTime, UtcOffset};
+use time::{Date, Duration, OffsetDateTime, UtcOffset};
 
 // The app's pinned palette (StatusItemRenderer's values).
 pub const WARNING: Color = Color::Rgb(255, 159, 10);
@@ -192,6 +192,20 @@ pub fn money(dollars: f64) -> String {
 fn clock(at: OffsetDateTime, offset: UtcOffset) -> String {
     let local = at.to_offset(offset);
     format!("{:02}:{:02}", local.hour(), local.minute())
+}
+
+/// "4m ago" — how long since something happened, at the precision a
+/// glance needs.
+fn ago(age: Duration) -> String {
+    let seconds = age.whole_seconds().max(0);
+    let minutes = seconds / 60;
+    if minutes >= 60 {
+        format!("{}h {}m ago", minutes / 60, minutes % 60)
+    } else if minutes > 0 {
+        format!("{minutes}m ago")
+    } else {
+        format!("{seconds}s ago")
+    }
 }
 
 fn countdown(to: OffsetDateTime, now: OffsetDateTime) -> String {
@@ -528,7 +542,10 @@ pub fn render(frame: &mut Frame, app: &mut App, now: OffsetDateTime) {
     app.hits.clear();
     let area = frame.area();
     let Some(digest) = app.digest.clone() else {
-        render_offline(frame, area, app);
+        // No digest yet, but a host holds the lease: starting under load,
+        // not absent — and nothing to install.
+        let busy = app.freshness(now) == Freshness::Busy;
+        render_offline(frame, area, app, busy);
         return;
     };
     let freshness = app.freshness(now);
@@ -862,14 +879,17 @@ fn render_dashboard(
     }
     let all = app.all_agents(digest);
     if let Some(rect) = plan.today {
-        frame.render_widget(today(digest, all, accent, rect), rect);
+        frame.render_widget(today(digest, all, accent, rect, app.local_offset), rect);
     }
     if let Some(rect) = plan.models {
         // Rows the section can seat: its height minus the title and the
         // cost rollup line that closes it.
         let seats = (rect.height as usize).saturating_sub(2);
         let (shown, hidden) = outline::seat(&data.rows, seats);
-        frame.render_widget(models(app, data, &shown, hidden, rect), rect);
+        // One account still on its first scan says so; the all-agents
+        // outline carries its own "partial" / "no total yet" rules.
+        let scanning = all.is_none() && activity_scanning(digest);
+        frame.render_widget(models(app, data, &shown, hidden, rect, scanning), rect);
         for (position, index) in shown.iter().enumerate() {
             app.hits.add(
                 Rect::new(rect.x, rect.y + 1 + position as u16, rect.width, 1),
@@ -878,9 +898,14 @@ fn render_dashboard(
         }
     }
     if let Some(rect) = plan.heatmap {
-        match app.period {
-            Period::Week => render_bars(frame, app, digest, data, rect),
-            _ => render_heatmap(frame, app, digest, data, rect),
+        if all.is_none() && activity_scanning(digest) {
+            // Absent, never an empty chart reading "0 tokens".
+            frame.render_widget(scanning_lines("ACTIVITY"), rect);
+        } else {
+            match app.period {
+                Period::Week => render_bars(frame, app, digest, data, rect),
+                _ => render_heatmap(frame, app, digest, data, rect),
+            }
         }
     }
     if let Some(rect) = plan.sessions {
@@ -892,7 +917,10 @@ fn render_dashboard(
                 |key| crate::state::account_name(digest, key),
             )
         });
-        frame.render_widget(sessions(digest, owner.as_deref(), accent, rect), rect);
+        frame.render_widget(
+            sessions(digest, owner.as_deref(), accent, rect, app.local_offset),
+            rect,
+        );
     }
     if let Some(rect) = plan.status
         && let Some(card) = digest.service_status.as_ref()
@@ -1127,6 +1155,30 @@ fn header<'a>(
                     ));
                 }
             }
+            Freshness::Busy => {
+                // Alive and late: the host holds its lease but hasn't
+                // rewritten the digest in a while. The numbers stand, with
+                // the age of the last rewrite beside them.
+                status.push(Span::styled(glyphs().hollow, style(WARNING)));
+                status.push(Span::styled(
+                    if compact {
+                        "busy".to_owned()
+                    } else {
+                        "engine busy — updating…".to_owned()
+                    },
+                    style(WARNING),
+                ));
+                let age = (now - engine.generated_at).max(Duration::ZERO);
+                status.push(Span::styled(
+                    format!(
+                        "{}{}{}",
+                        glyphs().sep,
+                        if compact { "" } else { "last update " },
+                        ago(age)
+                    ),
+                    style(DIM),
+                ));
+            }
             Freshness::EngineOffline => {
                 status.push(Span::styled(
                     "engine offline — start: usage-cli daemon start",
@@ -1308,6 +1360,28 @@ fn spend_text(spend: &crate::digest::SpendStatus) -> String {
         Some(limit) => format!("{} of {}", amount(spend.used_minor), amount(limit)),
         None => amount(spend.used_minor),
     }
+}
+
+/// While the writer's first scan hasn't landed, the top level's empty
+/// rollup is not zero usage — the section says "scanning…" instead.
+fn activity_scanning(digest: &LiveState) -> bool {
+    digest
+        .activity_status
+        .as_ref()
+        .is_some_and(|status| status.is_scanning())
+}
+
+/// " · as of 22:15" when the activity shown is the previous run's scan.
+fn activity_as_of(digest: &LiveState, offset: UtcOffset) -> Option<String> {
+    let at = digest.activity_status.as_ref()?.cached_as_of()?;
+    Some(format!("{}as of {}", glyphs().sep, clock(at, offset)))
+}
+
+fn scanning_lines(title: &str) -> Paragraph<'static> {
+    Paragraph::new(vec![
+        section_title(title),
+        Line::from(Span::styled("scanning…", style(DIM))),
+    ])
 }
 
 // MARK: - Heatmap (two forms, weekday-true, paged — design §4)
@@ -2226,7 +2300,10 @@ fn render_strip(
     now: OffsetDateTime,
 ) {
     let accent = rgb(digest.engine.accent);
-    let grey = freshness != Freshness::Live && freshness != Freshness::Backoff;
+    let grey = !matches!(
+        freshness,
+        Freshness::Live | Freshness::Backoff | Freshness::Busy
+    );
     let mut spans = vec![Span::styled(
         format!("{} ", digest.engine.glyph),
         style(if grey { DIM } else { accent }),
@@ -2264,6 +2341,8 @@ fn render_strip(
     }
     if freshness == Freshness::EngineOffline {
         spans.push(Span::styled("  offline".to_owned(), style(CRITICAL)));
+    } else if freshness == Freshness::Busy {
+        spans.push(Span::styled("  busy".to_owned(), style(WARNING)));
     } else if freshness == Freshness::Backoff {
         // The 429 marker with its ticking retry countdown — the strip's
         // only word on it, so it earns its columns.
@@ -2279,9 +2358,14 @@ fn render_strip(
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
-fn render_offline(frame: &mut Frame, area: Rect, app: &App) {
+fn render_offline(frame: &mut Frame, area: Rect, app: &App, busy: bool) {
     let message = if let Some(error) = &app.decode_error {
         format!("digest unreadable: {error}")
+    } else if busy {
+        format!(
+            "engine busy — starting…\n\nno live-state digest yet at\n{}",
+            app.digest_path.display()
+        )
     } else {
         format!(
             "no live-state digest at\n{}\n\nlaunch the menu bar app, or: usage-cli daemon start",
@@ -2376,9 +2460,16 @@ fn sessions<'a>(
     owner: Option<&str>,
     accent: Color,
     rect: Rect,
+    offset: UtcOffset,
 ) -> Paragraph<'a> {
+    if activity_scanning(digest) {
+        return scanning_lines("SESSIONS");
+    }
     let cards = &digest.sessions;
-    let title = sessions_title(owner, cards.len(), rect.width as usize);
+    let mut title = sessions_title(owner, cards.len(), rect.width as usize);
+    if let Some(as_of) = activity_as_of(digest, offset) {
+        title.push_str(&as_of);
+    }
     let mut lines = vec![section_title(&title)];
 
     if cards.is_empty() {
@@ -2806,6 +2897,216 @@ mod tests {
         );
         assert_eq!(truncate_label("Argon (7d)", 12), "Argon (7d)");
         assert_eq!(truncate_label("Session (5h)", 12), "Session (5h)");
+    }
+
+    fn golden_digest(status: Option<(&str, Option<OffsetDateTime>)>) -> LiveState {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../Tests/UsageCoreTests/Fixtures/digest/live-state-v1.json");
+        let mut digest = LiveState::parse(&std::fs::read(path).unwrap()).unwrap();
+        digest.activity_status = status.map(|(state, as_of)| crate::digest::ActivityStatus {
+            state: state.into(),
+            as_of,
+        });
+        digest
+    }
+
+    fn text(paragraph: Paragraph<'_>, width: u16, height: u16) -> String {
+        use ratatui::buffer::Buffer;
+        use ratatui::widgets::Widget;
+        let rect = Rect::new(0, 0, width, height);
+        let mut buffer = Buffer::empty(rect);
+        paragraph.render(rect, &mut buffer);
+        (0..height)
+            .map(|y| {
+                (0..width)
+                    .map(|x| buffer[(x, y)].symbol().to_owned())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// Absent ≠ zero (2026-11-21): before the writer's first scan, the empty
+    /// rollup must never read as "0 tok" or "no sessions recorded yet".
+    #[test]
+    fn a_scanning_digest_says_scanning_never_zero() {
+        let digest = golden_digest(Some(("scanning", None)));
+        let rect = Rect::new(0, 0, 60, 4);
+        let head = text(
+            today(&digest, None, Color::Reset, rect, UtcOffset::UTC),
+            60,
+            4,
+        );
+        assert!(head.contains("scanning…"), "{head}");
+        assert!(!head.contains("tok"), "{head}");
+        let sessions = text(
+            sessions(&digest, None, Color::Reset, rect, UtcOffset::UTC),
+            60,
+            4,
+        );
+        assert!(sessions.contains("scanning…"), "{sessions}");
+        assert!(!sessions.contains("no sessions recorded yet"), "{sessions}");
+    }
+
+    /// Busy is a sentence, not a grey-out (2026-11-21): the header says the
+    /// engine is busy and how old the numbers are; the strip keeps its
+    /// colours and adds `busy`.
+    #[test]
+    fn a_busy_engine_reads_busy_with_its_age_never_offline() {
+        let digest = golden_digest(None);
+        let now = digest.engine.generated_at + Duration::minutes(4);
+        let app = crate::state::App::new(
+            std::path::PathBuf::from("/nonexistent/live-state.json"),
+            Some(std::path::PathBuf::from("/nonexistent/control.sock")),
+            UtcOffset::UTC,
+        );
+        let (paragraph, _) = header(&digest, Freshness::Busy, &app, now, Color::Reset, 120);
+        let head = text(paragraph, 120, 3);
+        assert!(head.contains("engine busy — updating…"), "{head}");
+        assert!(head.contains("last update 4m ago"), "{head}");
+        assert!(!head.contains("offline"), "{head}");
+
+        let backend = ratatui::backend::TestBackend::new(60, 1);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| render_strip(frame, frame.area(), &digest, Freshness::Busy, now))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let strip: String = (0..60)
+            .map(|x| buffer[(x, 0)].symbol().to_owned())
+            .collect();
+        assert!(
+            strip.contains("busy") && !strip.contains("offline"),
+            "{strip}"
+        );
+        let glyph = buffer[(0, 0)].style().fg;
+        assert_ne!(glyph, Some(DIM), "a busy strip is not greyed: {strip}");
+    }
+
+    fn rendered(
+        app: &mut crate::state::App,
+        now: OffsetDateTime,
+        width: u16,
+        height: u16,
+    ) -> String {
+        let backend = ratatui::backend::TestBackend::new(width, height);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, app, now)).unwrap();
+        let buffer = terminal.backend().buffer();
+        (0..height)
+            .map(|y| {
+                (0..width)
+                    .map(|x| buffer[(x, y)].symbol().to_owned())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn app_at(lock: std::path::PathBuf) -> crate::state::App {
+        let mut app = crate::state::App::new(
+            lock.with_file_name("live-state.json"),
+            Some(std::path::PathBuf::from("/nonexistent/control.sock")),
+            UtcOffset::UTC,
+        );
+        app.lock_path = lock;
+        app
+    }
+
+    /// The whole dashboard of a scanning account: the activity chart is
+    /// "scanning…", never an empty chart over "0 tokens · 0 active days".
+    #[test]
+    fn a_scanning_dashboard_draws_no_empty_chart() {
+        let digest = golden_digest(Some(("scanning", None)));
+        let now = digest.engine.generated_at + Duration::minutes(1);
+        let mut app = app_at(std::path::PathBuf::from("/nonexistent/engine.lock"));
+        app.digest = Some(digest);
+        let text = rendered(&mut app, now, 140, 50);
+        assert!(text.contains("ACTIVITY"), "{text}");
+        assert!(text.contains("scanning…"), "{text}");
+        assert!(!text.contains("active days"), "{text}");
+        assert!(!text.contains("0 tok"), "{text}");
+    }
+
+    /// No digest yet while a host holds the lease: busy starting, not the
+    /// "launch the menu bar app" screen.
+    #[test]
+    fn no_digest_with_the_lease_held_is_busy_not_offline() {
+        let dir = std::env::temp_dir().join(format!("tui-busy-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let lock = dir.join("engine.lock");
+        let holder = std::fs::File::create(&lock).unwrap();
+        holder.lock().unwrap();
+        let mut app = app_at(lock.clone());
+        let now = OffsetDateTime::now_utc();
+        let busy = rendered(&mut app, now, 80, 12);
+        assert!(busy.contains("engine busy — starting…"), "{busy}");
+        assert!(!busy.contains("launch the menu bar app"), "{busy}");
+        holder.unlock().unwrap();
+        let offline = rendered(&mut app, now, 80, 12);
+        assert!(offline.contains("launch the menu bar app"), "{offline}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The focused account still scanning doesn't blank an All agents total
+    /// the other agents already make up; its own scope says "scanning…".
+    #[test]
+    fn a_scanning_focused_account_leaves_the_all_agents_total_standing() {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../Tests/UsageCoreTests/Fixtures/digest/live-state-v1-harnesses.json");
+        let mut digest = LiveState::parse(&std::fs::read(path).unwrap()).unwrap();
+        digest.activity_status = Some(crate::digest::ActivityStatus {
+            state: "scanning".into(),
+            as_of: None,
+        });
+        let all = digest
+            .all_agents
+            .clone()
+            .expect("the harness golden carries a total");
+        let rect = Rect::new(0, 0, 80, 4);
+        let total = text(
+            today(&digest, Some(&all), Color::Reset, rect, UtcOffset::UTC),
+            80,
+            4,
+        );
+        assert!(
+            total.contains("tok") && !total.contains("scanning…"),
+            "{total}"
+        );
+        let mine = text(
+            today(&digest, None, Color::Reset, rect, UtcOffset::UTC),
+            80,
+            4,
+        );
+        assert!(mine.contains("scanning…"), "{mine}");
+    }
+
+    #[test]
+    fn a_cached_digest_shows_its_numbers_and_their_age() {
+        let as_of = OffsetDateTime::parse(
+            "2026-08-16T11:12:00Z",
+            &time::format_description::well_known::Rfc3339,
+        )
+        .unwrap();
+        let digest = golden_digest(Some(("cached", Some(as_of))));
+        let rect = Rect::new(0, 0, 80, 4);
+        let cached = text(
+            today(&digest, None, Color::Reset, rect, UtcOffset::UTC),
+            80,
+            4,
+        );
+        assert!(
+            cached.contains("tok") && cached.contains("as of 11:12"),
+            "{cached}"
+        );
+        // A scanned (or marker-less) digest carries no age line.
+        let plain = golden_digest(None);
+        let fresh = text(
+            today(&plain, None, Color::Reset, rect, UtcOffset::UTC),
+            80,
+            4,
+        );
+        assert!(!fresh.contains("as of"), "{fresh}");
     }
 
     fn incident(impact: &str) -> ServiceStatusCard {

@@ -234,7 +234,8 @@ extension MeteringHost {
             return ControlReply(ok: false, message: "no engine for profile \(profile ?? "in focus")")
         }
         guard let answer = engine.sessionAnswer(idPrefix: id) else {
-            return ControlReply(ok: false, message: "\(engine.profileID) has not indexed its sessions yet")
+            return ControlReply(
+                ok: false, message: "\(engine.profileID) has not indexed its sessions yet", indexing: true)
         }
         let message = switch answer.matches.count {
         case 0: "no session matches '\(id)'"

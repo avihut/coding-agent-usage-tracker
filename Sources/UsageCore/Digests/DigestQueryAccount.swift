@@ -15,8 +15,12 @@ extension DigestQuery {
         let unix = parsed.flags["unix"] != nil
         let relative = parsed.flags["relative"] != nil
 
+        // Token amounts come from the scan's timeline: while the account's
+        // first scan runs they are uncounted, not zero.
+        let tokenFields: Set = ["today-tokens", "today-cost", "window-tokens", "window-cost", "accounts"]
         func resolve(_ field: String, asJSON: Bool) -> QueryOutput {
-            accountField(
+            if tokenFields.contains(field), isScanning(digest) { return scanningOutput }
+            return accountField(
                 field, card: card, now: now, json: asJSON, unix: unix, relative: relative)
         }
         if let output = multiFieldOutput(
@@ -33,7 +37,7 @@ extension DigestQuery {
             if parsed.flags["raw"] != nil {
                 return badQuery("raw needs a field — e.g. `account email`")
             }
-            return ok(withStaleSuffix(summaryLine(card, now: now), digest: digest))
+            return ok(withStaleSuffix(summaryLine(card, now: now, counted: !isScanning(digest)), digest: digest))
         }
         guard parsed.positionals.count == 1 else { return badQuery("too many arguments") }
         return resolve(field, asJSON: json)
@@ -42,7 +46,7 @@ extension DigestQuery {
     /// The human line: who, which org when it says something, for how
     /// long, and what today cost. Signed-out is stated, never blank — a
     /// card exists exactly because something IS tracked.
-    private static func summaryLine(_ card: AccountPresenceCard, now: Date) -> String {
+    private static func summaryLine(_ card: AccountPresenceCard, now: Date, counted: Bool) -> String {
         guard let current = card.current else {
             var parts = ["signed out"]
             if card.distinctAccounts > 0 {
@@ -58,7 +62,7 @@ extension DigestQuery {
         if let since = card.since {
             parts.append("for \(UsageFormatting.duration(max(0, now.timeIntervalSince(since))))")
         }
-        if let mine = card.accounts.first(where: {
+        if counted, let mine = card.accounts.first(where: {
             $0.ref?.accountUuid == current.accountUuid
         }) {
             if let cost = mine.todayCost {

@@ -67,6 +67,10 @@
     "todayPrompts" : 3,
     "todayTokens" : 41175
   },
+  "activityStatus" : {
+    "asOf" : "2026-09-19T11:40:00Z",
+    "state" : "cached"
+  },
   "allAgents" : {
     "activity" : {
       "days" : [
@@ -1089,6 +1093,10 @@
         "todayPrompts" : 6,
         "todayTokens" : 42360
       },
+      "activityStatus" : {
+        "asOf" : "2026-09-19T11:59:30Z",
+        "state" : "scanned"
+      },
       "dormant" : false,
       "enabled" : true,
       "engine" : {
@@ -1689,6 +1697,10 @@
         "todayPrompts" : 3,
         "todayTokens" : 41175
       },
+      "activityStatus" : {
+        "asOf" : "2026-09-19T11:40:00Z",
+        "state" : "cached"
+      },
       "dormant" : false,
       "enabled" : true,
       "engine" : {
@@ -2206,22 +2218,8 @@
     },
     {
       "accountID" : "default",
-      "activity" : {
-        "days" : [
-
-        ],
-        "hourDays" : [
-
-        ],
-        "modelDays" : [
-
-        ],
-        "timeZone" : "GMT",
-        "todayHours" : [
-
-        ],
-        "todayPrompts" : 0,
-        "todayTokens" : 0
+      "activityStatus" : {
+        "state" : "scanning"
       },
       "dormant" : false,
       "enabled" : true,
@@ -2289,14 +2287,8 @@
           "tag" : "S"
         }
       ],
-      "models" : [
-
-      ],
       "monogram" : "G",
-      "providerID" : "gemini",
-      "sessions" : [
-
-      ]
+      "providerID" : "gemini"
     }
   ],
   "schemaVersion" : 1,

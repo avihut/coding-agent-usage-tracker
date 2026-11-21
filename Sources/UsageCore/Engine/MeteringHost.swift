@@ -131,6 +131,7 @@ public final class MeteringHost {
     @ObservationIgnored private var isStarted = false
     @ObservationIgnored var isShutDown = false
     @ObservationIgnored private var isReprobing = false
+    @ObservationIgnored private var publishesHeld = false
 
     /// One harness, the way every host built this before several were
     /// metered at once.
@@ -176,8 +177,10 @@ public final class MeteringHost {
     public func start() {
         guard !isStarted, !isShutDown else { return }
         isStarted = true
+        let trace = StartupTrace.shared
         serviceRegistry.onChange = { [weak self] in self?.republish() }
         serviceRegistry.start()
+        trace.mark("services")
         if let feedURL = configuration.updateFeedURL {
             let checker = UpdateChecker(
                 feed: UpdateFeed(latestReleaseURL: feedURL),
@@ -192,12 +195,16 @@ public final class MeteringHost {
         }
         probePresence(stored: ProfileStore.load(from: defaults))
         loadProfiles()
+        trace.mark("presence", roster.rows.map(\.id).joined(separator: ", "))
         probeSynchronously(profiles.filter(\.isEnrolled))
+        trace.mark("probe", "\(enrolledProfiles.count) accounts")
         recomputeDormancy(now: Date())
         reconcileEngines(staggered: true)
+        trace.mark("engines", engines.keys.sorted().joined(separator: ", "))
         _ = recomputeFocus()
         dismissAnsweredOffers()
         if configuration.bindsSocket { startSocket() }
+        trace.mark("socket")
         let monitor = NetworkMonitor()
         monitor.onRestored = { [weak self] in
             self?.engines.values.forEach { $0.noteNetworkRestored() }
@@ -417,6 +424,11 @@ public final class MeteringHost {
         }
         engine.onAgentActivity = { [weak self] at in self?.noteActivity(key, at: at) }
         engines[key] = engine
+        // Its section exists from the first digest on — the cached meters
+        // and activity status it starts with — rather than after its first
+        // landing point (2026-11-21). Folded without a publish of its own:
+        // whoever started it publishes once for every engine it started.
+        holdingPublishes { engine.publishNow() }
         log("engine: \(key)" + (launchDelay > 0 ? " (first poll in \(Int(launchDelay))s)" : ""))
     }
 
@@ -550,7 +562,7 @@ public final class MeteringHost {
         let providers = providers
         let stored = ProfileStore.load(from: defaults)
         let configuration = configuration
-        Task.detached(priority: .utility) { [weak self] in
+        Task.detached(priority: EngineWork.heavy) { [weak self] in
             let now = Date()
             let seen = HarnessPresence.probe(
                 providers: providers, stored: stored, bundleID: configuration.bundleID,
@@ -587,7 +599,7 @@ public final class MeteringHost {
         for row in roster.rows where row.provider.supportsMultipleHomes {
             let provider = row.provider
             let known = row.profiles
-            Task.detached(priority: .utility) { [weak self] in
+            Task.detached(priority: EngineWork.heavy) { [weak self] in
                 let found = ProfileDiscovery.discover(
                     provider: provider, known: known, bundleID: configuration.bundleID,
                     roots: configuration.roots, now: Date(), userHome: configuration.userHome)
@@ -623,8 +635,17 @@ public final class MeteringHost {
 
     // MARK: - Digest
 
+    /// Runs `body` with publishing held, so N engines' initial sections fold
+    /// into ONE digest written afterwards by the caller.
+    private func holdingPublishes(_ body: () -> Void) {
+        let held = publishesHeld
+        publishesHeld = true
+        body()
+        publishesHeld = held
+    }
+
     func republish(now: Date = Date()) {
-        guard isStarted, !isShutDown else { return }
+        guard isStarted, !isShutDown, !publishesHeld else { return }
         let sectionList = enrolledProfiles.map { profile -> ProfileSection in
             let key = profile.key
             let label = ProfileFacts.label(
@@ -637,9 +658,15 @@ public final class MeteringHost {
                 homeDisplayPath: profile.displayHome(relativeTo: configuration.userHome),
                 state: engines[key] != nil ? sections[key] : nil,
                 consumption: engines[key].flatMap { engine in
-                    // `activity` lands in the same step that sets the flag;
-                    // before it, the empty list means "not looked yet".
-                    engine.sessionsIndexed
+                    // Counted once the account has activity to show — this
+                    // run's scan, or the previous run's cached one, landed
+                    // with the status that says so (`activityStatus`,
+                    // 2026-11-21). Still scanning, it is the all-agents
+                    // section's `scanning` member: absent, never an empty
+                    // list read as zero. An engine without the marker (no
+                    // local activity) keeps the index rule.
+                    let known = engine.activityStatus.map { !$0.isScanning } ?? engine.sessionsIndexed
+                    return known
                         ? SectionConsumption(
                             days: engine.activity, timeline: engine.tokenTimeline,
                             pricing: engine.pricing)
@@ -671,6 +698,17 @@ public final class MeteringHost {
         notices = composed.notices
         outages = composed.outages ?? []
         publisher.publish(composed)
+        traceStartup()
+    }
+
+    /// First publish, then — once every running engine has its meters, its
+    /// scan and its forecast — the trace's last line.
+    private func traceStartup() {
+        let trace = StartupTrace.shared
+        guard !trace.isComplete else { return }
+        trace.mark("first publish")
+        guard !engines.isEmpty, engines.values.allSatisfy(\.startupSettled) else { return }
+        trace.complete("\(engines.count) engines")
     }
 
     func log(_ message: String) {

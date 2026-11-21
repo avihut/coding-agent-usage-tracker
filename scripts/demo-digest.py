@@ -574,11 +574,20 @@ def build(now, several=False, with_antigravity=False, scanning=False):
                         "notices": copy.deepcopy(quiet), "outages": [],
                         "newestActivityAt": stamp(now - timedelta(minutes=4))})
         harness.pop("serviceStatus", None)
+    # Every demo account's activity is a finished scan of its own: the golden
+    # template exercises "scanning" and "cached" too, and a demo must show
+    # neither unless a picture asks for it.
+    scanned = {"state": "scanned", "asOf": stamp(now - timedelta(minutes=1))}
+    state["activityStatus"] = copy.deepcopy(scanned)
+    for section in state["profiles"]:
+        section["activityStatus"] = copy.deepcopy(scanned)
     if scanning:
-        # A scanning engine publishes nothing of its own yet.
-        codex["models"] = []
-        codex["activity"] = {"timeZone": "GMT", "todayHours": [], "todayTokens": 0,
-                             "todayPrompts": 0, "days": [], "modelDays": [], "hourDays": []}
+        # A scanning engine publishes nothing of its own yet: the writer
+        # marks it and leaves its activity, models and sessions ABSENT —
+        # never an empty rollup (docs/DAEMON.md "Under load").
+        codex["activityStatus"] = {"state": "scanning"}
+        for key in ("activity", "models", "sessions"):
+            codex.pop(key, None)
     section = all_agents(state, now, scanning=("codex",) if scanning else ())
     if section is None:
         state.pop("allAgents", None)

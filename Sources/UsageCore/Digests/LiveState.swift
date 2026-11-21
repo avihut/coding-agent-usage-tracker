@@ -92,6 +92,10 @@ public struct LiveState: Codable, Sendable, Equatable {
     /// total) or a writer before this field; `ConsumptionMembership` over
     /// `profiles`/`harnesses` tells the two apart.
     public let allAgents: AllAgentsState?
+    /// Whether `activity`, `models` and `sessions` are this run's scan, the
+    /// previous run's cached one, or nothing yet (2026-11-21). Nil = a writer
+    /// before the marker, or a harness with nothing to scan.
+    public let activityStatus: ActivityStatus?
 
     public init(
         schemaVersion: Int = Self.schemaVersion,
@@ -103,8 +107,10 @@ public struct LiveState: Codable, Sendable, Equatable {
         outages: [OutageSpan]? = nil, focusedProfile: String? = nil,
         profiles: [ProfileState]? = nil, menuBarCells: [MenuBarCell]? = nil,
         harnesses: [HarnessState]? = nil, pinnedProfile: String? = nil,
-        allAgents: AllAgentsState? = nil
+        allAgents: AllAgentsState? = nil,
+        activityStatus: ActivityStatus? = nil
     ) {
+        self.activityStatus = activityStatus
         self.schemaVersion = schemaVersion
         self.sessionsCap = sessionsCap
         self.engine = engine
@@ -754,6 +760,9 @@ public enum LiveStateBuilder {
         /// Incidents within retention for the charts' outage floor, or nil
         /// when the host records none.
         outages: [OutageSpan]? = nil,
+        /// Where `activity`/`timeline`/`sessions` stand; nil for a harness
+        /// with nothing to scan.
+        activityStatus: ActivityStatus? = nil,
         now: Date,
         calendar: Calendar = .current,
         locale: Locale = .current
@@ -870,7 +879,7 @@ public enum LiveStateBuilder {
                     pending: $0, serviceName: provider.serviceName, now: now,
                     calendar: calendar, locale: locale)
             },
-            outages: outages)
+            outages: outages, activityStatus: activityStatus)
     }
 
     // MARK: - Activity

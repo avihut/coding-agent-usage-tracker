@@ -44,6 +44,10 @@ public enum DigestQuery {
     static let exitOverCap: Int32 = 24
     static let exitForecast: Int32 = 25
     static let exitNoData: Int32 = 26
+    /// The selected account's first transcript scan hasn't landed: its
+    /// activity is ABSENT, never zero (2026-11-21, docs/DAEMON.md "Under
+    /// load"). 27 is `DeepQuery.exitScanBusy`.
+    static let exitScanning: Int32 = 28
 
     /// The grammar's own noun vocabulary — `run` below validates argv's
     /// noun position against this set directly (bad-query exit for
@@ -196,6 +200,13 @@ public enum DigestQuery {
         }
 
         let calendar = digestCalendar(digest)
+        // An account still on its first scan has no activity to answer for —
+        // never zeros. An all-agents total carries its own "partial" and
+        // "no total yet" rules (its projected view has no marker), while a
+        // one-account Mac's all-agents view IS that account's and is guarded.
+        if let scanning = unscannedActivity(noun: noun, parsed: parsed, digest: digest) {
+            return scanning
+        }
         let output = answer(
             noun: noun, parsed: parsed, digest: digest, rawDigest: rawDigest, view: view,
             environment: environment, now: now, calendar: calendar, json: json, raw: raw)
@@ -244,6 +255,35 @@ public enum DigestQuery {
         case "get": return runGet(parsed: parsed, rawDigest: rawDigest, digest: digest, json: json)
         default: return badQuery("unknown noun '\(noun)'")
         }
+    }
+
+    /// The nouns that read the scan's rollup refuse while the account's
+    /// first scan is still running — the digest then carries an empty
+    /// rollup (or none), and printing it would be "0 tokens" for an account
+    /// that has simply not been counted yet. `sessions`/`session` are
+    /// guarded where the CLI actually routes them (`runSessionsList`,
+    /// `runSession`), `account`'s token fields in `runAccount`.
+    static func unscannedActivity(noun: String, parsed: ParsedArgs, digest: LiveState) -> QueryOutput? {
+        guard digest.activityStatus?.isScanning == true else { return nil }
+        switch noun {
+        case "activity", "cost", "models", "model": return scanningOutput
+        case "get":
+            // The raw walker reads the top level's empty rollup as 0.
+            let head = parsed.positionals.first.flatMap {
+                $0.split(whereSeparator: { $0 == "." || $0 == "[" }).first.map(String.init)
+            }
+            return ["activity", "models", "sessions"].contains(head ?? "") ? scanningOutput : nil
+        default: return nil
+        }
+    }
+
+    static let scanningOutput = QueryOutput(
+        stdout: "",
+        note: "this account's first transcript scan hasn't finished — no activity yet, not zero; try again shortly",
+        exitCode: exitScanning)
+
+    static func isScanning(_ digest: LiveState?) -> Bool {
+        digest?.activityStatus?.isScanning == true
     }
 
     // MARK: - Account selection

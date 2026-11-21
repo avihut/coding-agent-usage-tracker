@@ -43,6 +43,32 @@ struct TranscriptScannerTests {
         FlexibleISO8601.date(from: iso)!
     }
 
+    @Test("the cached pass replays the last scan as saved — no re-parse — dated by the cache")
+    func cachedScanReplaysTheLastScan() throws {
+        let (scanner, root) = try makeScanner()
+        let file = root.appending(path: "a.jsonl")
+        #expect(scanner.cachedScan(now: Self.scanNow) == nil)  // no scan yet, no cache
+        try Self.transcript.write(to: file, atomically: true, encoding: .utf8)
+        let first = scanner.scan(now: Self.scanNow)
+        let cached = try #require(scanner.cachedScan(now: Self.scanNow))
+        #expect(cached.scan == first)
+        let saved = try #require(
+            try FileManager.default.attributesOfItem(atPath: scanner.cacheURL.path)[.modificationDate] as? Date)
+        #expect(cached.asOf == saved)
+
+        // The agent writes on: the cached pass still says what the LAST scan
+        // saw (that is its age's meaning), the next scan sees the new call.
+        let more = #"{"timestamp":"2026-08-02T11:00:00.000Z","requestId":"r9","message":{"id":"m9","usage":{"input_tokens":7,"output_tokens":3}}}"#
+        try (Self.transcript + "\n" + more + "\n").write(to: file, atomically: true, encoding: .utf8)
+        #expect(scanner.cachedScan(now: Self.scanNow)?.scan.daily.last?.tokens == 1500)
+        #expect(scanner.scan(now: Self.scanNow).daily.last?.tokens == 1510)
+
+        // Minute slots age out against `now`, as a scan's would.
+        let later = Self.scanNow.addingTimeInterval(TranscriptScanner.timelineRetention + 3 * 86400)
+        #expect(scanner.cachedScan(now: later)?.scan.timeline.isEmpty == true)
+        #expect(scanner.cachedScan(now: later)?.scan.daily.count == 2)
+    }
+
     @Test("aggregates per day, sums all token kinds, counts a streamed call once and whole")
     func aggregates() throws {
         let (scanner, root) = try makeScanner()

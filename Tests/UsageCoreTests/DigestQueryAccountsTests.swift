@@ -237,7 +237,7 @@ struct DigestQueryAccountsTests {
                 profiles: [personalProfile], homes: homes,
                 engine: { profile, _ in
                     asked.append(profile)
-                    return nil
+                    return .silent
                 })
         }
         #expect(miss(["nope"]).exitCode == 20)
