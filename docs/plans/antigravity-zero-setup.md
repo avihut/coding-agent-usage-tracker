@@ -17,9 +17,10 @@ Branch `fix/antigravity-zero-setup`, cut from main at 542aa67. Follows
 | When | Only when a conversation was written since the last reading started (the first reading: a conversation written in the last 7 days). Floor 10 min, measured from the last ATTEMPT and persisted, so restarts, handovers and manual refreshes can't beat it. One run at a time. 30 s hard timeout that kills the process group. Backoff 20 → 40 → 80 → 120 min after failures |
 | What is kept | Bucket id, remaining fraction and absolute reset only, in `<bundle>/antigravity/default/quota-probe.json` (mode 0600, written by the engine, which is the single writer) |
 | Status line | REMOVED: `usage-cli export-statusline`, `UsageProvider.statusLineExport`, `StatusLineExport`, the single-writer carve-out and every "paste this" string (see "The status line" below) |
-| Meters | Gemini only (ADDED SCOPE, the person ~22:55: "Could you remove them from that harness? They're just polluting the status and I'm not actually using them"): `gemini-5h` → Session (5h), `gemini-weekly` → Weekly, labels and ids unchanged. The Claude + GPT pool (`3p-5h`, `3p-weekly`, bar tag C) is skipped like `gemini-argon-wtu-weekly` and every model-specific bucket |
-| Models and prices | Gemini only (ADDED SCOPE 2, ~23:10): `pricingSelector` = Gemini's feed slice alone, `modelCatalog` = Gemini's grammar alone. A non-Gemini model that does appear in a transcript still counts in tokens, and its cost reads unpriced (null, "—", never $0) |
-| Model scope | The two Gemini meters keep `modelScope: ["gemini"]`: Gemini's quota is spent by Gemini models only, so a stray non-Gemini call must not move their curves. `Meter.modelScope` / `LiveMeter.modelScope` and the lockout scope rule stay as generic machinery, still used; the digest is untouched |
+| Meters | EVERY pool the plan's reading reports (FINAL, the person ~23:22: "don't have the agent working on it remove these limits. I want to see them while they're available" — supersedes the earlier ADDED SCOPE / REVISED notes): `gemini-5h` → Session (5h), `gemini-weekly` → Weekly, `3p-5h` / `3p-weekly` → scoped "Claude + GPT (5h)" / "Claude + GPT (7d)" (tag C), all as #36 built them, plus NEW `gemini-argon-wtu-weekly` → scoped "Argon (7d)" (tag A). No "show once used" gating: an untouched pool shows its real reading (0% used, no reset — the epoch); a pool Google stops reporting simply has no meter. Every other bucket id is skipped |
+| Models and prices | Unchanged from #36: Gemini's, Anthropic's and OpenAI's feed slices, so a pool model's cost reads in dollars; the display grammar union stays. NEW: rates LISTINGS show what is relevant — every model the harness has seen, then the unseen rows the provider marks as its own (Gemini's), never the whole Anthropic and OpenAI catalogues (a vendor-neutral provider hook, default "list everything" for every other harness) |
+| Model scope | Unchanged for the pool (`claude`, `gpt`) and the Gemini meters (`gemini`); Argon counts `argon`. On Pro, Argon's quota is SEPARATE ("For paid Pro plans, Argon quota is separate") and scope matching is include-only by substring, so `gemini` alone would also count `gemini-4-argon` calls against the Gemini meters: an additive, vendor-neutral `Meter.modelScopeExcluded` (and `LiveMeter.modelScopeExcluded`, omitted when nil) lets the Gemini meters exclude `argon` exactly when the reading carries an Argon bucket. `Meter.inScope` = an included needle and no excluded one; the lockout rule's "same scope" compares both lists. Golden regenerated with `UPDATE_GOLDENS=1` and the diff read; Rust decodes `model_scope` but never filters on it, and ignores the new key |
+| Density | The bar draws one segment per rank: S, W, and ONE scoped segment = the most-used scoped meter (the existing `scopedMax` rule), tagged by that meter (C or A) — five meters read as three in the bar; the panel, TUI and `usage-cli limits` list all five. Checked with snapshots in the build |
 | Failures | Never thrown from the fetch. The service turns the probe's standing outcome into `.cached(snapshot, error)`, so focus always sees a snapshot (empty or not) and the reason travels in the digest's existing error text, hint and code. A missing CLI is silent |
 | Classification | `networkDestinations` stays `[]` (the app connects nowhere new; `isLocalProvider` unchanged). The by-proxy run is declared separately (`UsageProvider.quotaCommand`) and rendered on its own privacy-card lines |
 
@@ -128,9 +129,16 @@ structure, never on the name. Shape, every value replaced except where safe:
         { id: "gemini-argon-wtu-weekly", name, description, window: "weekly", remaining_fraction: 0.98, reset_time: "…" } ] } ] } } }
 ```
 
+- **Checked against agy's own `/usage` screen** (the person's screenshot,
+  23:08, Google AI Pro): Gemini weekly 76.86% left (0.7686160 → 23% used),
+  5h 74.62% left (0.7461944 → 25% used), Claude + GPT 100% / 100% ("Quota
+  available", no refresh shown — the epoch), Gemini 4 Argon weekly 98.20%
+  left (0.9820021 → 2% used). The resets agree with the screen's "refreshes
+  in": 14:02:05Z is 160 h 54 m after 21:08Z (screen: 160h 53m), 00:02:05Z is
+  2 h 54 m (screen: 2h 53m), Argon's 14:00:46Z is 160 h 52 m (screen: 160h 52m).
 - **Bucket ids** (owed since #36): `gemini-5h`, `gemini-weekly`, `3p-5h`,
   `3p-weekly`, and `gemini-argon-wtu-weekly` — exactly the ids the meters
-  were built for, plus the Argon bucket, which stays skipped. Each bucket
+  were built for, plus the Argon bucket, now metered too. Each bucket
   also states its `window` (`5h`, `weekly`), which agrees with the id.
 - **Tier ids**: `/quota` carries no plan tier at all, and no account
   identifier (no email, no project: `conversation_id` is empty). The plan
@@ -311,18 +319,24 @@ goes to Google under its own sign-in, and is not an app destination
 - `AntigravityQuotaReading` loses `planTier` and `cliVersion` (no source any
   more); the `version` stays 1. A cached body from the old build still decodes
   (unknown keys are ignored).
-- `shape(of:)` meters the `gemini` pool only; `3p-*` returns nil (skipped),
-  and the third-party constants (`thirdPartyName`, `thirdPartyScope`,
-  `shortWindow`) and the rank-2 branch go.
-- `pricingSelector` → `PricingFeedSelector.gemini`; `modelCatalog` →
-  `.gemini` (checked in the build: how Gemini's grammar displays a
-  non-Gemini id; if it mangles one, a generic fallback for unclaimed ids,
-  never Claude's or Codex's grammar).
-- Labels, ids, ranks, the Gemini scope and the rolled-window rule:
-  unchanged. No history exists under the pool's labels on any install (no
-  reading ever landed: the status line was never set up and #36 is
-  unreleased), so dropping them strands nothing. The build checks anyway
-  that no view lists a label without a current meter.
+- `shape(of:)` becomes an explicit table of the ids the provider meters —
+  `gemini-5h`, `gemini-weekly`, `3p-5h`, `3p-weekly`,
+  `gemini-argon-wtu-weekly` — and everything else returns nil. The window
+  comes from the id as today, and must agree with the bucket's own `window`
+  field when it states one, or the bucket is dropped. Scoped meters sort in
+  the vendor's own order (the pool, then Argon), then by window.
+- An untouched pool (fraction 1, epoch reset) is a real meter: 0% used, no
+  reset, never a dash.
+- `pricingSelector` and `modelCatalog`: unchanged. The rates-listing hook
+  (`UsageProvider.listsUnseenRate(_ modelID:)`, default true): Antigravity
+  answers true only for ids Gemini's grammar claims, so its rates table is
+  its seen models plus Gemini's slice. The app's `CostRatesCard.tableIDs`
+  (and the cost picker built from it) consult it, and any core rates listing
+  found in the build follows the same rule.
+- Labels, ids, ranks, scopes and the rolled-window rule: unchanged for the
+  four #36 meters; "Argon (7d)" is new (a new label, not a rename — no
+  history to migrate). It avoids "Weekly", so `usage-cli limits weekly`
+  still names one meter.
 
 ### The status line
 
@@ -348,10 +362,11 @@ machine is simply never read again.
   `~/.gemini/antigravity-cli` when it runs". Rendered generically from the
   declaration; the app names no vendor.
 - Settings caption: drops the status-line sentence.
-- The snapshot hatch's Antigravity cell: S·W (no C).
-- `docs/HARNESSES.md` (user section: "nothing to set up", Gemini only;
-  internals: the probe, LIMITS rewritten, TWO POOLS replaced by "one pool
-  metered, Gemini-scoped; a non-Gemini call counts unpriced"),
+- The snapshot hatch's Antigravity cell: S·W plus the scoped segment, as
+  today; one more case with Argon as the most-used scoped meter (tag A).
+- `docs/HARNESSES.md` (user section: "nothing to set up"; internals: the
+  probe, LIMITS rewritten with the real ids and Argon, TWO POOLS becomes
+  THREE POOLS with the exclusion, the rates-listing rule),
   `docs/PRIVACY.md`, spec §10, CLAUDE.md, `docs/CLI.md` (verb
   removed), `docs/DAEMON.md` (carve-out removed; the probe runs in the engine
   host), `docs/ARCHITECTURE.md` (one line on the seam), README privacy
@@ -382,12 +397,16 @@ machine is simply never read again.
   0–2 (`/bin/sh -c 'ls /dev/fd'`); missing executable → launch failure.
 - Host opt-in: a host built without a runner never constructs a probe.
 - The removed status-line tests go; the meters/rolled-window tests stay.
-- Gemini-only: `3p-*` buckets produce no meter; the two Gemini meters keep
-  their scope and lockout; the pricing selector excludes Anthropic and
-  OpenAI feed rows; a transcript call on a `claude-*` id counts its tokens
-  and prices to null. Every test, fixture and snapshot model expecting
-  S·W·C (the snapshot hatch's Antigravity segments, the digest goldens if
-  any carry the pool) moves to S·W.
+- Pools: today's real reading → Session 25%, Weekly 23%, Claude + GPT (5h)
+  0% and (7d) 0% with no reset, Argon (7d) 2%, in that order; a reading
+  without the pool → no pool meters; a reading without Argon → no Argon
+  meter and no exclusion on the Gemini meters; with Argon present a
+  `gemini-4-argon` call counts toward Argon's curve and not Gemini's;
+  `Meter.inScope` with exclusions; lockouts: the Gemini 5h still gates the
+  Gemini weekly, the pool's 5h its 7d, and nothing gates across pools.
+- Rates listing: Antigravity lists its seen models plus Gemini's rows, and
+  an unseen `claude-*` row is not listed (but still prices a seen one);
+  every other harness lists exactly what it lists today.
 
 ## Verification
 
@@ -422,11 +441,19 @@ machine is simply never read again.
 6. `~/.antigravity/antigravity/bin/agy` is excluded from the candidates (the
    brief listed it; it is the editor).
 7. No plan name for Antigravity (`/quota` has no tier).
-8. The Gemini meters keep `modelScope: ["gemini"]` after the pool goes, so
-   the generic scope machinery stays (still used, nothing removed from the
-   digest).
-9. Gemini-only catalog: Gemini's grammar alone, with a generic fallback for
-   ids it doesn't claim if the build shows it needs one.
+8. Argon's separate weekly (the lead's recommendation from the person's
+   screen) is a scoped meter labelled "Argon (7d)" — not "Weekly · Argon",
+   which would make `usage-cli limits weekly` match two meters — shown
+   whenever the reading reports it (FINAL: no gating).
+9. The additive core `modelScopeExcluded` field, so Argon's separate quota
+   isn't double-counted in the Gemini meters' curves and overshoot. Fallback
+   if it proves bigger than planned: no exclusion, overlap documented.
+10. Rates listings: seen models first, then only the provider's own unseen
+    rows (Gemini's for Antigravity); pricing itself keeps all three slices.
+11. Bar density: S · W · one scoped segment (the most-used scoped meter,
+    the existing rule); the panel, TUI and CLI list every meter.
+12. Scoped meters in the vendor's order: Claude + GPT (5h), (7d), then
+    Argon (7d).
 
 ## Found (belongs elsewhere)
 
@@ -442,8 +469,8 @@ machine is simply never read again.
 1. The §10 amendment: SPEC §10, PRIVACY.md, CLAUDE.md. Commit.
 2. Core runner + tests (system binaries). Commit.
 3. Gate, store, probe + tests (fake runner). Commit.
-4. Provider command, reducer, fixtures, fetch, Gemini-only meters, prices
-   and catalog + tests. Commit.
+4. Provider command, reducer, fixtures, fetch, the Argon meter, the scope
+   exclusion, the rates-listing hook + tests. Commit.
 5. Service/engine/host hook, error cases, focus check + tests. Commit.
 6. Status-line removal, UI strings, privacy card, docs, release note. Gate.
 7. Live check, path listing, snapshots. BUILD DONE.
