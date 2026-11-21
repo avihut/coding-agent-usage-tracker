@@ -24,6 +24,10 @@ struct SessionRow: View {
     /// has ever been observed — one account everywhere would say nothing.
     /// Nil or empty renders nothing.
     var accounts: [String]? = nil
+    /// The agent's mark before the title — only where rows of several
+    /// agents share one list (the panel strip under a merged Activity
+    /// scope). Nil renders nothing.
+    var mark: (style: HarnessStyle, name: String)? = nil
     var isEditingTitle = false
     var onBeginRename: (() -> Void)? = nil
     var onCommitRename: ((String) -> Void)? = nil
@@ -39,6 +43,13 @@ struct SessionRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
+                if let mark {
+                    HarnessMark(style: mark.style, ink: 10)
+                        .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
+                        .padding(.trailing, -3)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(mark.name)
+                }
                 title
                 Spacer(minLength: 4)
                 keyValue

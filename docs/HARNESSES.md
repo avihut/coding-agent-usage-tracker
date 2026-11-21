@@ -20,6 +20,11 @@ runs two at once — work in `~/.claude`, personal in `~/.claude-personal`.
 Since v0.96.0 the app meters each of them as its own **account**: its own
 token, its own limits, its own history, its own directory under the app's
 scope. There is no blending — two accounts are two meters, never one sum.
+That holds for LIMITS. Consumption is a different reading: tokens and
+list-price cost do add up across accounts and agents, so the Activity
+section's scope (default "All agents", user-directed 2026-11-21) totals
+every account on the strip while each limit stays its own meter — see
+[CHARTS.md](CHARTS.md#the-consumption-scope).
 
 What this reads, and why it adds no network destination, is in
 [PRIVACY.md](PRIVACY.md#several-agent-homes-no-new-destination).
@@ -619,4 +624,6 @@ succeeds it for Google's plans, and it stays metered for API-key use.
   personal→work switch an hour ago) — the auto-show gate can't be
   produced on demand on a one-account machine.
 - Deliberately deferred (ledger): TUI/statusline rendering of the labels,
-  heatmap-by-account, an explicit user-initiated "claim history" backfill.
+  heatmap-by-account (since 2026-11-21 the Activity section's consumption
+  scope narrows to one account or totals several — CHARTS.md), an explicit
+  user-initiated "claim history" backfill.

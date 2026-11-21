@@ -11,11 +11,13 @@ struct UsagePanelView: View {
     /// optionally landed on one card (an account-found notice's
     /// click-through goes straight to Accounts).
     let onOpenSettings: (SettingsLanding?) -> Void
-    /// Same shape for the Sessions window.
-    let onOpenSessions: () -> Void
+    /// Same shape for the Sessions window — of this account (a ProfileKey),
+    /// or the focused one when nil.
+    let onOpenSessions: (String?) -> Void
     /// The shortlist's click-through: opens the Sessions window landed on
-    /// the clicked session.
-    let onOpenSession: (String) -> Void
+    /// the clicked session — of the account that owns it (a merged Activity
+    /// scope lists several accounts' sessions): `(session id, ProfileKey)`.
+    let onOpenSession: (String, String) -> Void
     /// Coordinate space the row-frame preferences are measured in — the same
     /// view the shared popover attaches to, so its anchor rects line up.
     static let panelSpace = "usage-panel"
@@ -66,6 +68,46 @@ struct UsagePanelView: View {
     /// The focused account's face — every existing call site reads it.
     private var store: UsageStore { registry.focusedStore }
 
+    // MARK: - Consumption scope
+
+    /// Whose consumption the section counts — every agent by default,
+    /// independent of focus; the registry keeps (and persists) the choice.
+    private var activityScope: ConsumptionScope { registry.consumptionScope }
+
+    /// Whose consumption the section shows. With one account there is no
+    /// choice and it is the focused store, exactly as it always was.
+    private var activityStores: [UsageStore] {
+        let members = registry.consumptionMembers
+        guard ConsumptionScope.showsMenu(members) else { return [store] }
+        let stores = registry.consumptionStores(activityScope)
+        return stores.isEmpty ? [store] : stores
+    }
+
+    /// What resets the Activity and Sessions subtree: the scope — never a
+    /// focus change, which only moves whose LIMITS lead. With no scope menu
+    /// the section is the focused account's, so focus it stays.
+    private var activityScopeID: String {
+        ConsumptionScope.showsMenu(registry.consumptionMembers)
+            ? "scope:" + activityScope.rawValue : registry.focusedID
+    }
+
+    private var scopeMenu: ActivityScopeMenu? {
+        let members = registry.consumptionMembers
+        guard ConsumptionScope.showsMenu(members) else { return nil }
+        return ActivityScopeMenu(
+            options: ConsumptionScope.options(for: members),
+            selection: activityScope,
+            onSelect: { registry.setConsumptionScope($0) },
+            entries: registry.scopeMenuEntries(members))
+    }
+
+    /// A new scope's accounts get the panel-open nudge too — never the
+    /// focused store again (a second request inside the throttle's minute
+    /// owes it a catch-up scan after the panel has closed).
+    private func scanScopeStores() {
+        for owner in activityStores where owner !== store { owner.scanActivity() }
+    }
+
     private var accountForm: PanelAccountForm {
         PanelAccountForm(rawValue: accountFormRaw) ?? .standard
     }
@@ -93,54 +135,51 @@ struct UsagePanelView: View {
         VStack(alignment: .leading, spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    AccountStrip(
-                        registry: registry, form: accountForm,
-                        onSetForm: { accountFormRaw = $0.rawValue },
-                        onFocus: { registry.focus($0) },
-                        onAuto: { registry.pin(nil) })
-                        // Two fingers across the strip step through the
-                        // accounts — the heatmap pager's gesture and its
-                        // sign convention (fingers left = the next one).
-                        // Attached here, not inside the strip: an
-                        // NSViewRepresentable in that view would render as
-                        // a placeholder in every headless snapshot.
-                        .background(HorizontalSwipeCatcher(
-                            enabled: registry.shownProfiles.count > 1 && accountForm != .stacked
-                        ) { direction in
-                            if let next = AccountStrip.step(
-                                direction, in: registry.shownProfiles, focusedID: registry.focusedID)
-                            {
-                                registry.focus(next)
-                            }
-                        })
-                    noticesSection
-                    serviceStatusSection
-                    errorBlock
-                    content
-                    statusRow
-                    Divider()
-                    HeatmapView(
-                        activity: store.activity, pricing: store.pricing,
-                        weeklyProfile: store.weeklyProfile,
-                        agentName: store.provider.agentName,
-                        style: store.style,
-                        focus: $activityFocus,
-                        samples: store.samples,
-                        timeline: store.tokenTimeline,
-                        sessions: store.sessions,
-                        windowOutcomes: store.windowOutcomes,
-                        outages: store.outages,
-                        onOpenOutage: openOutage,
-                        sessionAuditMeter: auditMeter(rank: 0),
-                        weeklyAuditMeter: auditMeter(rank: 1))
-                    sessionsSection
+                    VStack(alignment: .leading, spacing: 12) {
+                        AccountStrip(
+                            registry: registry, form: accountForm,
+                            onSetForm: { accountFormRaw = $0.rawValue },
+                            onFocus: { registry.focus($0) },
+                            onAuto: { registry.pin(nil) })
+                            // Two fingers across the strip step through the
+                            // accounts — the heatmap pager's gesture and its
+                            // sign convention (fingers left = the next one).
+                            // Attached here, not inside the strip: an
+                            // NSViewRepresentable in that view would render as
+                            // a placeholder in every headless snapshot.
+                            .background(HorizontalSwipeCatcher(
+                                enabled: registry.shownProfiles.count > 1 && accountForm != .stacked
+                            ) { direction in
+                                if let next = AccountStrip.step(
+                                    direction, in: registry.shownProfiles, focusedID: registry.focusedID)
+                                {
+                                    registry.focus(next)
+                                }
+                            })
+                        noticesSection
+                        serviceStatusSection
+                        errorBlock
+                        content
+                        statusRow
+                    }
+                    // Switching accounts crossfades the limits (the drill
+                    // idiom) — a fresh subtree, so nothing of the previous
+                    // account's meters or hover state lingers.
+                    .id(isStacked ? "stacked" : registry.focusedID)
+                    .transition(.opacity)
+                    .animation(.easeInOut(duration: 0.16), value: registry.focusedID)
+                    // Consumption answers to its own scope: a focus change
+                    // leaves the chart, its page, drill and lens alone; a
+                    // scope change crossfades it fresh.
+                    VStack(alignment: .leading, spacing: 12) {
+                        Divider()
+                        activitySection
+                        sessionsSection
+                    }
+                    .id(activityScopeID)
+                    .transition(.opacity)
+                    .animation(.easeInOut(duration: 0.16), value: activityScopeID)
                 }
-                // Switching accounts crossfades everything below the strip
-                // (the drill idiom) — a fresh subtree, so nothing of the
-                // previous account's chart or hover state lingers.
-                .id(isStacked ? "stacked" : registry.focusedID)
-                .transition(.opacity)
-                .animation(.easeInOut(duration: 0.16), value: registry.focusedID)
                 .padding(.horizontal, 14)
                 .padding(.top, 14)
                 .padding(.bottom, 10)
@@ -211,10 +250,15 @@ struct UsagePanelView: View {
             hoveredMeter = nil
             statusAnchor = nil
             litReset = nil
-            activityFocus = nil
-            hoveredSession = nil
             meterFrames = [:]
             store.scanActivity()
+        }
+        // The navigated span and the hovered row name moments of the
+        // section's accounts; they go with a scope change, not with focus.
+        .onChange(of: activityScopeID) { _, _ in
+            activityFocus = nil
+            hoveredSession = nil
+            scanScopeStores()
         }
         // Re-sync the login-item mirror between panel sessions: the user
         // can flip registration in Settings or System Settings while the
@@ -693,7 +737,7 @@ struct UsagePanelView: View {
                     }
                 }
                 if store.providesSessions {
-                    Button("Sessions…") { onOpenSessions() }
+                    Button("Sessions…") { onOpenSessions(nil) }
                         .keyboardShortcut("1", modifiers: .command)
                 }
                 Button("Settings…") { onOpenSettings(nil) }
@@ -788,10 +832,14 @@ struct UsagePanelView: View {
     /// section is navigated (paged window or drilled day) the strip follows
     /// it, labels the span, and states emptiness rather than vanishing.
     @ViewBuilder private var sessionsSection: some View {
-        let shortlist = SessionShortlist.build(store.sessions, in: activityFocus)
-        if store.providesSessions,
+        let shortlist = sessionShortlist
+        if shortlist.provides,
            !shortlist.rows.isEmpty || shortlist.hasMore || activityFocus != nil {
-            let colors = shortlistColors
+            let marked = Set(activityStores.map(\.provider.id)).count > 1
+            // Once per owner per pass — the palette walks every session.
+            let colors = Dictionary(
+                activityStores.map { ($0.profile.key, shortlistColors(of: $0, marked: marked)) },
+                uniquingKeysWith: { first, _ in first })
             Divider()
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .firstTextBaseline) {
@@ -812,12 +860,12 @@ struct UsagePanelView: View {
                         .padding(.horizontal, 4)
                         .padding(.vertical, 2)
                 }
-                ForEach(shortlist.rows) { session in
-                    shortlistRow(session, colors: colors)
+                ForEach(shortlist.rows) { owned in
+                    shortlistRow(owned, colors: colors[owned.owner] ?? [:], marked: marked)
                 }
                 if shortlist.hasMore {
                     Button {
-                        onOpenSessions()
+                        onOpenSessions(shortlist.moreOwner)
                     } label: {
                         Text("Show more…")
                             .font(.caption)
@@ -835,8 +883,8 @@ struct UsagePanelView: View {
     /// The meter the audit surfaces read at this rank (0 session, 1 weekly):
     /// its label keys the samples/ledger; a meter without a known window
     /// length can't place cliffs, so it offers no audit.
-    private func auditMeter(rank: Int) -> AuditMeterInfo? {
-        guard let meter = store.state.snapshot?.meters.first(where: { $0.rank == rank }),
+    private func auditMeter(rank: Int, of owner: UsageStore) -> AuditMeterInfo? {
+        guard let meter = owner.state.snapshot?.meters.first(where: { $0.rank == rank }),
               let window = meter.limitWindow
         else { return nil }
         return AuditMeterInfo(label: meter.label, window: window)
@@ -859,39 +907,112 @@ struct UsagePanelView: View {
         return formatter
     }()
 
+    /// The strip's rows for the section's scope: one account's shortlist as
+    /// it always was, or every in-scope account's sessions merged newest
+    /// first, each row carrying its owner.
+    /// `moreOwner` is whose Sessions window "Show more…" opens: the one
+    /// account's, or under a merged scope the account of the newest session
+    /// the strip hides.
+    private var sessionShortlist: (
+        rows: [OwnedSession], hasMore: Bool, provides: Bool, moreOwner: String?
+    ) {
+        let stores = activityStores
+        if stores.count <= 1 {
+            let owner = stores.first ?? store
+            let shortlist = SessionShortlist.build(owner.sessions, in: activityFocus)
+            return (shortlist.rows.map { OwnedSession(owner: owner.profile.key, session: $0) },
+                    shortlist.hasMore, owner.providesSessions, owner.profile.key)
+        }
+        let providing = stores.filter(\.providesSessions)
+        let merged = ConsumptionMerge.sessions(
+            providing.map { (owner: $0.profile.key, sessions: $0.sessions) }, in: activityFocus)
+        return (merged.rows, merged.hasMore, !providing.isEmpty,
+                merged.nextOwner ?? providing.first?.profile.key)
+    }
+
     /// The same palette input as the sessions window — the union over every
     /// session's models — so a model's dot color matches across surfaces.
-    private var shortlistColors: [String: Color] {
+    /// Beside other agents' rows, the agent's own tones instead, matching
+    /// the merged chart above.
+    private func shortlistColors(of owner: UsageStore, marked: Bool) -> [String: Color] {
         var models: Set<String> = []
-        for session in store.sessions { models.formUnion(session.models.keys) }
-        return ModelPalette.assignment(for: models.sorted(), style: store.style)
+        for session in owner.sessions { models.formUnion(session.models.keys) }
+        return marked
+            ? ModelPalette.agentShades(for: models.sorted(), style: owner.style)
+            : ModelPalette.assignment(for: models.sorted(), style: owner.style)
     }
 
     /// One shortlist entry: the sidebar's full session card, wrapped in the
-    /// panel's hover/click chrome.
-    private func shortlistRow(_ session: SessionSummary, colors: [String: Color]) -> some View {
-        SessionRow(
+    /// panel's hover/click chrome — priced, colored and labeled by the
+    /// account that owns it.
+    private func shortlistRow(
+        _ owned: OwnedSession, colors: [String: Color], marked: Bool
+    ) -> some View {
+        let owner = registry.store(for: owned.owner) ?? store
+        let session = owned.session
+        return SessionRow(
             session: session,
-            cost: SessionsView.cost(of: session, pricing: store.pricing),
+            cost: SessionsView.cost(of: session, pricing: owner.pricing),
             colors: colors,
             // Same auto-show rule as the sidebar (D4).
-            accounts: (store.accountPresence?.distinctAccounts ?? 0) >= 2
-                ? store.sessionAccountLabels(session) : nil)
+            accounts: (owner.accountPresence?.distinctAccounts ?? 0) >= 2
+                ? owner.sessionAccountLabels(session) : nil,
+            mark: marked ? (owner.style, owner.provider.agentName) : nil)
             .padding(.horizontal, 6)
             .padding(.vertical, 3)
             .background(
                 RoundedRectangle(cornerRadius: 5)
-                    .fill(Color.primary.opacity(hoveredSession == session.id ? 0.07 : 0)))
+                    .fill(Color.primary.opacity(hoveredSession == owned.id ? 0.07 : 0)))
             .contentShape(Rectangle())
             .onHover { inside in
                 if inside {
-                    hoveredSession = session.id
-                } else if hoveredSession == session.id {
+                    hoveredSession = owned.id
+                } else if hoveredSession == owned.id {
                     hoveredSession = nil
                 }
             }
             .pointerStyle(.link)
-            .onTapGesture { onOpenSession(session.id) }
+            .onTapGesture { onOpenSession(session.id, owned.owner) }
+    }
+
+    /// The Activity section for the scope: one account's section as it
+    /// always was (narrowed to an account, or the only one there is), or the
+    /// merged reading of several — no per-account limit readings there.
+    @ViewBuilder private var activitySection: some View {
+        let stores = activityStores
+        if stores.count > 1 {
+            let input = registry.consumptionInput(for: stores)
+            HeatmapView(
+                activity: input.days, pricing: input.pricing,
+                weeklyProfile: nil,
+                agentName: stores[0].provider.agentName,
+                style: stores[0].style,
+                focus: $activityFocus,
+                samples: [], timeline: [], sessions: [], windowOutcomes: [],
+                sessionAuditMeter: nil, weeklyAuditMeter: nil,
+                consumption: input, scopeMenu: scopeMenu)
+        } else {
+            let owner = stores.first ?? store
+            HeatmapView(
+                activity: owner.activity, pricing: owner.pricing,
+                weeklyProfile: owner.weeklyProfile,
+                agentName: owner.provider.agentName,
+                style: owner.style,
+                focus: $activityFocus,
+                samples: owner.samples,
+                timeline: owner.tokenTimeline,
+                sessions: owner.sessions,
+                windowOutcomes: owner.windowOutcomes,
+                outages: owner.outages,
+                onOpenOutage: { span in
+                    if let url = owner.provider.outageDestination(url: span.url) {
+                        NSWorkspace.shared.open(url)
+                    }
+                },
+                sessionAuditMeter: auditMeter(rank: 0, of: owner),
+                weeklyAuditMeter: auditMeter(rank: 1, of: owner),
+                scopeMenu: scopeMenu)
+        }
     }
 
     /// The freshness stamp alone — the two-line row's top-left cell.

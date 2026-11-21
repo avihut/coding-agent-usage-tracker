@@ -44,6 +44,13 @@ struct HeatmapView: View {
     var onOpenOutage: ((OutageSpan) -> Void)? = nil
     let sessionAuditMeter: AuditMeterInfo?
     let weeklyAuditMeter: AuditMeterInfo?
+    /// A merged consumption scope (more than one account): the outline
+    /// replaces the per-model table, colors come from the scope, and the
+    /// per-account readings (typical week, limit-window views) step aside.
+    /// Nil is the single-account section, exactly as it always was.
+    var consumption: ConsumptionInput? = nil
+    /// The scope control beside the title, while there is a choice.
+    var scopeMenu: ActivityScopeMenu? = nil
 
     enum Period: String, CaseIterable, Identifiable {
         case week = "7D"
@@ -107,6 +114,10 @@ struct HeatmapView: View {
     /// Rebuilt only when the activity or the period changes — never per cell
     /// and never on hover. See `HeatmapLayout`.
     @State private var layout: HeatmapLayout = .empty
+    /// The merged scope's breakdown over the shown window, rebuilt with the
+    /// layout; and the outline row the cursor is on (its keys light up).
+    @State private var outline: ConsumptionOutline = .empty
+    @State private var hoveredNode: ConsumptionOutline.Node?
 
     private static let levelOpacities: [Double] = [0.3, 0.55, 0.78, 1.0]
     /// Push/pop feel for the day drill-down.
@@ -135,7 +146,7 @@ struct HeatmapView: View {
             if pageOffset == 0, layout.isEmpty, !layout.hasOlder {
                 VStack(alignment: .leading, spacing: 8) {
                     titleRow
-                    Text("No local \(agentName) activity found")
+                    Text(consumption == nil ? "No local \(agentName) activity found" : "No local activity found")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -168,6 +179,11 @@ struct HeatmapView: View {
             }
         }
         .onChange(of: activity, initial: true) { rebuildLayout(for: period) }
+        // Prices land after the first scan (a feed refresh, a harness whose
+        // rates arrive late): the cost index and outline follow them.
+        .onChange(of: pricing) { rebuildLayout(for: period) }
+        // An account joining or leaving the scope (idle ones add no days).
+        .onChange(of: consumption?.accounts.map(\.member)) { rebuildLayout(for: period) }
         .onChange(of: layout) {
             // A rebuild can drop the drilled day (aged out of the window);
             // pop back rather than point at nothing.
@@ -184,6 +200,7 @@ struct HeatmapView: View {
         .onReceive(NotificationCenter.default.publisher(for: .panelDidClose)) { _ in
             selectedDay = nil
             hoveredModel = nil
+            hoveredNode = nil
             hoveredDay = nil
             outgoingStep = nil
             slideX = 0
@@ -217,12 +234,47 @@ struct HeatmapView: View {
 
     /// The period's models, heaviest first — the row order of the summary
     /// grid and the rank that assigns legend colors.
+    /// In a merged scope the outline's order instead — agent by agent — so
+    /// the bars stack each agent's models together.
     private var summaryRows: [ModelTokenUsage] {
-        WindowTokens.rows(from: layout.modelTotals)
+        guard consumption != nil else { return WindowTokens.rows(from: layout.modelTotals) }
+        return outline.modelOrder.compactMap { key in
+            layout.modelTotals[key].map { ModelTokenUsage(model: key, tally: $0) }
+        }
     }
 
     private var modelColors: [String: Color] {
-        ModelPalette.assignment(for: summaryRows.map(\.model), style: style)
+        consumption?.colors ?? ModelPalette.assignment(for: summaryRows.map(\.model), style: style)
+    }
+
+    /// The chart keys the legend points at: one model row, or every key
+    /// under an outline row (an agent, an account, a family). Nil = none.
+    private var highlightKeys: Set<String>? {
+        // A row with no chart keys (an agent that reports no tokens) names
+        // itself in the stats line but dims nothing.
+        if let hoveredNode { return hoveredNode.keys.isEmpty ? nil : hoveredNode.keys }
+        return hoveredModel.map { [$0] }
+    }
+
+    private func isHighlighted(_ model: String) -> Bool {
+        highlightKeys?.contains(model) ?? true
+    }
+
+    /// The color that stands for the highlight: its first model's, or the
+    /// agent's own accent for an agent row.
+    private var highlightColor: Color? {
+        if let hoveredNode {
+            if case .agent(let agent) = hoveredNode.kind, let face = consumption?.agents[agent] {
+                return face.style.accentColor
+            }
+            return Self.firstKey(hoveredNode).flatMap { modelColors[$0] } ?? accent
+        }
+        return hoveredModel.map { modelColors[$0] ?? accent }
+    }
+
+    private static func firstKey(_ node: ConsumptionOutline.Node) -> String? {
+        if case .model(let key, _) = node.kind { return key }
+        return node.children.first.flatMap(firstKey)
     }
 
     // MARK: - Period mode
@@ -239,6 +291,7 @@ struct HeatmapView: View {
     private var titleRow: some View {
         HStack(spacing: Self.headerSpacing) {
             Text("Activity").font(.caption.bold())
+            if let scopeMenu { scopeMenu }
             Spacer()
             if period == .week, weeklyAuditMeter != nil {
                 auditToggle(
@@ -338,15 +391,16 @@ struct HeatmapView: View {
             // Fixed height so hover swaps can never reflow the layout —
             // wrapping stats used to shift the legend rows mid-hover.
             HStack(spacing: 5) {
-                if let hoveredModel {
+                if let highlightColor {
                     Circle()
-                        .fill(modelColors[hoveredModel] ?? accent)
+                        .fill(highlightColor)
                         .frame(width: 6, height: 6)
                 }
                 Text(footerStats)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                    .modifier(TokenizerNote(shown: consumption?.spansAgents == true))
                 Spacer(minLength: 8)
                 // The less→more ramp explains calendar-cell tinting; the 7D
                 // bars say magnitude with height, so there it's just noise.
@@ -376,12 +430,20 @@ struct HeatmapView: View {
             .background(HorizontalSwipeCatcher(enabled: period != .all) { direction in
                 pageStep(direction)
             })
-            if period == .week {
+            // The typical week is one account's learned rhythm — it steps
+            // aside in a merged scope rather than claim a total's shape.
+            if period == .week, consumption == nil {
                 weeklyTrendCaption
             }
-            ModelBreakdownGrid(
-                rows: summaryRows, colors: modelColors, pricing: pricing,
-                hoveredModel: $hoveredModel)
+            if let consumption {
+                ConsumptionOutlineGrid(
+                    outline: outline, input: consumption, hoveredNode: $hoveredNode,
+                    litModel: hoveredModel)
+            } else {
+                ModelBreakdownGrid(
+                    rows: summaryRows, colors: modelColors, pricing: pricing,
+                    hoveredModel: $hoveredModel)
+            }
         }
     }
 
@@ -420,6 +482,18 @@ struct HeatmapView: View {
     /// "7.3B tokens · 24 active days" (or "≈ $6,860 · …" in cost mode) —
     /// scoped to the hovered model while the legend is filtering the chart.
     private var footerStats: String {
+        if let node = hoveredNode, let consumption {
+            let title = consumption.title(for: node)
+            guard node.reportsTokens else { return "\(title) · \(node.prompts) prompts · reports no tokens" }
+            let days = layout.byDay.values.count { entry in
+                node.keys.contains { (entry.models[$0]?.total ?? 0) > 0 }
+            }
+            let value = switch dimension {
+            case .tokens: "\(TokenFormat.compact(node.tokens)) tokens"
+            case .cost: node.cost.map { "≈ \(UsageFormatting.money($0))" } ?? "—"
+            }
+            return "\(title) · \(value) · \(days) active days"
+        }
         if let hoveredModel, let tally = layout.modelTotals[hoveredModel] {
             let days = layout.byDay.values.count(
                 where: { ($0.models[hoveredModel]?.total ?? 0) > 0 })
@@ -427,15 +501,17 @@ struct HeatmapView: View {
             case .tokens:
                 "\(TokenFormat.compact(tally.total)) tokens"
             case .cost:
-                "≈ \(UsageFormatting.money(pricing.rates(for: hoveredModel)?.dollars(for: tally) ?? 0))"
+                // Absent ≠ zero: an unpriced model has no cost to state.
+                pricing.rates(for: hoveredModel).map { "≈ \(UsageFormatting.money($0.dollars(for: tally)))" } ?? "—"
             }
             return "\(ModelNames.display(hoveredModel)) · \(value) · \(days) active days"
         }
         let value = switch dimension {
         case .tokens: "\(TokenFormat.compact(layout.totalTokens)) tokens"
-        case .cost: "≈ \(UsageFormatting.money(costIndex.total))"
+        case .cost: costText(costIndex.byDay.isEmpty ? nil : costIndex.total, tokens: layout.totalTokens)
         }
-        let base = "\(value) · \(layout.activeDays) active days"
+        let counted = consumption.map { " · \($0.countLabel)" } ?? ""
+        let base = "\(value) · \(layout.activeDays) active days\(counted)"
         // Paged into the past, the stats line owns saying WHICH window.
         return rangeText.map { "\($0) · \(base)" } ?? base
     }
@@ -482,6 +558,26 @@ struct HeatmapView: View {
         layout = HeatmapLayout.build(
             activity: activity, dayCount: period.dayCount, pagesBack: pageOffset)
         costIndex = CostIndex.build(days: layout.byDay, pricing: pricing)
+        if let consumption {
+            // All folds versions by family — the long tail of a year of
+            // models reads as a handful of lines.
+            // The layout's own span on every period — All included, so
+            // the outline never counts a day the chart doesn't show.
+            outline = ConsumptionOutline.build(
+                consumption.accounts, in: layoutSpan, foldFamilies: period == .all)
+            // A hovered row is held by value: re-read it from the rebuilt
+            // outline so the stats line follows a live refresh.
+            if let held = hoveredNode { hoveredNode = outline.node(id: held.id) }
+        }
+    }
+
+    /// The shown window's days as a half-open interval.
+    private var layoutSpan: DateInterval? {
+        let days = layout.weeks.flatMap { $0 }.compactMap { $0 }
+        guard let first = days.first, let last = days.last,
+              let end = Calendar.current.date(byAdding: .day, value: 1, to: last)
+        else { return nil }
+        return DateInterval(start: first, end: end)
     }
 
     // MARK: - Dimension values
@@ -544,6 +640,7 @@ struct HeatmapView: View {
     private func drill(into day: Date) {
         guard spanContains(day) else { return }
         hoveredModel = nil
+        hoveredNode = nil
         hoveredDay = nil
         selectedDay = day
     }
@@ -611,6 +708,7 @@ struct HeatmapView: View {
             HStack(spacing: Self.headerSpacing) {
                 Button {
                     hoveredModel = nil
+                    hoveredNode = nil
                     selectedDay = nil
                     outgoingStep = nil
                     slideX = 0
@@ -690,9 +788,7 @@ struct HeatmapView: View {
             if dayStyleRaw == "timeline", let meter = sessionAuditMeter {
                 dayAuditChart(entry, meter: meter)
                 if !rows.isEmpty {
-                    ModelBreakdownGrid(
-                        rows: rows, colors: modelColors, pricing: pricing,
-                        hoveredModel: $hoveredModel)
+                    dayBreakdown(entry, rows: rows)
                 }
             } else if rows.isEmpty {
                 Text(Self.emptyDayNote(entry))
@@ -703,10 +799,27 @@ struct HeatmapView: View {
                     .frame(maxWidth: .infinity, minHeight: 132)
             } else {
                 dayRing(rows: rows, entry: entry, live: live)
-                ModelBreakdownGrid(
-                    rows: rows, colors: modelColors, pricing: pricing,
-                    hoveredModel: $hoveredModel)
+                dayBreakdown(entry, rows: rows)
             }
+        }
+    }
+
+    /// The drilled day's table: the per-model grid, or in a merged scope the
+    /// outline over that one day.
+    @ViewBuilder
+    private func dayBreakdown(_ entry: DailyActivity, rows: [ModelTokenUsage]) -> some View {
+        if let consumption {
+            let next = Calendar.current.date(byAdding: .day, value: 1, to: entry.day)
+                ?? entry.day.addingTimeInterval(86400)
+            ConsumptionOutlineGrid(
+                outline: ConsumptionOutline.build(
+                    consumption.accounts, in: DateInterval(start: entry.day, end: next),
+                    foldFamilies: false),
+                input: consumption, hoveredNode: $hoveredNode, litModel: hoveredModel)
+        } else {
+            ModelBreakdownGrid(
+                rows: rows, colors: modelColors, pricing: pricing,
+                hoveredModel: $hoveredModel)
         }
     }
 
@@ -745,7 +858,7 @@ struct HeatmapView: View {
                 innerRadius: .ratio(0.62),
                 angularInset: 1.5)
                 .foregroundStyle(modelColors[row.model] ?? accent)
-                .opacity(hoveredModel == nil || hoveredModel == row.model ? 1 : 0.25)
+                .opacity(isHighlighted(row.model) ? 1 : 0.25)
                 .cornerRadius(2)
         }
         .chartLegend(.hidden)
@@ -799,7 +912,7 @@ struct HeatmapView: View {
                                 .font(.caption2)
                                 .foregroundStyle(.tertiary)
                         case .cost:
-                            Text("≈ \(UsageFormatting.money(costIndex.byDay[entry.day] ?? 0))")
+                            Text(costText(costIndex.byDay[entry.day], tokens: entry.tokens))
                                 .font(.system(size: 15, weight: .semibold).monospacedDigit())
                             Text("est. cost")
                                 .font(.caption2)
@@ -1180,8 +1293,7 @@ struct HeatmapView: View {
 
     /// While the legend filters, only the hovered model's band stays lit.
     private func segmentOpacity(for model: String) -> Double {
-        guard let hoveredModel else { return 1 }
-        return hoveredModel == model ? 1 : 0.2
+        isHighlighted(model) ? 1 : 0.2
     }
 
     /// Render order is top→bottom, so the period's heaviest model sits at
@@ -1293,8 +1405,15 @@ struct HeatmapView: View {
     private func tooltipValue(_ entry: DailyActivity) -> String {
         switch dimension {
         case .tokens: "\(TokenFormat.compact(entry.tokens)) tokens"
-        case .cost: "≈ \(UsageFormatting.money(costIndex.byDay[entry.day] ?? 0))"
+        case .cost: costText(costIndex.byDay[entry.day], tokens: entry.tokens)
         }
+    }
+
+    /// Absent ≠ zero: tokens with nothing priced have no cost to state ("—");
+    /// no tokens at all is a true $0.
+    private func costText(_ dollars: Double?, tokens: Int) -> String {
+        if let dollars { return "≈ \(UsageFormatting.money(dollars))" }
+        return tokens > 0 ? "—" : "≈ \(UsageFormatting.money(0))"
     }
 
     // MARK: - Coloring
@@ -1303,7 +1422,10 @@ struct HeatmapView: View {
     /// access so a panel left open across midnight doesn't mark yesterday.
     private static var today: Date { Calendar.current.startOfDay(for: Date()) }
 
-    private var accent: Color { style.accentColor }
+    /// Several agents' total belongs to no one vendor, so its ramp is neutral.
+    private var accent: Color {
+        consumption?.spansAgents == true ? Color.primary : style.accentColor
+    }
     private static let emptyColor = Color.gray.opacity(0.18)
     /// Days known only from prompt history — Claude Code already deleted the
     /// transcripts, so activity is certain but its magnitude isn't.
@@ -1311,14 +1433,15 @@ struct HeatmapView: View {
 
     private func color(for entry: DailyActivity?) -> Color {
         guard let entry, entry.tokens > 0 || entry.prompts > 0 else { return Self.emptyColor }
-        if let hoveredModel {
-            // Legend filter: paint only this model's share, on its own
-            // scale, so a light model still shows its pattern.
-            let value = modelDayValue(entry, model: hoveredModel)
+        if let keys = highlightKeys {
+            // Legend filter: paint only the highlighted share, on its own
+            // scale, so a light model still shows its pattern. A group's
+            // scale is its members' maxima summed — an upper bound, cheap
+            // per cell.
+            let value = keys.reduce(0) { $0 + modelDayValue(entry, model: $1) }
             guard value > 0 else { return Self.emptyColor }
-            let maxValue = max(.leastNonzeroMagnitude, modelMaxValue(hoveredModel))
-            return ramp(modelColors[hoveredModel] ?? accent,
-                        fraction: value / maxValue)
+            let maxValue = max(.leastNonzeroMagnitude, keys.reduce(0) { $0 + modelMaxValue($1) })
+            return ramp(highlightColor ?? accent, fraction: value / maxValue)
         }
         guard entry.tokens > 0 else { return promptOnlyColor }
         let value = dayValue(entry)
@@ -1333,7 +1456,7 @@ struct HeatmapView: View {
     }
 
     private var legend: some View {
-        let base = hoveredModel.flatMap { modelColors[$0] } ?? accent
+        let base = highlightColor ?? accent
         return HStack(spacing: 2) {
             Text("less").font(.caption2).foregroundStyle(.tertiary)
             ForEach(0..<5, id: \.self) { level in
@@ -1445,4 +1568,18 @@ private struct AnimatableVector: VectorArithmetic {
     }
 
     var magnitudeSquared: Double { values.reduce(0) { $0 + $1 * $1 } }
+}
+
+/// The merged scope's stats-line tooltip; nothing at all where it would
+/// have nothing to say (the single-account line keeps no tooltip).
+private struct TokenizerNote: ViewModifier {
+    let shown: Bool
+
+    func body(content: Content) -> some View {
+        if shown {
+            content.help("Tokens as each vendor counts them — every agent's tokenizer is its own")
+        } else {
+            content
+        }
+    }
 }

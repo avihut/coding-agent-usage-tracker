@@ -386,6 +386,40 @@ per-harness geometry of the bar is in [HARNESSES.md](HARNESSES.md).
   .interactive (rollouts carry no headless marker), detail rows from
   user_message + token_count deltas. Gemini stays sessionless.
 
+## The panel's consumption scope
+
+- (2026-11-21, user-directed; the chart rules are in
+  [CHARTS.md](CHARTS.md#the-consumption-scope).) The panel below the
+  status row is TWO subtrees now: the strip, notices and meters keyed on
+  focus (`.id(focusedID)`, the old crossfade), and the Activity section
+  plus the Sessions strip keyed on the consumption scope
+  (`activityScopeID`). So a click on the account strip moves the limits
+  and leaves the chart, its page, drill and Tokens|Cost lens alone; a
+  scope change crossfades Activity fresh. With one account on the Mac the
+  scope id IS the focused id, and nothing changed.
+- The title row inventory at 360pt: "Activity", the scope menu (only with
+  more than one account), Spacer, the audit toggle (7D, single-account
+  scope only), Tokens|Cost, 7D|30D|All. The merged scope has no audit
+  toggle, which is what makes room for "All agents ▾".
+- The Sessions strip under a merged scope lists every in-scope account's
+  sessions newest first, each row wearing its agent's mark (an optional
+  `SessionRow.mark`, labeled for VoiceOver); `onOpenSession` carries
+  `(id, ProfileKey)` and `showSessions(selecting:in:)` opens the OWNER's
+  window — the window itself stays per account. "Show more…" opens the
+  window of the account the strip shows, or under a merged scope of the
+  account whose session is the newest one hidden
+  (`ConsumptionMerge.sessions` → `nextOwner`).
+- The scope lives on the registry (`consumptionScopeRaw`,
+  `setConsumptionScope`), persisted under `activityScope` — not an
+  `@AppStorage`, so `StatusItemController` and the panel read one value
+  and a demo can keep it off the live defaults.
+- Panel open scans the focused store and every OTHER store in scope, each
+  once (asking a hosted engine twice inside its throttle's minute owes it
+  a catch-up scan after the panel has closed); a scope change nudges the
+  new scope's other stores. Each store's own throttle allows one scan a
+  minute, so the panel adds at most one scan per in-scope account per
+  minute, and only while it is being used.
+
 ## Session rename, search and sort
 
 - SESSIONS RENAME + SEARCH/SORT (2026-08-17): titles are click-to-rename
@@ -449,8 +483,8 @@ per-harness geometry of the bar is in [HARNESSES.md](HARNESSES.md).
   `LaunchAgentInstaller.ensure` (so a demo launched from a worktree cannot
   repoint the real launch agent, the hatch-launch lesson), and an
   unreadable file exits 2 rather than falling through to real data under a
-  flag that promised none. Three leaks had to be closed, and any new
-  client-side read is a fourth: (1) a client face SCANS TRANSCRIPTS itself
+  flag that promised none. Four leaks have been closed, and any new
+  client-side read is a fifth: (1) a client face SCANS TRANSCRIPTS itself
   for the heatmap, the model table and the shortlist — the digest carries
   rollups, not those — so a demo `DigestClient` makes no local activity
   source (`scansLocally: false`) and takes `DigestActivity.daily/sessions`
@@ -459,7 +493,16 @@ per-harness geometry of the bar is in [HARNESSES.md](HARNESSES.md).
   `<bundleID>.demo`, a storage scope with nothing in it (nothing is
   written there either — checked: the directory is never created);
   (3) the account list comes from the digest's sections, not
-  `ProfileStore`. The one thing deliberately taken from this Mac is how
+  `ProfileStore`; (4) MODEL COLORS (closed after the fact, 2026-11-21): a
+  build run from a worktree carries the live install's bundle id, so its
+  `UserDefaults.standard` IS the live app's domain, and every chart's
+  `ModelPalette.assignment` grew the live per-harness color ledger with
+  the demo's model ids — a write to this Mac, and colors borrowed from it.
+  A demo registry sets `ModelPalette.isEphemeral`: ledgers live in memory,
+  starting empty. The Activity section's consumption scope, new since,
+  never became one: a demo registry reads it only from the launch
+  arguments (the volatile argument domain) and never writes it. The one
+  thing deliberately taken from this Mac is how
   the person DRAWS an account they also have (`menuBarForm`,
   `menuBarElements`), so the bar in the picture is the one they chose.
   What a demo can't show follows from (1): no minute timeline, no

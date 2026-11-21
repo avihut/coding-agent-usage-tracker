@@ -341,6 +341,88 @@ are produced is in [MEASUREMENT.md](MEASUREMENT.md).
   9 days") — the same countdown shows concretely in Settings → Usage,
   falling back to the raw sample span before the profile object exists.
 
+## The consumption scope
+
+User-directed 2026-11-21 ("I want to see a total of claude and codex
+together … a unified limit will not make sense because they don't tap from
+the same models. But for consumption it makes sense"). Design record:
+[plans/unified-consumption.md](plans/unified-consumption.md).
+
+- CONSUMPTION HAS A SCOPE OF ITS OWN, separate from focus. Focus decides
+  whose LIMITS lead the bar and the panel; the scope (`ConsumptionScope`,
+  core; `@AppStorage("activityScope")`, default `all`) decides whose
+  tokens and cost the Activity section and the Sessions strip count: all
+  agents, one agent, or one account of an agent that has several. A focus
+  change never narrows it, and never resets the section — Activity and
+  Sessions sit in a subtree keyed on the scope, the meters in one keyed on
+  focus. Limits are never summed anywhere.
+- WHO "ALL" IS: the strip's accounts (`shownProfiles`) minus hidden
+  harnesses (`ProviderRegistry.consumptionMembers`). Dormant and disabled
+  accounts stay out — while the app hosts they have no engine, so no
+  activity in memory, and counting them would need a scan of its own and
+  make the total depend on which process hosts.
+- ONE ACCOUNT IN SCOPE IS TODAY'S SECTION, fed from that account's store
+  with every per-account reading. With a single account on the Mac there
+  is no scope menu and the section is pixel-identical to before (checked
+  against the demo snapshot). The menu (`ActivityScopeMenu`) is a
+  borderless pull-down beside "Activity": "All agents ▾" (the audit
+  toggle is absent there, so it fits), narrowed to the agent's mark (plus
+  the account's letter) to fit the ~85pt beside the audit toggle.
+- SEVERAL ACCOUNTS ARE A MERGE, never a scan: `ConsumptionMerge.days`
+  sums each account's in-memory days into ONE entry per day under
+  composite keys `agent␟account␟model` (`ConsumptionKey`) — one entry per
+  day because `HeatmapLayout.build` keeps a day's first entry for its
+  cells but sums every entry into its totals; composite keys because two
+  agents both emit `unknown`. `ConsumptionMerge.pricing` prices each key
+  by its own harness's table, so the existing `CostIndex`, bars, heatmap
+  and ring work unchanged; `ModelNames.display/family` decode the key.
+  The input is memoized on the registry (`ConsumptionCache`: `==` on the
+  accounts' days and prices, identity-fast while the buffers are the
+  cached ones — a content-equal rescan's fresh buffers replace the key) —
+  the panel body re-evaluates on every hover.
+- THE OUTLINE (`ConsumptionOutline`, core; `ConsumptionOutlineGrid`)
+  replaces the per-model table: agent ▸ account ▸ model, the agent level
+  only when more than one agent is in scope, the account level only under
+  an agent with several. Agent and account rows start OPEN (they are the
+  bars' legend); on All, versions fold under a family row ("Sonnet 2",
+  folded). Hovering ANY row highlights exactly its keys (bars, ring,
+  heatmap re-ramp, stats line) — the single hovered model became a key
+  set; rows hover through `HoverProbe` (a model row presents its cost
+  math, and SwiftUI hover never returns to a row that has presented a
+  popover). A row with no chart keys (an agent that reports no tokens)
+  names itself in the stats line and dims nothing; only group rows (fold)
+  and model rows (cost math) take a click. The bars stack in outline order: agent by agent, heaviest at the
+  bottom. A cost is the sum of what is priced, "—" when nothing is; the
+  headline counts unpriced models. An agent whose traces carry no tokens
+  (`UsageProvider.reportsTokens == false`: Gemini CLI) keeps a row of
+  dashes and its prompt count, "not in the totals", and the stats line
+  says "2 of 3 agents"; its prompt days stay out of the merged days, so
+  they are neither active days nor passed off as another agent's swept
+  transcripts. One unpriced model used from two accounts counts once.
+  Cost readouts follow absent ≠ zero everywhere in the section: tokens
+  with nothing priced read "—" (stats line, ring centre, day tooltip).
+- COLORS: one agent in scope keeps the model colors it wears everywhere.
+  Several agents paint each model in its AGENT's accent at a tone picked
+  by the family's persistent ledger slot (`ModelColorMath.agentShade`;
+  versions step darker from a bright tone, lighter from a deep one) — two
+  vendors' second families both landed on the fixed blue before. Each
+  agent's ledger grows with its own raw ids only; `ModelPalette` refuses a
+  composite key. The heatmap ramp is neutral (`Color.primary`) when
+  agents share it — no one vendor owns the total.
+- WHAT STEPS ASIDE IN A MERGE: the typical-week overlay and its caption,
+  the 7D and day limit-window views and their toggles — all built from
+  one account's limit history. Tokens sum as each vendor counts them (a
+  `.help` on the stats line says so); cost is the cleaner common unit.
+- THE SESSIONS STRIP follows the scope: every in-scope account's sessions
+  merged newest-first by end (`ConsumptionMerge.sessions`; each scan is
+  end-descending only within itself), each row priced, colored and
+  labeled by its owner, wearing its agent's mark when several agents
+  share the list; a click opens the Sessions window of the row's
+  account (`showSessions(selecting:in:)`). Identity is owner + id.
+- Not yet (follow-ups in the design record): the Sessions window's own
+  scope, the total in the digest for the CLI and TUI, the family view at
+  every period.
+
 ## The window ledger and the audit views
 
 - WINDOW LEDGER + AUDIT VIEWS (v0.55.0/v0.58.0, user-directed — the

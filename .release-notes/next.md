@@ -26,6 +26,10 @@ Fixes
   as a fresh sign-up, which kept, for one, a deprecated Gemini CLI unused
   for half a year in the bar for another 30 days. It returns the moment
   it's used again.
+- A demo run (`--demo-digest`) no longer writes model colours into the
+  installed app's settings.
+- A cost with nothing priced behind it reads "—" instead of "$0" in the
+  Activity section's stats line, day ring and day tooltip.
 
 Features
 - Antigravity CLI is metered. It sits in the menu bar beside the other
@@ -39,3 +43,11 @@ Features
   show no longer takes the bar's lead unless you pin it.
 - Gemini CLI, which Antigravity succeeds for Google's plans, is labelled
   deprecated and stays metered for API-key use.
+- The panel's Activity section counts every agent's consumption together:
+  one token and list-price cost total for, say, Claude Code and Codex, broken
+  down agent by agent, account by account, model by model. Limits stay one
+  meter per account; they never add up. A menu beside "Activity" narrows it
+  to one agent or one account, and narrowed to one account the section
+  reads as it always did. With a single account there is no menu. The
+  Sessions strip follows the same choice, and clicking a merged row opens
+  that account's sessions.
