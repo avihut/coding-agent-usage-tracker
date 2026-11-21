@@ -15,11 +15,12 @@ In short:
 | reads `status.claude.com` | nothing — an anonymous conditional GET |
 | checks `api.github.com` for this repo's newest release | nothing — an anonymous conditional GET |
 | reads local files | each agent's own transcripts and session files, plus one key of `.claude.json`; read-only |
-| writes inside an agent home | exactly one key, `cleanupPeriodDays` in that home's `settings.json`, and only when you move the transcript-retention control in Settings |
-| keeps Antigravity's plan limits | in one file in its OWN folder, written only by `usage-cli export-statusline` when you make that your Antigravity status line; limits and plan tier only |
+| writes inside an agent home | exactly one key, `cleanupPeriodDays` in that home's `settings.json`, and only when you move the transcript-retention control in Settings; the Antigravity CLI it runs for limits stamps its own files there itself |
+| runs Antigravity's own CLI for its plan limits | `agy -p /quota` (its documented print mode) at most every 10 minutes while you use it; the CLI asks Google with its own sign-in, and only the limits are kept |
 
-No other network destination, no analytics, no telemetry. Codex, Gemini
-CLI and Antigravity CLI are metered from local files alone. The sections below are each
+No other network destination, no analytics, no telemetry. Codex and
+Gemini CLI are metered from local files alone; Antigravity CLI from its
+local files plus its own CLI's quota report (below). The sections below are each
 decision in full, in the maintainer's voice, in the order they were made.
 
 ## Why this is OK (policy note)
@@ -155,11 +156,12 @@ shared rather than once per harness. The privacy card lists every metered
 harness's hosts and files, one block each — what the app reads is the union,
 so the card that names it is too.
 
-## Antigravity CLI: local transcripts and a status-line export, no new destination
+## Antigravity CLI: local transcripts, and its own CLI for the limits
 
 (2026-11-21, user-directed.) Antigravity CLI succeeds Gemini CLI for
-Google's plans, and it is metered the way Codex is: from its own files,
-with no network destination and no credential.
+Google's plans. Its tokens come from its own files, with no network
+destination and no credential; its plan limits come from asking the CLI
+itself.
 
 **What it reads, read-only.** The file NAMES in
 `~/.gemini/antigravity-cli/conversations/` — never a conversation
@@ -173,34 +175,67 @@ worktrees), and never opens the CLI's credential or state files, or
 anything belonging to the Antigravity app.
 
 **Where the plan limits come from.** Antigravity keeps its quota on Google's
-servers; nothing on disk holds it, and the only routes to it that other
-trackers use — the language server's local port, the CLI's own OAuth
-credential, scripting the CLI's `/usage` screen — each mean a credential,
-a process or a sign-in this app does not touch. What Antigravity DOES offer
-is its documented custom status line: on every redraw it runs a command you
-choose and hands it a JSON payload that includes the quota. So the limits
-are opt-in, and you install them yourself:
+servers; nothing on disk holds it. The CLI has a documented, scriptable way
+to print it — `agy -p /quota --output-format json` — which runs "without
+starting an agent turn, spending quota, or leaving a conversation behind".
+So there is nothing to set up ("There shouldn't even be a path that
+requires extra work from the user to start metering antigravity" —
+2026-11-21), and the app runs exactly that, under these terms:
 
-- `usage-cli export-statusline antigravity --print-config` prints the
-  `statusLine` entry to add to `~/.gemini/antigravity-cli/settings.json`.
-  The app NEVER writes that file — it is inside the agent home — so you
-  paste it.
-- On each redraw `usage-cli export-statusline antigravity` reads the
-  payload, keeps ONLY the quota buckets (remaining fraction, reset time,
-  disabled), the plan tier and the CLI's version, and writes them to
-  `statusline-export.json` in this app's own Application Support folder
-  (mode 0600; rewritten when a limit moves, otherwise at most once a
-  minute). The email, the working directory, paths, the conversation title
-  and everything else in the payload are dropped before anything touches
-  the disk. It prints nothing and always exits 0, so the CLI's own status
-  line is unchanged.
-- The engine reads that file like any other local trace. It is the one file
-  in the app's folders written by something other than the engine, and
-  nothing else ever writes it.
+- **What runs.** `agy -p /quota --output-format json --log-file /dev/null`,
+  with `AGY_CLI_DISABLE_AUTO_UPDATE=true` (Google's documented switch; the
+  Homebrew cask sets the same one) so the run neither logs nor checks for an
+  update, from `/`, in a minimal environment. `agy` is the CLI's own install
+  (`~/.local/bin`, or Homebrew's `bin`), confirmed by its `--version` — never
+  the desktop app's editor launcher of the same name. Should a run ever come
+  back as an agent turn rather than the limits report (a future CLI
+  treating `/quota` as a prompt), that install is never asked again until
+  it changes — at most one turn per update, never one per run.
+- **How often.** At most once every ten minutes, only when Antigravity has
+  written a conversation since the last reading, one at a time, stopped
+  after 30 seconds (with anything it started), and backing off to two hours
+  when it fails — your clicking refresh skips that backoff, never the ten
+  minutes. It runs only
+  in the process that runs the meters (the background daemon, or the app
+  when no daemon is running). A Mac that doesn't use Antigravity never runs
+  it. Each run takes about two seconds and half a second of CPU.
+- **What it costs your plan.** Nothing: measured readings were identical
+  before and after, and the run reports zero turns and zero tokens.
+- **The network.** The CLI, not this app, contacts Google's Cloud Code
+  backend (`daily-cloudcode-pa.googleapis.com`) with its own sign-in —
+  the same requests any start of the CLI makes. This app opens no
+  connection to Google; its four destinations stay four.
+- **Its sign-in.** The CLI reads its own sign-in from your login Keychain
+  through Apple's `security` tool, which never prompts, and may refresh it
+  and write it back, as it does whenever you run it. This app never sees,
+  reads or stores any of it.
+- **What the CLI writes inside its own folder.** Each run stamps the
+  modification time of `cache/onboarding.json`, `conversation_summaries.db`
+  and `crashes/` under `~/.gemini/antigravity-cli`, and so of the folders
+  holding them (measured; no sizes change). If you have an Antigravity
+  session open at the time, that database's SQLite companion files
+  (`-wal`, `-shm`) can appear beside it and stay while your session holds
+  it — the CLI's own database at work. Without the two switches above it would also write a log, an
+  `implicit/` file and its update check's markers — the switches turn those
+  off. This is the one place an agent home is written to on this app's
+  initiative, and it is the vendor's own process doing it: the app itself
+  still writes nothing there.
+- **What the app keeps.** Each bucket's id, remaining fraction and reset
+  time, in `quota-probe.json` in its own Application Support folder (mode
+  0600), beside where it found the CLI (path, size, date, whether it
+  answered as the CLI) and when it last asked and how often that failed;
+  the limits also sit in its usage cache like any reading. The rest of the
+  output — its text, names and descriptions — is dropped before anything
+  is written, and nothing the CLI prints is logged.
 
-Without the status line Antigravity still meters tokens, models and
-activity; its limits simply aren't shown, and a harness with no limits to
-show never takes the menu bar's lead unless you pin it.
+Every pool the reading reports gets its meters: the Gemini session and
+weekly limits, the Claude + GPT pool, and Gemini 4 Argon's separate weekly.
+If the CLI isn't installed, Antigravity still meters tokens, models and
+activity, and simply shows no limits; if it can't be read (not signed in,
+timed out, unreadable), the last limits stay on screen, greyed, with the
+reason. Spec §10 amended twice on 2026-11-21: the transcripts, and this run,
+which replaced the hand-installed status-line export the first amendment
+had.
 
 **Gemini CLI is deprecated.** Its plan sign-in stopped working in mid-2026,
 so for most people it writes nothing any more. It is still metered for

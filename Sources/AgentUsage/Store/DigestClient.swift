@@ -410,16 +410,6 @@ final class DigestClient {
 
     private static func error(_ status: ErrorStatus?) -> UsageError {
         guard let status else { return .network }
-        switch status.code {
-        case "noCredentials": return .noCredentials
-        case "keychainDenied": return .keychainDenied
-        case "credentialsUnreadable": return .credentialsUnreadable
-        case "signInExpired": return .signInExpired
-        case "rateLimited": return .rateLimited(retryAfter: nil)
-        case "http": return .http(status.httpStatus ?? 0)
-        case "schema": return .schema
-        case "noLocalData": return .noLocalData
-        default: return .network
-        }
+        return LiveStateBuilder.usageError(code: status.code, httpStatus: status.httpStatus)
     }
 }

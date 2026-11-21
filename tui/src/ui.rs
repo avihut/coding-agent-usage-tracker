@@ -450,6 +450,27 @@ pub fn truncate(text: &str, width: usize) -> String {
     }
 }
 
+/// A meter label cut to `width`, keeping a trailing parenthetical when it
+/// fits with at least four characters of the head: two meters of one pool
+/// ("Claude + GPT (5h)", "Claude + GPT (7d)") differ only there, and a
+/// plain cut would print both as "Claude + GP…". Otherwise as `truncate`.
+pub fn truncate_label(text: &str, width: usize) -> String {
+    if text.chars().count() <= width {
+        return text.to_owned();
+    }
+    if text.ends_with(')')
+        && let Some(open) = text.rfind(" (")
+    {
+        let suffix = &text[open..];
+        let room = width.saturating_sub(suffix.chars().count() + 1);
+        if room >= 4 {
+            let head: String = text[..open].chars().take(room).collect();
+            return format!("{}{}{suffix}", head.trim_end(), glyphs().ellipsis);
+        }
+    }
+    truncate(text, width)
+}
+
 /// Greedy word wrap for the pane's few prose lines. A word longer than the
 /// whole width goes on its own line and overflows rather than being cut —
 /// the caller decides whether that many lines are affordable at all.
@@ -1140,7 +1161,10 @@ fn meters<'a>(digest: &'a LiveState, freshness: Freshness, rect: Rect) -> Paragr
                 style(DIM).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                format!("{:<label_width$} ", truncate(&meter.label, label_width)),
+                format!(
+                    "{:<label_width$} ",
+                    truncate_label(&meter.label, label_width)
+                ),
                 Style::new(),
             ),
             Span::styled(glyphs().bar_fill.repeat(filled), style(bar_color)),
@@ -2568,6 +2592,22 @@ mod tests {
                 .any(|(_, digits)| digits.chars().any(|c| c.is_ascii_digit()))
         }));
         assert!(others.iter().all(|other| other.glyph != "✦"));
+    }
+
+    #[test]
+    fn meter_labels_keep_the_window_that_tells_them_apart() {
+        let five = truncate_label("Claude + GPT (5h)", 12);
+        let seven = truncate_label("Claude + GPT (7d)", 12);
+        assert_eq!(five.chars().count(), 12);
+        assert!(five.ends_with(" (5h)") && seven.ends_with(" (7d)"));
+        assert_ne!(five, seven);
+        // Too little head left: the plain cut, as before.
+        assert_eq!(
+            truncate_label("Weekly (Fable)", 12),
+            truncate("Weekly (Fable)", 12)
+        );
+        assert_eq!(truncate_label("Argon (7d)", 12), "Argon (7d)");
+        assert_eq!(truncate_label("Session (5h)", 12), "Session (5h)");
     }
 
     fn incident(impact: &str) -> ServiceStatusCard {

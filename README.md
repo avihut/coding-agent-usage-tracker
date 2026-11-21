@@ -61,9 +61,10 @@ Anthropic, OpenAI or Google. It reads your usage with your own local Claude
 Code sign-in (access token only; never stored, never logged) from an
 undocumented endpoint that may change without notice. It talks to four hosts
 and no others, carries no analytics and no telemetry, and meters Codex,
-Antigravity and Gemini CLI from their local files alone (Antigravity's plan
-limits come from a status line you set up yourself —
-[how](docs/HARNESSES.md#antigravity-cli)). Every destination, every file read
+Antigravity and Gemini CLI from their local files (Antigravity's plan limits
+come from asking its own CLI, which uses its own sign-in —
+[what that does](docs/PRIVACY.md#antigravity-cli-local-transcripts-and-its-own-cli-for-the-limits)).
+Every destination, every file read
 and the reasoning behind each is in [docs/PRIVACY.md](docs/PRIVACY.md); the
 app lists the same inventory live under Settings → General → About.
 

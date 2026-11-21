@@ -54,9 +54,10 @@ struct MultiHarnessHostTests {
         var codex: CodexProvider { CodexProvider(sessionsRoot: codexSessions) }
         var gemini: GeminiProvider { GeminiProvider(tmpRoot: geminiTmp) }
         var antigravityHome: URL { userHome.appending(path: ".gemini/antigravity-cli") }
-        var antigravityExport: URL { root.appending(path: "export/statusline-export.json") }
+        /// Where the fixture's (fake) Antigravity CLI is installed, when it is.
+        var agyBinary: URL { root.appending(path: "bin/agy") }
         var antigravity: AntigravityProvider {
-            AntigravityProvider(home: antigravityHome, exportURL: antigravityExport)
+            AntigravityProvider(home: antigravityHome, userHome: userHome, agyCandidates: [agyBinary])
         }
 
         /// An Antigravity conversation (synthetic) last written this many days
@@ -104,14 +105,14 @@ struct MultiHarnessHostTests {
 
         func makeHost(
             _ providers: [any UsageProvider], reprobeInterval: TimeInterval = 600,
-            stagger: TimeInterval = 0
+            stagger: TimeInterval = 0, runner: (any AgentCommandRunner)? = nil
         ) -> MeteringHost {
             MeteringHost(
                 providers: providers, defaults: defaults,
                 configuration: MeteringHost.Configuration(
                     bundleID: "com.test.harnesses", kind: .app, roots: roots, pollsStatus: false,
                     updateFeedURL: nil, reprobeInterval: reprobeInterval, userHome: userHome,
-                    stagger: stagger, bindsSocket: false))
+                    stagger: stagger, bindsSocket: false, agentCommandRunner: runner))
         }
 
         func tearDown() {
@@ -252,16 +253,21 @@ struct MultiHarnessHostTests {
         #expect(!(await host.handle(.focusProfile(id: "gemini"))).ok)
     }
 
-    /// 2026-11-21: Antigravity before its status-line export reads tokens and
-    /// no limits — used on more days than Claude, it must still not take the
-    /// bar's lead; the moment a reading lands it competes like any harness.
+    /// 2026-11-21: Antigravity with no limits read (its CLI not installed
+    /// yet) reads tokens and no limits — used on more days than Claude, it
+    /// must still not take the bar's lead; the moment the quota probe lands a
+    /// reading it competes like any harness.
     @Test("a harness reading no limits doesn't take focus until it reads some")
     func meterlessFocus() async throws {
         let fixture = try Fixture()
         defer { fixture.tearDown() }
         try fixture.claudeSession(daysAgo: 0.2)
         for day in 1...5 { try fixture.antigravityConversation(daysAgo: Double(day) + 0.3) }
-        let host = fixture.makeHost([fixture.claude, fixture.antigravity])
+        let reset = AntigravityFixture.stamp(Date().addingTimeInterval(86400))
+        let runner = FakeAgentRunner(quota: .exited(stdout: AntigravityQuotaFixture.output([
+            AntigravityQuotaFixture.bucket("gemini-weekly", window: "weekly", remaining: 0.6, reset: reset),
+        ])))
+        let host = fixture.makeHost([fixture.claude, fixture.antigravity], runner: runner)
         host.start()
         defer { host.shutdown() }
 
@@ -269,24 +275,62 @@ struct MultiHarnessHostTests {
         #expect(read)
         #expect(host.engines["antigravity"]?.state.snapshot?.meters.isEmpty == true)
         #expect(host.focusedProfileID == "default")
+        #expect(await runner.invocations.isEmpty)
 
-        // The person installs the export; a reading lands.
-        let export = try #require(fixture.antigravity.statusLineExport)
-        let payload = AntigravityStatusLine.payload(quota: AntigravityStatusLine.quota([
-            AntigravityStatusLine.bucket(
-                "gemini-weekly", remaining: 0.6, reset: Date().addingTimeInterval(86400)),
-        ]))
-        #expect(StatusLineExportWriter.run(export, stdin: payload) == .written)
+        // The CLI gets installed; the next refresh reads its limits.
+        try FileManager.default.createDirectory(
+            at: fixture.agyBinary.deletingLastPathComponent(), withIntermediateDirectories: true)
+        FileManager.default.createFile(
+            atPath: fixture.agyBinary.path, contents: Data("#!/bin/sh\n".utf8),
+            attributes: [.posixPermissions: 0o755])
         #expect(await host.handle(.refreshProfile(id: "antigravity")).ok)
         let moved = await eventually { host.focusedProfileID == "antigravity" }
         #expect(moved)
         #expect(host.digest?.engine.providerID == "antigravity")
+        #expect(await runner.quotaRuns.count == 1)
+    }
 
-        // The export goes away: no limits again, and focus goes back.
-        try FileManager.default.removeItem(at: fixture.antigravityExport)
-        #expect(await host.handle(.refreshProfile(id: "antigravity")).ok)
-        let back = await eventually { host.focusedProfileID == "default" }
-        #expect(back)
+    /// A host that wasn't given a runner never asks the CLI, installed or not.
+    @Test("a host without a runner never runs the quota probe")
+    func noRunnerNoProbe() async throws {
+        let fixture = try Fixture()
+        defer { fixture.tearDown() }
+        for day in 1...2 { try fixture.antigravityConversation(daysAgo: Double(day)) }
+        let host = fixture.makeHost([fixture.antigravity])
+        host.start()
+        defer { host.shutdown() }
+        let read = await eventually { host.engines["antigravity"]?.state.snapshot != nil }
+        #expect(read)
+        #expect(host.engines["antigravity"]?.state.snapshot?.meters.isEmpty == true)
+        let state = StorageScope.supportDirectory(
+            bundleID: "com.test.harnesses", providerID: "antigravity", profileID: "default",
+            roots: fixture.roots).appending(path: AgentQuotaProbe.stateFileName)
+        #expect(!FileManager.default.fileExists(atPath: state.path))
+    }
+
+    @Test("a CLI that times out: Antigravity reads its failure, and focus stays put")
+    func failedProbeKeepsFocus() async throws {
+        let fixture = try Fixture()
+        defer { fixture.tearDown() }
+        try fixture.claudeSession(daysAgo: 0.2)
+        for day in 1...5 { try fixture.antigravityConversation(daysAgo: Double(day) + 0.3) }
+        try FileManager.default.createDirectory(
+            at: fixture.agyBinary.deletingLastPathComponent(), withIntermediateDirectories: true)
+        FileManager.default.createFile(
+            atPath: fixture.agyBinary.path, contents: Data("#!/bin/sh\n".utf8),
+            attributes: [.posixPermissions: 0o755])
+        let runner = FakeAgentRunner(quota: AgentCommandResult(
+            termination: .timedOut, stdout: Data(), stderr: Data(), duration: 30))
+        let host = fixture.makeHost([fixture.claude, fixture.antigravity], runner: runner)
+        host.start()
+        defer { host.shutdown() }
+
+        let failed = await eventually { host.engines["antigravity"]?.state.error == .agentTimedOut }
+        #expect(failed)
+        // A snapshot either way — the harness renders, it just has no limits.
+        #expect(host.engines["antigravity"]?.state.snapshot?.meters.isEmpty == true)
+        #expect(host.focusedProfileID == "default")
+        #expect(await runner.quotaRuns.count == 1)
     }
 
     /// The next launch (or a host taking over) must not lead with the

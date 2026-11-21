@@ -20,7 +20,12 @@ traces carry prompts and no tokens — the merged consumption scope's edge
 states. The default output is unchanged by it (the extras draw their
 randomness after everything else).
 
-usage: demo-digest.py [--several] <out.json>
+`--with-antigravity` adds Antigravity CLI with the five meters its quota
+probe reads (Gemini session and weekly, the Claude + GPT pool's two, Gemini
+4 Argon's weekly) — opt-in and drawn last too, so the other outputs keep
+their bytes.
+
+usage: demo-digest.py [--several] [--with-antigravity] <out.json>
 """
 
 import copy
@@ -60,6 +65,10 @@ WORK_MODELS = [
 WORK_SESSIONS = [
     ("Quarterly report pipeline", "reports", "feat/q3"),
     ("Tidy the CI matrix", "infra", "chore/ci-matrix"),
+]
+ANTIGRAVITY_MODELS = [
+    ("gemini-4-neon", "Gemini 4 Neon", rgb(0.631, 0.259, 0.957), 0.85, 0.9),
+    ("gemini-4-argon", "Gemini 4 Argon", rgb(0.259, 0.522, 0.957), 0.15, 1.2),
 ]
 CLAUDE_SESSIONS = [
     ("Add retry with backoff to the sync client", "sync-client", "fix/retry-backoff"),
@@ -317,7 +326,60 @@ def add_several(now, rng, state, sections, cells):
         state["menuBarCells"].append(cell)
 
 
-def build(now, several=False):
+def add_antigravity(now, rng, state, sections, cells):
+    """Antigravity's section and harness row, from the golden's Gemini ones
+    (the same Google-family shape), with the real reading's meters."""
+    hours, days = lambda n: timedelta(hours=n), lambda n: timedelta(days=n)
+    template = copy.deepcopy(sections["gemini"])
+    violet = rgb(0.631, 0.259, 0.957)
+    template.update({"id": "antigravity", "providerID": "antigravity", "label": "default",
+                     "monogram": "A", "isFocused": False})
+    template["engine"].update({"providerID": "antigravity", "agentName": "Antigravity CLI",
+                               "glyph": "∩", "accent": violet})
+    gemini, argon = ANTIGRAVITY_MODELS[:1], ANTIGRAVITY_MODELS[1:]
+    session = meter(now, rng, gemini, ident="0-session", label="Session (5h)", tag="S",
+                    rank=0, window=hours(5), elapsed=timedelta(hours=2, minutes=6), percent=25,
+                    projected=52, verdict="green", severity=0, step_minutes=5)
+    weekly = meter(now, rng, gemini, ident="1-weekly", label="Weekly", tag="W",
+                   rank=1, window=days(7), elapsed=timedelta(hours=7), percent=23,
+                   projected=61, verdict="green", severity=0, step_minutes=60)
+    for built in (session, weekly):
+        built["modelScope"] = ["gemini", "!argon"]
+    pool = []
+    for ident, label, window in (("2-3p-5h", "Claude + GPT (5h)", hours(5)),
+                                 ("2-3p-weekly", "Claude + GPT (7d)", days(7))):
+        # An untouched pool: 0% and no window running, so no reset.
+        built = meter(now, rng, [], ident=ident, label=label, tag="C", rank=2, window=window,
+                      elapsed=hours(1), percent=0, projected=0, verdict="green",
+                      severity=0, step_minutes=60)
+        for key in ("resetsAt", "resetCaption", "forecast"):
+            built.pop(key, None)
+        built.update({"scopedModelName": "Claude + GPT", "modelScope": ["claude", "gpt"]})
+        pool.append(built)
+    argon_weekly = meter(now, rng, argon, ident="2-gemini-argon-wtu-weekly", label="Argon (7d)",
+                         tag="A", rank=2, window=days(7), elapsed=timedelta(hours=7),
+                         percent=2, projected=6, verdict="green", severity=0, step_minutes=60)
+    argon_weekly.update({"scopedModelName": "Argon", "modelScope": ["argon"]})
+    # The bar: S, W, and the most-used scoped meter; the panel: all five.
+    section = face(now, rng, template, models=ANTIGRAVITY_MODELS, titles=[], typical=6e6,
+                   engine={}, meters=[session, weekly, argon_weekly])
+    section["meters"] = [session, weekly, *pool, argon_weekly]
+    golden = json.loads(GOLDEN.read_text())["harnesses"]
+    harness = copy.deepcopy(next(h for h in golden if h["id"] == "gemini"))
+    harness.update({"id": "antigravity", "agentName": "Antigravity CLI", "shortName": "Antigravity",
+                    "glyph": "∩", "accent": violet, "serviceName": "Google AI"})
+    harness.pop("deprecationNote", None)
+    state["profiles"].append(section)
+    state["harnesses"].append(harness)
+    cell = copy.deepcopy(cells["codex"])
+    cell.update({"profile": "antigravity", "providerID": "antigravity", "glyph": "∩",
+                 "monogram": "A", "accent": violet, "segments": section["menuBar"],
+                 "stale": False, "indicator": False,
+                 "worstSeverity": max(s["severity"] for s in section["menuBar"])})
+    state["menuBarCells"].append(cell)
+
+
+def build(now, several=False, with_antigravity=False):
     rng = random.Random(5)
     state = json.loads(GOLDEN.read_text())
     sections = {section["id"]: section for section in state["profiles"]}
@@ -375,6 +437,8 @@ def build(now, several=False):
     state["harnesses"] = [h for h in state["harnesses"] if h["id"] in kept]
     if several:
         add_several(now, rng, state, sections, templates)
+    if with_antigravity:
+        add_antigravity(now, rng, state, sections, templates)
     for harness in state["harnesses"]:
         count = sum(1 for p in state["profiles"] if p["providerID"] == harness["id"])
         harness.update({"accountCount": count, "present": True, "shown": True,
@@ -385,13 +449,15 @@ def build(now, several=False):
 
 
 def main():
+    flags = ("--several", "--with-antigravity")
     args = sys.argv[1:]
-    several = "--several" in args
-    paths = [a for a in args if a != "--several"]
+    paths = [a for a in args if a not in flags]
     if len(paths) != 1:
         sys.exit(__doc__.strip().splitlines()[-1])
     now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
-    Path(paths[0]).write_text(json.dumps(build(now, several), indent=1, sort_keys=True) + "\n")
+    digest = build(now, several="--several" in args,
+                   with_antigravity="--with-antigravity" in args)
+    Path(paths[0]).write_text(json.dumps(digest, indent=1, sort_keys=True) + "\n")
 
 
 if __name__ == "__main__":

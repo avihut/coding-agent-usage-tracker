@@ -3,87 +3,71 @@ import Testing
 
 @testable import UsageCore
 
-/// Status-line payloads in the shape Antigravity's status-line docs give —
-/// built here, with the identifying fields a real one carries so the tests
-/// prove none survives the reduction.
-enum AntigravityStatusLine {
-    static func payload(
-        quota: String?, planTier: String? = "pro", email: String = "person@example.com"
-    ) -> Data {
-        var fields = [
-            #""cwd":"/Users/someone/secret-project""#,
-            #""email":"\#(email)""#,
-            #""transcript_path":"/Users/someone/.gemini/antigravity-cli/brain/x/.system_generated/logs/transcript.jsonl""#,
-            #""conversation_title":"SECRET TITLE""#,
-            #""model":{"id":"gemini-4-neon","display_name":"Gemini 4 Neon","effort":"xhigh"}"#,
-            #""version":"1.5.14""#,
-            #""cost":{"total_usd":1.23}"#,
-            #""context_window":{"total_input_tokens":1000}"#,
-        ]
-        if let planTier { fields.append(#""plan_tier":"\#(planTier)""#) }
-        if let quota { fields.append(#""quota":\#(quota)"#) }
-        return Data(("{" + fields.joined(separator: ",") + "}").utf8)
-    }
-
-    static func bucket(
-        _ id: String, remaining: Double? = nil, reset: Date? = nil, inSeconds: Double? = nil,
-        disabled: Bool? = nil, amount: Double? = nil
-    ) -> String {
-        var fields: [String] = []
-        if let remaining { fields.append(#""remaining_fraction":\#(remaining)"#) }
-        if let amount { fields.append(#""remaining_amount":\#(amount)"#) }
-        if let reset { fields.append(#""reset_time":"\#(AntigravityFixture.stamp(reset))""#) }
-        if let inSeconds { fields.append(#""reset_in_seconds":\#(inSeconds)"#) }
-        if let disabled { fields.append(#""disabled":\#(disabled)"#) }
-        return #""\#(id)":{\#(fields.joined(separator: ","))}"#
-    }
-
-    static func quota(_ buckets: [String]) -> String { "{" + buckets.joined(separator: ",") + "}" }
-}
-
 @Suite("Antigravity provider")
 struct AntigravityProviderTests {
-    private let now = Date()
+    private let now = AntigravityQuotaFixture.capturedNow
 
-    private func reading(_ buckets: [String], at captured: Date) throws -> Data {
-        try #require(AntigravityQuota.reduce(
-            statusLine: AntigravityStatusLine.payload(quota: AntigravityStatusLine.quota(buckets)),
-            now: captured))
+    private func reduce(_ stdout: Data, exit: Int32 = 0, stderr: String = "") -> AgentQuotaOutcome {
+        AntigravityQuota.reduce(exitStatus: exit, stdout: stdout, stderr: Data(stderr.utf8), now: now)
+    }
+
+    private func buckets(_ stdout: Data) throws -> [AgentQuotaBucket] {
+        guard case .buckets(let buckets) = reduce(stdout) else {
+            Issue.record("expected buckets")
+            return []
+        }
+        return buckets
     }
 
     private func snapshot(
-        _ reading: Data?, conversationWrittenAt: Date? = nil, fetchedAt: Date? = nil
+        _ buckets: [AgentQuotaBucket]?, capturedAt: Date? = nil,
+        conversationWrittenAt: Date? = nil, fetchedAt: Date? = nil
     ) throws -> Snapshot {
+        let captured = capturedAt ?? now
         let payload = AntigravityUsagePayload(
             fetchedAt: fetchedAt ?? now,
-            reading: reading.flatMap(AntigravityQuota.decodeReading),
+            reading: buckets.map {
+                AgentQuotaReading(startedAt: captured.addingTimeInterval(-2), capturedAt: captured, buckets: $0)
+            },
             conversationWrittenAt: conversationWrittenAt)
         return try AntigravityQuota.snapshot(
             fromPayload: AntigravityQuota.encodePayload(payload), thresholds: .standard, now: now)
     }
 
-    @Test("identity is provider data: ∩, violet, local, no credentials")
-    func identity() {
+    private func stamp(_ offset: TimeInterval) -> String {
+        AntigravityFixture.stamp(now.addingTimeInterval(offset))
+    }
+
+    @Test("identity is provider data: ∩, violet, local, no credentials, its own CLI for limits")
+    func identity() throws {
         let provider = AntigravityProvider()
         #expect(provider.id == "antigravity")
         #expect(provider.agentName == "Antigravity CLI")
         #expect(provider.menuBarGlyph == "∩")
         #expect(provider.accent == ProviderAccent(red: 0.631, green: 0.259, blue: 0.957))
+        // The CLI the probe runs talks to Google itself: no destination here.
         #expect(provider.networkDestinations.isEmpty)
         #expect(provider.statusFeed == nil)
         #expect(provider.accountIdentity == nil)
         #expect(provider.agentSettings == nil)
         #expect(provider.deprecationNote == nil)
-        #expect(provider.statusLineExport != nil)
         #expect(!provider.supportsMultipleHomes)
         #expect(HarnessResolution.standardProviders().last?.id == "antigravity")
+        let command = try #require(provider.quotaCommand)
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        #expect(command.executableCandidates.map(\.path) == [
+            home.appending(path: ".local/bin/agy").path, "/opt/homebrew/bin/agy", "/usr/local/bin/agy",
+        ])
+        #expect(!command.executableCandidates.contains { $0.path.contains(".antigravity") })
+        #expect(command.versionArguments == ["--version"])
+        #expect(command.environment == ["AGY_CLI_DISABLE_AUTO_UPDATE": "true"])
+        #expect(command.privacyLines.count == 3)
     }
 
-    @Test("its models read and price as Gemini's")
+    @Test("its models read and price as Gemini's, and its pool's as their vendors'")
     func modelsAndPricing() {
         let provider = AntigravityProvider()
         #expect(provider.modelCatalog.displayName("gemini-4-neon") == "Gemini 4 Neon")
-        // Other vendors' ids read in their own grammar.
         #expect(provider.modelCatalog.displayName("claude-sonnet-4-5")
             == ModelCatalog.claude.displayName("claude-sonnet-4-5"))
         #expect(provider.pricingSelector.normalizeKey("gemini/gemini-4-neon") == "gemini-4-neon")
@@ -93,7 +77,7 @@ struct AntigravityProviderTests {
     /// The rates the feed carries for Antigravity's models sit under
     /// `gemini/`; a synthetic fragment proves the provider's own slice picks
     /// them up and keys them the way transcripts name them.
-    @Test("its models price through Gemini's feed slice")
+    @Test("its models price through Gemini's feed slice; the pool's through theirs")
     func pricesThroughFeed() throws {
         let feed = Data("""
         {"gemini/gemini-4-neon":{"litellm_provider":"gemini","input_cost_per_token":0.000003,
@@ -110,7 +94,6 @@ struct AntigravityProviderTests {
         #expect(abs(dollars - (3 + 1.5 + 0.15)) < 0.0001)
         #expect(table.rates["gemini-4-argon"] != nil)
         #expect(table.rates.count == 2)
-        // Its Claude + GPT pool's models price from those vendors' slices.
         let thirdParty = Data("""
         {"claude-sonnet-4-5":{"litellm_provider":"anthropic","input_cost_per_token":0.000003,
           "output_cost_per_token":0.000015},
@@ -124,7 +107,18 @@ struct AntigravityProviderTests {
         #expect(Set(other.rates.keys) == ["claude-sonnet-4-5", "gpt-5.1"])
     }
 
-    @Test("no conversations is noLocalData; conversations without transcripts too")
+    @Test("its rates table lists what it ran plus Gemini's, not every vendor's catalogue")
+    func ratesListing() {
+        let provider = AntigravityProvider()
+        #expect(provider.listsUnseenRate("gemini-4-neon"))
+        #expect(provider.listsUnseenRate("gemini-3.8-flash"))
+        #expect(!provider.listsUnseenRate("claude-opus-5-5"))
+        #expect(!provider.listsUnseenRate("gpt-oss-120b"))
+        // Every other harness lists its whole slice, as before.
+        #expect(CodexProvider().listsUnseenRate("gpt-5.1"))
+    }
+
+    @Test("no conversations and no reading is noLocalData; conversations without transcripts too")
     func noLocalData() async throws {
         let fixture = try AntigravityFixture()
         defer { fixture.tearDown() }
@@ -135,14 +129,17 @@ struct AntigravityProviderTests {
         await #expect(throws: (any Error).self) {
             _ = try await fixture.provider().fetchRawUsage(accessToken: "")
         }
+        // A reading alone (transcripts pruned) still renders.
+        let reading = AgentQuotaReading(startedAt: now, capturedAt: now, buckets: [])
+        _ = try await fixture.provider().fetchRawUsage(accessToken: "", quota: reading)
     }
 
-    @Test("transcripts but no status-line reading: no limits, fresh")
+    @Test("transcripts but no reading yet: no limits, fresh")
     func noReadingYet() async throws {
         let fixture = try AntigravityFixture()
         defer { fixture.tearDown() }
         try fixture.conversation(rows: [
-            AntigravityFixture.call(at: now.addingTimeInterval(-60), input: 1, output: 1),
+            AntigravityFixture.call(at: Date().addingTimeInterval(-60), input: 1, output: 1),
         ])
         let provider = fixture.provider()
         let body = try await provider.fetchRawUsage(accessToken: "")
@@ -152,95 +149,133 @@ struct AntigravityProviderTests {
         #expect(abs(snapshot.fetchedAt.timeIntervalSince(Date())) < 5)
     }
 
-    @Test("v1 meters: Gemini session and weekly, the Claude + GPT pool scoped")
-    func bucketTable() throws {
-        let reset5h = now.addingTimeInterval(2 * 3600)
-        let resetWeek = now.addingTimeInterval(3 * 86400)
-        let data = try reading([
-            AntigravityStatusLine.bucket("gemini-5h", remaining: 0.82, reset: reset5h),
-            AntigravityStatusLine.bucket("gemini-weekly", remaining: 0.59, reset: resetWeek),
-            AntigravityStatusLine.bucket("3p-weekly", remaining: 0.93, reset: resetWeek),
-            AntigravityStatusLine.bucket("3p-5h", remaining: 0.5, inSeconds: 3600),
-            AntigravityStatusLine.bucket("gemini-3-flash-lite-weekly", remaining: 0.1),
-            AntigravityStatusLine.bucket("gemini-daily", remaining: 0.4, disabled: true),
-            AntigravityStatusLine.bucket("gemini-monthly", amount: 300),
-        ], at: now)
-        let snapshot = try snapshot(data)
-        let byID = Dictionary(uniqueKeysWithValues: snapshot.meters.map { ($0.id, $0) })
-        #expect(Set(byID.keys) == ["0-session", "1-weekly", "2-3p-weekly", "2-3p-5h"])
+    /// The person's own `/usage` screen at the moment of the capture read:
+    /// Gemini weekly 76.86% left, 5h 74.62%, Claude + GPT 100% / 100%
+    /// ("Quota available"), Gemini 4 Argon weekly 98.20%.
+    @Test("the real reading: every pool the plan reports, as the CLI's own screen shows it")
+    func realReading() throws {
+        let read = try buckets(try AntigravityQuotaFixture.real())
+        #expect(read.map(\.id)
+            == ["gemini-weekly", "gemini-5h", "3p-weekly", "3p-5h", "gemini-argon-wtu-weekly"])
+        // The untouched pool's epoch reset is no reset.
+        #expect(read.first { $0.id == "3p-5h" }?.resetsAt == nil)
+        #expect(read.first { $0.id == "3p-5h" }?.remainingFraction == 1)
 
-        let session = try #require(byID["0-session"])
-        #expect(session.label == "Session (5h)")
-        #expect(session.percent == 18)
-        #expect(session.rank == 0)
+        let snapshot = try snapshot(read)
+        #expect(snapshot.meters.map(\.label)
+            == ["Session (5h)", "Weekly", "Claude + GPT (5h)", "Claude + GPT (7d)", "Argon (7d)"])
+        #expect(snapshot.meters.map(\.percent) == [25, 23, 0, 0, 2])
+        #expect(snapshot.meters.map(UsageFormatting.tag(for:)) == ["S", "W", "C", "C", "A"])
+        let byLabel = Dictionary(uniqueKeysWithValues: snapshot.meters.map { ($0.label, $0) })
+        let session = try #require(byLabel["Session (5h)"])
         #expect(session.limitWindow == TimeInterval(5 * 3600))
-        #expect(session.resetsAt.map { abs($0.timeIntervalSince(reset5h)) < 1 } == true)
-        #expect(UsageFormatting.tag(for: session) == "S")
+        // 00:02:05Z is 2 h 54 m after the screen's 21:08Z ("2h 53m").
+        #expect(session.resetsAt.map { abs($0.timeIntervalSince(now) - (2 * 3600 + 54 * 60 + 5)) < 0.5 }
+            == true)
+        let pool = try #require(byLabel["Claude + GPT (7d)"])
+        #expect(pool.resetsAt == nil)
+        #expect(pool.scopedModelName == "Claude + GPT")
+        let argon = try #require(byLabel["Argon (7d)"])
+        #expect(argon.rank == 2 && argon.scopedModelName == "Argon")
+        #expect(argon.limitWindow == TimeInterval(7 * 86400))
+        #expect(snapshot.plan == nil)
+        #expect(snapshot.fetchedAt == now)
 
-        let weekly = try #require(byID["1-weekly"])
-        #expect(weekly.label == "Weekly")
-        #expect(weekly.percent == 41)
-        #expect(UsageFormatting.tag(for: weekly) == "W")
-
-        let thirdParty = try #require(byID["2-3p-weekly"])
-        #expect(thirdParty.label == "Claude + GPT (7d)")
-        #expect(thirdParty.rank == 2)
-        #expect(thirdParty.scopedModelName == "Claude + GPT")
-        #expect(UsageFormatting.tag(for: thirdParty) == "C")
-        // Each pool counts its own models' tokens, never the other's.
-        #expect(thirdParty.inScope("claude-sonnet-4-5") && thirdParty.inScope("gpt-5.1"))
-        #expect(!thirdParty.inScope("gemini-4-neon"))
-        #expect(session.inScope("gemini-4-neon") && !session.inScope("claude-sonnet-4-5"))
-        #expect(weekly.countedScope == ["gemini"])
-        // reset_in_seconds became an absolute time at capture.
-        let thirdPartySession = try #require(byID["2-3p-5h"])
-        #expect(thirdPartySession.label == "Claude + GPT (5h)")
-        #expect(thirdPartySession.resetsAt.map {
-            abs($0.timeIntervalSince(now.addingTimeInterval(3600))) < 1
-        } == true)
-
-        #expect(UsageFormatting.menuBarSegments(from: snapshot.meters).map(\.tag) == ["S", "W", "C"])
-        // `usage-cli limits session|weekly` must each still name ONE meter:
-        // the pool's labels never repeat the Gemini meters' window words.
+        // `usage-cli limits session|weekly` must each still name ONE meter.
         for word in ["session", "weekly"] {
             #expect(snapshot.meters.filter { $0.label.lowercased().contains(word) }.count == 1)
         }
-        #expect(snapshot.plan?.subscriptionType == "pro")
+        // The bar: S, W, and one scoped segment — the most-used scoped meter.
+        #expect(UsageFormatting.menuBarSegments(from: snapshot.meters).map(\.tag) == ["S", "W", "A"])
+    }
+
+    @Test("each pool counts its own models; Gemini's excludes Argon when the plan meters it apart")
+    func scopes() throws {
+        let read = try buckets(try AntigravityQuotaFixture.real())
+        let meters = try snapshot(read).meters
+        let byLabel = Dictionary(uniqueKeysWithValues: meters.map { ($0.label, $0) })
+        let session = try #require(byLabel["Session (5h)"])
+        let weekly = try #require(byLabel["Weekly"])
+        let pool = try #require(byLabel["Claude + GPT (5h)"])
+        let argon = try #require(byLabel["Argon (7d)"])
+        #expect(session.inScope("gemini-4-neon") && session.inScope("gemini-3.8-flash"))
+        #expect(!session.inScope("gemini-4-argon") && !session.inScope("claude-opus-5-5"))
+        #expect(argon.inScope("gemini-4-argon") && !argon.inScope("gemini-4-neon"))
+        #expect(pool.inScope("claude-opus-5-5") && pool.inScope("gpt-oss-120b"))
+        #expect(!pool.inScope("gemini-4-neon"))
+        #expect(session.countedScope == weekly.countedScope)
+
+        // Without a separate Argon bucket (a plan that folds Argon into the
+        // Gemini pool), Gemini's meters count Argon too.
+        let folded = try snapshot(read.filter { $0.id != "gemini-argon-wtu-weekly" }).meters
+        #expect(folded.first { $0.label == "Weekly" }?.inScope("gemini-4-argon") == true)
+        #expect(folded.first { $0.label == "Weekly" }?.countedScope == ["gemini"])
+    }
+
+    @Test("an exclusion needle excludes; an older reader's literal match never fires")
+    func exclusionNeedles() {
+        #expect(Meter.inScope("gemini-4-neon", needles: ["gemini", "!argon"]))
+        #expect(!Meter.inScope("gemini-4-argon-low", needles: ["gemini", "!argon"]))
+        #expect(Meter.inScope("anything", needles: ["!argon"]))
+        #expect(!Meter.inScope("gemini-4-argon", needles: ["!argon"]))
+        #expect(!Meter.inScope("claude-opus", needles: ["gemini", "!argon"]))
+        #expect(Meter.inScope("x", needles: nil) && Meter.inScope("x", needles: []))
+        // What a pre-exclusion reader did with the same needles: "!argon"
+        // as a literal matches no id, so it counts the pool whole.
+        #expect(["gemini", "!argon"].contains { "gemini-4-argon".contains($0) })
+    }
+
+    @Test("lockouts stay inside a pool")
+    func lockoutsStayInPool() throws {
+        let spent = try buckets(AntigravityQuotaFixture.output([
+            AntigravityQuotaFixture.bucket("gemini-5h", window: "5h", remaining: 0, reset: stamp(3600)),
+            AntigravityQuotaFixture.bucket("gemini-weekly", window: "weekly", remaining: 0.5, reset: stamp(86400)),
+            AntigravityQuotaFixture.bucket("3p-5h", window: "5h", remaining: 0, reset: stamp(3600)),
+            AntigravityQuotaFixture.bucket("3p-weekly", window: "weekly", remaining: 0.5, reset: stamp(86400)),
+            AntigravityQuotaFixture.bucket(
+                "gemini-argon-wtu-weekly", window: "weekly", remaining: 0.5, reset: stamp(86400)),
+        ]))
+        let meters = try snapshot(spent).meters
+        let byLabel = Dictionary(uniqueKeysWithValues: meters.map { ($0.label, $0) })
+        let gemini5h = try #require(byLabel["Session (5h)"])
+        let pool5h = try #require(byLabel["Claude + GPT (5h)"])
+        // Only meters whose scope covers another's gate it: Gemini's 5h
+        // gates Gemini's weekly, the pool's its own, nothing gates Argon.
+        for other in meters where other.id != gemini5h.id {
+            let gates = other.countedScope == nil || other.countedScope == gemini5h.countedScope
+            #expect(gates == (other.label == "Weekly"), "\(other.label)")
+        }
+        for other in meters where other.id != pool5h.id {
+            let gates = other.countedScope == nil || other.countedScope == pool5h.countedScope
+            #expect(gates == (other.label == "Claude + GPT (7d)"), "\(other.label)")
+        }
     }
 
     @Test("a reading is as fresh as its capture, whatever the fetch says")
     func freshnessIsTheCapture() throws {
         let captured = now.addingTimeInterval(-2 * 86400)
-        let data = try reading([
-            AntigravityStatusLine.bucket(
-                "gemini-weekly", remaining: 0.7, reset: now.addingTimeInterval(86400)),
-        ], at: captured)
-        let snapshot = try snapshot(data, fetchedAt: now)
-        #expect(abs(snapshot.fetchedAt.timeIntervalSince(captured)) < 1)
+        let snapshot = try snapshot(
+            [AgentQuotaBucket(id: "gemini-weekly", remainingFraction: 0.7, resetsAt: now.addingTimeInterval(86400))],
+            capturedAt: captured)
+        #expect(snapshot.fetchedAt == captured)
         #expect(snapshot.meters.first?.percent == 30)
     }
 
     @Test("a window that rolled unseen is a dash, unless nothing was used since")
     func rolledWindow() throws {
         let reset = now.addingTimeInterval(-3600)
-        let data = try reading([
-            AntigravityStatusLine.bucket("gemini-5h", remaining: 0.1, reset: reset),
-        ], at: now.addingTimeInterval(-5 * 3600))
-        // A conversation was written after the reset: spent, but unseen.
-        let used = try snapshot(data, conversationWrittenAt: now.addingTimeInterval(-600))
+        let read = [AgentQuotaBucket(id: "gemini-5h", remainingFraction: 0.1, resetsAt: reset)]
+        let captured = now.addingTimeInterval(-5 * 3600)
+        let used = try snapshot(read, capturedAt: captured, conversationWrittenAt: now.addingTimeInterval(-600))
         #expect(used.meters.first?.percent == nil)
         #expect(used.meters.first?.resetsAt == nil)
-        // Nothing written since the reset: the fresh window is untouched.
-        let idle = try snapshot(data, conversationWrittenAt: reset.addingTimeInterval(-60))
+        let idle = try snapshot(read, capturedAt: captured, conversationWrittenAt: reset.addingTimeInterval(-60))
         #expect(idle.meters.first?.percent == 0)
         #expect(idle.meters.first?.resetsAt == nil)
-        // No write time at all: "nothing since" is unknown — a dash.
-        let unknown = try snapshot(data, conversationWrittenAt: nil)
+        let unknown = try snapshot(read, capturedAt: captured, conversationWrittenAt: nil)
         #expect(unknown.meters.first?.percent == nil)
-        // A body fetched BEFORE the reset and replayed from the cache after
-        // it knows nothing of the writes since: a dash too.
         let replayed = try snapshot(
-            data, conversationWrittenAt: reset.addingTimeInterval(-600),
+            read, capturedAt: captured, conversationWrittenAt: reset.addingTimeInterval(-600),
             fetchedAt: reset.addingTimeInterval(-300))
         #expect(replayed.meters.first?.percent == nil)
     }
@@ -252,14 +287,14 @@ struct AntigravityProviderTests {
     func scopeInDigest() throws {
         func card(_ scope: [String]?) -> LiveMeter {
             LiveMeter(
-                id: "2-3p-weekly", label: "Claude + GPT (7d)", tag: "C", percent: 7,
-                level: "normal", rank: 2, rateWindowSeconds: 14400, forcesWarning: false,
-                risk: nil, resetsAt: nil, limitWindow: 604_800, scopedModelName: "Claude + GPT",
+                id: "1-weekly", label: "Weekly", tag: "W", percent: 7,
+                level: "normal", rank: 1, rateWindowSeconds: 14400, forcesWarning: false,
+                risk: nil, resetsAt: nil, limitWindow: 604_800, scopedModelName: nil,
                 resetCaption: nil, forecast: nil, series: [], stretches: [], modelScope: scope)
         }
-        let scoped = try LiveState.encoder().encode(card(["claude", "gpt"]))
+        let scoped = try LiveState.encoder().encode(card(["gemini", "!argon"]))
         let decoded = try LiveState.decoder().decode(LiveMeter.self, from: scoped)
-        #expect(decoded.modelScope == ["claude", "gpt"])
+        #expect(decoded.modelScope == ["gemini", "!argon"])
         let plain = try LiveState.encoder().encode(card(nil))
         #expect(!(String(data: plain, encoding: .utf8) ?? "").contains("modelScope"))
         #expect(Meter.countedScope(modelScope: nil, scopedModelName: "Fable") == ["fable"])
@@ -277,117 +312,164 @@ struct AntigravityProviderTests {
         // A stored reading with an absurd id and fraction decodes to meters
         // without trapping.
         let stored = Data("""
-        {"version":1,"capturedAt":"2026-11-21T10:00:00Z","buckets":[
-          {"id":"gemini-3000000000000000h","remainingFraction":0.5,"disabled":false},
-          {"id":"gemini-weekly","remainingFraction":1e300,"disabled":false}]}
+        {"fetchedAt":"2026-11-21T21:08:00Z","reading":{"startedAt":"2026-11-21T21:07:58Z",
+          "capturedAt":"2026-11-21T21:08:00Z","buckets":[
+          {"id":"gemini-3000000000000000h","remainingFraction":0.5},
+          {"id":"gemini-weekly","remainingFraction":1e300}]}}
         """.utf8)
-        let snapshot = try snapshot(stored)
+        let snapshot = try AntigravityQuota.snapshot(fromPayload: stored, thresholds: .standard, now: now)
         #expect(snapshot.meters.map(\.label) == ["Weekly"])
         #expect(snapshot.meters.first?.percent == 0)
     }
 
     @Test("an unexpected field drops only itself; a spent bucket with no fraction is 100%")
     func lenientPayload() throws {
-        let reset = AntigravityFixture.stamp(now.addingTimeInterval(3600))
-        let payload = Data("""
-        {"plan_tier":{"id":"pro"},"version":15,"quota":{
-          "gemini-daily":null,
-          "gemini-monthly":[1,2],
-          "gemini-weekly":{"reset_time":"\(reset)"},
-          "gemini-5h":{"remaining_fraction":0.5,"reset_in_seconds":"3600"},
-          "3p-weekly":{"remaining_amount":12,"reset_time":"\(reset)"},
-          "3p-5h":{"remaining_fraction":0.9,"reset_in_seconds":1e300}}}
+        let output = Data("""
+        {"status":"SUCCESS","command":{"data":{"groups":[
+          {"buckets":[
+            {"id":"gemini-weekly","window":"weekly","reset_time":"\(stamp(3600))"},
+            {"id":"gemini-5h","window":"5h","remaining_fraction":"0.5","reset_time":"\(stamp(3600))"},
+            {"id":"3p-weekly","window":"weekly","reset_time":"1970-01-01T00:00:00Z"},
+            {"id":"3p-5h","window":"5h","remaining_fraction":0.9,"reset_time":"9999-01-01T00:00:00Z"},
+            {"id":17,"remaining_fraction":0.5},
+            {"id":"gemini-daily","window":"weekly","remaining_fraction":0.5},
+            {"id":"bad id with spaces","remaining_fraction":0.5},
+            {"id":"gemini-5h","remaining_fraction":0.1}]},
+          "not a group",
+          {"buckets":"nope"}]}}}
         """.utf8)
-        let kept = try #require(AntigravityQuota.reduce(statusLine: payload, now: now))
-        let reading = try #require(AntigravityQuota.decodeReading(kept))
-        #expect(reading.planTier == nil && reading.cliVersion == nil)
-        let byID = Dictionary(uniqueKeysWithValues: reading.buckets.map { ($0.id, $0) })
+        let read = try buckets(output)
+        let byID = Dictionary(uniqueKeysWithValues: read.map { ($0.id, $0) })
         #expect(Set(byID.keys) == ["gemini-weekly", "gemini-5h", "3p-weekly", "3p-5h"])
-        // Fraction omitted, reset stated, no amount: spent, not dropped.
+        // Fraction omitted, a REAL reset ahead: spent, not dropped.
         #expect(byID["gemini-weekly"]?.remainingFraction == 0)
-        // An amount bucket has no fraction to draw.
+        // Fraction omitted, the epoch: not spent — nothing to draw.
         #expect(byID["3p-weekly"]?.remainingFraction == nil)
-        // A numeric string reads; an absurd distance is no reset.
-        #expect(byID["gemini-5h"]?.resetsAt.map {
-            abs($0.timeIntervalSince(now.addingTimeInterval(3600))) < 1
-        } == true)
+        #expect(byID["3p-weekly"]?.resetsAt == nil)
+        // A numeric string reads; an absurd distance is no reset; the first
+        // of a repeated id wins.
+        #expect(byID["gemini-5h"]?.remainingFraction == 0.5)
         #expect(byID["3p-5h"]?.resetsAt == nil)
-        let meters = try snapshot(kept).meters
+        let meters = try snapshot(read).meters
         #expect(meters.first { $0.label == "Weekly" }?.percent == 100)
+        #expect(!meters.contains { $0.label == "Claude + GPT (7d)" })
     }
 
-    @Test("an export the provider can't read surfaces as a schema error")
-    func unreadable() {
-        #expect(throws: (any Error).self) {
-            _ = try AntigravityProvider().snapshot(
-                fromRawUsage: Data("nope".utf8), fetchedAt: now, plan: nil, thresholds: .standard)
-        }
+    @Test("what isn't a limits report fails readably, and an empty one is no limits")
+    func failuresAndEmpty() throws {
+        #expect(reduce(Data()) == .failure(.unreadable))
+        #expect(reduce(Data("Gemini Models\tWeekly Limit Remaining\t77%".utf8)) == .failure(.unreadable))
+        #expect(reduce(Data(try AntigravityQuotaFixture.real().prefix(900))) == .failure(.unreadable))
+        // A success without the command's result: if it says no turn ran,
+        // unreadable; if it can't say, assume a turn and stop asking.
+        #expect(reduce(Data(#"{"status":"SUCCESS","num_turns":0,"response":"x"}"#.utf8))
+            == .failure(.unreadable))
+        #expect(reduce(Data(#"{"status":"SUCCESS","response":"x"}"#.utf8))
+            == .failure(.notALimitsCommand))
+        #expect(reduce(Data(#"{"status":"ERROR","response":"x"}"#.utf8)) == .failure(.failed))
+        #expect(reduce(Data(), exit: 1, stderr: "AGY_ERROR: {\"status\":\"UNAVAILABLE\"}") == .failure(.failed))
+        #expect(reduce(Data(), exit: 1, stderr: "You are not logged into Antigravity.") == .failure(.notSignedIn))
+        #expect(reduce(
+            Data(#"{"status":"ERROR","response":"Authentication expired. Please log back in."}"#.utf8))
+            == .failure(.notSignedIn))
+        // A sign-in with no plan quota (an API key) reports a command with
+        // nothing in it: no limits, not an error.
+        #expect(reduce(Data(#"{"status":"SUCCESS","command":{"name":"usage","data":{}}}"#.utf8))
+            == .buckets([]))
+        #expect(reduce(Data(
+            #"{"status":"SUCCESS","command":{"name":"usage","data":{"groups":[]}}}"#.utf8))
+            == .buckets([]))
     }
 
-    @Test("the reduction keeps the quota and drops everything identifying")
-    func reduction() throws {
-        let payload = AntigravityStatusLine.payload(quota: AntigravityStatusLine.quota([
-            #""gemini-weekly":{"remaining_fraction":"0.25","reset_in_seconds":86400}"#,
-            AntigravityStatusLine.bucket("bad id with spaces", remaining: 0.5),
-        ]))
-        let kept = try #require(AntigravityQuota.reduce(statusLine: payload, now: now))
-        let text = try #require(String(data: kept, encoding: .utf8))
-        for secret in ["person@example.com", "secret-project", "transcript", "SECRET", "total_usd",
-                       "gemini-4-neon", "bad id"] {
-            #expect(!text.contains(secret), "\(secret) leaked into the export")
-        }
-        let reading = try #require(AntigravityQuota.decodeReading(kept))
-        #expect(reading.buckets.map(\.id) == ["gemini-weekly"])
-        #expect(reading.buckets.first?.remainingFraction == 0.25)
-        #expect(reading.planTier == "pro")
-        #expect(reading.cliVersion == "1.5.14")
-        // No quota at all — an API-key sign-in — keeps nothing.
-        #expect(AntigravityQuota.reduce(
-            statusLine: AntigravityStatusLine.payload(quota: nil), now: now) == nil)
-        #expect(AntigravityQuota.reduce(
-            statusLine: AntigravityStatusLine.payload(quota: "{}"), now: now) == nil)
-        #expect(AntigravityQuota.reduce(statusLine: Data("[1,2".utf8), now: now) == nil)
-        // An email-shaped tier is not a tier.
-        let odd = AntigravityStatusLine.payload(
-            quota: AntigravityStatusLine.quota([AntigravityStatusLine.bucket("gemini-5h", remaining: 1)]),
-            planTier: "x@y.z")
-        let oddReading = try #require(
-            AntigravityQuota.reduce(statusLine: odd, now: now).flatMap(AntigravityQuota.decodeReading))
-        #expect(oddReading.planTier == nil)
+    @Test("an agent turn is never a limits report: the probe must stop asking")
+    func agentTurnRefused() throws {
+        // The real limits command: zero turns, zero tokens, no conversation.
+        #expect(try buckets(try AntigravityQuotaFixture.real()).count == 5)
+        let turn = #"{"status":"SUCCESS","conversation_id":"c-1","num_turns":1,"#
+            + #""usage":{"total_tokens":1200},"response":"Here is your quota…"}"#
+        #expect(reduce(Data(turn.utf8)) == .failure(.notALimitsCommand))
+        // Even when it carried a command result, and even when it errored.
+        let both = #"{"status":"SUCCESS","num_turns":2,"command":{"name":"usage","data":{}}}"#
+        #expect(reduce(Data(both.utf8)) == .failure(.notALimitsCommand))
+        let spent = #"{"status":"ERROR","usage":{"total_tokens":30}}"#
+        #expect(reduce(Data(spent.utf8)) == .failure(.notALimitsCommand))
+        #expect(UsageError(quotaFailure: .notALimitsCommand) == .agentOutputUnreadable)
     }
 
-    @Test("a reading differs only when a meter would show it")
-    func differs() throws {
-        let reset = now.addingTimeInterval(4 * 3600)
-        func make(_ remaining: Double, reset: Date, tier: String = "pro", at: Date) throws -> Data {
-            try #require(AntigravityQuota.reduce(
-                statusLine: AntigravityStatusLine.payload(
-                    quota: AntigravityStatusLine.quota([
-                        AntigravityStatusLine.bucket("gemini-5h", remaining: remaining, reset: reset),
-                    ]), planTier: tier),
-                now: at))
-        }
-        let base = try make(0.800, reset: reset, at: now)
-        #expect(!AntigravityQuota.differs(
-            stored: base, fresh: try make(0.801, reset: reset.addingTimeInterval(20), at: now + 30)))
-        #expect(AntigravityQuota.differs(stored: base, fresh: try make(0.78, reset: reset, at: now)))
-        #expect(AntigravityQuota.differs(
-            stored: base, fresh: try make(0.8, reset: reset.addingTimeInterval(3600), at: now)))
-        #expect(AntigravityQuota.differs(
-            stored: base, fresh: try make(0.8, reset: reset, tier: "ultra", at: now)))
-        #expect(AntigravityQuota.differs(stored: Data("junk".utf8), fresh: base))
+    @Test("a shape that moved reads as unreadable, never as no limits")
+    func movedShape() throws {
+        let renamed = #"{"status":"SUCCESS","num_turns":0,"command":{"name":"usage","#
+            + #""data":{"quota_groups":[{"buckets":[]}]}}}"#
+        #expect(reduce(Data(renamed.utf8)) == .failure(.unreadable))
+        let mistyped = #"{"status":"SUCCESS","command":{"name":"usage","data":{"groups":"x"}}}"#
+        #expect(reduce(Data(mistyped.utf8)) == .failure(.unreadable))
+        let noData = #"{"status":"SUCCESS","command":{"name":"usage"}}"#
+        #expect(reduce(Data(noData.utf8)) == .failure(.unreadable))
+        // Buckets reported, none readable: unreadable too.
+        let bad = AntigravityQuotaFixture.output([
+            AntigravityQuotaFixture.bucket("gemini weekly!", window: "weekly", remaining: 0.5,
+                                           reset: "2026-11-28T14:02:05Z"),
+        ])
+        #expect(reduce(bad) == .failure(.unreadable))
+        // A window word this build can't read is no disagreement: kept.
+        let unknownWindow = AntigravityQuotaFixture.output([
+            AntigravityQuotaFixture.bucket("gemini-weekly", window: "1w", remaining: 0.5,
+                                           reset: "2026-11-28T14:02:05Z"),
+        ])
+        #expect(try buckets(unknownWindow).map(\.id) == ["gemini-weekly"])
+    }
+
+    @Test("a disabled bucket is skipped, and one that states an amount is never read as spent")
+    func disabledAndAmount() throws {
+        let future = "2026-11-28T14:02:05Z"
+        let raw = #"{"status":"SUCCESS","num_turns":0,"command":{"name":"usage","data":{"groups":[{"buckets":["#
+            + #"{"id":"gemini-weekly","window":"weekly","disabled":true,"reset_time":"\#(future)"},"#
+            + #"{"id":"gemini-5h","window":"5h","remaining_amount":40,"reset_time":"\#(future)"},"#
+            + #"{"id":"3p-5h","window":"5h","reset_time":"\#(future)"}"#
+            + #"]}]}}}"#
+        let read = try buckets(Data(raw.utf8))
+        #expect(read.map(\.id) == ["gemini-5h", "3p-5h"])
+        #expect(read.first { $0.id == "gemini-5h" }?.remainingFraction == nil)
+        // No amount, no fraction, a real reset ahead: protobuf's omitted zero.
+        #expect(read.first { $0.id == "3p-5h" }?.remainingFraction == 0)
+    }
+
+    @Test("sign-in is recognised by whole phrases only")
+    func signInPhrases() {
+        #expect(reduce(Data(), exit: 1, stderr: "Error: not signed in. Run agy to sign in.")
+            == .failure(.notSignedIn))
+        #expect(reduce(Data(), exit: 1, stderr: "TLS authentication handshake failed: dial tcp")
+            == .failure(.failed))
+        #expect(reduce(Data(), exit: 1, stderr: "the login keychain is locked") == .failure(.failed))
+        #expect(reduce(Data(), exit: 1, stderr: "catalog in use") == .failure(.failed))
+    }
+
+    @Test("only bucket numbers are kept — nothing the output says in words")
+    func keepsNumbersOnly() throws {
+        let read = try buckets(try AntigravityQuotaFixture.real())
+        let reading = AgentQuotaReading(startedAt: now, capturedAt: now, buckets: read)
+        let text = try #require(String(data: try JSONEncoder().encode(reading), encoding: .utf8))
+        #expect(!text.contains("placeholder"))
+        #expect(!text.lowercased().contains("description"))
     }
 
     @Test("bucket ids name their pool and window, or nothing")
     func shapes() {
-        #expect(AntigravityQuota.shape(of: "gemini-5h")
-            == .init(pool: .gemini, window: 5 * 3600))
-        #expect(AntigravityQuota.shape(of: "3p-weekly")
-            == .init(pool: .thirdParty, window: 7 * 86400))
-        #expect(AntigravityQuota.shape(of: "gemini-2d")
-            == .init(pool: .gemini, window: 2 * 86400))
+        #expect(AntigravityQuota.shape(of: "gemini-5h") == .init(pool: .gemini, window: 5 * 3600))
+        #expect(AntigravityQuota.shape(of: "3p-weekly") == .init(pool: .thirdParty, window: 7 * 86400))
+        #expect(AntigravityQuota.shape(of: "gemini-2d") == .init(pool: .gemini, window: 2 * 86400))
+        #expect(AntigravityQuota.shape(of: "gemini-argon-wtu-weekly")
+            == .init(pool: .argon, window: 7 * 86400))
         #expect(AntigravityQuota.shape(of: "gemini-4-argon-weekly") == nil)
         #expect(AntigravityQuota.shape(of: "gemini-soon") == nil)
         #expect(AntigravityQuota.shape(of: "image-weekly") == nil)
+    }
+
+    @Test("a body the provider can't read surfaces as a schema error")
+    func unreadableBody() {
+        #expect(throws: (any Error).self) {
+            _ = try AntigravityProvider().snapshot(
+                fromRawUsage: Data("nope".utf8), fetchedAt: now, plan: nil, thresholds: .standard)
+        }
     }
 }

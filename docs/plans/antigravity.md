@@ -10,17 +10,19 @@ read-only investigation and a proposal.
 > | --- | --- |
 > | Identity | id `antigravity`, "Antigravity CLI", service "Google AI", glyph `∩`, accent violet #A142F4; registered last |
 > | Tokens | the per-conversation `transcript.jsonl`, conversations found by listing `conversations/` by name; no database is opened |
-> | Plan limits | the CLI's documented custom **status line**, installed by hand; `usage-cli export-statusline antigravity` keeps only the quota in one file in the app's own folder (spec §10 amendment 2026-11-21, `docs/PRIVACY.md`) |
-> | Meters | `gemini-5h` → Session (5h), `gemini-weekly` → Weekly, `3p-*` → scoped "Claude + GPT (5h/7d)" (bar S·W·C); other buckets skipped |
+> | Plan limits | ~~the CLI's custom status line, installed by hand~~ — superseded the same day (user-directed: "There shouldn't even be a path that requires extra work from the user"): the engine host runs the CLI's own `agy -p /quota` print mode, nothing to set up (spec §10 amendment 2026-11-21, second; `docs/plans/antigravity-zero-setup.md`) |
+> | Meters | `gemini-5h` → Session (5h), `gemini-weekly` → Weekly, `3p-*` → scoped "Claude + GPT (5h/7d)", and (zero-setup branch) `gemini-argon-wtu-weekly` → scoped "Argon (7d)"; every pool the reading reports is shown; other buckets skipped |
 > | A window that rolled with no newer reading | a dash and no reset time, unless no conversation was written since the reset (then 0%) |
 > | Focus | a harness that read its usage and holds no limit isn't ranked for focus unless pinned (vendor-neutral) |
 > | Gemini CLI | deprecated, still metered; its provider declares the note Settings and `usage-cli harnesses` show |
 >
-> Where it landed: `docs/HARNESSES.md` (Antigravity), `docs/CLI.md`
-> (`export-statusline`), spec §10. The capture of a REAL status-line payload
-> (step V0 of the build plan) is still owed: the bucket ids and shape the
-> code expects come from the CLI's docs and changelog, not yet from a payload
-> seen on this Mac.
+> Where it landed: `docs/HARNESSES.md` (Antigravity), spec §10. Step V0 —
+> a real payload — was settled by the zero-setup branch with a real `/quota`
+> reading checked against the CLI's own `/usage` screen: the bucket ids are
+> `gemini-5h`, `gemini-weekly`, `3p-5h`, `3p-weekly` and
+> `gemini-argon-wtu-weekly`; `/quota` carries no tier; an untouched pool
+> reads fraction 1 with the Unix epoch as its reset. The "reset but no
+> fraction = spent" reading is still unobserved.
 
 The issue (2026-11-21): the person now works in Google's Antigravity CLI, and
 the tracker shows none of it. The one Google harness, `GeminiProvider`, reads

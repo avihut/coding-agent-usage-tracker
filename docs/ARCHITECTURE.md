@@ -108,6 +108,15 @@ seam.
   provider later = a new UsageProvider implementation + a spec §10
   amendment for its hosts (and for any local trees it reads); the engine,
   history, charts, and panel need zero changes.
+- QUOTA PROBE (2026-11-21, spec §10 amendment, second): a provider whose
+  agent's OWN tool prints the plan's limits declares `quotaCommand`
+  (`AgentCommands/`, core, vendor-neutral); the engine builds an
+  `AgentQuotaProbe` only when its host was given an `AgentCommandRunner`
+  (usaged, the hosting app), and `UsageService.refresh` asks it before the
+  fetch, handing the reading to `fetchRawUsage(accessToken:quota:)` and a
+  failed attempt back as `.cached(snapshot, error)`. Not a network
+  destination (the tool talks for itself), so `isLocalProvider` holds.
+  Antigravity is the one user (`docs/HARNESSES.md`).
 
 ## Adaptive refresh, as the user meets it
 

@@ -98,11 +98,31 @@ public struct Meter: Sendable, Equatable, Identifiable {
         Meter.inScope(model, needles: countedScope)
     }
 
+    /// A needle written `!word` EXCLUDES (2026-11-21, Antigravity: Gemini's
+    /// pool minus Gemini 4 Argon, which a Pro plan meters separately): a
+    /// model counts when it contains an including needle — or there is none
+    /// — and no excluding one. An older reader takes `!argon` as an ordinary
+    /// needle that never matches, so it degrades to counting the pool
+    /// whole, never to dropping it.
     public static func inScope(_ model: String, needles: [String]?) -> Bool {
         guard let needles, !needles.isEmpty else { return true }
         let text = model.lowercased()
-        return needles.contains { !$0.isEmpty && text.contains($0) }
+        var including = false
+        var included = false
+        for needle in needles {
+            if needle.hasPrefix(Self.excludingMark) {
+                let word = needle.dropFirst(Self.excludingMark.count)
+                if !word.isEmpty, text.contains(word) { return false }
+            } else if !needle.isEmpty {
+                including = true
+                if text.contains(needle) { included = true }
+            }
+        }
+        return included || !including
     }
+
+    /// The prefix that turns a scope needle into an exclusion.
+    public static let excludingMark = "!"
 
     /// Short windows move fast and need a tight fit; long ones should
     /// average across sittings: 45 minutes for windows up to ~6 hours,

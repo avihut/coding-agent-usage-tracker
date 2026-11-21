@@ -72,7 +72,10 @@ Swift tests and the TUI's serde tests decode the same golden fixtures in
   (additive-only for real now). Layout = dynamic shape math
   (tui/src/layout.rs): strip under 10 rows/40 cols, landscape at
   cols ≥ 2.1×rows, priority flow header→meters→today→models→heatmap→
-  footer, sections drop WHOLE. time crate: local offset captured once
+  footer, sections drop WHOLE. A meter label too long for its column keeps
+  a trailing `(window)` when four head characters still fit
+  (`truncate_label`: "Claude… (5h)" / "Claude… (7d)", 2026-11-21), so two
+  meters of one pool never print alike. time crate: local offset captured once
   in main() before threads (soundness gate), UTC fallback. Verify
   renders headlessly: tmux new-session -d -x W -y H + capture-pane
   (sizes 100×27, 46×30, 72×16, 46×8); raw SGR mouse bytes via

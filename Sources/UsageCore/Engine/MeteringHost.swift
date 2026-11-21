@@ -409,7 +409,7 @@ public final class MeteringHost {
             service: serviceFactory?(profile), defaults: defaults,
             bundleID: configuration.bundleID, roots: configuration.roots,
             host: configuration.kind, gateSeed: gateSeeds[key], systemAccent: systemAccent,
-            launchDelay: launchDelay
+            launchDelay: launchDelay, agentCommandRunner: configuration.agentCommandRunner
         ) { [weak self] state in
             self?.sink(key, state)
         }

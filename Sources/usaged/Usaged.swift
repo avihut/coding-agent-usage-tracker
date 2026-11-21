@@ -179,7 +179,11 @@ final class DaemonHost {
             providers: providers, defaults: defaults,
             configuration: MeteringHost.Configuration(
                 bundleID: Usaged.bundleID, kind: .daemon,
-                updateFeedURL: MeteringHost.Configuration.updateFeedURL(defaults: defaults)),
+                updateFeedURL: MeteringHost.Configuration.updateFeedURL(defaults: defaults),
+                // The engine host may run an agent's own tool for its plan
+                // limits (the quota probe, spec §10 amendment 2026-11-21,
+                // second).
+                agentCommandRunner: SpawnedCommandRunner()),
             gateSeeds: previous?.gateSeeds() ?? [:],
             systemAccent: SystemAccentPalette.color(appleAccentColor: accentChoice))
         host.onLog = { [weak self] message in self?.log(message) }

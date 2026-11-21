@@ -48,13 +48,14 @@ Fixes
 Features
 - Antigravity CLI is metered. It sits in the menu bar beside the other
   agents, under a violet ∩: its tokens, models, activity and cost come from
-  its own local transcripts, with nothing to set up and no network or
-  sign-in involved. Its plan limits (Gemini session and weekly, and the
-  Claude + GPT pool) appear once you make `usage-cli export-statusline
-  antigravity` its status line — `usage-cli export-statusline antigravity
-  --print-config` prints the entry to paste into Antigravity's settings.
-  Until then it shows tokens without limits, and an agent with no limits to
-  show no longer takes the bar's lead unless you pin it.
+  its own local transcripts. Its plan limits — the Gemini session and
+  weekly limits, the Claude + GPT pool, and Gemini 4 Argon's own weekly —
+  appear with nothing to set up: while you use Antigravity, the app asks
+  the CLI itself (`agy -p /quota`, its own limits report — no agent turn)
+  at most every ten minutes; it spends no quota, and the CLI uses its own
+  sign-in.
+  Without the CLI installed it shows tokens without limits, and an agent
+  with no limits to show no longer takes the bar's lead unless you pin it.
 - Gemini CLI, which Antigravity succeeds for Google's plans, is labelled
   deprecated and stays metered for API-key use.
 - The panel's Activity section counts every agent's consumption together:
