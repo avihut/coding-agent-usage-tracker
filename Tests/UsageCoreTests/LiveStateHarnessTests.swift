@@ -34,7 +34,8 @@ struct LiveStateHarnessTests {
     /// One account's published section: a couple of meters, nothing else, so
     /// the fixture stays small and every field in it is deliberate.
     private func section(
-        provider: any UsageProvider, percent: Int, label: String, tag: String
+        provider: any UsageProvider, percent: Int, label: String, tag: String,
+        usage: Usage? = nil
     ) -> LiveState {
         let meter = Meter(
             id: "session", label: label, percent: percent,
@@ -42,11 +43,46 @@ struct LiveStateHarnessTests {
         return LiveStateBuilder.build(
             provider: provider, host: "daemon", pid: 909, appVersion: "0.101.0",
             state: .live(Snapshot(meters: [meter], fetchedAt: date("2026-09-19T11:58:00Z"))),
-            predictions: [:], samples: [], timeline: [], activity: [],
-            pricing: provider.bundledRates, colorLedger: ModelColorLedger(),
+            predictions: [:], samples: [], timeline: usage?.timeline ?? [], activity: usage?.days ?? [],
+            pricing: provider.bundledRates, colorLedger: usage?.ledger ?? ModelColorLedger(),
             graceSeconds: ActivityGrace.defaultSeconds, activeInterval: 300, paceMultiplier: 1,
             nextPollAt: date("2026-09-19T12:03:00Z"), backoffUntil: nil, apiBudget: nil,
             now: now, calendar: utc, locale: posix)
+    }
+
+    /// One account's scan, published in its own section AND handed to the
+    /// all-agents total — the same data, so the golden reads consistently.
+    struct Usage {
+        let days: [DailyActivity]
+        let timeline: [TokenSlot]
+        let ledger: ModelColorLedger
+        let pricing: PricingTable
+
+        var consumption: SectionConsumption {
+            SectionConsumption(days: days, timeline: timeline, pricing: pricing)
+        }
+    }
+
+    private func usage(
+        provider: any UsageProvider, _ tallies: [(day: String, model: String, tally: TokenTally)],
+        prompts: Int
+    ) -> Usage {
+        var byDay: [Date: DailyActivity] = [:]
+        var timeline: [TokenSlot] = []
+        for entry in tallies {
+            let moment = date("\(entry.day)T09:15:00Z")
+            let day = utc.startOfDay(for: moment)
+            var daily = byDay[day] ?? DailyActivity(day: day, tokens: 0, messages: 0, prompts: prompts)
+            daily.tokens += entry.tally.total
+            daily.models[entry.model, default: TokenTally()].add(entry.tally)
+            byDay[day] = daily
+            timeline.append(TokenSlot(t: moment, model: entry.model, tally: entry.tally))
+        }
+        let models = Array(Set(tallies.map(\.model))).sorted()
+        return Usage(
+            days: byDay.values.sorted { $0.day < $1.day }, timeline: timeline,
+            ledger: ModelColorLedger().assigning(models.map { ($0, provider.modelCatalog.familyName($0)) }),
+            pricing: provider.bundledRates)
     }
 
     /// Codex's own ledger holds a reset named by the same minute Claude's
@@ -73,15 +109,26 @@ struct LiveStateHarnessTests {
             nickname: "Personal", order: 1)
         let codexAccount = profile(id: "default", providerID: "codex", home: nil, order: 0)
         let geminiAccount = profile(id: "default", providerID: "gemini", home: nil, order: 0)
+        // Both agents emit `unknown` — the all-agents rows keep them apart.
+        let workUsage = usage(provider: claude, [
+            ("2026-09-18", "claude-sonnet-4-5", TokenTally(input: 1200, output: 3400, cacheCreation: 800, cacheRead: 90000)),
+            ("2026-09-19", "claude-sonnet-4-5", TokenTally(input: 600, output: 1500, cacheCreation: 200, cacheRead: 40000)),
+            ("2026-09-19", "unknown", TokenTally(input: 50, output: 10)),
+        ], prompts: 6)
+        let codexUsage = usage(provider: codex, [
+            ("2026-09-19", "gpt-5.2-codex", TokenTally(input: 9000, output: 2100, cacheRead: 30000)),
+            ("2026-09-19", "unknown", TokenTally(input: 70, output: 5)),
+        ], prompts: 3)
 
         return MeteringDigest.compose(
             harnesses: [
                 HarnessSection(
                     provider: claude, recentFiles: 412, activeDays: 9,
-                    serviceStatus: nil, notices: [], outages: []),
+                    serviceStatus: nil, notices: [], outages: [], colorLedger: workUsage.ledger),
                 HarnessSection(
                     provider: codex, recentFiles: 22, activeDays: 6,
-                    serviceStatus: nil, notices: codexNotices, outages: nil),
+                    serviceStatus: nil, notices: codexNotices, outages: nil,
+                    colorLedger: codexUsage.ledger),
                 HarnessSection(
                     provider: gemini, shown: false, recentFiles: 0, activeDays: 0,
                     serviceStatus: nil, notices: [], outages: nil),
@@ -90,7 +137,9 @@ struct LiveStateHarnessTests {
                 ProfileSection(
                     profile: work, label: "work@example.com", monogram: "W", dormant: false,
                     lastActivityAt: date("2026-09-19T11:30:00Z"), homeDisplayPath: "~/.claude",
-                    state: section(provider: claude, percent: 41, label: "Session (5h)", tag: "S")),
+                    state: section(
+                        provider: claude, percent: 41, label: "Session (5h)", tag: "S", usage: workUsage),
+                    consumption: workUsage.consumption),
                 ProfileSection(
                     profile: personal, label: "Personal", monogram: "P", dormant: true,
                     lastActivityAt: date("2026-08-02T09:00:00Z"),
@@ -98,7 +147,9 @@ struct LiveStateHarnessTests {
                 ProfileSection(
                     profile: codexAccount, label: "Codex", monogram: "C", dormant: false,
                     lastActivityAt: date("2026-09-19T10:05:00Z"), homeDisplayPath: nil,
-                    state: section(provider: codex, percent: 13, label: "Session", tag: "S")),
+                    state: section(
+                        provider: codex, percent: 13, label: "Session", tag: "S", usage: codexUsage),
+                    consumption: codexUsage.consumption),
                 ProfileSection(
                     profile: geminiAccount, label: "Gemini CLI", monogram: "G", dormant: false,
                     lastActivityAt: date("2026-09-17T08:00:00Z"), homeDisplayPath: nil,
@@ -198,6 +249,45 @@ struct LiveStateHarnessTests {
         // Ids of the bundled harness pass through untouched, colon or not.
         #expect(NoticeRouting.split("outage|abc:def") == (bundled, "outage|abc:def"))
         #expect(NoticeRouting.split("\(bundled):reset|17") == (bundled, "\(bundled):reset|17"))
+    }
+
+    /// "All" is the strip's accounts of shown harnesses: the dormant Claude
+    /// account and hidden Gemini stay out. Rows are per agent + model — the
+    /// two agents' `unknown` stay two rows — and each part sums to the whole.
+    @Test("the all-agents section totals the strip's accounts, agent by agent")
+    func allAgents() throws {
+        let state = buildFixture()
+        let all = try #require(state.allAgents)
+        #expect(all.members.map(\.profile) == ["default", "codex"])
+        #expect(all.members.map(\.state) == ["counted", "counted"])
+        #expect(all.countLabel == "2 agents")
+        #expect(!all.partial)
+        let models = try #require(all.models)
+        let total = try #require(all.activity)
+        let unknowns = models.filter { $0.id == "unknown" }
+        #expect(Set(unknowns.compactMap(\.agent)) == ["claude", "codex"])
+        #expect(models.allSatisfy { $0.agent != nil })
+        // Every per-account row stays agent-less on the wire.
+        #expect(state.profiles?.compactMap(\.models).joined().allSatisfy { $0.agent == nil } == true)
+
+        let profiles = try #require(state.profiles)
+        for key in total.days.map(\.dayKey) {
+            let parts = profiles.filter { ["default", "codex"].contains($0.id) }
+                .compactMap { $0.activity?.days.first { $0.dayKey == key } }
+            let whole = try #require(total.days.first { $0.dayKey == key })
+            #expect(whole.tokens == parts.reduce(0) { $0 + $1.tokens })
+            #expect(whole.prompts == parts.reduce(0) { $0 + $1.prompts })
+            let costs = parts.compactMap(\.cost)
+            #expect(whole.cost == (costs.isEmpty ? nil : costs.reduce(0, +)))
+        }
+        #expect(total.todayTokens == profiles.filter { ["default", "codex"].contains($0.id) }
+            .reduce(0) { $0 + ($1.activity?.todayTokens ?? 0) })
+        // Two agents share the chart: each model wears its agent's tone.
+        let codexRow = try #require(models.first { $0.id == "gpt-5.2-codex" })
+        #expect(codexRow.color == ModelColorMath.agentShade(
+            hueSlot: 0, shadeSlot: 0, accent: RGBColor(CodexProvider().accent), on: .dark))
+        // A projection keeps the section — every view of the file has it.
+        #expect(state.viewing(profile: "default")?.allAgents == all)
     }
 
     @Test("the harness golden stays decodable and equal to the crafted state")

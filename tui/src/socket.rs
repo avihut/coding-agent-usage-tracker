@@ -26,12 +26,15 @@ pub enum Silence {
     NoAnswer,
 }
 
-pub fn send(socket_path: &Path, command: &serde_json::Value) -> Option<Reply> {
+pub fn send(socket_path: Option<&Path>, command: &serde_json::Value) -> Option<Reply> {
     ask(socket_path, command).ok()
 }
 
-/// `send`, saying why when no reply came back.
-pub fn ask(socket_path: &Path, command: &serde_json::Value) -> Result<Reply, Silence> {
+/// `send`, saying why when no reply came back. No path at all is a pane
+/// reading a `--digest` file nobody's engine wrote: nothing is listening,
+/// and nothing is ever dialled — the live engine least of all.
+pub fn ask(socket_path: Option<&Path>, command: &serde_json::Value) -> Result<Reply, Silence> {
+    let socket_path = socket_path.ok_or(Silence::NotListening)?;
     let stream = UnixStream::connect(socket_path).map_err(|_| Silence::NotListening)?;
     let exchange = || -> Option<Reply> {
         stream.set_read_timeout(Some(Duration::from_secs(3))).ok()?;
@@ -50,14 +53,14 @@ pub fn ask(socket_path: &Path, command: &serde_json::Value) -> Result<Reply, Sil
     exchange().ok_or(Silence::NoAnswer)
 }
 
-pub fn refresh(socket_path: &Path) -> Option<Reply> {
+pub fn refresh(socket_path: Option<&Path>) -> Option<Reply> {
     send(socket_path, &serde_json::json!({ "refresh": {} }))
 }
 
 /// The engine's active pace. It clamps to its own floor and ceiling and
 /// echoes what it settled on, so the reply — not the request — is what the
 /// pane reports.
-pub fn set_interval(socket_path: &Path, seconds: u32) -> Option<Reply> {
+pub fn set_interval(socket_path: Option<&Path>, seconds: u32) -> Option<Reply> {
     send(
         socket_path,
         &serde_json::json!({ "setInterval": { "seconds": seconds } }),
@@ -66,21 +69,21 @@ pub fn set_interval(socket_path: &Path, seconds: u32) -> Option<Reply> {
 
 /// The person's × on a notice. The engine refuses an ongoing one (`ok:
 /// false`, "not dismissable") — the reply, not the request, is the word.
-pub fn dismiss_notice(socket_path: &Path, id: &str) -> Option<Reply> {
+pub fn dismiss_notice(socket_path: Option<&Path>, id: &str) -> Option<Reply> {
     send(
         socket_path,
         &serde_json::json!({ "dismissNotice": { "id": id } }),
     )
 }
 
-pub fn dismiss_all_notices(socket_path: &Path) -> Option<Reply> {
+pub fn dismiss_all_notices(socket_path: Option<&Path>) -> Option<Reply> {
     send(socket_path, &serde_json::json!({ "dismissAllNotices": {} }))
 }
 
 /// The pane drew these while they were pending. Seen is not dismissed: the
 /// dot stays, but an outage watched here ends with "Outage ended" rather
 /// than a full recount.
-pub fn mark_notices_seen(socket_path: &Path, ids: &[String]) -> Option<Reply> {
+pub fn mark_notices_seen(socket_path: Option<&Path>, ids: &[String]) -> Option<Reply> {
     send(
         socket_path,
         &serde_json::json!({ "markNoticesSeen": { "ids": ids } }),
@@ -93,7 +96,7 @@ pub fn mark_notices_seen(socket_path: &Path, ids: &[String]) -> Option<Reply> {
 /// account, including one it stores and does not honour, so a pin is
 /// judged by the next digest rather than by this reply — and a busy engine
 /// that took the line but answered late may still apply it.
-pub fn focus_profile(socket_path: &Path, key: Option<&str>) -> Result<Reply, Silence> {
+pub fn focus_profile(socket_path: Option<&Path>, key: Option<&str>) -> Result<Reply, Silence> {
     ask(socket_path, &focus_command(key))
 }
 
@@ -123,14 +126,14 @@ mod tests {
         let path = std::env::temp_dir().join(format!("usage-tui-{}.sock", std::process::id()));
         let _ = std::fs::remove_file(&path);
         assert_eq!(
-            ask(&path, &focus_command(None)).unwrap_err(),
+            ask(Some(&path), &focus_command(None)).unwrap_err(),
             Silence::NotListening
         );
         // Something took the connection and hung up without a word.
         let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
         let engine = std::thread::spawn(move || drop(listener.accept().unwrap()));
         assert_eq!(
-            ask(&path, &focus_command(None)).unwrap_err(),
+            ask(Some(&path), &focus_command(None)).unwrap_err(),
             Silence::NoAnswer
         );
         engine.join().unwrap();

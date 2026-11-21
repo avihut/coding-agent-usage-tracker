@@ -357,7 +357,9 @@ the same models. But for consumption it makes sense"). Design record:
   Sessions sit in a subtree keyed on the scope, the meters in one keyed on
   focus. Limits are never summed anywhere.
 - WHO "ALL" IS: the strip's accounts (`shownProfiles`) minus hidden
-  harnesses (`ProviderRegistry.consumptionMembers`). Dormant and disabled
+  harnesses — core `ConsumptionMembership`, which the registry's
+  `consumptionMembers`, the digest's `allAgents` and `usage-cli
+  --all-agents` all call. Dormant and disabled
   accounts stay out — while the app hosts they have no engine, so no
   activity in memory, and counting them would need a scan of its own and
   make the total depend on which process hosts.
@@ -420,9 +422,17 @@ the same models. But for consumption it makes sense"). Design record:
   labeled by its owner, wearing its agent's mark when several agents
   share the list; a click opens the Sessions window of the row's
   account (`showSessions(selecting:in:)`). Identity is owner + id.
+- Merged colours read each agent's families by that agent's OWN catalog
+  (2026-11-21): the globally active catalog (`ModelNames`) filed another
+  vendor's model under a family its engine never named — a stray ledger
+  slot and a tone the digest didn't share.
+- THE TOTAL IN THE DIGEST (2026-11-21, docs/plans/tui-unified-reading.md):
+  `allAgents`, built from the same merge, for the TUI (`u`) and `usage-cli
+  --all-agents`.
 - Not yet (follow-ups in the design record): the Sessions window's own
-  scope, the total in the digest for the CLI and TUI, the family view at
-  every period.
+  scope, the family view at every period, and a "scanning" state: an
+  account whose first scan hasn't landed counts here (as nothing) where
+  the digest names it `scanning` and calls the total partial.
 
 ## Model color legibility
 

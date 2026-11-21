@@ -29,8 +29,14 @@ enum ModelPalette {
     /// persistent ledger, growing and saving it when new models appear.
     /// Persistence lives with core `ModelColorLedger` — the engine's
     /// usage-ordered seed and this lookup share the one write path.
-    static func assignment(for models: [String], style: HarnessStyle) -> [String: Color] {
-        let grown = ledger(growing: models, providerID: style.providerID)
+    /// `family` reads a model's family; the merged consumption scope passes
+    /// the model's own agent's catalog reading, every other chart the
+    /// active one's.
+    static func assignment(
+        for models: [String], style: HarnessStyle,
+        family: (String) -> String = ModelFamily.familyName
+    ) -> [String: Color] {
+        let grown = ledger(growing: models, providerID: style.providerID, family: family)
         var result: [String: Color] = [:]
         for (family, familyShades) in grown.shades {
             guard let hue = grown.hues[family] else { continue }
@@ -48,22 +54,28 @@ enum ModelPalette {
     /// read from — and growing — that agent's own ledger, so the slots and
     /// therefore the colors are as fixed as the ones above. Raw model ids
     /// only; the caller keys the result however its chart needs.
-    static func agentShades(for models: [String], style: HarnessStyle) -> [String: Color] {
-        let grown = ledger(growing: models, providerID: style.providerID)
+    static func agentShades(
+        for models: [String], style: HarnessStyle,
+        family: (String) -> String = ModelFamily.familyName
+    ) -> [String: Color] {
+        let grown = ledger(growing: models, providerID: style.providerID, family: family)
         var result: [String: Color] = [:]
         for model in models {
-            guard let slots = grown.slots(for: model, family: ModelFamily.familyName(model)) else { continue }
+            guard let slots = grown.slots(for: model, family: family(model)) else { continue }
             result[model] = adaptive(.agentShade, hueSlot: slots.hue, shadeSlot: slots.shade, accent: style.accent)
         }
         return result
     }
 
-    static func ledger(growing models: [String], providerID: String) -> ModelColorLedger {
+    static func ledger(
+        growing models: [String], providerID: String,
+        family: (String) -> String = ModelFamily.familyName
+    ) -> ModelColorLedger {
         // A merged scope's composite key (agent␟account␟model) is a chart's
         // key, never a model: saved here it would hold a slot forever.
         let entries = models
             .filter { !ConsumptionKey.isComposite($0) }
-            .map { ($0, ModelFamily.familyName($0)) }
+            .map { ($0, family($0)) }
         guard isEphemeral else {
             return ModelColorLedger.grow(entries, defaults: .standard, providerID: providerID)
         }

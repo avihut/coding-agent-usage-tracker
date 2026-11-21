@@ -109,7 +109,7 @@ description = "Regenerate the zstd decoder's synthetic test fixtures (needs Home
 run = "scripts/zstd-fixtures.sh"
 
 [tasks.demo-digest]
-description = "Write a synthetic live-state.json for demos (args: [--several] out.json; --several adds a second Claude Code account and Gemini CLI) — read it with usage-tui/usage-cli --digest"
+description = "Write a synthetic live-state.json for demos (args: [--several] [--scanning] out.json; --several adds a second Claude Code account and Gemini CLI, --scanning shows Codex mid-first-scan) — read it with usage-tui/usage-cli --digest"
 run = "scripts/demo-digest.py"
 
 [tasks.axdump]

@@ -48,6 +48,15 @@ Fixes
   and then with "Write permissions error" while Claude Code status lines are
   running `usage-cli` from the bundle: the bundle is built and signed aside
   and swapped into place whole.
+- The terminal dashboard pointed at a saved digest (`usage-tui --digest
+  <file>`) no longer talks to the running engine: it sends no command and
+  marks no notice seen unless `--socket` names one, and it never sets the
+  engine up either way. A demo could otherwise refresh, re-pace or
+  re-focus the real engine.
+- In the panel's all-agents chart, each agent's models take their colours
+  from that agent's own model families, as its engine names them. Codex's
+  "Other" and any model no catalog claims were filed under Claude's
+  families, so they could wear a tone of their own there.
 
 Features
 - Antigravity CLI is metered. It sits in the menu bar beside the other
@@ -70,3 +79,13 @@ Features
   reads as it always did. With a single account there is no menu. The
   Sessions strip follows the same choice, and clicking a merged row opens
   that account's sessions.
+- The terminal dashboard and `usage-cli` read every agent's consumption
+  together too, as the panel does. In the dashboard, TODAY, the model table
+  and the Activity chart total all agents by default: the table becomes
+  agent ▸ model, the bars stack in each agent's colours, and `u` switches to
+  the focused account and back. The header still shows the focused
+  account's limits, which never add up. `usage-cli activity`, `cost`,
+  `models` and `model` take `--all-agents` for the same total. An agent
+  whose history is still being read is named and left out ("partial"),
+  never counted as zero; while every agent is still being read there is
+  no total yet, rather than a total of zero.

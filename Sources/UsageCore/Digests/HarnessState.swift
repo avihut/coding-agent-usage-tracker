@@ -93,12 +93,15 @@ public struct HarnessSection: Sendable {
     public let serviceStatus: ServiceStatusCard?
     public let notices: [Notice]?
     public let outages: [OutageSpan]?
+    /// The harness's model-colour ledger, as its engines seeded it — the
+    /// all-agents rows read their slots here.
+    public let colorLedger: ModelColorLedger
 
     public init(
         provider: any UsageProvider, present: Bool = true, shown: Bool = true,
         recentFiles: Int? = nil, activeDays: Int? = nil,
         serviceStatus: ServiceStatusCard? = nil, notices: [Notice]? = nil,
-        outages: [OutageSpan]? = nil
+        outages: [OutageSpan]? = nil, colorLedger: ModelColorLedger = ModelColorLedger()
     ) {
         self.provider = provider
         self.present = present
@@ -108,6 +111,7 @@ public struct HarnessSection: Sendable {
         self.serviceStatus = serviceStatus
         self.notices = notices
         self.outages = outages
+        self.colorLedger = colorLedger
     }
 
     /// The short name every face falls back to when it cannot draw a glyph:

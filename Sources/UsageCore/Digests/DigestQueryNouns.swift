@@ -473,7 +473,12 @@ extension DigestQuery {
             case "hours":
                 let matched = digest.activity.hourDays.filter { $0.dayKey >= window.start && $0.dayKey <= window.end }
                 guard !matched.isEmpty else {
-                    return noMatch("no hourly data for '\(rangeToken)' — beyond the ~8-day timeline retention")
+                    // The all-agents total keeps fewer days of hours than an
+                    // account does (a size cap, `AllAgentsDigest.hourSpanDays`).
+                    let reach = parsed.flags["all-agents"] != nil
+                        ? "the all-agents total keeps hours for the last \(AllAgentsDigest.hourSpanDays) days"
+                        : "beyond the timeline's retention"
+                    return noMatch("no hourly data for '\(rangeToken)' — \(reach)")
                 }
                 return hourBucketOutput(matched, json: asJSON, raw: raw, header: header)
             case "models":
@@ -481,7 +486,8 @@ extension DigestQuery {
                 guard !matched.isEmpty else {
                     return noMatch("no per-model data for '\(rangeToken)' — beyond the ~35-day model horizon")
                 }
-                return modelRowsOutput(aggregateModels(matched), json: asJSON, raw: raw, header: header)
+                return modelRowsOutput(
+                    aggregateModels(matched), json: asJSON, raw: raw, header: header, digest: digest)
             default: return unknownField(noun: "activity", field: name)
             }
         }
@@ -537,15 +543,26 @@ extension DigestQuery {
         return ok(DigestQueryFormat.table(rows))
     }
 
-    private static func modelRowsOutput(_ models: [ModelRow], json: Bool, raw: Bool, header: Bool) -> QueryOutput {
+    /// Rows that span agents (`--all-agents`) carry their agent: the LAST
+    /// raw column (a script reading the first four by position is
+    /// unaffected) and the first human one.
+    private static func modelRowsOutput(
+        _ models: [ModelRow], json: Bool, raw: Bool, header: Bool, digest: LiveState? = nil
+    ) -> QueryOutput {
         if json { return ok(DigestQueryFormat.jsonValue(models)) }
         guard !models.isEmpty else { return ok("") }
+        let spansAgents = models.contains { $0.agent != nil }
         if raw {
-            let rows = models.map { [$0.id, $0.displayName, String($0.tally.total), DigestQueryFormat.rawMoney($0.cost)] }
-            return ok(DigestQueryFormat.tsv(rows, header: header ? ["id", "name", "tokens", "cost"] : nil))
+            let rows = models.map {
+                [$0.id, $0.displayName, String($0.tally.total), DigestQueryFormat.rawMoney($0.cost)]
+                    + (spansAgents ? [$0.agent ?? ""] : [])
+            }
+            let names = ["id", "name", "tokens", "cost"] + (spansAgents ? ["agent"] : [])
+            return ok(DigestQueryFormat.tsv(rows, header: header ? names : nil))
         }
         let rows = models.map {
-            [$0.displayName, TokenFormat.compact($0.tally.total), DigestQueryFormat.humanMoney($0.cost)]
+            (spansAgents ? [$0.agent.map { agentShortName($0, digest: digest) } ?? ""] : [])
+                + [$0.displayName, TokenFormat.compact($0.tally.total), DigestQueryFormat.humanMoney($0.cost)]
         }
         return ok(DigestQueryFormat.table(rows))
     }
@@ -561,7 +578,8 @@ extension DigestQuery {
         switch resolveModelScope(parsed: parsed, digest: digest, now: now, calendar: calendar) {
         case .failure(let output): return output
         case .success(let models):
-            return modelRowsOutput(models, json: json, raw: raw, header: parsed.flags["header"] != nil)
+            return modelRowsOutput(
+                models, json: json, raw: raw, header: parsed.flags["header"] != nil, digest: digest)
         }
     }
 
@@ -596,7 +614,7 @@ extension DigestQuery {
                     if parsed.flags["raw"] != nil {
                         return modelRowsOutput(
                             [model], json: false, raw: true,
-                            header: parsed.flags["header"] != nil)
+                            header: parsed.flags["header"] != nil, digest: digest)
                     }
                     let line = "\(model.displayName) · \(TokenFormat.compact(model.tally.total)) tokens"
                         + " · \(DigestQueryFormat.humanMoney(model.cost))"
@@ -637,6 +655,7 @@ extension DigestQuery {
         switch field {
         case "name": return DigestQueryFormat.textField(model.displayName, json: json)
         case "id": return DigestQueryFormat.textField(model.id, json: json)
+        case "agent": return DigestQueryFormat.textField(model.agent, json: json)
         case "color": return DigestQueryFormat.hexField(model.color, json: json)
         case "cost": return DigestQueryFormat.numberField(model.cost, json: json)
         case "share":

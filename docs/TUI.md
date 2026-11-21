@@ -28,10 +28,47 @@ steps only through accounts the engine will focus — turned on, not
 dormant, harness shown — and the footer calls a switch done only when the
 digest shows it.
 
+`usage-tui --digest <file>` reads that file and talks to NO engine: no
+command (refresh, pace, focus, dismiss, the automatic "seen" marks) unless
+`--socket` names a socket too, and never `usaged ensure` either way; a key
+that would send one says "no engine — this pane reads a --digest file". A demo
+digest that aged past the heartbeat horizon used to read as offline and
+run `ensure`, which can repoint the person's launch agent, and its keys
+reached the live engine (2026-11-21).
+
 ```sh
 mise run tui        # build + run in this terminal
 mise run tui-test   # digest contract + layout tests
 ```
+
+Consumption reads every agent at once, as the panel's Activity section
+does: TODAY, the model table and the activity chart total all the
+accounts on the strip (the digest's `allAgents` section), and `u`
+switches to the focused account and back. The header always shows the
+focused account's limits — limits never add up. Under All agents the
+table is the agent ▸ model outline (`ALL AGENTS · 7D`, or `AGENTS · 7D`
+where the longer title would push the column labels out): every agent
+row is seated first, then the heaviest models fill what is left under
+their agents, and a pane with no room to spare shows agent rows only
+("+N more" in the rollup line counts every hidden row). THE DEGRADE: the
+section asks for up to six rows and gives rows back — models first, then
+agents, down to a single one — rather than cost the pane a section one
+account's view would show (the activity chart, or MODELS itself); under
+~30 columns a model's indent shrinks to one cell, and an agent name that
+won't fit becomes its short name. An agent whose first scan hasn't
+landed keeps a dim row, "scanning…", and the readout says "partial" —
+the last word a narrow readout gives up (the active days go first, then
+the count label). While NO agent is counted yet there is no total:
+TODAY and the readout say so instead of showing zeros. The bars stack
+in each agent's colours; the TODAY spark, the heatmap and the day drill
+go neutral only when several AGENTS share them (two accounts of one
+agent keep its colours, as the panel does). The day drill names its
+scope in its title (the count label), a model name two agents share
+carries its agent ("Other (Codex)"), and a day past the total's 8 days of
+hours says so ("u: this account" reads the account's own). Hover and the
+keyboard cursor hold a row by its identity, so a scan landing above it
+can't move it. With one account in "all" there is nothing to total, `u`
+says "no all-agents total in this digest", and the pane reads as before.
 
 Detail surfaces open from the dashboard: click a meter (or `1-3`) for its
 window chart — measured percent in braille, forecast trajectory, session

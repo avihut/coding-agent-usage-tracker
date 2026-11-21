@@ -157,7 +157,7 @@ fn plan_inner(
     }
 }
 
-fn landed(plan: &Plan) -> usize {
+pub(crate) fn landed(plan: &Plan) -> usize {
     [plan.meters, plan.today, plan.models, plan.heatmap]
         .iter()
         .filter(|section| section.is_some())

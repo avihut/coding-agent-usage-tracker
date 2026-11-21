@@ -289,6 +289,46 @@ same account is already running (nothing was scanned).
   account runs and the rest exit 27), but it buys nothing a status line
   needs.
 
+## --all-agents (2026-11-21)
+
+- `usage-cli activity|cost|models|model … --all-agents` answers for every
+  account "all" counts (`ConsumptionMembership`: enrolled, enabled,
+  awake, harness shown — the panel's rule) from the digest's `allAgents`
+  section, projected onto the top level (`LiveState.viewingAllAgents`),
+  so each noun runs its own code (`Digests/DigestQueryAllAgents.swift`).
+  Registered in `flagOwners` for those four nouns only — on any other it
+  is exit 19 "unknown flag". With `--account` or `--provider` it is 19
+  (it counts every account and can't also name one); the provider's home
+  variable selects nothing under it. `--max-age` still judges the file.
+- NO SECTION: the membership rule over the digest's own
+  `profiles`/`harnesses` decides why. One account — its own section
+  answers, being the whole total; none (every account disabled, asleep or
+  hidden) — exit 20; two or more — the writer predates the section:
+  exit 20.
+- NO TOTAL YET (a section whose members are all still scanning, so it
+  carries no `models`/`activity`): exit 20, empty stdout, the note names
+  who is being scanned — never a total of zero.
+- Rows that span agents carry `agent`: a JSON key, the LAST `--raw`
+  column (a script reading the first four by position is unaffected), the
+  first human column (the harness's short name). An id two agents share
+  (`unknown`) is ambiguous (19) and `agent:id` names one; `model … agent`
+  is a field (null on a per-account row, which names no agent).
+  `aggregateModels` keys by agent + id, ties ordered agent then id as the
+  section's own rows are (a per-account row: id alone, as before).
+- PARTIAL (a member still scanning, at least one counted): raw and JSON
+  stdout never change; a stderr note in every register names who is left
+  out, and a human summary line ends "· partial" — `cost`'s amount
+  included, as "· stale" already rides it; never a field value or a
+  table. Exit 0.
+- HOURS: the total keeps 8 days of hourly buckets (a size cap); past them
+  `activity <range> hours --all-agents` is 20, "the all-agents total keeps
+  hours for the last 8 days". (An account's own past its retention now
+  says "beyond the timeline's retention" — the "~8-day" figure it printed
+  was stale since v0.91.0's 56 days.)
+- Every invocation that answered before answers the same, output and exit
+  codes; the one newly answering call is `model <sel> agent` (it was 19,
+  an unknown field).
+
 ## Daemon verbs
 
 Not digest queries — these drive the launch agent, and are the stable

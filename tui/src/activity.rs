@@ -20,9 +20,25 @@ pub struct ModelTotal {
     pub tally: Tally,
     /// None = nothing in scope was priceable. Never 0 for "unknown".
     pub cost: Option<f64>,
+    /// The agent the model ran under, on all-agents rows only.
+    pub agent: Option<String>,
+}
+
+/// A row's identity across agents: the id alone within one account, the
+/// agent and the id when rows span agents (two agents' `unknown` are two
+/// models). Internal only — never printed.
+pub fn row_key(agent: Option<&str>, id: &str) -> String {
+    match agent {
+        Some(agent) => format!("{agent}\u{1f}{id}"),
+        None => id.to_owned(),
+    }
 }
 
 impl ModelTotal {
+    pub fn key(&self) -> String {
+        row_key(self.agent.as_deref(), &self.id)
+    }
+
     /// What this row is worth in the active dimension — the value bars,
     /// heat, and ordering all read.
     pub fn value(&self, dimension: Dimension) -> f64 {
@@ -41,6 +57,7 @@ impl From<&ModelRow> for ModelTotal {
             color: row.color,
             tally: row.tally,
             cost: row.cost,
+            agent: row.agent.clone(),
         }
     }
 }
@@ -83,7 +100,7 @@ pub fn day_value(day: &DayRollup, dimension: Dimension) -> f64 {
 /// Per-model totals over the scoped days, heaviest first (the digest
 /// builder's own ordering, re-applied after summing).
 pub fn model_totals(activity: &ActivityRollup, start: &str, end: &str) -> Vec<ModelTotal> {
-    let mut by_id: HashMap<&str, ModelTotal> = HashMap::new();
+    let mut by_id: HashMap<String, ModelTotal> = HashMap::new();
     for day in &activity.model_days {
         if day.day_key.as_str() < start || day.day_key.as_str() > end {
             continue;
@@ -92,13 +109,14 @@ pub fn model_totals(activity: &ActivityRollup, start: &str, end: &str) -> Vec<Mo
             // Identity from the first sighting, figures from every day —
             // seeding with the row's own tally would count day one twice.
             let entry = by_id
-                .entry(model.id.as_str())
+                .entry(row_key(model.agent.as_deref(), &model.id))
                 .or_insert_with(|| ModelTotal {
                     id: model.id.clone(),
                     display_name: model.display_name.clone(),
                     color: model.color,
                     tally: Tally::default(),
                     cost: None,
+                    agent: model.agent.clone(),
                 });
             entry.tally.add(model.tally);
             if let Some(cost) = model.cost {
@@ -112,6 +130,7 @@ pub fn model_totals(activity: &ActivityRollup, start: &str, end: &str) -> Vec<Mo
             .total()
             .cmp(&a.tally.total())
             .then_with(|| a.id.cmp(&b.id))
+            .then_with(|| a.agent.cmp(&b.agent))
     });
     rows
 }
@@ -146,9 +165,9 @@ pub fn total_value(days: &[DayRollup], start: &str, end: &str, dimension: Dimens
 }
 
 /// One day's bar, split by model in the period's own stacking order so the
-/// bands line up across days: (color, fraction), heaviest first — callers
-/// paint from the bottom up. Days without model attribution get no
-/// segments and fall back to a plain fill.
+/// bands line up across days: (row key, color, fraction), first = bottom —
+/// heaviest first for one account, agent by agent under All agents. Days
+/// without model attribution get no segments and fall back to a plain fill.
 pub fn segments(
     activity: &ActivityRollup,
     day_key: &str,
@@ -165,12 +184,16 @@ pub fn segments(
     let valued: Vec<(String, Rgb, f64)> = order
         .iter()
         .filter_map(|row| {
-            let model = day.models.iter().find(|m| m.id == row.id)?;
+            let key = row.key();
+            let model = day
+                .models
+                .iter()
+                .find(|m| row_key(m.agent.as_deref(), &m.id) == key)?;
             let value = match dimension {
                 Dimension::Tokens => model.tally.total() as f64,
                 Dimension::Cost => model.cost.unwrap_or(0.0),
             };
-            (value > 0.0).then(|| (row.id.clone(), row.color, value))
+            (value > 0.0).then_some((key, row.color, value))
         })
         .collect();
     let sum: f64 = valued.iter().map(|(_, _, value)| value).sum();
@@ -238,6 +261,7 @@ mod tests {
                 cache_creation1h: 0,
             },
             cost,
+            agent: None,
         };
         let activity = ActivityRollup {
             time_zone: "UTC".into(),

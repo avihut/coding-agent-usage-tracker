@@ -136,6 +136,33 @@ Contents, by section:
   writer that meters one home — absent ≠ empty. A dormant or disabled home
   carries nil numbers, never zeros. The TUI mirrors both fields in its
   digest structs (the golden must decode) but does not draw them yet.
+- `allAgents` (2026-11-21, additive) — consumption summed across every
+  account "all" counts (`ConsumptionMembership`: enrolled, enabled, awake,
+  harness shown), every agent and model; never limits. `members` (profile,
+  providerID, state `counted`|`scanning`|`noTokens`), a pre-phrased
+  `countLabel`, `partial`, today's `models` and an `activity` shaped
+  exactly like the top level's, so faces read it with the code they have.
+  Built by the COMPOSER from each engine's raw scan (`ProfileSection
+  .consumption`, set once `sessionsIndexed`) through `ConsumptionMerge` —
+  the panel's own merge — and the per-account rollup's builder
+  (`LiveStateBuilder.activity`): one answer. A member whose scan hasn't
+  landed is `scanning`, named and left out, never zero; while NO member
+  is counted, `models` and `activity` are absent (no total yet — never a
+  total of zero). Rows are per
+  agent + model, accounts of one agent summed, and carry `ModelRow.agent`
+  (absent on every per-account row, so those encode byte-identically);
+  colours are the agent's ledger slots by its own catalog's family,
+  `ModelColorMath.agentShade` when several agents share the chart — the
+  dark variant, as every digest colour is. Hourly
+  buckets reach 8 days back — a SIZE cap (`AllAgentsDigest.hourSpanDays`;
+  an account's own reach its scanner's 56-day retention). Absent when "all"
+  holds fewer than two accounts (the focused section IS the total) or the
+  writer predates it. Memoized on the host (`AllAgentsCache`, keyed on the
+  day, where each horizon's cut falls, membership, scans, prices and
+  ledgers): heartbeats reuse it; a miss rebuilds on the host's actor
+  (~127 ms in a debug build on heavy synthetic data). Size on a
+  three-agent Mac: the section is ~111 KB pretty, +16.7% on a 664 KB
+  digest measured without it.
 
 Privacy: the digest never contains tokens/credentials, full filesystem
 paths, or prompt text — home paths appear tilde-abbreviated only. (Session

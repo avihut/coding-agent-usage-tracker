@@ -257,6 +257,28 @@ gives each stack band its own density glyph.
     Harnesses) and `usage-cli harnesses` prints it. Draw it there if one
     lands. The meterless focus rule needs nothing here — the TUI's pin
     test is unchanged, and the digest's `focusedProfile` already obeys it.
+36. [M][✓][+d] All agents (2026-11-21, follow-up to #37: "doesn't the
+    unified appearance appear in the TUI interface as well?") — the
+    app's Activity scope. The digest's `allAgents` section (DAEMON.md)
+    carries the total; `u` switches All agents ↔ the focused account,
+    default All agents, held for the run (the pane writes nothing) and
+    kept across a focus switch. Under All agents MODELS, ACTIVITY and
+    the day drill read `allAgents.activity` through ONE accessor
+    (`App::reading`); TODAY reads the same section itself, to say "no
+    total yet" while no member is counted (absent, never zeros). MODELS
+    becomes the agent ▸ model outline (`tui/src/outline.rs`, titled
+    `ALL AGENTS · 7D` or `AGENTS · 7D` where labels need the room), bars
+    stack per agent+model in the digest's agent tones, and — when several
+    AGENTS share them, as the app's `spansAgents` — the heatmap, the
+    TODAY spark and unattributed bar fills go neutral. The header is
+    always the focused account's limits. No section (one account in
+    "all", or an older writer) = no `u` in the footer, and the pane reads
+    as before. Differences, deliberate: no family fold on All (no room);
+    SESSIONS stays the focused account's list, titled with its account
+    (the app merges the strip; the digest carries no merged shortlist
+    yet); and an account mid-first-scan reads `scanning` here but counts
+    (as nothing) in the app's panel, which has no scanning state yet
+    (follow-up).
 
 ### Intentionally different (do NOT "fix")
 32. Push/pop animation, pointer cursors, hover popovers — GUI idioms;
@@ -330,11 +352,24 @@ gives each stack band its own density glyph.
   **s span / z zoom** (meter surface only — on the dashboard they
   say "open a meter first") and **p pace** (3/5/15m over the socket).
   **a / A** account focus (item 34; replies ride the typed `Echo`
-  channel). FREE KEYS still: m, d.
+  channel), **u** All agents ↔ the focused account (item 36).
+  `parse_args`: an explicit `--digest` dials no socket (unless
+  `--socket` too) and never ensures. FREE KEYS still: m, d.
 - activity.rs (v0.74.0): the period math — `span`, `day_value`,
   `model_totals`, `active_days`, `total_value`, `segments`,
   `model_horizon_truncates`. Pure, tested; every activity surface
   reads it so table, chart and summary can't disagree.
+- ui/consumption.rs (item 36): the TODAY and MODELS renderers — a
+  child module of ui, sharing its helpers (`models`, `agent_row`,
+  `model_row_at`, `models_title`, `cost_rollup*`, `today_title`).
+- outline.rs (item 36): MODELS as rows — `flat` (one account) or
+  `build` (the agent ▸ model outline over the period's totals: agent
+  rows sum their models, scanning/noTokens agents keep a noted row,
+  `models` in row order = the bars' stacking order) and `seat` (agents
+  first, then the heaviest models; agents only when cramped). Pure,
+  tested. Row identity across agents is `activity::row_key` (agent +
+  id); every outline row has an `id` (`Hit::ModelRow` holds it, never a
+  position); hovering a row filters by its key SET.
 - meter.rs (v0.76.0): the meter surface's span math — `Span`
   (Sliding/Window), the `FRAMES` ladder + `ladder`/`default_rung`
   (window-capped), `window_available`, `view()` (start/end/label +

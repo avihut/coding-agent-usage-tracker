@@ -348,7 +348,8 @@ final class ProviderRegistry {
         case .client: ProfileStore.pin(from: .standard)
         }
     }
-    private var dormantIDs: Set<String> {
+    /// Dormant account keys — read by the consumption membership rule too.
+    var dormantIDs: Set<String> {
         switch role {
         case .hosting(let host): return host.dormant
         case .client(let feed):

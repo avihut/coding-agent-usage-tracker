@@ -12,6 +12,7 @@ mod activity;
 mod digest;
 mod layout;
 mod meter;
+mod outline;
 mod socket;
 mod state;
 mod status;
@@ -99,49 +100,84 @@ fn ensure_engine(reply_tx: &mpsc::Sender<Echo>) {
     });
 }
 
-fn parse_args() -> Result<(PathBuf, PathBuf), String> {
-    let mut digest = support_root().join("live-state.json");
-    let mut socket = support_root().join("control.sock");
-    let mut args = std::env::args().skip(1);
+/// What a run reads and which engine, if any, it may talk to.
+#[derive(Debug, PartialEq, Eq)]
+struct Args {
+    digest: PathBuf,
+    /// None: the pane dials no engine at all.
+    socket: Option<PathBuf>,
+    /// Whether finding no engine may run `usaged ensure`.
+    may_ensure: bool,
+    /// `--status`: print the tmux line and leave.
+    status: bool,
+}
+
+/// An explicit `--digest` names a file no engine is known to have written —
+/// a demo, a capture, a fixture — so, as `usage-cli --digest` asks no
+/// engine, the pane neither runs `usaged ensure` (a demo that ages past the
+/// heartbeat horizon reads as offline, and an ensure could repoint the
+/// person's launch agent) nor sends a single command, the automatic
+/// "seen" marks included, unless `--socket` names one deliberately.
+fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
+    let mut digest = None;
+    let mut socket = None;
+    let mut args = args;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--digest" => {
-                digest = args
-                    .next()
-                    .map(PathBuf::from)
-                    .ok_or("--digest needs a path")?;
+                digest = Some(
+                    args.next()
+                        .map(PathBuf::from)
+                        .ok_or("--digest needs a path")?,
+                );
             }
             "--socket" => {
-                socket = args
-                    .next()
-                    .map(PathBuf::from)
-                    .ok_or("--socket needs a path")?;
+                socket = Some(
+                    args.next()
+                        .map(PathBuf::from)
+                        .ok_or("--socket needs a path")?,
+                );
             }
             "--status" => {
                 // One tmux-format line and out — no terminal takeover.
-                println!("{}", status::render(&digest));
-                std::process::exit(0);
+                return Ok(Args {
+                    digest: digest.unwrap_or_else(|| support_root().join("live-state.json")),
+                    socket: None,
+                    may_ensure: false,
+                    status: true,
+                });
             }
             "--help" | "-h" => {
                 return Err(concat!(
                     "usage-tui — terminal dashboard for the usage engine\n\n",
-                    "  --digest <path>   read this live-state.json (default: app support)\n",
+                    "  --digest <path>   read this live-state.json (default: app support);\n",
+                    "                    talks to no engine unless --socket is given too\n",
                     "  --socket <path>   control socket for commands (default: app support)\n",
                     "\nkeys: q quit · r refresh · arrows move the cursor, enter opens · 1-3 meters · [ ] page\n",
-                    "      v span · c cost · p pace · a/A account/auto · s/z span+zoom on a meter · n/x/X notices\n",
-                    "      esc back · ? help"
+                    "      v span · c cost · u agents · p pace · a/A account/auto · s/z span+zoom on a meter\n",
+                    "      n/x/X notices · esc back · ? help"
                 )
                 .to_owned());
             }
             other => return Err(format!("unknown argument '{other}' (try --help)")),
         }
     }
-    Ok((digest, socket))
+    let explicit = digest.is_some();
+    Ok(Args {
+        digest: digest.unwrap_or_else(|| support_root().join("live-state.json")),
+        socket: if explicit {
+            socket
+        } else {
+            Some(socket.unwrap_or_else(|| support_root().join("control.sock")))
+        },
+        may_ensure: !explicit,
+        status: false,
+    })
 }
 
 fn main() {
-    let (digest_path, socket_path) = match parse_args() {
-        Ok(paths) => paths,
+    let args = match parse_args(std::env::args().skip(1)) {
+        Ok(args) => args,
         Err(message) => {
             eprintln!("{message}");
             std::process::exit(if message.starts_with("usage-tui") {
@@ -151,6 +187,10 @@ fn main() {
             });
         }
     };
+    if args.status {
+        println!("{}", status::render(&args.digest));
+        std::process::exit(0);
+    }
     // Capture the local offset while still single-threaded (the `time`
     // crate refuses afterwards, soundly); clocks fall back to UTC.
     let local_offset = UtcOffset::current_local_offset().unwrap_or(UtcOffset::UTC);
@@ -166,7 +206,11 @@ fn main() {
 
     let terminal = ratatui::init();
     let _ = execute!(std::io::stdout(), EnableMouseCapture);
-    let result = run(terminal, App::new(digest_path, socket_path, local_offset));
+    let result = run(
+        terminal,
+        App::new(args.digest, args.socket, local_offset),
+        args.may_ensure,
+    );
     let _ = execute!(std::io::stdout(), DisableMouseCapture);
     ratatui::restore();
     if let Err(error) = result {
@@ -175,13 +219,17 @@ fn main() {
     }
 }
 
-fn run(mut terminal: ratatui::DefaultTerminal, mut app: App) -> std::io::Result<()> {
+fn run(
+    mut terminal: ratatui::DefaultTerminal,
+    mut app: App,
+    may_ensure: bool,
+) -> std::io::Result<()> {
     let (reply_tx, reply_rx) = mpsc::channel::<Echo>();
     let mut last_draw = Instant::now() - Duration::from_secs(1);
     let mut last_stat = Instant::now() - Duration::from_secs(1);
     let mut seen_sent = std::collections::HashSet::<String>::new();
 
-    if app.freshness(OffsetDateTime::now_utc()) == Freshness::EngineOffline {
+    if may_ensure && app.freshness(OffsetDateTime::now_utc()) == Freshness::EngineOffline {
         app.notice = Some("no engine running — asking usaged to set itself up…".into());
         ensure_engine(&reply_tx);
     }
@@ -287,12 +335,18 @@ fn handle_key(app: &mut App, code: KeyCode, reply_tx: &mpsc::Sender<Echo>) {
             }
         }
         KeyCode::Char('?') => app.show_help = !app.show_help,
+        KeyCode::Char('r')
+        | KeyCode::Char('p')
+        | KeyCode::Char('a')
+        | KeyCode::Char('A')
+        | KeyCode::Char('X')
+            if no_engine(app) => {}
         KeyCode::Char('r') => {
             let socket_path = app.socket_path.clone();
             let tx = reply_tx.clone();
             app.notice = Some("refreshing…".into());
             std::thread::spawn(move || {
-                let reply = match socket::refresh(&socket_path) {
+                let reply = match socket::refresh(socket_path.as_deref()) {
                     Some(reply) => reply.message.unwrap_or_else(|| {
                         if reply.ok {
                             "ok".into()
@@ -320,7 +374,7 @@ fn handle_key(app: &mut App, code: KeyCode, reply_tx: &mpsc::Sender<Echo>) {
             let tx = reply_tx.clone();
             app.notice = Some(format!("pace → {}m…", seconds / 60));
             std::thread::spawn(move || {
-                let reply = match socket::set_interval(&socket_path, seconds) {
+                let reply = match socket::set_interval(socket_path.as_deref(), seconds) {
                     Some(reply) => reply.message.unwrap_or_else(|| {
                         if reply.ok {
                             "ok".into()
@@ -384,7 +438,7 @@ fn handle_key(app: &mut App, code: KeyCode, reply_tx: &mpsc::Sender<Echo>) {
             app.notice = Some("dismissing all…".into());
             std::thread::spawn(move || {
                 let _ = tx.send(Echo::Notice(reply_word(socket::dismiss_all_notices(
-                    &socket_path,
+                    socket_path.as_deref(),
                 ))));
             });
         }
@@ -396,6 +450,7 @@ fn handle_key(app: &mut App, code: KeyCode, reply_tx: &mpsc::Sender<Echo>) {
             app.heat_page = 0;
         }
         KeyCode::Char('c') => app.dimension = app.dimension.toggled(),
+        KeyCode::Char('u') => app.toggle_scope(),
         // The meter popover's span picker and its frame dropdown, as two
         // keys. Both are meter-surface grammar: on the dashboard they say
         // so rather than silently doing nothing.
@@ -521,7 +576,20 @@ fn reply_word(reply: Option<socket::Reply>) -> String {
     }
 }
 
+/// A pane reading a `--digest` file has no engine to ask: a key that would
+/// send a command says so instead of pretending it was sent.
+fn no_engine(app: &mut App) -> bool {
+    if app.socket_path.is_some() {
+        return false;
+    }
+    app.notice = Some("no engine — this pane reads a --digest file".into());
+    true
+}
+
 fn dismiss_notice(app: &mut App, id: String, reply_tx: &mpsc::Sender<Echo>) {
+    if no_engine(app) {
+        return;
+    }
     let socket_path = app.socket_path.clone();
     let tx = reply_tx.clone();
     app.notice = Some("dismissing…".into());
@@ -529,7 +597,7 @@ fn dismiss_notice(app: &mut App, id: String, reply_tx: &mpsc::Sender<Echo>) {
     app.focus_hit = None;
     std::thread::spawn(move || {
         let _ = tx.send(Echo::Notice(reply_word(socket::dismiss_notice(
-            &socket_path,
+            socket_path.as_deref(),
             &id,
         ))));
     });
@@ -537,6 +605,9 @@ fn dismiss_notice(app: &mut App, id: String, reply_tx: &mpsc::Sender<Echo>) {
 
 /// Ask for a focus switch; the request goes out now unless one already is.
 fn request_focus(app: &mut App, ask: FocusAsk, reply_tx: &mpsc::Sender<Echo>) {
+    if no_engine(app) {
+        return;
+    }
     if let Some(send) = app.ask_focus(ask) {
         send_focus(app, send, reply_tx);
     }
@@ -546,7 +617,7 @@ fn send_focus(app: &App, ask: FocusAsk, reply_tx: &mpsc::Sender<Echo>) {
     let socket_path = app.socket_path.clone();
     let tx = reply_tx.clone();
     std::thread::spawn(move || {
-        let answer = match socket::focus_profile(&socket_path, ask.key()) {
+        let answer = match socket::focus_profile(socket_path.as_deref(), ask.key()) {
             Ok(reply) if reply.ok => FocusAnswer::Accepted,
             Ok(reply) => FocusAnswer::Refused(reply_word(Some(reply))),
             Err(socket::Silence::NotListening) => FocusAnswer::Refused(reply_word(None)),
@@ -574,7 +645,7 @@ fn mark_seen(app: &App, sent: &mut std::collections::HashSet<String>) {
     sent.extend(ids.iter().cloned());
     let socket_path = app.socket_path.clone();
     std::thread::spawn(move || {
-        let _ = socket::mark_notices_seen(&socket_path, &ids);
+        let _ = socket::mark_notices_seen(socket_path.as_deref(), &ids);
     });
 }
 
@@ -617,5 +688,69 @@ fn activate(app: &mut App, hit: Hit) {
         // Another harness's mark in the header: the menu bar's click on a
         // mark, deferred the same way.
         Hit::Account(key) => app.pending_focus = Some(FocusAsk::Pin(key)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parsed(args: &[&str]) -> Args {
+        parse_args(args.iter().map(|arg| (*arg).to_owned())).unwrap()
+    }
+
+    /// A pane on a `--digest` file has no engine: a key that would send
+    /// a command says so; one with a socket named dials it as asked.
+    #[test]
+    fn engine_keys_in_a_digest_pane_say_there_is_no_engine() {
+        let mut app = App::new(
+            std::path::PathBuf::from("/nonexistent/live-state.json"),
+            None,
+            time::UtcOffset::UTC,
+        );
+        assert!(no_engine(&mut app));
+        assert_eq!(
+            app.notice.as_deref(),
+            Some("no engine — this pane reads a --digest file")
+        );
+        app.socket_path = Some(std::path::PathBuf::from("/nonexistent/control.sock"));
+        app.notice = None;
+        assert!(!no_engine(&mut app));
+        assert!(app.notice.is_none());
+    }
+
+    #[test]
+    fn the_live_digest_may_ensure_and_dials_the_live_socket() {
+        let args = parsed(&[]);
+        assert!(args.may_ensure);
+        assert_eq!(args.socket, Some(support_root().join("control.sock")));
+    }
+
+    #[test]
+    fn an_explicit_digest_never_ensures_and_dials_nothing() {
+        let args = parsed(&["--digest", "/tmp/demo.json"]);
+        assert_eq!(args.digest, PathBuf::from("/tmp/demo.json"));
+        assert!(!args.may_ensure);
+        assert_eq!(args.socket, None);
+        // Even when the file named IS the live one: nobody said which
+        // engine wrote it.
+        let live = support_root().join("live-state.json");
+        let args = parsed(&["--digest", live.to_str().unwrap()]);
+        assert!(!args.may_ensure && args.socket.is_none());
+    }
+
+    #[test]
+    fn a_named_socket_is_dialled_but_still_never_ensured() {
+        let args = parsed(&["--digest", "/tmp/demo.json", "--socket", "/tmp/s.sock"]);
+        assert_eq!(args.socket, Some(PathBuf::from("/tmp/s.sock")));
+        assert!(!args.may_ensure);
+    }
+
+    #[test]
+    fn no_socket_path_is_not_listening_without_dialling() {
+        assert_eq!(
+            socket::ask(None, &serde_json::json!({ "refresh": {} })).unwrap_err(),
+            socket::Silence::NotListening
+        );
     }
 }

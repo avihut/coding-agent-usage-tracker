@@ -68,7 +68,7 @@ extension DigestQuery {
         "activity": scalars(["tokens", "prompts", "cost"])
             .merging(tables(["days", "hours", "models"])) { lhs, _ in lhs },
         "model": scalars([
-            "name", "id", "color", "cost", "share", "tokens", "tokens.input", "tokens.output", "tokens.cache-read",
+            "name", "id", "agent", "color", "cost", "share", "tokens", "tokens.input", "tokens.output", "tokens.cache-read",
             "tokens.cache-write", "tokens.cache-write-1h", "tokens.uncached-input", "tokens.input-side",
             "tokens.cached-share",
         ]),
