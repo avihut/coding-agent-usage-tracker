@@ -87,6 +87,28 @@ struct AntigravityProviderTests {
         #expect(provider.pricingSelector.includes("gemini/gemini-4-neon", "gemini"))
     }
 
+    /// The rates the feed carries for Antigravity's models sit under
+    /// `gemini/`; a synthetic fragment proves the provider's own slice picks
+    /// them up and keys them the way transcripts name them.
+    @Test("its models price through Gemini's feed slice")
+    func pricesThroughFeed() throws {
+        let feed = Data("""
+        {"gemini/gemini-4-neon":{"litellm_provider":"gemini","input_cost_per_token":0.000003,
+          "output_cost_per_token":0.000015,"cache_read_input_token_cost":1.5e-7},
+         "vertex_ai/gemini-4-neon":{"litellm_provider":"vertex_ai","input_cost_per_token":9,
+          "output_cost_per_token":9},
+         "gemini/gemini-4-argon":{"litellm_provider":"gemini","input_cost_per_token":0.000002,
+          "output_cost_per_token":0.00001}}
+        """.utf8)
+        let table = try PricingFeedClient.decode(
+            feed: feed, now: now, selector: AntigravityProvider().pricingSelector)
+        let neon = try #require(table.rates["gemini-4-neon"])
+        let dollars = neon.dollars(for: TokenTally(input: 1_000_000, output: 100_000, cacheRead: 1_000_000))
+        #expect(abs(dollars - (3 + 1.5 + 0.15)) < 0.0001)
+        #expect(table.rates["gemini-4-argon"] != nil)
+        #expect(table.rates.count == 2)
+    }
+
     @Test("no conversations is noLocalData; conversations without transcripts too")
     func noLocalData() async throws {
         let fixture = try AntigravityFixture()

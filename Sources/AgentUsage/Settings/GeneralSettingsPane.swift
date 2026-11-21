@@ -372,7 +372,11 @@ struct GeneralSettingsPane: View {
                     infoRow("Update check", "api.github.com")
                 }
                 note(
-                    (store.isLocalProvider
+                    (store.provider.statusLineExport != nil
+                        // Limits that only the agent's status line sees
+                        // (spec §10, the status-line export).
+                        ? "Everything comes from this Mac's local \(store.provider.agentName) files, read-only. Its plan limits come only from its status line, if you set that up: `usage-cli export-statusline` keeps the limits and plan tier from it in one file in this app's own folder, and nothing else. Nothing is fetched from \(store.provider.serviceName). No analytics, no telemetry."
+                        : store.isLocalProvider
                         ? "Everything comes from this Mac's local \(store.provider.agentName) session files, read-only — including the limit percentages \(store.provider.agentName) itself records. Nothing is fetched from \(store.provider.serviceName). No analytics, no telemetry."
                         : "Usage comes from \(store.provider.serviceName)'s own usage endpoint; activity and tokens from this Mac's local \(store.provider.agentName) transcripts, read-only. No analytics, no telemetry.")
                         + (store.provider.statusFeed == nil

@@ -11,7 +11,7 @@ import Testing
     private func harness(
         _ id: String, glyph: String, agent: String, shown: Bool = true, present: Bool = true,
         files: Int? = nil, days: Int? = nil, accounts: Int = 1,
-        status: ServiceStatusCard? = nil, notices: NoticesCard? = nil
+        status: ServiceStatusCard? = nil, notices: NoticesCard? = nil, note: String? = nil
     ) -> HarnessState {
         HarnessState(
             id: id, serviceName: agent, agentName: agent, glyph: glyph,
@@ -19,7 +19,8 @@ import Testing
             accent: RGBColor(red: 0.5, green: 0.5, blue: 0.5), isLocalProvider: id != "claude",
             present: present, shown: shown, recentFiles: files, activeDays: days,
             newestActivityAt: files == nil ? Date(timeIntervalSince1970: 1_700_000_000) : nil,
-            accountCount: accounts, serviceStatus: status, notices: notices, outages: nil)
+            accountCount: accounts, serviceStatus: status, notices: notices, outages: nil,
+            deprecationNote: note)
     }
 
     private func card(_ items: [NoticeCard], indicator: Bool = true) -> NoticesCard {
@@ -103,6 +104,25 @@ import Testing
         #expect(rows[1][4] == "shown")
         #expect(rows[1][5] == "217 files · 7 days")
         #expect(rows[3][4] == "hidden")
+    }
+
+    /// 2026-11-21: `note` is APPENDED, so the first seven columns keep
+    /// their positions for scripts that read them that way.
+    @Test("a deprecated harness's note is the last column, empty for the rest")
+    func noteColumn() {
+        let harnesses = [
+            harness("claude", glyph: "✳︎", agent: "Claude Code", files: 3, days: 1),
+            harness("gemini", glyph: "✦", agent: "Gemini CLI", note: "Deprecated — use X."),
+        ]
+        #expect(DigestQuery.harnessesColumns.last == "note")
+        #expect(DigestQuery.harnessesColumns.count == 8)
+        let rows = run(["harnesses", "--raw"], harnesses).stdout
+            .split(separator: "\n")
+            .map { $0.split(separator: "\t", omittingEmptySubsequences: false).map(String.init) }
+        #expect(rows[1].count == 8 && rows[1][7].isEmpty)
+        #expect(rows[2][7] == "Deprecated — use X.")
+        #expect(rows[2][4] == "shown")
+        #expect(run(["harnesses"], harnesses).stdout.contains("Deprecated — use X."))
     }
 
     @Test("scalars count what they name")

@@ -103,14 +103,15 @@ struct MultiHarnessHostTests {
         }
 
         func makeHost(
-            _ providers: [any UsageProvider], reprobeInterval: TimeInterval = 600
+            _ providers: [any UsageProvider], reprobeInterval: TimeInterval = 600,
+            stagger: TimeInterval = 0
         ) -> MeteringHost {
             MeteringHost(
                 providers: providers, defaults: defaults,
                 configuration: MeteringHost.Configuration(
                     bundleID: "com.test.harnesses", kind: .app, roots: roots, pollsStatus: false,
                     updateFeedURL: nil, reprobeInterval: reprobeInterval, userHome: userHome,
-                    stagger: 0, bindsSocket: false))
+                    stagger: stagger, bindsSocket: false))
         }
 
         func tearDown() {
@@ -280,6 +281,51 @@ struct MultiHarnessHostTests {
         let moved = await eventually { host.focusedProfileID == "antigravity" }
         #expect(moved)
         #expect(host.digest?.engine.providerID == "antigravity")
+
+        // The export goes away: no limits again, and focus goes back.
+        try FileManager.default.removeItem(at: fixture.antigravityExport)
+        #expect(await host.handle(.refreshProfile(id: "antigravity")).ok)
+        let back = await eventually { host.focusedProfileID == "default" }
+        #expect(back)
+    }
+
+    /// A harness with no local data yet publishes no snapshot at all — that
+    /// is "unknown", not "no limits", and must not cost it focus.
+    @Test("a harness with no local data stays in the focus ranking")
+    func noLocalDataStaysEligible() async throws {
+        let fixture = try Fixture()
+        defer { fixture.tearDown() }
+        try fixture.claudeSession(daysAgo: 0.2)
+        // Rollouts with no token events: Codex is present, reads nothing.
+        for day in 1...5 { try fixture.codexRollout(daysAgo: Double(day) + 0.3) }
+        let host = fixture.makeHost([fixture.claude, fixture.codex])
+        host.start()
+        defer { host.shutdown() }
+        let read = await eventually { host.engines["codex"]?.state.error != nil }
+        #expect(read)
+        #expect(host.engines["codex"]?.state.snapshot == nil)
+        #expect(host.focusedProfileID == "codex")
+    }
+
+    /// The launch stagger spreads polls of a NETWORK endpoint; a local
+    /// provider's first read must not wait behind it, or focus would guess
+    /// about it for minutes after every update.
+    @Test("local harnesses read at once, whatever the launch stagger")
+    func localSkipsStagger() async throws {
+        let fixture = try Fixture()
+        defer { fixture.tearDown() }
+        try fixture.claudeSession(daysAgo: 0.2)
+        try fixture.codexRollout(daysAgo: 0.3)
+        try fixture.antigravityConversation(daysAgo: 0.4)
+        let host = fixture.makeHost(
+            [fixture.claude, fixture.codex, fixture.antigravity], stagger: 60)
+        host.start()
+        defer { host.shutdown() }
+        // With the stagger applied to all three, the last would wait 40s.
+        let read = await eventually {
+            host.engines["antigravity"]?.state.snapshot != nil
+        }
+        #expect(read)
     }
 
     /// The user's own rule: "I've not been using Codex for months; there's no
