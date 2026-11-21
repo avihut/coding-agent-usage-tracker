@@ -425,7 +425,8 @@ git branch -q -D preview
 tip=$(git rev-parse HEAD)
 fails "$scripts/release.sh" --dry-run
 cp "$out" "$tmp/step.log"
-passes grep -q '#16 .*its description could not be read' "$tmp/step.log"
+passes grep -q '✗ #16 .*its description could not be read' "$tmp/step.log"
+passes grep -q 'release: #13 .*could not be read — nothing from it' "$tmp/step.log" # a chore only warns
 fails "$scripts/release.sh"
 jq -n '[{number: 16, body: "## Release note\n\nJust prose, no label."}]' >"$tmp/bad.json"
 fails env RELEASE_NOTES_PRS="$tmp/bad.json" "$scripts/release.sh"
@@ -447,10 +448,20 @@ passes test "$(git log -1 --format=%s)" = 'release: v0.4.0'
 passes test "$(git tag -l --format='%(contents:subject)%0a%0a%(contents:body)' v0.4.0)" = "$(cat "$expected")"
 passes test "$(git log -1 --format=%b)" = "$(cat "$expected")"
 passes test "$(cat .release-notes/next.md)" = "$(sed -n '1,/-->/p' "$root/.release-notes/next.md")"
-# Nothing in next.md, a PR note: titled with the version.
-squash 'fix(panel): one more (#17)' $'## Release note\n\nFixes: one more.'
+# Nothing in next.md, a PR note: titled with the version. Its squash body
+# is shaped as GitHub writes one: wrapped at 72, signature, trailer block.
+squash 'fix(panel): one more (#17)' $'## What and why\n\nWhy.\n\n## Release note\n\nFixes: one more, its description wrapped as a squash commit\nwraps it.\n\nGenerated with a tool\n\n---------\n\nCo-authored-by: someone <someone@example.invalid>'
 passes "$scripts/release.sh"
-passes test "$(git tag -l --format='%(contents)' v0.4.1)" = $'v0.4.1\n\nFixes\n- One more.'
+passes test "$(git tag -l --format='%(contents)' v0.4.1)" = $'v0.4.1\n\nFixes\n- One more, its description wrapped as a squash commit wraps it.'
+# A note is frozen as merged, so rewording one is the maintainer's edit of
+# the annotation, before pushing (docs/WORKFLOW.md): `git tag -f -a` opens
+# it in the editor. The pre-push check still holds the tag whole.
+printf 'v0.4.1\n\nFixes\n- One more, reworded.\n' >"$tmp/reworded.txt"
+git tag -f -a v0.4.1 -F "$tmp/reworded.txt" >/dev/null
+passes test "$(git tag -l --format='%(contents:body)' v0.4.1 | tail -n 2 | head -n 1)" = '- One more, reworded.'
+passes with_stdin "refs/heads/main $(git rev-parse HEAD) refs/heads/main $(git rev-parse "v0.4.0^{commit}")
+refs/tags/v0.4.1 $(git rev-parse v0.4.1) refs/tags/v0.4.1 $zero
+" "$scripts/release-check.sh"
 
 # ── digest-baseline.sh ──────────────────────────────────────────────────────
 passes "$scripts/digest-baseline.sh" main

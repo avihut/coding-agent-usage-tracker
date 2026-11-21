@@ -295,3 +295,13 @@ build runs long.
 - The template's section sits after "What and why", where the change is
   still in mind.
 - Guard rule 7 (§7) was built: 3 checks in test-hooks.
+- Checked against what really landed (`assemble v0.103.0..origin/main`,
+  read-only, after #45 and #42 merged): #45's note read FROZEN from its
+  squash body (re-wrapped at 72, signature and trailer block after it),
+  once; #42's squash body is an older revision of its description with no
+  section, so its four entries were read LIVE and flagged, once each. The
+  squash-merge message setting is `PR_BODY` (a read-only `gh api` GET).
+- Rewording a frozen entry is an edit of the annotation before pushing
+  (`git tag -f -a vX.Y.Z` opens it pre-filled); tested with release-check.
+- A live-read failure refuses only for feat/fix subjects; anything else
+  (Dependabot's chores) warns, so an offline release isn't blocked by them.

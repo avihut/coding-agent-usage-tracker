@@ -91,7 +91,7 @@ lists the full catalog, including the AX verification pair
   3.2-safe — macOS's own: no apostrophe inside a `${VAR:?message}`, 3.2
   reads it as an unterminated quote — `test-hooks` caught that one).
   THE HOOK SCRIPTS HAVE TESTS: `scripts/test-hooks.sh` (`mise run
-  test-hooks`, 130 checks, in pre-push and the merge gate) drives every
+  test-hooks`, 133 checks, in pre-push and the merge gate) drives every
   script through its pass AND refusal paths in a throwaway repo under
   `.build/` — a new hook script or rule lands with its cases there. MERGE
   (squash-first since 2026-09-20): `daft.merge.style = squash` — a git
@@ -199,14 +199,23 @@ lists the full catalog, including the AX verification pair
   subjects. To title a release the hook already cut, BEFORE pushing: `git
   tag -d vX.Y.Z && git reset --hard HEAD~1`, commit the title in next.md,
   `mise run release` (a pushed tag never moves).
-  WHERE A NOTE IS READ: a subject ending `(#N)` is PR N, and GitHub's squash
-  commit carries the description as its body — so the note is read from
-  git, frozen as it was merged. A description stays editable after the
-  merge; read live, an author's later edit would reach the tag unreviewed.
+  WHERE A NOTE IS READ: a subject ending `(#N)` is PR N, and the repo's
+  squash merges carry the PR's description as the commit body (its
+  squash-merge message setting is "pull request body"; read 2026-11-22) —
+  so the note is read from git, frozen as it was merged, re-wrapped at 72
+  columns, signature and trailers after it. A description stays editable
+  after the merge; read live, an author's later edit would reach the tag
+  unreviewed. So a merged note is reworded in the ANNOTATION, before
+  pushing: `git tag -f -a vX.Y.Z` opens it in the editor, the tag stays on
+  the release commit (release-check holds it), and that commit's body
+  keeps the text as merged.
   Only when the squash body has no usable note (a hand-written merge
   message, a local `daft merge -F` — end its subject in `(#N)` or the PR is
   never looked up) is the live description read, with `gh pr view`, and its
-  entries flagged "review before pushing". A subject ending in an ISSUE's
+  entries flagged "review before pushing" (#42's squash body was an older
+  revision of its description, without the section). A gh failure refuses
+  only for a feat/fix; for anything else (Dependabot's chore bumps) it
+  warns. A subject ending in an ISSUE's
   number falls back to the commit message; a commit with no PR contributes
   a `Release note — Fixes: …` paragraph of its own message. A feat/fix PR
   with no section only warns (every PR before 2026-11-22 is one: their

@@ -403,7 +403,14 @@ assemble() {
             status=0
             pr_body "$number" || status=$?
             if [ "$status" = 1 ]; then
-                problem "#$number ($subject): its squash commit carries no usable \"## Release note\" and its description could not be read — ${gh_error:-gh failed}"
+                # Only a feat or fix can cut a release, so only theirs is
+                # worth refusing one over: Dependabot's chore bumps, offline,
+                # must not block it.
+                if releasable "$subject"; then
+                    problem "#$number ($subject): its squash commit carries no usable \"## Release note\" and its description could not be read — ${gh_error:-gh failed}"
+                else
+                    warn "#$number ($subject): its description could not be read — nothing from it (${gh_error:-gh failed})"
+                fi
                 continue
             fi
             if [ "$status" = 0 ]; then
