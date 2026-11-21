@@ -2592,7 +2592,8 @@ mod tests {
                 .any(|(_, digits)| digits.chars().any(|c| c.is_ascii_digit()))
         }));
         assert!(others.iter().all(|other| other.glyph != "✦"));
-||||||| parent of 9450aa7 (chore(wip): docs, demo digest, snapshot case, TUI label truncation)
+    }
+
     #[test]
     fn meter_labels_keep_the_window_that_tells_them_apart() {
         let five = truncate_label("Claude + GPT (5h)", 12);
