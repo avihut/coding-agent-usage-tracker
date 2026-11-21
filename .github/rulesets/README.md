@@ -13,8 +13,10 @@ gh api -X POST repos/{owner}/{repo}/rulesets --input .github/rulesets/main-integ
   its only pusher can bypass stops nothing. Rewriting `main` means disabling
   the ruleset on purpose, in the UI.
 - **main: merge requirements** — a PR, squash only, threads resolved, the
-  `ci-gate` and `conventional-title` checks (pinned to GitHub Actions as
-  their source) green, signed commits. The branch need NOT be up to date
+  `ci-gate`, `conventional-title` and `release-note` checks (pinned to GitHub
+  Actions as their source) green, signed commits. `release-note`
+  (`pr-title.yml`, 2026-11-22) holds the description to a `## Release note`
+  section, which `scripts/release.sh` collects into the release notes. The branch need NOT be up to date
   with main (user-directed 2026-10-05): rebasing every open PR after each
   merge cost a CI round apiece. What that gives up — two PRs green apart and
   broken together — CI catches on the squash's own push to main.

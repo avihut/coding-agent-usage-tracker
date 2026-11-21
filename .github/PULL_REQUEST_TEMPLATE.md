@@ -4,6 +4,10 @@
 
 ## What and why
 
+## Release note
+
+<!-- What a user will notice, in one paragraph starting with Fixes:, New: or Features: (repeat the label for a second entry), or the word none. The release notes are collected from here, so never edit .release-notes/next.md. CI checks this section. -->
+
 ## How it was verified
 
 - [ ] `mise run gate` is green locally

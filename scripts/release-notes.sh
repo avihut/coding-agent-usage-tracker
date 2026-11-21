@@ -28,10 +28,14 @@
 # after it leaks in. HTML comments (the template's hint) are not text.
 #
 # assemble: a subject ending in "(#N)" — GitHub's squash convention — is PR
-# N, read with `gh pr view`; RELEASE_NOTES_PRS=<file.json>, a JSON array of
-# {number, body} as `gh … --json number,body` prints it, stands in for gh
-# (scripts/test-hooks.sh), and then gh is never called. Any other commit is
-# read for its own "Release note — <Label>: …" paragraph.
+# N. Its note is read from the squash commit's own body, which GitHub fills
+# with the PR's description: the text as merged, frozen in git, offline.
+# Only when that body has no usable note is the description read live with
+# `gh pr view` (and the entries flagged for review). RELEASE_NOTES_PRS=
+# <file.json>, a JSON array of {number, body} as `gh … --json number,body`
+# prints it, stands in for gh (scripts/test-hooks.sh), and then gh is never
+# called. Any other commit is read for its own "Release note — <Label>: …"
+# paragraph.
 #
 # Plain bash, deliberately — `read` and `case` globs, which bash implements
 # itself — so the check behaves the same on CI's Ubuntu runner (mawk, glibc)
@@ -364,8 +368,10 @@ section_key() { # <line> → $section in fixes|features, or 1
 }
 
 assemble() {
-    local range=$1 fallback=$2 sha subject number short status entries before
+    local range=$1 fallback=$2 sha subject number short status entries one why before
     entries=$(mktemp)
+    one=$(mktemp)
+    why=$(mktemp)
     if [ -n "${RELEASE_NOTES_PRS:-}" ] && ! jq -e 'type == "array"' "$RELEASE_NOTES_PRS" >/dev/null 2>&1; then
         problem "RELEASE_NOTES_PRS=$RELEASE_NOTES_PRS is not a JSON array of {number, body}"
         return 1
@@ -381,20 +387,36 @@ assemble() {
             [[ -n $number && $number != *[!0-9]* ]] || number=""
         fi
         if [ -n "$number" ]; then
+            # FROZEN AT MERGE: GitHub's squash commit carries the PR's
+            # description as its body, so the note is read from git — the text
+            # that was reviewed and merged, offline. A description stays
+            # editable after its merge; read live, an author's later edit
+            # would reach the tag unreviewed.
+            status=0
+            read_description <<<"$(git log -1 --format=%B "$sha")" >"$one" 2>/dev/null || status=$?
+            if [ "$status" = 0 ]; then
+                cat "$one" >>"$entries"
+                continue
+            fi
+            # No usable note in the commit (a hand-written merge message, a
+            # local merge): the live description, flagged for review.
             status=0
             pr_body "$number" || status=$?
             if [ "$status" = 1 ]; then
-                problem "#$number ($subject): could not read its description — ${gh_error:-gh failed}"
+                problem "#$number ($subject): its squash commit carries no usable \"## Release note\" and its description could not be read — ${gh_error:-gh failed}"
                 continue
             fi
             if [ "$status" = 0 ]; then
                 status=0
-                read_description <<<"$body" >>"$entries" 2>"$entries.why" || status=$?
+                read_description <<<"$body" >"$one" 2>"$why" || status=$?
                 case $status in
+                0) if [ -s "$one" ]; then
+                    cat "$one" >>"$entries"
+                    warn "#$number: read LIVE from its description (its squash commit carries no note) — review these entries before pushing"
+                fi ;;
                 1) if releasable "$subject"; then warn "#$number has no \"## Release note\" — nothing from it ($subject)"; fi ;;
-                2) problem "#$number: $(cat "$entries.why") — fix its description (gh pr edit $number), then: mise run release" ;;
+                2) problem "#$number: $(cat "$why") — fix its description (gh pr edit $number), then: mise run release" ;;
                 esac
-                rm -f "$entries.why"
                 continue
             fi
             warn "$short ends in (#$number), which is not a pull request here — reading its commit message instead"
@@ -407,7 +429,7 @@ assemble() {
     done < <(git log --reverse --format="%H$tab%s" "$range")
 
     merge_notes "$fallback" <"$entries"
-    rm -f "$entries"
+    rm -f "$entries" "$one" "$why"
     [ "$problems" -eq 0 ]
 }
 
@@ -493,7 +515,7 @@ check)
     entries=$(read_description <<<"$description" 2>/dev/null) || status=$?
     if [ "$status" = 0 ]; then
         if [ -z "$entries" ]; then
-            echo "release note: none — this change cuts nothing into the release notes"
+            echo "release note: none — this change adds nothing to the release notes"
         else
             printf 'release note: %s entr%s\n' "$(printf '%s\n' "$entries" | wc -l | tr -d ' ')" \
                 "$([ "$(printf '%s\n' "$entries" | wc -l | tr -d ' ')" = 1 ] && echo y || echo ies)"
