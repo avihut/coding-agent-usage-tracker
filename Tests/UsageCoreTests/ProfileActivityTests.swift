@@ -27,6 +27,29 @@ struct DormancyTests {
         #expect(Dormancy.isDormant(lastActivity: nil, addedAt: now.addingTimeInterval(-31 * 86400), now: now))
         #expect(!Dormancy.isDormant(lastActivity: nil, addedAt: nil, now: now))
     }
+
+    @Test("a default home's stored stamp dates an edit, not an enrolment")
+    func defaultStampIgnored() {
+        let gemini = GeminiProvider()
+        let stale = now.addingTimeInterval(-189 * 86400)
+        // A menu-bar style set a week ago stored the default record, stamped then.
+        var styled = Profile.standard(for: gemini, addedAt: now.addingTimeInterval(-7 * 86400))
+        styled.menuBarForm = .bars
+        #expect(styled.isDefault)
+        #expect(Dormancy.enrolmentStamp(of: styled) == nil)
+        #expect(Dormancy.isDormant(styled, lastActivity: stale, now: now))
+        #expect(!Dormancy.isDormant(styled, lastActivity: now.addingTimeInterval(-86400), now: now))
+        // Nothing ever written: not dormant, whatever the stamp says.
+        #expect(!Dormancy.isDormant(styled, lastActivity: nil, now: now))
+
+        // An extra home the person enrolled a week ago keeps its grace.
+        let extra = Profile(
+            id: "c982130e", providerID: "claude", home: URL(filePath: "/tmp/.claude-personal"),
+            addedAt: now.addingTimeInterval(-7 * 86400))
+        #expect(!extra.isDefault)
+        #expect(Dormancy.enrolmentStamp(of: extra) == extra.addedAt)
+        #expect(!Dormancy.isDormant(extra, lastActivity: stale, now: now))
+    }
 }
 
 @Suite("Focus rule")

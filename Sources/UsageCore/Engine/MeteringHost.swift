@@ -485,19 +485,17 @@ public final class MeteringHost {
         return true
     }
 
-    /// A synthesized default record's enrolment stamp is "now" every time it
-    /// is resolved, so it must not feed the dormancy reference — otherwise a
-    /// harness nobody has touched in months would look freshly enrolled and
-    /// hold a cell forever ("I've not been using Codex for months; there's
-    /// no point showing it"). A STORED record's stamp is a fact and counts.
+    /// A default record's stamp never feeds the dormancy reference — a
+    /// synthesized one is "now" on every resolve, and a stored one dates the
+    /// first edit that made it differ from the standard, not an enrolment
+    /// (`Dormancy.enrolmentStamp`). Otherwise a harness nobody has touched in
+    /// months would look freshly enrolled and hold a cell ("I've not been
+    /// using Codex for months; there's no point showing it"). An extra home's
+    /// stamp is the person's enrolment and counts.
     private func recomputeDormancy(now: Date) {
         var fresh: Set<String> = []
         for profile in enrolledProfiles {
-            let synthesized = profile.isDefault
-                && roster.row(profile.providerID)?.synthesizedDefault == true
-            guard Dormancy.isDormant(
-                lastActivity: lastActivity[profile.key],
-                addedAt: synthesized ? nil : profile.addedAt, now: now)
+            guard Dormancy.isDormant(profile, lastActivity: lastActivity[profile.key], now: now)
             else { continue }
             fresh.insert(profile.key)
         }
