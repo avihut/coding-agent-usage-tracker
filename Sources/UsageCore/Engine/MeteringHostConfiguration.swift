@@ -20,12 +20,18 @@ extension MeteringHost {
         /// Where the control socket binds; nil = the broker's standard path.
         public var socketURL: URL?
         public var bindsSocket: Bool
+        /// What runs an agent's own tool for its limits (the quota probe,
+        /// spec §10 amendment 2026-11-21, second). Nil — the default, and
+        /// what tests and snapshots keep — means no engine here can spawn
+        /// anything; usaged and the app's hosting path pass the real one.
+        public var agentCommandRunner: (any AgentCommandRunner)?
 
         public init(
             bundleID: String, kind: UsageEngine.Host, roots: StorageScope.Roots = .standard,
             pollsStatus: Bool = true, updateFeedURL: URL? = nil, reprobeInterval: TimeInterval = 600,
             userHome: URL = FileManager.default.homeDirectoryForCurrentUser,
-            stagger: TimeInterval = TriggerGate.floor, socketURL: URL? = nil, bindsSocket: Bool = true
+            stagger: TimeInterval = TriggerGate.floor, socketURL: URL? = nil, bindsSocket: Bool = true,
+            agentCommandRunner: (any AgentCommandRunner)? = nil
         ) {
             self.bundleID = bundleID
             self.kind = kind
@@ -37,6 +43,7 @@ extension MeteringHost {
             self.stagger = stagger
             self.socketURL = socketURL
             self.bindsSocket = bindsSocket
+            self.agentCommandRunner = agentCommandRunner
         }
 
         /// The release feed a real host polls: both GitHub flavors, so a

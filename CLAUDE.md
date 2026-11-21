@@ -72,7 +72,7 @@ was learned the hard way.
   writes exactly `cleanupPeriodDays` in that home's `settings.json`
   through `ClaudeCodeSettings` — read-modify-write preserving every other
   key, atomic, refusing a file whose content doesn't parse. Nothing else
-  the app runs writes there, and a second write is a §10 amendment first.
+  the app itself writes there, and a second write is a §10 amendment first.
   BY PROXY (§10 amendment 2026-11-21, second): the `agy -p /quota` run the
   Antigravity provider spawns stamps the CLI's OWN files under
   `~/.gemini/antigravity-cli` (measured list in the amendment) and may

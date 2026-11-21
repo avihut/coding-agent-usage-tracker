@@ -134,7 +134,7 @@ struct CostRatesCard: View {
     ) -> HarnessRates {
         let pricing = store?.pricing ?? provider.bundledRates
         let seen = store.map(Self.seenModels) ?? []
-        let ids = Self.tableIDs(store: store, pricing: pricing)
+        let ids = Self.tableIDs(store: store, pricing: pricing, provider: provider)
         // Seen models keep their heaviest-first order at the front; the rest
         // follow in the vendor's tier order.
         let tail = ModelFamily.group(ids.filter { !seen.contains($0) })
@@ -146,13 +146,18 @@ struct CostRatesCard: View {
     }
 
     /// The models this harness has actually run, heaviest first, then the
-    /// rest of its priced table — minus the dated aliases of ids already
-    /// listed, which would double every row.
-    static func tableIDs(store: UsageStore?, pricing: PricingTable) -> [String] {
+    /// rest of its priced table that the provider lists before they're run
+    /// (`listsUnseenRate` — Antigravity: Gemini's, not the whole Anthropic
+    /// and OpenAI catalogues it prices its pool from) — minus the dated
+    /// aliases of ids already listed, which would double every row.
+    static func tableIDs(
+        store: UsageStore?, pricing: PricingTable, provider: any UsageProvider
+    ) -> [String] {
         var ids = store.map(seenModels) ?? []
         let names = Set(ids.map(ModelNames.display))
         ids += pricing.rates.keys
             .filter { !hasDateSuffix($0) && !names.contains(ModelNames.display($0)) }
+            .filter { provider.listsUnseenRate($0) }
             .sorted()
         return ids
     }
@@ -182,7 +187,7 @@ struct CostRatesCard: View {
             let store = registry.store(ofHarness: provider.id)
             let pricing = store?.pricing ?? provider.bundledRates
             let style = HarnessStyle(provider)
-            return ModelFamily.group(tableIDs(store: store, pricing: pricing))
+            return ModelFamily.group(tableIDs(store: store, pricing: pricing, provider: provider))
                 .flatMap { family in
                     family.models.compactMap { id -> PricedModel? in
                         // A model the feed does not price has nothing for the

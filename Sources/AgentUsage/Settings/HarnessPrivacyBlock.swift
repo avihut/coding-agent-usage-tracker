@@ -8,11 +8,6 @@ import UsageCore
 struct HarnessPrivacyBlock: View {
     var registry: ProviderRegistry
 
-    static func tildeAbbreviated(_ path: String) -> String {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
-    }
-
     let provider: any UsageProvider
     /// With one harness the rows keep their pre-0.101 titles; with several
     /// each is prefixed by its agent, or the rows would be ambiguous.
@@ -78,14 +73,13 @@ struct HarnessPrivacyBlock: View {
                     several || accounts.count > 1 ? "\(name) sessions" : "Transcripts",
                     "\(path) (read-only)")
             }
-            // The status-line export is a file in THIS app's folder that the
-            // person's own status-line command writes; the engine only reads
-            // it (spec §10, the status-line export).
-            if let export = registry.provider(for: account).statusLineExport {
+            // The agent's own tool, run for the plan's limits — its own lines,
+            // in the provider's words (spec §10 amendment 2026-11-21, second).
+            let probeLines = registry.provider(for: account).quotaCommand?.privacyLines ?? []
+            ForEach(Array(probeLines.enumerated()), id: \.offset) { index, line in
                 infoRow(
-                    several || accounts.count > 1 ? "\(name) plan limits" : "Plan limits",
-                    "from its status line, via usage-cli export-statusline → "
-                        + "\(Self.tildeAbbreviated(export.destination.path)) (only if you set it up)")
+                    index > 0 ? "" : several || accounts.count > 1 ? "\(name) limits" : "Plan limits",
+                    line)
             }
         }
     }

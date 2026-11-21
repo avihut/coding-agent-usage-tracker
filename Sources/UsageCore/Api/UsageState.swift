@@ -13,6 +13,13 @@ public enum UsageError: Error, Sendable, Equatable {
     case network
     case schema
     case noLocalData
+    /// The agent's own tool, asked for the plan's limits, didn't answer in
+    /// time (the quota probe, spec §10 amendment 2026-11-21, second).
+    case agentTimedOut
+    /// It answered with something that isn't a limits report.
+    case agentOutputUnreadable
+    /// It exited with an error, or couldn't be started.
+    case agentCommandFailed
 
     /// `agent` names whichever local agent owns the credentials ("Claude
     /// Code") — the taxonomy itself is provider-neutral.
@@ -27,6 +34,9 @@ public enum UsageError: Error, Sendable, Equatable {
         case .network: "Network unavailable"
         case .schema: "Unexpected API response"
         case .noLocalData: "No local \(agent) sessions found yet"
+        case .agentTimedOut: "\(agent) didn't answer — limits not refreshed"
+        case .agentOutputUnreadable: "\(agent)'s limits report wasn't readable"
+        case .agentCommandFailed: "\(agent) couldn't report its limits"
         }
     }
 
@@ -38,6 +48,10 @@ public enum UsageError: Error, Sendable, Equatable {
         case .rateLimited: "The API asked for a pause. Checks back off and resume on their own."
         case .schema: "The undocumented API may have changed shape."
         case .noLocalData: "Run \(agent) once on this Mac — usage is read from its session files."
+        case .agentTimedOut, .agentCommandFailed:
+            "The last limits stay shown; \(agent) is asked again in a few minutes."
+        case .agentOutputUnreadable:
+            "A \(agent) update may have changed what it prints; the last limits stay shown."
         case .http, .network, .credentialsUnreadable: nil
         }
     }

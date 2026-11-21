@@ -611,7 +611,12 @@ final class ProviderRegistry {
             providers: providers, defaults: .standard,
             configuration: MeteringHost.Configuration(
                 bundleID: bundleID, kind: .app,
-                updateFeedURL: MeteringHost.Configuration.updateFeedURL(defaults: .standard)),
+                updateFeedURL: MeteringHost.Configuration.updateFeedURL(defaults: .standard),
+                // The quota probe runs an agent's own tool (spec §10
+                // amendment 2026-11-21, second): a hosting app may, a
+                // snapshot run never does.
+                agentCommandRunner: CommandLine.arguments.contains("--snapshot")
+                    ? nil : SpawnedCommandRunner()),
             gateSeeds: gateSeeds, systemAccent: systemAccent())
         host.start()
         return host

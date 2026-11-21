@@ -9,12 +9,6 @@ import UsageCore
 /// this machine would publish (docs/SYNC.md) — same read-only cache rules,
 /// zero network.
 ///
-/// `usage-cli export-statusline <provider>` (2026-11-21) is an agent's
-/// status-line command: it reduces the agent's status-line payload on stdin
-/// to the one export file that provider reads (core `StatusLineExport`;
-/// spec §10, the status-line export) — the one thing this CLI ever writes
-/// into the app's scoped folders, and never inside an agent home.
-///
 /// `usage-cli state` prints the engine's published live-state digest
 /// (docs/DAEMON.md) exactly as it sits on disk — the file every consumer
 /// interface renders from.
@@ -50,11 +44,6 @@ struct UsageCLI {
         // is somebody's flag VALUE (`sessions --branch state` must run the
         // sessions query, not dump the digest), never a mode switch.
         let mode = arguments.count > 1 ? arguments[1] : ""
-        // First and cheapest: an agent's status line runs this on every
-        // redraw, so it touches no digest, settings or account store.
-        if mode == "export-statusline" {
-            runStatusLineExport(Array(arguments.dropFirst(2)))
-        }
         if mode == "sync-digest" {
             runSyncDigest(providerID: value(after: "--provider", in: arguments))
             return
@@ -429,23 +418,6 @@ struct UsageCLI {
         }
         if let message = output.note { note(message) }
         exit(output.exitCode)
-    }
-
-    /// `export-statusline <provider>`: core `StatusLineExportCommand` does
-    /// the work; this only reads stdin, writes the two streams and exits.
-    private static func runStatusLineExport(_ arguments: [String]) -> Never {
-        let executable = (Bundle.main.executablePath ?? CommandLine.arguments[0])
-        let resolved = URL(fileURLWithPath: executable).resolvingSymlinksInPath().path
-        let result = StatusLineExportCommand.run(
-            arguments: arguments,
-            stdin: {
-                (try? FileHandle.standardInput.read(
-                    upToCount: StatusLineExportWriter.stdinCap + 1)) ?? Data()
-            },
-            executablePath: resolved)
-        if !result.stdout.isEmpty { FileHandle.standardOutput.write(Data(result.stdout.utf8)) }
-        if !result.stderr.isEmpty { FileHandle.standardError.write(Data(result.stderr.utf8)) }
-        exit(result.code)
     }
 
     private static func value(after flag: String, in arguments: [String]) -> String? {

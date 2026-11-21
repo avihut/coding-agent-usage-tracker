@@ -98,11 +98,23 @@ public protocol UsageProvider: Sendable {
     /// succeeds it — shown beside it in Settings and `usage-cli harnesses`.
     /// Nil for every current harness.
     var deprecationNote: String? { get }
-    /// How this provider's plan limits arrive through the agent's own
-    /// status line, when they can: a person-installed status-line command
-    /// (`usage-cli export-statusline <id>`) reduces the agent's status-line
-    /// payload to one small file the provider then reads. Nil = no export.
-    var statusLineExport: StatusLineExport? { get }
+    /// The agent's OWN command-line tool, when it can print the plan's
+    /// limits (spec §10 amendment 2026-11-21, second — the quota probe). An
+    /// engine host given a runner asks it on `AgentQuotaSchedule`'s terms
+    /// and hands the reading to `fetchRawUsage(accessToken:quota:)`. Not a
+    /// network destination of this app — whatever the tool contacts, it
+    /// contacts itself — so it never joins `networkDestinations`; the
+    /// privacy card renders its `privacyLines`. Nil = no such tool.
+    var quotaCommand: AgentQuotaCommand? { get }
+    /// `fetchRawUsage` with the quota probe's newest reading (nil when the
+    /// provider declares no command, the host runs no probe, or nothing has
+    /// been read yet). Defaults to the plain fetch.
+    func fetchRawUsage(accessToken: String, quota: AgentQuotaReading?) async throws -> Data
+    /// Whether a rates table lists this model before the harness has run
+    /// it — a provider whose feed slice reaches beyond its own models (to
+    /// price the ones it CAN run) keeps the listing to what is relevant.
+    /// Seen models are always listed. True by default.
+    func listsUnseenRate(_ modelID: String) -> Bool
     /// The label this provider writes TODAY for a meter it once wrote under
     /// `stored` (0.101.0). Labels key the stored percent history, so a
     /// provider that renames a meter answers here and the history follows
@@ -142,7 +154,11 @@ public protocol UsageProvider: Sendable {
 extension UsageProvider {
     public var preferences: [ProviderPreference] { [] }
     public var deprecationNote: String? { nil }
-    public var statusLineExport: StatusLineExport? { nil }
+    public var quotaCommand: AgentQuotaCommand? { nil }
+    public func fetchRawUsage(accessToken: String, quota: AgentQuotaReading?) async throws -> Data {
+        try await fetchRawUsage(accessToken: accessToken)
+    }
+    public func listsUnseenRate(_ modelID: String) -> Bool { true }
     public func currentMeterLabel(forStored stored: String) -> String { stored }
     /// Opt-in: a provider without a declared feed tracks no status.
     public var statusFeed: StatusFeed? { nil }

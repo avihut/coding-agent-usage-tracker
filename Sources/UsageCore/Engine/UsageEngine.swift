@@ -171,6 +171,7 @@ public final class UsageEngine {
         gateSeed: Date? = nil,
         systemAccent: RGBColor? = nil,
         launchDelay: TimeInterval = 0,
+        agentCommandRunner: (any AgentCommandRunner)? = nil,
         publish: @escaping @MainActor (LiveState) -> Void
     ) {
         let support = StorageScope.supportDirectory(
@@ -188,9 +189,14 @@ public final class UsageEngine {
         // host's last fetch (the digest's stamp) — a handover must never
         // double-poll inside the floor.
         self.gate = TriggerGate(lastAllowed: gateSeed)
-        self.localActivity = provider.makeLocalActivity(cacheDirectory: support)
+        let localActivity = provider.makeLocalActivity(cacheDirectory: support)
+        self.localActivity = localActivity
         self.service = service
-            ?? UsageService(provider: provider, cache: UsageCache(directory: caches))
+            ?? UsageService(
+                provider: provider, cache: UsageCache(directory: caches),
+                probe: Self.quotaProbe(
+                    provider: provider, runner: agentCommandRunner, directory: support,
+                    activity: localActivity))
         self.history = UsageHistory(
             directory: support, relabel: { provider.currentMeterLabel(forStored: $0) })
         self.windowLedger = WindowLedger(directory: support)
@@ -252,6 +258,19 @@ public final class UsageEngine {
             recomputePredictions(for: snapshot)
         }
         scanActivity()
+    }
+
+    /// The provider's quota probe — only when it declares a command AND the
+    /// host supplied a runner (spec §10 amendment 2026-11-21, second).
+    static func quotaProbe(
+        provider: any UsageProvider, runner: (any AgentCommandRunner)?, directory: URL,
+        activity: (any LocalActivitySource)?
+    ) -> AgentQuotaProbe? {
+        guard let runner, let command = provider.quotaCommand else { return nil }
+        return AgentQuotaProbe(
+            command: command, runner: runner,
+            stateURL: directory.appending(path: AgentQuotaProbe.stateFileName),
+            lastActivity: { now in activity?.lastActivity(now: now) })
     }
 
     /// The last fetch's snapshot from the cache, without fetching — what the

@@ -19,11 +19,6 @@ import Foundation
 /// these files ("Session (5h)" percents in history.json), which is only
 /// safe because every profile owns its own files; never share one of these
 /// directories between providers or profiles.
-///
-/// * `statusline-export.json` is the ONE file in these scopes the engine
-///   never writes: `usage-cli export-statusline` (run by the agent's own
-///   status line) is its only writer and the engine only reads it (spec
-///   §10, the status-line export carve-out from the single-writer rule).
 public enum StorageScope {
     /// The implicit profile every install has: the provider's standard home
     /// (`~/.claude` for Claude). Its defaults keys keep the pre-profile
@@ -85,18 +80,6 @@ public enum StorageScope {
     ) -> URL {
         cachesRootDirectory(bundleID: bundleID, roots: roots)
             .appending(path: providerID).appending(path: profileID)
-    }
-
-    /// `<support>/<bundleID>/<providerID>/<profileID>/statusline-export.json`
-    /// — the reading a status-line export leaves for the provider (see the
-    /// type comment: written only by the export command, never the engine).
-    public static func statusLineExportFile(
-        bundleID: String, providerID: String, profileID: String = defaultProfileID,
-        roots: Roots = .standard
-    ) -> URL {
-        supportDirectory(
-            bundleID: bundleID, providerID: providerID, profileID: profileID, roots: roots)
-            .appending(path: "statusline-export.json")
     }
 
     /// "apiHourlyCeiling" → "claude.apiHourlyCeiling" — for defaults whose

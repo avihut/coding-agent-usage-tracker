@@ -1194,6 +1194,9 @@ public enum LiveStateBuilder {
         case .network: ("network", nil)
         case .schema: ("schema", nil)
         case .noLocalData: ("noLocalData", nil)
+        case .agentTimedOut: ("agentTimedOut", nil)
+        case .agentOutputUnreadable: ("agentOutputUnreadable", nil)
+        case .agentCommandFailed: ("agentCommandFailed", nil)
         }
     }
 

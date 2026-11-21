@@ -12,15 +12,20 @@ public struct UsageService: Sendable {
     /// Delay before the one transport retry (spec §6). Injectable so tests
     /// don't sleep.
     let retryDelay: Duration
+    /// The provider's quota probe, when its host may run one (spec §10
+    /// amendment 2026-11-21, second); nil everywhere else.
+    let probe: AgentQuotaProbe?
 
     public init(
         provider: any UsageProvider,
         cache: UsageCache,
-        retryDelay: Duration = .seconds(2)
+        retryDelay: Duration = .seconds(2),
+        probe: AgentQuotaProbe? = nil
     ) {
         self.provider = provider
         self.cache = cache
         self.retryDelay = retryDelay
+        self.probe = probe
     }
 
     public func refresh(thresholds: Thresholds = .standard) async -> DisplayState {
@@ -38,9 +43,12 @@ public struct UsageService: Sendable {
             return fallback(.credentialsUnreadable, thresholds: thresholds)
         }
 
+        // The probe runs on its own schedule and always reports where it
+        // stands: its newest reading, and the last attempt's failure.
+        let quota = await probe?.refreshIfDue()
         let body: Data
         do {
-            body = try await fetchWithOneRetry(token: token)
+            body = try await fetchWithOneRetry(token: token, quota: quota?.reading)
         } catch let error as UsageClientError {
             return fallback(.from(error), thresholds: thresholds)
         } catch {
@@ -54,6 +62,12 @@ public struct UsageService: Sendable {
             return fallback(.schema, thresholds: thresholds)
         }
         cache.save(body: body, fetchedAt: fetchedAt)
+        // A failed probe leaves the last limits standing, greyed, with the
+        // reason — as a snapshot, so focus still sees what there is to lead
+        // with (none, when nothing was ever read).
+        if let failure = quota?.failure {
+            return .cached(snapshot, error: UsageError(quotaFailure: failure))
+        }
         return .live(snapshot)
     }
 
@@ -68,13 +82,13 @@ public struct UsageService: Sendable {
 
     /// Exactly one retry, transport failures only — a 401 won't fix itself,
     /// and this runs unattended against an undocumented endpoint (spec §6).
-    private func fetchWithOneRetry(token: String) async throws -> Data {
+    private func fetchWithOneRetry(token: String, quota: AgentQuotaReading?) async throws -> Data {
         do {
-            return try await provider.fetchRawUsage(accessToken: token)
+            return try await provider.fetchRawUsage(accessToken: token, quota: quota)
         } catch let error as UsageClientError {
             guard case .network = error else { throw error }
             try? await Task.sleep(for: retryDelay)
-            return try await provider.fetchRawUsage(accessToken: token)
+            return try await provider.fetchRawUsage(accessToken: token, quota: quota)
         }
     }
 

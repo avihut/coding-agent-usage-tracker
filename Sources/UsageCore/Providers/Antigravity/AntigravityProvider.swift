@@ -1,21 +1,21 @@
 import Foundation
 
 /// Google's Antigravity CLI (`agy`) behind the provider seam — the Google
-/// harness since Gemini CLI's deprecation. LOCAL-FILES-ONLY like Codex:
-/// zero network destinations, zero credentials (the CLI keeps its sign-in
-/// in the Keychain, which is never touched), nothing written inside
-/// `~/.gemini`.
+/// harness since Gemini CLI's deprecation. No network destination of its
+/// own and no credential: the app reads only local files and never touches
+/// the CLI's sign-in.
 ///
-/// Two local sources:
+/// Two sources:
 /// - TOKENS from each conversation's `transcript.jsonl`
 ///   (`AntigravityActivitySource`).
-/// - PLAN LIMITS from the CLI's own status line: Antigravity hands a
-///   person-configured status-line command a payload whose `quota` map is
-///   the only local place the plan's remaining fractions and resets appear.
-///   `usage-cli export-statusline antigravity` (installed by the person in
-///   the CLI's settings) reduces it to one file in this app's own folder,
-///   which `fetchRawUsage` reads — as fresh as the last session, like
-///   Codex's rate-limit events.
+/// - PLAN LIMITS from the CLI ITSELF (spec §10 amendment 2026-11-21,
+///   second — "There shouldn't even be a path that requires extra work from
+///   the user to start metering antigravity"): its documented print mode
+///   `agy -p /quota --output-format json` reports every quota bucket without
+///   an agent turn and without spending any. `quotaCommand` declares the
+///   run; core's quota probe makes it, in the engine host only, at most
+///   every 10 minutes while Antigravity is in use, and hands the reading to
+///   `fetchRawUsage(accessToken:quota:)`. Nothing to set up.
 public struct AntigravityProvider: UsageProvider {
     public let id = "antigravity"
     public let serviceName = "Google AI"
@@ -28,35 +28,81 @@ public struct AntigravityProvider: UsageProvider {
     /// warning/critical colours (Antigravity's own brand colour could not be
     /// verified; user-chosen 2026-11-21).
     public let accent = ProviderAccent(red: 0.631, green: 0.259, blue: 0.957)
+    /// Empty: the app contacts nothing for this provider. The CLI the quota
+    /// probe runs talks to Google itself, under its own sign-in — declared
+    /// by `quotaCommand`, never here (spec §10).
     public let networkDestinations: [String] = []
     public let credentials: CredentialChain
     let home: URL
-    let exportURL: URL
+    /// The user's home, which the CLI's install location hangs off.
+    let userHome: URL
 
-    public init(home: URL? = nil, exportURL: URL? = nil) {
-        self.home = home
-            ?? FileManager.default.homeDirectoryForCurrentUser
-                .appending(path: ".gemini/antigravity-cli")
-        self.exportURL = exportURL
-            ?? StorageScope.statusLineExportFile(
-                bundleID: AppIdentity.bundleID, providerID: "antigravity")
+    public init(home: URL? = nil, userHome: URL? = nil) {
+        let userHome = userHome ?? FileManager.default.homeDirectoryForCurrentUser
+        self.userHome = userHome
+        self.home = home ?? userHome.appending(path: ".gemini/antigravity-cli")
         self.credentials = CredentialChain(sources: [
             StaticCredentialSource(name: "local Antigravity CLI files")
         ])
     }
 
-    /// Ignores the token. The status-line reading when one exists; with
-    /// none but conversations on disk, an honest "no limits read yet"
-    /// (zero meters, fresh); with no conversations, `noLocalData`.
+    /// No reading to hand over: the plain fetch is the quota-aware one with
+    /// nothing read yet.
     public func fetchRawUsage(accessToken: String) async throws -> Data {
+        try await fetchRawUsage(accessToken: accessToken, quota: nil)
+    }
+
+    /// Ignores the token. The probe's reading when one exists; with none
+    /// but conversations on disk, an honest "no limits read yet" (zero
+    /// meters, fresh); with neither, `noLocalData`.
+    public func fetchRawUsage(accessToken: String, quota: AgentQuotaReading?) async throws -> Data {
         let tree = AntigravityHome(root: home)
-        let reading = (try? Data(contentsOf: exportURL)).flatMap(AntigravityQuota.decodeReading)
-        guard reading != nil || tree.hasTranscripts() else {
+        guard quota != nil || tree.hasTranscripts() else {
             throw UsageClientError.noLocalData
         }
         return try AntigravityQuota.encodePayload(AntigravityUsagePayload(
-            fetchedAt: Date(), reading: reading,
+            fetchedAt: Date(), reading: quota,
             conversationWrittenAt: tree.newestConversationWrite()))
+    }
+
+    /// The CLI's own print mode, exactly as the §10 amendment states it. The
+    /// candidates are the install script's documented default and
+    /// Homebrew's `bin` (its cask's wrapper); NOT
+    /// `~/.antigravity/antigravity/bin/agy`, the desktop app's editor
+    /// launcher of the same name. `--log-file /dev/null` and the documented
+    /// update switch keep a run from writing a log or checking for an update
+    /// (measured: what's left is three mtime stamps).
+    public var quotaCommand: AgentQuotaCommand? {
+        AgentQuotaCommand(
+            executableCandidates: [
+                userHome.appending(path: ".local/bin/agy"),
+                URL(fileURLWithPath: "/opt/homebrew/bin/agy"),
+                URL(fileURLWithPath: "/usr/local/bin/agy"),
+            ],
+            versionArguments: ["--version"],
+            acceptsVersion: { AntigravityQuota.acceptsVersion($0) },
+            arguments: ["-p", "/quota", "--output-format", "json", "--log-file", "/dev/null"],
+            environment: ["AGY_CLI_DISABLE_AUTO_UPDATE": "true"],
+            timeout: 30,
+            floor: 600,
+            reduce: { status, stdout, stderr, now in
+                AntigravityQuota.reduce(exitStatus: status, stdout: stdout, stderr: stderr, now: now)
+            },
+            privacyLines: [
+                "Plan limits: runs `agy -p /quota` (the CLI's own print mode) at most every 10 min "
+                    + "while Antigravity is in use, never an agent turn",
+                "The CLI asks Google with its own sign-in; this app connects nowhere and keeps "
+                    + "only each limit's percent and reset",
+                "Each run stamps the CLI's own files in ~/.gemini/antigravity-cli "
+                    + "(onboarding.json, conversation_summaries.db, crashes/)",
+            ])
+    }
+
+    /// The rates table lists what this harness has run, plus Gemini's own
+    /// models — not the whole Anthropic and OpenAI catalogues its feed
+    /// slices reach into to price the pool's models.
+    public func listsUnseenRate(_ modelID: String) -> Bool {
+        ModelCatalog.gemini.claims(modelID)
     }
 
     public func snapshot(
@@ -95,27 +141,5 @@ public struct AntigravityProvider: UsageProvider {
                     || PricingFeedSelector.openAI.includes(key, provider)
             },
             normalizeKey: PricingFeedSelector.gemini.normalizeKey)
-    }
-
-    public var statusLineExport: StatusLineExport? {
-        StatusLineExport(
-            destination: exportURL,
-            settingsPath: "~/.gemini/antigravity-cli/settings.json",
-            settingsSnippet: { command in
-                // The CLI's documented statusLine entry; stacking keeps its
-                // own status line, since the export prints nothing.
-                let escaped = command
-                    .replacingOccurrences(of: "\\", with: "\\\\")
-                    .replacingOccurrences(of: "\"", with: "\\\"")
-                return """
-                "statusLine": {
-                  "type": "command",
-                  "command": "\(escaped)",
-                  "stack_with_default": true
-                }
-                """
-            },
-            reduce: { payload, now in AntigravityQuota.reduce(statusLine: payload, now: now) },
-            differs: { stored, fresh in AntigravityQuota.differs(stored: stored, fresh: fresh) })
     }
 }
