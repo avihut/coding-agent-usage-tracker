@@ -549,7 +549,10 @@ Non-negotiable; flag rather than work around:
     - What the VENDOR'S process writes inside its own home, measured (the
       superset of every run): mtime stamps on `cache/onboarding.json`,
       `conversation_summaries.db` and `crashes/` (and so on the folders
-      holding them); and — were the CLI to
+      holding them); with another session of the CLI open, SQLite's own
+      companions of that database, `conversation_summaries.db-wal` and
+      `-shm`, which stay while that session holds it (measured 2026-11-22);
+      and — were the CLI to
       ignore its documented log path and update switch — a log in `log/`,
       the `cli.log` link, an `implicit/*.pb`, and the update check's
       `last_check.timestamp` / `updater/` (possibly an update). It may

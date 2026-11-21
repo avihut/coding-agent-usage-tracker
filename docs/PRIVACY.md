@@ -212,7 +212,10 @@ requires extra work from the user to start metering antigravity" —
 - **What the CLI writes inside its own folder.** Each run stamps the
   modification time of `cache/onboarding.json`, `conversation_summaries.db`
   and `crashes/` under `~/.gemini/antigravity-cli`, and so of the folders
-  holding them (measured; no sizes change). Without the two switches above it would also write a log, an
+  holding them (measured; no sizes change). If you have an Antigravity
+  session open at the time, that database's SQLite companion files
+  (`-wal`, `-shm`) can appear beside it and stay while your session holds
+  it — the CLI's own database at work. Without the two switches above it would also write a log, an
   `implicit/` file and its update check's markers — the switches turn those
   off. This is the one place an agent home is written to on this app's
   initiative, and it is the vendor's own process doing it: the app itself

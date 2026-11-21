@@ -538,6 +538,16 @@ compliance reviewer on Opus):
   stamps as every measured lever run, nothing under `~/Library/Keychains`.
 - The raw `/quota` captures were deleted from the session scratchpad once
   the placeholdered fixture existed.
+- Re-check after the review round (2026-11-22 00:37, the refusal rule and
+  the group kill in place): 2.71 s, the same five buckets and meters, no
+  `agy -p /quota` process left. The listing showed one NEW pair:
+  `conversation_summaries.db-wal` / `-shm` (and no `.db` stamp this time),
+  held open by the person's own interactive session (`agy` on a terminal
+  since 22:07, its own process group — out of the probe's reach). SQLite
+  keeps a WAL-mode database's companions while any connection is open, so
+  with a second session of the CLI running, the run's write lands there.
+  Added to the amendment's measured list (SPEC §10, PRIVACY, the privacy
+  card): the vendor's own database files, written by its own process.
 
 ## Found (belongs elsewhere)
 

@@ -94,7 +94,8 @@ public struct AntigravityProvider: UsageProvider {
                 "The CLI asks Google with its own sign-in; this app connects nowhere and keeps "
                     + "only each limit's percent and reset",
                 "Each run stamps the CLI's own files in ~/.gemini/antigravity-cli "
-                    + "(onboarding.json, conversation_summaries.db, crashes/)",
+                    + "(onboarding.json, conversation_summaries.db and its SQLite -wal/-shm, "
+                    + "crashes/)",
             ])
     }
 
