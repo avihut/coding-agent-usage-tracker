@@ -92,12 +92,47 @@ struct CodexUsagePayload: Codable {
     let secondary: Window?
 }
 
-/// Read-only walk of `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`.
+/// Read-only walk of `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`, and of
+/// `rollout-*.jsonl.zst`: Codex compresses a rollout in place once it has
+/// gone a week without a write (zstd, through a temp file, mtime kept, the
+/// plain file deleted after), and re-inflates it to plain on resume. Both
+/// names are ONE rollout — `rolloutID(of:)` — and while both exist Codex's
+/// own readers take the plain one, as this provider does.
 /// Nothing inside the tree is ever written (spec §10); legacy 2025-era
 /// `.json` rollouts are ignored. Every field decodes as optional — the
 /// rollout schema drifted between observed CLI versions and will again.
 enum CodexRollouts {
-    /// Newest-first rollout files, ordered by mtime.
+    private static let compressedSuffix = ".zst"
+
+    /// A rollout file: `.jsonl`, or `.jsonl.zst` (compressed).
+    static func isRollout(_ url: URL) -> Bool {
+        let name = url.lastPathComponent
+        return name.hasSuffix(".jsonl") || name.hasSuffix(".jsonl" + compressedSuffix)
+    }
+
+    static func isCompressed(_ url: URL) -> Bool {
+        url.lastPathComponent.hasSuffix(compressedSuffix)
+    }
+
+    /// The rollout's identity — its name without `.jsonl[.zst]` — and its
+    /// session id: the same before and after Codex compresses it.
+    static func rolloutID(of url: URL) -> String {
+        var name = url.lastPathComponent
+        if name.hasSuffix(compressedSuffix) { name.removeLast(compressedSuffix.count) }
+        if name.hasSuffix(".jsonl") { name.removeLast(".jsonl".count) }
+        return name
+    }
+
+    /// The rollout's lines, decompressed when it is a `.jsonl.zst`; nil when
+    /// it can't be opened. Check `failure` after the loop.
+    static func lines(of url: URL, stopsWhenCancelled: Bool = false) -> LineReader? {
+        let reader = LineReader(url: url, compressed: isCompressed(url))
+        reader?.stopsWhenCancelled = stopsWhenCancelled
+        return reader
+    }
+
+    /// Newest-first rollout files, ordered by mtime; on a tie (a rollout
+    /// mid-compression keeps its mtime) the plain file first.
     static func rolloutFiles(root: URL) -> [URL] {
         guard let enumerator = FileManager.default.enumerator(
             at: root, includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
@@ -105,14 +140,16 @@ enum CodexRollouts {
         else { return [] }
         var dated: [(URL, Date)] = []
         for case let url as URL in enumerator {
-            guard url.pathExtension == "jsonl",
+            guard isRollout(url),
                   let values = try? url.resourceValues(
                     forKeys: [.contentModificationDateKey, .isRegularFileKey]),
                   values.isRegularFile == true
             else { continue }
             dated.append((url, values.contentModificationDate ?? .distantPast))
         }
-        return dated.sorted { $0.1 > $1.1 }.map(\.0)
+        return dated.sorted {
+            $0.1 != $1.1 ? $0.1 > $1.1 : !isCompressed($0.0) && isCompressed($1.0)
+        }.map(\.0)
     }
 
     /// The last rate-limit snapshot Codex recorded, searching newest
@@ -129,9 +166,9 @@ enum CodexRollouts {
     }
 
     private static func lastRateLimitSnapshot(in url: URL) -> CodexUsagePayload? {
-        guard let data = try? Data(contentsOf: url) else { return nil }
+        guard let lines = lines(of: url) else { return nil }
         var latest: CodexUsagePayload?
-        for line in data.split(separator: UInt8(ascii: "\n")) {
+        for line in lines {
             guard let record = try? JSONDecoder().decode(RolloutLine.self, from: Data(line)),
                   record.type == "event_msg",
                   let payload = record.payload, payload.type == "token_count",
@@ -145,7 +182,8 @@ enum CodexRollouts {
                 primary: limits.primary.map(window(from:)),
                 secondary: limits.secondary.map(window(from:)))
         }
-        return latest
+        // A file that failed part-way can't vouch for its last snapshot.
+        return lines.failure == nil ? latest : nil
     }
 
     private static func window(from limit: RolloutLine.RateWindow) -> CodexUsagePayload.Window {

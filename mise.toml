@@ -104,6 +104,10 @@ run = "scripts/icon.sh"
 description = "Re-record the README's terminal GIFs against a synthetic digest (needs vhs + ffmpeg; arg: tapes)"
 run = "scripts/media.sh"
 
+[tasks.fixtures-zstd]
+description = "Regenerate the zstd decoder's synthetic test fixtures (needs Homebrew zstd)"
+run = "scripts/zstd-fixtures.sh"
+
 [tasks.demo-digest]
 description = "Write a synthetic live-state.json for demos (arg: out.json) — read it with usage-tui/usage-cli --digest"
 run = "scripts/demo-digest.py"

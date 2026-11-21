@@ -177,6 +177,10 @@ may not realise you are standing. The doc named beside each says why.
   shortest window first so lockouts resolve. (`docs/MEASUREMENT.md`)
 - Renaming a meter is a data migration: history is keyed by LABEL.
   (`docs/HARNESSES.md`)
+- A Codex rollout is keyed by its id (`CodexRollouts.rolloutID`), never
+  its path: Codex compresses it in place to `.jsonl.zst`, and both names
+  exist at once mid-hand-over — keyed by path, it counts twice.
+  (`docs/HARNESSES.md`)
 - Never poll faster than 180s (`TriggerGate.floor`) — the endpoint
   rate-limits sustained sub-3-minute polling, and adaptive cadence may
   only ever slow polling down. (`docs/ARCHITECTURE.md`)

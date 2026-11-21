@@ -40,18 +40,26 @@ public struct CodexActivitySource: LocalActivitySource {
             else { continue }
             let mtime = values.contentModificationDate ?? .distantPast
             let size = values.fileSize ?? 0
-            if let record = cache.files[path], record.mtime == mtime, record.size == size {
+            if let record = cache.files[path], record.mtime == mtime, record.size == size,
+               record.undecodable.map({ $0 == ZstdDecoder.revision }) ?? true {
                 continue
             }
-            cache.files[path] = parse(url: url, mtime: mtime, size: size)
+            // Nil — the file couldn't be read (gone between the walk and the
+            // open, permissions, I/O) — caches nothing: the next scan retries,
+            // and a record already held stands until then rather than the
+            // session vanishing for a scan. A file really gone leaves `seen`.
+            if let record = parse(url: url, mtime: mtime, size: size) {
+                cache.files[path] = record
+            }
         }
         cache.files = cache.files.filter { seen.contains($0.key) }
         if persistCache { saveCache(cache) }
 
+        let rollouts = Self.onePerRollout(cache.files)
         var byDay: [Date: DailyActivity] = [:]
         var slots: [SlotKey: TokenTally] = [:]
         let timelineCutoff = now.addingTimeInterval(-TranscriptScanner.timelineRetention)
-        for record in cache.files.values {
+        for record in rollouts.values {
             for day in record.days {
                 var merged = byDay[day.day]
                     ?? DailyActivity(day: day.day, tokens: 0, messages: 0)
@@ -74,16 +82,36 @@ public struct CodexActivitySource: LocalActivitySource {
         let timeline = slots
             .map { TokenSlot(t: $0.key.t, model: $0.key.model, tally: $0.value) }
             .sorted { $0.t != $1.t ? $0.t < $1.t : $0.model < $1.model }
-        let sessions = cache.files
-            .compactMap { path, record in
-                sessionSummary(
-                    id: URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent,
-                    record: record)
-            }
+        let sessions = rollouts
+            .compactMap { id, record in sessionSummary(id: id, record: record) }
             .sorted { $0.end > $1.end }
         return TranscriptScan(
             daily: byDay.values.sorted { $0.day < $1.day }, timeline: timeline,
             sessions: sessions)
+    }
+
+    /// ONE record per rollout, keyed by its id: the same rollout can sit
+    /// under both names for a moment (Codex compressing it, or re-inflating
+    /// it to resume), and counting both would double it. A readable record
+    /// beats an undecodable one; then plain beats compressed — Codex's own
+    /// rule, since the plain copy is the original or the live, resumed one.
+    private static func onePerRollout(_ files: [String: FileRecord]) -> [String: FileRecord] {
+        func rank(_ path: String, _ record: FileRecord) -> Int {
+            (record.undecodable == nil ? 2 : 0)
+                + (CodexRollouts.isCompressed(URL(fileURLWithPath: path)) ? 0 : 1)
+        }
+        var chosen: [String: (path: String, record: FileRecord)] = [:]
+        for (path, record) in files {
+            let id = CodexRollouts.rolloutID(of: URL(fileURLWithPath: path))
+            if let current = chosen[id] {
+                let mine = rank(path, record)
+                let theirs = rank(current.path, current.record)
+                // A tie falls to the path, so every scan picks the same file.
+                guard mine != theirs ? mine > theirs : path < current.path else { continue }
+            }
+            chosen[id] = (path, record)
+        }
+        return chosen.mapValues(\.record)
     }
 
     /// Prompt days ride the transcript scan itself (user_message events);
@@ -98,25 +126,18 @@ public struct CodexActivitySource: LocalActivitySource {
 
     public var providesSessions: Bool { true }
 
-    /// One rollout file = one session; there is no subagent join and no
+    /// One rollout = one session; there is no subagent join and no
     /// headless marker (all Codex sessions read as interactive).
     public func sessionDetail(id: String) -> SessionDetail? {
-        guard let url = CodexRollouts.rolloutFiles(root: root)
-            .first(where: { $0.deletingPathExtension().lastPathComponent == id }),
-            let data = try? Data(contentsOf: url),
-            let values = try? url.resourceValues(
-                forKeys: [.contentModificationDateKey, .fileSizeKey])
+        guard let (record, lines) = readableRollout(id: id),
+              let summary = sessionSummary(id: id, record: record)
         else { return nil }
-        let record = parse(
-            url: url, mtime: values.contentModificationDate ?? .distantPast,
-            size: values.fileSize ?? 0)
-        guard let summary = sessionSummary(id: id, record: record) else { return nil }
 
         var rows: [SessionEvent] = []
         var currentModel = "unknown"
         var truncated = false
         var lineNumber = 0
-        for line in data.split(separator: UInt8(ascii: "\n")) {
+        for line in lines {
             lineNumber += 1
             if lineNumber % 2048 == 0, Task.isCancelled { return nil }
             guard let record = try? JSONDecoder().decode(
@@ -154,12 +175,38 @@ public struct CodexActivitySource: LocalActivitySource {
                 continue
             }
         }
+        // The file changed under us between the two reads.
+        if lines.failure != nil { return nil }
         if truncated {
             rows.append(SessionEvent(
                 id: rows.count, t: summary.end,
                 kind: .command(name: "… breakdown truncated")))
         }
         return SessionDetail(summary: summary, rows: rows)
+    }
+
+    /// The rollout behind a session id, parsed, and its lines opened again
+    /// for the rows: the plain file first, its compressed twin if the plain
+    /// one is gone, unreadable or vanishes between the two opens. Both reads
+    /// stop on cancellation — a click through the sidebar must not queue
+    /// whole-file decodes nobody will see.
+    private func readableRollout(id: String) -> (FileRecord, LineReader)? {
+        let candidates = CodexRollouts.rolloutFiles(root: root)
+            .filter { CodexRollouts.rolloutID(of: $0) == id }
+            .sorted { !CodexRollouts.isCompressed($0) && CodexRollouts.isCompressed($1) }
+        for url in candidates {
+            guard !Task.isCancelled else { return nil }
+            guard let values = try? url.resourceValues(
+                forKeys: [.contentModificationDateKey, .fileSizeKey]),
+                let record = parse(
+                    url: url, mtime: values.contentModificationDate ?? .distantPast,
+                    size: values.fileSize ?? 0, stopsWhenCancelled: true),
+                record.undecodable == nil,
+                let lines = CodexRollouts.lines(of: url, stopsWhenCancelled: true)
+            else { continue }
+            return (record, lines)
+        }
+        return nil
     }
 
     private func sessionSummary(id: String, record: FileRecord) -> SessionSummary? {
@@ -225,6 +272,21 @@ public struct CodexActivitySource: LocalActivitySource {
         let slots: [TokenSlot]
         let days: [DayTally]
         let session: SessionMeta?
+        /// Set when the file's compressed bytes didn't decode: the decoder
+        /// revision that refused them. The record is then empty and counts
+        /// for nothing; a newer revision retries it (a compressed rollout
+        /// never changes, so a verdict without one would be permanent).
+        /// Optional, so every cache entry written before it still decodes —
+        /// which is why reading compressed rollouts (2026-11-21) needed no
+        /// `cacheVersion` bump: it changed no record a plain file produces, a
+        /// `.jsonl.zst` path is simply new, and a bump costs a whole-corpus
+        /// re-parse. A decoder fix that changes the OUTPUT of a frame it
+        /// already accepted does need one: only `undecodable` is retried.
+        var undecodable: Int? = nil
+
+        enum CodingKeys: String, CodingKey {
+            case mtime, size, slots, days, session, undecodable
+        }
     }
 
     private struct DayTally: Codable {
@@ -251,7 +313,11 @@ public struct CodexActivitySource: LocalActivitySource {
     /// v2 (0.31.0): per-file session summaries joined the cache.
     private static let cacheVersion = 2
 
-    private func parse(url: URL, mtime: Date, size: Int) -> FileRecord {
+    /// Nil when the file couldn't be read at all (gone, permissions, I/O) —
+    /// not cached, so the next scan retries it.
+    private func parse(
+        url: URL, mtime: Date, size: Int, stopsWhenCancelled: Bool = false
+    ) -> FileRecord? {
         var slots: [SlotKey: TokenTally] = [:]
         var days: [Date: DayTally] = [:]
         var currentModel = "unknown"
@@ -263,8 +329,8 @@ public struct CodexActivitySource: LocalActivitySource {
             if meta.end.map({ date > $0 }) ?? true { meta.end = date }
         }
 
-        if let data = try? Data(contentsOf: url) {
-            for line in data.split(separator: UInt8(ascii: "\n")) {
+        if let lines = CodexRollouts.lines(of: url, stopsWhenCancelled: stopsWhenCancelled) {
+            for line in lines {
                 guard let record = try? JSONDecoder().decode(
                     CodexRollouts.RolloutLine.self, from: Data(line))
                 else { continue }
@@ -319,6 +385,17 @@ public struct CodexActivitySource: LocalActivitySource {
                     continue
                 }
             }
+            // A stream that failed part-way counts for nothing — never half a
+            // file. Bad bytes are remembered (by decoder revision); a read
+            // error is retried.
+            if let failure = lines.failure {
+                guard failure.isFormatError else { return nil }
+                return FileRecord(
+                    mtime: mtime, size: size, slots: [], days: [], session: nil,
+                    undecodable: ZstdDecoder.revision)
+            }
+        } else {
+            return nil
         }
         if !activeMinutes.isEmpty {
             // Chronological before stitching — stitch merges garbage silently

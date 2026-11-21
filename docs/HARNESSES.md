@@ -378,8 +378,8 @@ succeeds it for Google's plans, and it stays metered for API-key use.
   TokenSlots/DailyActivity (input = input−cached, cacheRead = cached,
   output includes reasoning, cacheCreation 0 — OpenAI bills no
   cache-write class; `total = input+output` arithmetic-verified);
-  per-file mtime/size parse cache, version 1, in the provider's scoped
-  dir. LOCAL-PROVIDER GATING: `networkDestinations.isEmpty` ⇒ no
+  per-file mtime/size parse cache (version 1 then; 2 since sessions) in
+  the provider's scoped dir. LOCAL-PROVIDER GATING: `networkDestinations.isEmpty` ⇒ no
   RequestLedger recording, no API gauge, no budget lockout, manual
   refresh bypasses the TriggerGate (a disk rescan needs no rationing).
   New `noLocalData` case on BOTH UsageClientError and UsageError ("No
@@ -389,6 +389,32 @@ succeeds it for Google's plans, and it stays metered for API-key use.
   codex=bare openai keys); codex ships an EMPTY bundled table (live feed
   or "—", never stale hardcoded guesses). `scopedTag` now reads
   `scopedModelName` as data (the last label-parsing claude-ism).
+- COMPRESSED ROLLOUTS (2026-11-21, user-reported: the Codex heatmap in
+  "All" showed two weeks). Codex compresses a rollout once it has gone 7
+  days without a write — zstd level 3 into a `rollout-compress-*.tmp` in the
+  same folder, mtime copied, published no-clobber as `<name>.jsonl.zst`, and
+  only then the `.jsonl` deleted — and re-inflates it to plain to resume it
+  (openai/codex `codex-rs/rollout/src/compression.rs`). The scanner took
+  `.jsonl` only, so a session's tokens, cost, card and heatmap days vanished
+  the day Codex compressed it: history shrank daily, and on the reporting
+  Mac 801 of 1,569 rollouts were already gone. Every reader now goes
+  through `CodexRollouts.lines(of:)` — the activity scan, session detail,
+  the meter walk — and a `.jsonl.zst` reads exactly as its plain form
+  through the app's own decoder ([MEASUREMENT.md](MEASUREMENT.md) →
+  Compressed transcripts). IDENTITY, NOT PATH: a rollout is its name minus
+  `.jsonl[.zst]` (`CodexRollouts.rolloutID`) — which is also its session id,
+  so the id survives compression — and the scan aggregates ONE record per
+  id (`CodexActivitySource.onePerRollout`): readable before undecodable,
+  then plain before compressed. That is Codex's own rule (its readers
+  resolve "the plain rollout before its compressed sibling"): both names
+  exist at once for a moment at compression and at resume, and the plain
+  copy is then the original or the live, appended one. `sessionDetail`
+  tries the plain file, then its twin. The parse cache needed no version
+  bump; why, and when a decoder change does need one, is in MEASUREMENT.md. Measured on the reporting Mac against the
+  pre-fix scanner: 8 → 38 active days (Feb 7 → Nov 18), 737 → 1,528
+  sessions, 7.62 B → 10.95 B tokens; every one of the 737 sessions the old
+  scanner saw is identical in the new scan, and the token difference is
+  exactly the 791 compressed-only sessions'.
 
 ## Gemini (v0.28.0)
 

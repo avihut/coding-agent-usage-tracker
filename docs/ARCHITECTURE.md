@@ -29,7 +29,9 @@ full), [HARNESSES.md](HARNESSES.md) (providers, accounts, identity),
   TokenFormat, CodexActivitySource, SessionChartModel out of their old
   host files) — byte-identical moves, `private`→`internal` only where a
   type crossed its old file. New code lands in the matching folder; a
-  file that outgrows ~600 lines splits along whole-type seams like these.
+  file that outgrows ~600 lines splits along whole-type seams like these. Compression/
+  (2026-11-21) holds the zstd decoder and `LineReader`, provider-neutral
+  ([MEASUREMENT.md](MEASUREMENT.md) → Compressed transcripts).
 
 ## Engine and hosts
 
