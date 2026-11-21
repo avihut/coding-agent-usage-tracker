@@ -175,7 +175,14 @@ struct HeatmapView: View {
                                 .animation(Self.drillAnimation))
                     }
                 }
+                // Clipped a row inset wider than the frame, layout unchanged:
+                // the tables' hover highlight bleeds that far into the panel
+                // margin (their text sits on the content edge), and a plain
+                // clip cut it flush with the text. Anything further out — the
+                // drill's sliding pages — stays masked.
+                .padding(.horizontal, ModelBreakdownGrid.rowInset)
                 .clipped()
+                .padding(.horizontal, -ModelBreakdownGrid.rowInset)
             }
         }
         .onChange(of: activity, initial: true) { rebuildLayout(for: period) }
@@ -758,7 +765,11 @@ struct HeatmapView: View {
                 dayDetail(entry, rows: rows)
                     .offset(x: slideX)
             }
+            // A row inset wider than the frame, as the drill's own clip: the
+            // day table's highlight bleeds into the margin.
+            .padding(.horizontal, ModelBreakdownGrid.rowInset)
             .clipped()
+            .padding(.horizontal, -ModelBreakdownGrid.rowInset)
             .overlay(alignment: .topLeading) {
                 dayStepArrow(for: entry, rows: rows, direction: -1)
             }

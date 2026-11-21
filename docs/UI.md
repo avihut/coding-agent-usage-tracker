@@ -447,7 +447,13 @@ per-harness geometry of the bar is in [HARNESSES.md](HARNESSES.md).
   sits under its parent's NAME — leading = parent's leading + parent's mark
   + 4. `HarnessMark.side(ink:)` is the same square for every glyph, so all
   agents' names share one x. Name room: an agent 86pt, a model under an
-  agent 75pt, under an account ~59pt.
+  agent 75pt, under an account ~59pt, inside an opened family under an
+  account ~48pt — there a model truncates in the MIDDLE ("Son…4.5"), since
+  family members differ only by their version.
+- The hover highlight's bleed survives the drill's clips: both `.clipped()`
+  ZStacks in `HeatmapView` clip a row inset wider than their frame (pad,
+  clip, unpad — layout unchanged); a plain clip cut the highlight flush with
+  the text.
 - The headline caption keeps the section's 8pt rhythm above the column
   header (`ModelBreakdownGrid.headlineGap`).
 

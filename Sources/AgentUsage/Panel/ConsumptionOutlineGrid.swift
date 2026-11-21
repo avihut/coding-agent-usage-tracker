@@ -59,7 +59,7 @@ struct ConsumptionOutlineGrid: View {
             headline
             columnHeader
             ForEach(visibleRows, id: \.node.id) { row in
-                rowView(row.node, leading: row.leading)
+                rowView(row.node, leading: row.leading, underFamily: row.underFamily)
                 if !row.node.reportsTokens {
                     // Under the row's name, which sits inside the row's inset.
                     Text("\(row.node.prompts.formatted()) prompts · reports no tokens · not in the totals")
@@ -110,18 +110,22 @@ struct ConsumptionOutlineGrid: View {
     // MARK: - Rows
 
     /// The open part of the tree, depth-first, each row with its leading
-    /// edge: a child's mark under its parent's name.
-    private var visibleRows: [(node: ConsumptionOutline.Node, leading: CGFloat)] {
-        var rows: [(ConsumptionOutline.Node, CGFloat)] = []
-        func walk(_ nodes: [ConsumptionOutline.Node], leading: CGFloat) {
+    /// edge (a child's mark under its parent's name) and whether its parent
+    /// is a family — whose members differ only by version.
+    private var visibleRows: [(node: ConsumptionOutline.Node, leading: CGFloat, underFamily: Bool)] {
+        var rows: [(ConsumptionOutline.Node, CGFloat, Bool)] = []
+        func walk(_ nodes: [ConsumptionOutline.Node], leading: CGFloat, underFamily: Bool) {
             for node in nodes {
-                rows.append((node, leading))
+                rows.append((node, leading, underFamily))
                 if isOpen(node) {
-                    walk(node.children, leading: Self.nameOffset(node, leading: leading) - Self.chevronSlot - Self.leadSpacing)
+                    walk(
+                        node.children,
+                        leading: Self.nameOffset(node, leading: leading) - Self.chevronSlot - Self.leadSpacing,
+                        underFamily: isFamily(node))
                 }
             }
         }
-        walk(outline.roots, leading: 0)
+        walk(outline.roots, leading: 0, underFamily: false)
         return rows
     }
 
@@ -140,11 +144,13 @@ struct ConsumptionOutlineGrid: View {
         }
     }
 
-    private func rowView(_ node: ConsumptionOutline.Node, leading: CGFloat) -> some View {
+    private func rowView(
+        _ node: ConsumptionOutline.Node, leading: CGFloat, underFamily: Bool
+    ) -> some View {
         HStack(spacing: 0) {
             HStack(spacing: Self.leadSpacing) {
                 lead(node)
-                nameText(node)
+                nameText(node, underFamily: underFamily)
                 if case .family = node.kind {
                     Text("\(node.children.count)")
                         .foregroundStyle(.tertiary)
@@ -209,14 +215,17 @@ struct ConsumptionOutlineGrid: View {
     /// on its width ("Codex Auto Review" is 92.7pt) pushed the content past
     /// 360pt and collapsed EVERY section's margin (user-reported
     /// 2026-11-21). An account label (a sign-in can be long) gives way in the
-    /// middle, everything else at the tail, each with its full name as a
-    /// tooltip. A host with room still shows it whole.
-    @ViewBuilder private func nameText(_ node: ConsumptionOutline.Node) -> some View {
+    /// middle, and so does a model inside an opened family — its siblings
+    /// differ only by the version at the end ("Son…4.5"), and that row is
+    /// the deepest, with ~48pt for a name. Everything else gives way at the
+    /// tail. Each carries its full name as a tooltip; a host with room still
+    /// shows it whole.
+    @ViewBuilder private func nameText(_ node: ConsumptionOutline.Node, underFamily: Bool) -> some View {
         let name = title(node)
         Text(name)
             .foregroundStyle(isGroup(node) && !isFamily(node) ? .primary : .secondary)
             .lineLimit(1)
-            .truncationMode(isAccount(node) ? .middle : .tail)
+            .truncationMode(isAccount(node) || underFamily ? .middle : .tail)
             .help(name)
     }
 

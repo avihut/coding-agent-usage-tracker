@@ -472,8 +472,9 @@ the same models. But for consumption it makes sense"). Design record:
   apart. The merged tones are tuned for the widest gap between an agent's
   first four families (ΔE_ok ≥ 0.071 dark / 0.052 light, measured over the
   four harness accents) and the fewest cross-family look-alikes at any
-  slot (6–12% of pairs under ΔE 0.04 by accent and appearance, ~9% on
-  average, up from ~3% when shades ran to near-black). The outline and hover remain
+  slot (over shades 0–9, 5–15% of pairs under ΔE 0.04 by accent and
+  appearance — Codex on light is the 15% — ~9% on average, up from ~3%
+  when shades ran to near-black). The outline and hover remain
   the disambiguator. Known narrow pair: Gemini's accent and the first fixed
   hue are both blues, 0.038 apart on light.
 

@@ -84,9 +84,10 @@ struct ModelBreakdownGrid: View {
                 RoundedRectangle(cornerRadius: 2)
                     .fill(colors[row.model] ?? Color.gray)
                     .frame(width: 7, height: 7)
-                // Whole wherever the host has room (popovers size to fit);
-                // in the fixed 360pt panel a long name gives way at the tail
-                // rather than push the content wider (user-reported
+                // Whole wherever the host has room (the meter popover sizes
+                // to fit); in a fixed-width host — the 360pt panel, the
+                // 344pt prompt-span popover — a long name gives way at the
+                // tail rather than push the content wider (user-reported
                 // 2026-11-21: it collapsed every section's margin).
                 Text(row.displayName)
                     .foregroundStyle(.secondary)
