@@ -78,6 +78,9 @@ extension ZstdDecoder.Frame {
             position += 6
             let total = sizes.reduce(0, +)
             guard total <= end - position else { throw .corrupt("Huffman jump table overruns") }
+            // As the reference (MIN_LITERALS_FOR_4_STREAMS): fewer than 6
+            // literals can't be split four ways.
+            guard regenerated >= 6 else { throw .corrupt("too few literals for four streams") }
             let segment = (regenerated + 3) / 4
             let lastSegment = regenerated - 3 * segment
             guard lastSegment >= 0 else { throw .corrupt("too few literals for four streams") }

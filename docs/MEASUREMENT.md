@@ -59,8 +59,11 @@ a face is in [ARCHITECTURE.md](ARCHITECTURE.md).
   or an unbounded allocation. Every read is range-checked first; every loop
   is bounded by input bytes, a sequence count or the block's output budget.
   LIMITS: window ≤ 2^27 = 128 MiB (the reference decoder's own default, so
-  anything `zstd -d` takes without `--memory` decodes; only the window a
-  frame actually fills is allocated), ≤ 1 GiB out per file (8× the largest
+  any valid frame `zstd -d` takes without `--memory` decodes — two
+  malformed shapes its fast paths tolerate are refused, as the RFC says: a
+  Huffman stream with bits left over, a match past the window; the buffer
+  is reserved at window + slack once, and only what a frame fills becomes
+  resident), ≤ 1 GiB out per file (8× the largest
   plain rollout seen, 120 MB — bounds a decompression bomb's CPU), a line
   ≤ 64 MiB (~5× the longest real one, 13.6 MB; a longer line is skipped
   unbuffered). MEMORY: it streams a block (≤ 128 KiB) at a time and keeps
@@ -96,7 +99,12 @@ a face is in [ARCHITECTURE.md](ARCHITECTURE.md).
   ~200–240 MB/s in a release build; 207 differential inputs (text, binary,
   noise, tiny alphabets, runs, empty, block-boundary sizes × levels −1…−22,
   `--fast`, `--long`, small windows, raw literals, multithreaded, piped,
-  concatenated) match `zstd -dc`. Cold scan 13.3 s (16.8 s before, over
+  concatenated) match `zstd -dc`. The review round added ~240K mutated
+  streams (21K under AddressSanitizer) with no trap, hang or bad access,
+  1,000 random encoder parameter sets, and a 17.5K-mutant differential
+  against `zstd -d` in which this decoder never accepted what the reference
+  refused once two refusals were added (a tree without a weight-1 pair,
+  four Huffman streams under 6 literals). Cold scan 13.3 s (16.8 s before, over
   half the data), warm 0.40 s (0.23), cache 4.6 MB (2.8). Fixtures are
   synthetic (`mise run fixtures-zstd`), and a coverage test fails if any
   decoding path goes unexercised — an unhit path wants a fixture, never a

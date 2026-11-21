@@ -45,9 +45,11 @@ enum ZstdError: Error, Equatable, Sendable {
 }
 
 struct ZstdLimits: Sendable {
-    /// 2^27 = 128 MiB: the reference decoder's own default limit, so anything
-    /// `zstd -d` accepts without `--memory`, this decodes. Only the window a
-    /// frame actually fills is allocated.
+    /// 2^27 = 128 MiB: the reference decoder's own default limit, so any
+    /// valid frame `zstd -d` decodes without `--memory`, this decodes. (Two
+    /// malformed shapes the reference's fast paths tolerate are refused, as
+    /// RFC 8878 says: a Huffman stream with bits left over, a match reaching
+    /// past the window.) Only the window a frame actually fills is resident.
     var maxWindowSize = 1 << 27
     /// 1 GiB decompressed per stream: far beyond any real session file (the
     /// largest plain one seen was 120 MB); bounds the CPU a decompression
@@ -216,6 +218,12 @@ struct ZstdDecoder {
             self.hasChecksum = hasChecksum
             self.blockLimit = min(windowSize, ZstdDecoder.blockSizeMax)
             self.slack = slack ?? max(1 << 20, min(windowSize, 8 << 20))
+            // Reserved once, at its ceiling: grown by doubling, the buffer
+            // peaked near 3× the window (295 MB for a 4.5 KB hostile file
+            // declaring 2^27; 145 MB reserved). Untouched pages stay
+            // non-resident, so a small frame declaring a big window costs
+            // nothing (1.8 MB peak).
+            window.reserveCapacity(windowSize + self.slack + blockLimit)
         }
 
         mutating func decodeBlock(
@@ -264,8 +272,9 @@ struct ZstdDecoder {
         }
 
         /// Keeps the last `windowSize` bytes — all a match may reach — once
-        /// the buffer has grown a slack past that, so compaction copies at
-        /// most about one window per window of output.
+        /// the buffer has grown a slack past that: one window copied per
+        /// slack of output (16× at 2^27, measured negligible next to the
+        /// decode itself).
         private mutating func trimWindow() -> Bool {
             guard window.count > windowSize + slack else { return false }
             window.removeFirst(window.count - windowSize)

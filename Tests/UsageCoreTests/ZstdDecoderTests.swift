@@ -390,6 +390,36 @@ struct ZstdMalformedTests {
         #expect(throws: ZstdError.corrupt("bytes after an empty sequences section")) { try ZstdDecoder.decompress(trailing) }
     }
 
+    private static func hex(_ text: String) -> Data {
+        var bytes: [UInt8] = []
+        var index = text.startIndex
+        while index < text.endIndex {
+            let next = text.index(index, offsetBy: 2)
+            bytes.append(UInt8(text[index..<next], radix: 16) ?? 0)
+            index = next
+        }
+        return Data(bytes)
+    }
+
+    /// Both refused by `zstd -d` 1.5.7 ("Data corruption detected" /
+    /// "Literals' block doesn't respect format specification"); found by the
+    /// review's differential fuzz, where this decoder had accepted them.
+    @Test("shapes the reference refuses: a tree without a weight-1 pair, four streams under 6 literals")
+    func referenceRefusals() {
+        #expect(throws: ZstdError.corrupt("Huffman tree without a weight-1 pair")) {
+            try ZstdDecoder.decompress(Self.hex("28b52ffd0000450000820001802069010" + "0"))
+        }
+        for frame in [
+            "28b52ffd000085000006000380100100010001000101010100",
+            "28b52ffd000085000036000380100100010001000303030100",
+            "28b52ffd000085000046000380100100010001000303030300",
+        ] {
+            #expect(throws: ZstdError.corrupt("too few literals for four streams")) {
+                try ZstdDecoder.decompress(Self.hex(frame))
+            }
+        }
+    }
+
     @Test("trailing bytes after the last frame are refused")
     func trailingGarbage() throws {
         let tiny = try ZstdFixture.data("tiny.jsonl.zst")

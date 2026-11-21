@@ -25,6 +25,9 @@ final class LineReader: Sequence, IteratorProtocol {
 
     private var chunk: [UInt8] = []
     private var cursor = 0
+    /// A line spanning chunks. Peaks near 3× a long line (doubling growth,
+    /// then the copy into Data) — bounded by the cap; building it as Data
+    /// instead measured WORSE over a whole scan (280 MB vs 150 MB peak).
     private var pending: [UInt8] = []
     private var skippingLongLine = false
     private var finished = false

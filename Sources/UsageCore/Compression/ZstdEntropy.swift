@@ -278,6 +278,8 @@ struct HuffmanTable {
             rankStart[length - 1] = rankStart[length] + rankCount[length] * (1 << (maxBits - length))
         }
         guard rankStart[0] == size else { throw .corrupt("Huffman codes don't fill the table") }
+        // As the reference: a tree has at least two longest (weight-1) codes.
+        guard rankCount[maxBits] >= 2 else { throw .corrupt("Huffman tree without a weight-1 pair") }
         var symbols = [UInt8](repeating: 0, count: size)
         var lengths = [UInt8](repeating: 0, count: size)
         for (symbol, length) in codeLengths.enumerated() where length > 0 {
