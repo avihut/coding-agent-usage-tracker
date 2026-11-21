@@ -117,7 +117,7 @@ segment and a 7 pt swatch, per theme.
    grey approximation), intersected with the identity bounds.
 3. Base lightness is fitted into the band.
    - Slot 0 stays the brand accent wherever the accent already passes. On
-     dark that is all accents except Antigravity's (2.84:1, nudged
+     dark that is all accents except Antigravity's (2.81:1, nudged
      lighter).
    - On light, Claude's (2.6:1) and Codex's deepen slightly (Assumed).
 4. Versions: five lightness levels per family, at band offsets

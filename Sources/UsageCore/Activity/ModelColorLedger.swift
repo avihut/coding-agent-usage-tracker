@@ -116,11 +116,12 @@ public enum ModelColorMath {
         RGBColor(red: 0.610, green: 0.650, blue: 0.710),  // slate
     ]
 
-    /// A family's versions: where each sits in its band (a fraction of the
-    /// band's width above the family's own lightness, wrapping) and how
-    /// saturated. Five levels a fifth of the band apart, ordered so that
-    /// consecutive versions sit at least two fifths apart; slot 0 is the
-    /// family's own color, and slots past 4 cycle through 1–4 again.
+    /// A family's first five versions: where each sits in its band (a
+    /// fraction of the band's width above the family's own lightness,
+    /// wrapping) and how saturated — five levels a fifth of the band apart,
+    /// ordered so consecutive versions sit two fifths apart; slot 0 is the
+    /// family's own color. Later slots keep stepping two fifths
+    /// (`versionLevel`).
     public static let versionLevels: [(offset: Double, chroma: Double)] = [
         (0.0, 1.00),
         (0.4, 0.70),
@@ -129,10 +130,19 @@ public enum ModelColorMath {
         (0.6, 0.85),
     ]
 
-    /// The version level a shade slot wears.
+    /// The version level a shade slot wears: two fifths of the band past
+    /// the previous slot, and each round of five shifted a tenth, so the
+    /// step from one round into the next is half the band (not the fifth a
+    /// plain cycle gave slot 4 → 5) and a later round never repeats an
+    /// earlier one's lightness. Slots are kept for life, so the newest
+    /// version — the one in use — is the highest slot; it and its
+    /// predecessor share charts in a release week. Chroma cycles with the
+    /// first round's levels.
     public static func versionLevel(_ shadeSlot: Int) -> (offset: Double, chroma: Double) {
         guard shadeSlot > 0 else { return versionLevels[0] }
-        return versionLevels[1 + (shadeSlot - 1) % (versionLevels.count - 1)]
+        let round = Double(shadeSlot / versionLevels.count)
+        let offset = (0.4 * Double(shadeSlot) + 0.1 * round).truncatingRemainder(dividingBy: 1)
+        return (offset, versionLevels[1 + (shadeSlot - 1) % (versionLevels.count - 1)].chroma)
     }
 
     /// The family's base color re-shaded for a version's slot, for one

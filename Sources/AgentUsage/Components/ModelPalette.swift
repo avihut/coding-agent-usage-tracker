@@ -113,7 +113,10 @@ enum ModelPalette {
             return NSColor(srgbRed: rgb.red, green: rgb.green, blue: rgb.blue, alpha: 1)
         }
         let (dark, light) = (variant(.dark), variant(.light))
-        let color = Color(nsColor: NSColor(name: nil) { appearance in
+        // @Sendable: AppKit may resolve a dynamic color off the main thread,
+        // and a closure written in this @MainActor enum would otherwise
+        // inherit its isolation and trap there. It captures two NSColors.
+        let color = Color(nsColor: NSColor(name: nil) { @Sendable appearance in
             appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light
         })
         cache[key] = color

@@ -70,11 +70,25 @@ struct ModelColorLegibilityTests {
 
     // MARK: - Legibility, every slot
 
-    @Test("every model color holds 3:1 on its appearance's ground, in both derivations")
+    @Test("every model color holds 3:1 on its ground AS DRAWN — rounded to 8-bit sRGB")
     func contrastEverywhere() {
         forEveryColor { _, _, _, appearance, color in
-            let ratio = ModelColorLegibility.contrast(color, ModelColorLegibility.ground(appearance))
-            #expect(ratio >= ModelColorLegibility.minimumContrast - 1e-9, "\(appearance) \(color): \(ratio)")
+            let drawn = Self.bytes(color)
+            let ratio = ModelColorLegibility.contrast(drawn, ModelColorLegibility.ground(appearance))
+            #expect(ratio >= ModelColorLegibility.minimumContrast, "\(appearance) \(drawn): \(ratio)")
+        }
+    }
+
+    @Test("a color from a chromatic design keeps a tint — none turns grey")
+    func noneTurnsGrey() {
+        // The slate fixed hue is grey by design; everything else is a hue
+        // and must still read as one ("too grey on dark" reads disabled).
+        forEveryColor { derivation, hueSlot, accent, _, color in
+            let base = derivation == "merged"
+                ? accent
+                : ([accent] + ModelColorMath.fixedHues)[hueSlot % (ModelColorMath.fixedHues.count + 1)]
+            guard OKLCH(base).chroma >= 0.05 else { return }
+            #expect(OKLCH(color).chroma >= 0.025, "\(derivation) slot \(hueSlot) \(color)")
         }
     }
 
@@ -108,7 +122,7 @@ struct ModelColorLegibilityTests {
             for appearance in ModelColorAppearance.allCases {
                 let ground = ModelColorLegibility.ground(appearance)
                 let lightness = OKLCH(accent).lightness
-                let keeps = ModelColorLegibility.contrast(accent, ground) >= ModelColorLegibility.minimumContrast
+                let keeps = ModelColorLegibility.contrast(accent, ground) >= ModelColorLegibility.placementContrast
                     && (appearance == .dark
                         ? lightness <= ModelColorLegibility.darkLightnessCap
                         : lightness >= ModelColorLegibility.lightLightnessFloor)
@@ -158,7 +172,7 @@ struct ModelColorLegibilityTests {
                         for slot in colors.indices.dropLast() {
                             let difference = OKLCH.difference(colors[slot], colors[slot + 1])
                             #expect(
-                                difference >= Self.floor(appearance, dark: 0.055, light: 0.040),
+                                difference >= Self.floor(appearance, dark: 0.10, light: 0.075),
                                 "\(derivation) \(name) \(appearance) hue \(hueSlot) shades \(slot)/\(slot + 1): \(difference)")
                         }
                     }
@@ -238,6 +252,12 @@ struct ModelColorLegibilityTests {
     }
 
     // MARK: - Helpers
+
+    /// The color as the screen draws it: each channel rounded to a byte.
+    static func bytes(_ color: RGBColor) -> RGBColor {
+        func byte(_ value: Double) -> Double { (value * 255).rounded() / 255 }
+        return RGBColor(red: byte(color.red), green: byte(color.green), blue: byte(color.blue))
+    }
 
     private func forEveryColor(
         _ body: (_ derivation: String, _ hueSlot: Int, _ accent: RGBColor, ModelColorAppearance, RGBColor) -> Void

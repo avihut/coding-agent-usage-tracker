@@ -19,6 +19,12 @@ public enum ModelColorLegibility {
     /// Bar segments and the 7pt legend swatches are exactly that.
     public static let minimumContrast = 3.0
 
+    /// What a color is PLACED against: the minimum plus headroom for the
+    /// screen's 8-bit rounding. A color placed exactly on 3.0 rounds below
+    /// it about half the time (a review measured losses up to 0.017 — green
+    /// #4E993E drew at 2.988:1), and a checker measures the drawn bytes.
+    public static let placementContrast = minimumContrast + 0.05
+
     /// The ground each appearance is held against — the BINDING one, i.e.
     /// the plausible ground closest to the marks. Dark: the panel as the
     /// snapshot draws it and `windowBackgroundColor` (50,50,50); the live
@@ -52,7 +58,7 @@ public enum ModelColorLegibility {
     // MARK: - The band
 
     /// The OKLab lightnesses at which a color of this chroma and hue holds
-    /// the minimum contrast on the appearance's ground and keeps its hue.
+    /// the placement contrast on the appearance's ground and keeps its hue.
     /// The contrast edge is found by bisection on the color as it will be
     /// drawn (gamut-mapped), so the ratio holds exactly, not by a grey
     /// approximation. Above the ground's luminance contrast only grows with
@@ -63,7 +69,7 @@ public enum ModelColorLegibility {
     ) -> ClosedRange<Double> {
         let ground = ground(appearance)
         func passes(_ lightness: Double) -> Bool {
-            contrast(OKLCH(lightness: lightness, chroma: chroma, hue: hue).rgb, ground) >= minimumContrast
+            contrast(OKLCH(lightness: lightness, chroma: chroma, hue: hue).rgb, ground) >= placementContrast
         }
         switch appearance {
         case .dark:

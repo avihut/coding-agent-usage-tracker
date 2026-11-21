@@ -451,13 +451,17 @@ the same models. But for consumption it makes sense"). Design record:
   fixed hues; in a merge the agent's accent at the family tone) is placed
   in its BAND — the lightnesses where, at that hue and chroma, 3:1 holds
   (found by bisection on the color as drawn, gamut-mapped by giving up
-  chroma only) and the hue still reads. The design lightness is fitted
+  chroma only, against 3.05 — headroom for the screen's 8-bit rounding,
+  which put colors placed exactly on 3.0 at 2.98–2.99; the test checks the
+  drawn bytes) and the hue still reads. The design lightness is fitted
   into the band; a version moves a fixed fraction of the band's width up
-  from it, wrapping: five levels a fifth apart (slot 0 the family's own,
-  then 2/5, 4/5, 1/5, 3/5), consecutive versions ≥ 2/5 apart, slots past 4
-  cycling 1–4. A color that needs no move comes back bit-identical: slot 0
+  from it, wrapping: two fifths per slot (slot 0 the family's own, then
+  2/5, 4/5, 1/5, 3/5), each later round of five shifted a tenth so the
+  step between rounds is half the band and no round repeats another —
+  consecutive versions ≥ ΔE_ok 0.12 apart on dark, 0.084 on light, at
+  every slot. A color that needs no move comes back bit-identical: slot 0
   IS the brand accent wherever the accent holds (dark: all but
-  Antigravity's, 2.84:1, nudged lighter; light: Claude's is 2.6:1 and
+  Antigravity's, 2.81:1, nudged lighter; light: Claude's is 2.6:1 and
   deepens, as do Codex's and the fixed hues tuned for dark).
 - WHY LEVELS, NOT STEPS: ledger slots are kept for life, so the version in
   use holds its family's HIGHEST slot. The old HSB steps grew with the slot

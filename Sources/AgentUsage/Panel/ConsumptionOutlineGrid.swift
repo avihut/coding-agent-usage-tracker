@@ -32,8 +32,8 @@ struct ConsumptionOutlineGrid: View {
     // where there is nothing to fold, so marks stand in columns (a prompt-only
     // agent's glyph under the others'). A child's mark sits under its
     // parent's NAME: its leading edge is the parent's plus the parent's mark
-    // and one gap. Names start at the table's edge plus that, so the width a
-    // name gets is the lead budget (`ModelBreakdownGrid.leadBudget`) less it.
+    // and one gap. A name gets what the number columns and the minimum gap
+    // leave of the row (114pt at 360pt, docs/UI.md) less its own offset.
 
     private static let chevronSlot: CGFloat = 8
     private static let leadSpacing: CGFloat = 4
