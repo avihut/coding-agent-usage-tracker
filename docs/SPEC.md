@@ -498,7 +498,8 @@ Non-negotiable; flag rather than work around:
 - Antigravity CLI provider (amendment 2026-11-21, user-directed — "Since
   Antigravity is a successor to Gemini CLI I think we can safely mark it
   deprecated and focus on Antigravity"; the status-line route chosen over
-  every credentialed one). Zero network destinations, no credential.
+  every credentialed one; the plan-limits route superseded the same day,
+  below). Zero network destinations, no credential.
   - Reads, strictly read-only: the file NAMES in
     `~/.gemini/antigravity-cli/conversations/` (a conversation database is
     NEVER opened — a WAL database opened without its `-shm` creates one, a
@@ -509,26 +510,57 @@ Non-negotiable; flag rather than work around:
     `brain/` is never walked. The CLI's credential and state files
     (`oauth_creds.json`, `google_accounts.json`, `jetski_state.pbtxt`) and
     every file of the Antigravity app are never opened.
-  - Plan limits come ONLY from the agent's documented custom status line,
-    installed by the person by hand (the app never writes the agent's
-    `settings.json`; `usage-cli export-statusline antigravity
-    --print-config` prints the entry). The language server, the CLI's
-    OAuth credential and scripting the CLI are all ruled out — each is a
-    credential, a process or a sign-in this app does not touch, and the
-    OAuth route would impersonate the vendor's client.
-  - The status-line export (vendor-neutral, `UsageProvider.statusLineExport`):
-    `usage-cli export-statusline <provider>` reduces the payload on stdin to
-    the provider's allowlist — for Antigravity the quota buckets' remaining
-    fraction, absolute reset time and disabled flag, the plan tier and the
-    CLI version; never an email, a path, a title, a working directory or
-    any content — and writes it to ONE file,
-    `<bundle>/<provider>/default/statusline-export.json` (mode 0600, temp
-    file + rename, rewritten on a change or once a minute). Single-writer
-    carve-out: that file is the one thing under the app's scoped folders
-    NOT written by the `engine.lock` holder — the export command writes it
-    and nothing else ever does; the engine only reads it. The command
-    touches no digest, no lease and no other file, prints nothing, and
-    always exits 0.
+  - Plan limits by the vendor's own CLI (amendment 2026-11-21, second,
+    user-directed — "There shouldn't even be a path that requires extra
+    work from the user to start metering antigravity"; supersedes the
+    status-line export, which is retired with its single-writer carve-out;
+    measurements in `docs/plans/antigravity-zero-setup.md`). The engine
+    host — usaged, or the app while it hosts; never a client, `usage-cli`,
+    a test or a snapshot, whose hosts are given no runner — spawns the CLI's
+    documented print mode, exactly
+    `<agy> -p /quota --output-format json --log-file /dev/null`, with the
+    environment `HOME USER LOGNAME TMPDIR`, `PATH=/usr/bin:/bin:/usr/sbin:/sbin`
+    and the documented `AGY_CLI_DISABLE_AUTO_UPDATE=true`, cwd `/`, stdin
+    `/dev/null`, no inherited descriptors, utility QoS, its own process
+    group. `<agy>` is the first of `~/.local/bin/agy`,
+    `/opt/homebrew/bin/agy`, `/usr/local/bin/agy` that resolves outside any
+    `.app` bundle and whose `--version` prints one bare version (checked
+    once per file identity; `--version` writes nothing). Nothing else of
+    the CLI is ever run: no agent turn, no other subcommand.
+    - How often: at most once per 10 minutes (persisted from the last
+      ATTEMPT, so a restart, a handover or a manual refresh can't beat it),
+      only when a conversation was written since the last reading began
+      (the first reading: within the last 7 days), one at a time, killed
+      with its process group at 30 s, backing off to 2 hours after
+      failures. A Mac that doesn't use Antigravity runs nothing.
+    - What the VENDOR'S process writes inside its own home, measured (the
+      superset of every run): mtime stamps on `cache/onboarding.json`,
+      `conversation_summaries.db` and `crashes/`; and — were the CLI to
+      ignore its documented log path and update switch — a log in `log/`,
+      the `cli.log` link, an `implicit/*.pb`, and the update check's
+      `last_check.timestamp` / `updater/` (possibly an update). It may
+      refresh its own sign-in and write it back where it keeps it (its
+      Keychain item, which it reads through `/usr/bin/security`, or its own
+      file fallback). This is the second write inside an agent home this
+      section allows, and it is BY PROXY: the app itself writes nothing
+      there.
+    - What goes over the network, and who sends it: the vendor's process,
+      to Google's Cloud Code backend (`daily-cloudcode-pa.googleapis.com`,
+      measured: ten TLS connections to Google addresses on 443), under its
+      own sign-in — the same requests any start of the CLI makes, and no
+      quota spent. That is not a destination of this app: the provider's
+      `networkDestinations` stays empty, it stays a local provider, and the
+      privacy card renders the run on its own lines
+      (`UsageProvider.quotaCommand`).
+    - What the app keeps: each bucket's id, remaining fraction and absolute
+      reset, in `<bundle>/antigravity/default/quota-probe.json` (mode 0600,
+      written by the `engine.lock` holder like every other file there).
+      The payload's text, names and descriptions are dropped before anything
+      touches the disk; stdout and stderr are never logged. The app never
+      reads a token, a cookie, an OAuth file or the Keychain for it, never
+      calls Google, and never touches the language server.
+    - Meters: every pool the reading reports — the Gemini session and
+      weekly, the Claude + GPT pool, and Gemini 4 Argon's separate weekly.
   - Focus (vendor-neutral): a harness whose accounts have all read their
     usage and hold no limit is not ranked for focus unless pinned; when
     every eligible harness is like that, the ranking runs over all of them.

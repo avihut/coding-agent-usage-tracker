@@ -48,7 +48,11 @@ was learned the hard way.
   any install whose distribution channel declares a feed: both GitHub
   flavors since v0.88.0; the release asset from `github.com`/
   `objects.githubusercontent.com` downloads exclusively on a user click).
-  No analytics, no telemetry.
+  No analytics, no telemetry. NOT an app destination (§10 amendment
+  2026-11-21, second): the Antigravity provider's quota probe spawns the
+  vendor's own CLI (`agy -p /quota`, print mode), whose OWN traffic goes to
+  Google under its own sign-in; it is declared by `UsageProvider.quotaCommand`,
+  never `networkDestinations`, and only an engine host given a runner spawns it.
 - A status feed is declared by `UsageProvider.statusFeed`, NOT added to
   `networkDestinations`: that list being empty is what makes a provider
   "local" (`isLocalProvider` — no budget gauge, refresh = rescan), so folding
@@ -68,7 +72,12 @@ was learned the hard way.
   writes exactly `cleanupPeriodDays` in that home's `settings.json`
   through `ClaudeCodeSettings` — read-modify-write preserving every other
   key, atomic, refusing a file whose content doesn't parse. Nothing else
-  ever writes there, and a second write is a §10 amendment first.
+  the app runs writes there, and a second write is a §10 amendment first.
+  BY PROXY (§10 amendment 2026-11-21, second): the `agy -p /quota` run the
+  Antigravity provider spawns stamps the CLI's OWN files under
+  `~/.gemini/antigravity-cli` (measured list in the amendment) and may
+  refresh its own sign-in; the app itself still writes nothing there and
+  reads no credential for it.
 - No App Sandbox. No entitlements we don't need.
 - Never install or register anything (login items, launch agents) without
   asking the user in-session. Launch-at-login is a user-clicked toggle only.
