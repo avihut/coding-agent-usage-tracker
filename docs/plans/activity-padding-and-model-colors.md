@@ -202,3 +202,49 @@ segment and a 7 pt swatch, per theme.
   (the CLAUDE.md never-again: `HoverProbe`).
 - In the meter popover and session detail, the grid's text sits 4 pt inside
   their own content edges (same class, outside the panel).
+
+## Outcome (build + review, 2026-11-21)
+
+Built as planned, with these changes from review (two Opus reviewers, one
+on the colour maths, one on the layout):
+
+- **Colours are placed against 3.05, not 3.0.** A colour placed exactly
+  on the edge rounded below 3:1 as drawn (8-bit), e.g. green `#4E993E` at
+  2.988. The test now checks the drawn bytes; every colour draws at
+  ≥ 3.04:1.
+- **The version cycle steps half the band between rounds.** Each round of
+  five versions is shifted a tenth, so slot 4 → 5 (the newest Opus and the
+  one after it) is ½ band apart, not ⅕. Slot 5 no longer repeats slot 1.
+  Consecutive versions are ≥ ΔE 0.12 apart on dark and 0.084 on light, at
+  every slot.
+- **The highlight bleed survives the drill's clips.** Both `.clipped()`
+  ZStacks clip a row inset wider (layout unchanged).
+- **A model inside an opened family truncates in the middle**
+  ("Son…4.5"). It has ~48 pt, and its siblings differ only by version.
+- **A known narrow pair stays documented, not hidden:** Gemini's accent
+  and the first fixed hue are both blues, 0.038 apart on light.
+
+Measured capacity (Swift):
+- An agent's first four family tones stay ≥ 0.071 apart on dark and
+  0.052 on light.
+- 5–15% of cross-family pairs fall under ΔE 0.04 (shades 0–9), ~9% on
+  average.
+
+## Snapshots (demo data, `--demo-digest`)
+
+All from the same digest, which carries the long-named
+`codex-auto-review`. "Before" is base `0b42369`, built from a `git
+archive` export and run unbundled with the same strip form
+(`-panelAccountForm stacked`).
+
+| Before | After |
+|---|---|
+| ![](activity-padding-and-model-colors/before-dark.png) | ![](activity-padding-and-model-colors/after-dark.png) |
+| ![](activity-padding-and-model-colors/before-light.png) | ![](activity-padding-and-model-colors/after-light.png) |
+| ![](activity-padding-and-model-colors/several-before-dark.png) | ![](activity-padding-and-model-colors/several-after-dark.png) |
+| ![](activity-padding-and-model-colors/one-agent-before-light.png) | ![](activity-padding-and-model-colors/one-agent-after-light.png) |
+
+Swatch strips: every hue slot × shades 0–5 per harness, before and after,
+on the dark and light grounds.
+![merged](activity-padding-and-model-colors/strips-merged.png)
+![ledger](activity-padding-and-model-colors/strips-ledger.png)
