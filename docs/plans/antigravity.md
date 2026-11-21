@@ -18,10 +18,13 @@ Everything below was learned without writing anything inside an agent home.
 - Each SQLite file's journal mode was read from its 100-byte header (bytes
   18–19), not by opening it. Every database is WAL-mode. Databases were then
   opened only as `file:<path>?immutable=1`, and the directory was re-listed
-  afterwards: no `-wal`, `-shm` or `-journal` file was created by these reads.
-  (The `-wal`/`-shm` pair that appeared at 17:30 local belonged to a
-  conversation the person started then — the live case, which turned out
-  useful.)
+  afterwards: no `-wal`, `-shm` or `-journal` file appeared beside a database
+  that had been read. Sidecars do come and go here, written by the CLI itself:
+  a final sweep at 17:50 local found a `-wal`/`-shm` pair beside the
+  conversation started at 17:44 and beside `conversation_summaries.db`
+  (stamped 17:44:59 and 17:49:58, moments when this investigation opened
+  nothing). The pair that appeared at 17:30 was the same thing — a live
+  conversation, which turned out useful.
 - Protobuf blobs were dumped as **shape**: field numbers, wire types, varint
   ranges, and for strings only a class (uuid / ISO date / identifier / path /
   text) and a length. Values were printed afterwards only at fields the shape
@@ -80,7 +83,7 @@ One JSON object per step. Message bodies sit in `content`, `thinking` and
 | --- | --- | --- |
 | `created_at` | `2026-11-21T14:03:43Z` | ISO 8601, **UTC**, whole seconds; every row checked had this shape. The step's creation time — a model call is stamped when it starts |
 | `type` | `USER_INPUT`, `PLANNER_RESPONSE`, `GENERIC`, `SYSTEM_MESSAGE` | a model call is `PLANNER_RESPONSE`; a tool step is `GENERIC` |
-| `source` | `USER_EXPLICIT`, `MODEL`, `SYSTEM` | a typed prompt is `USER_INPUT` + `USER_EXPLICIT` |
+| `source` | `USER_EXPLICIT`, `MODEL`, `SYSTEM` | a prompt is `USER_INPUT` + `USER_EXPLICIT` |
 | `status` | `DONE`, `ERROR` | the changelog notes ERROR steps were once omitted from this file (fixed) |
 | `step_index` | 0…n | unique within a conversation; equals the database's `steps.idx` |
 | `model` | `gemini-4-neon-xhigh`, `gemini-4-argon-low` | present only on model-call rows; the model id + the thinking-effort setting |
@@ -130,7 +133,7 @@ therefore enough, and it is the fresher of the two (next section).
 
 While a conversation is open, its newest rows live in the `-wal` file. An
 `immutable=1` open reads the main file only. Measured on the live conversation
-at 17:33 local: the transcript held 44 steps (its newest written 8 seconds
+at 17:33 local: the transcript held 44 steps (its newest written 17 seconds
 before the read); the immutable database read showed 37, behind a 32 MB WAL.
 The main file catches up only at a checkpoint (32 MB of WAL at these page
 sizes, or the CLI's exit — the changelog says it checkpoints on exit). An
@@ -171,7 +174,12 @@ appends per step.
 ### Models
 
 - The transcript's `model` is `<model id>-<effort>`. The effort words seen were
-  `xhigh` and `low`; the changelog's `/effort` command implies more.
+  `xhigh` and `low`; the changelog's `/effort` command implies more. Stripping
+  must be an ALLOWLIST of known effort words, never "drop the last hyphen
+  word": the database's own `gemini-4-argon-trial`, and the feed's `-lite`,
+  `-preview` and `-image` ids, show how often the last word is part of the
+  model's name. An unknown suffix stays on the id (and the call goes
+  unpriced) rather than being guessed away.
 - With the effort suffix stripped, the ids are in the LiteLLM feed this app
   already downloads: `gemini/gemini-4-neon` and `gemini/gemini-4-argon` (and
   `carbon`, `hydrogen`), `litellm_provider: gemini`, flat input / output /
@@ -183,9 +191,13 @@ appends per step.
 
 ### Prompts are not model calls
 
-Seven typed prompts against 60 model calls; one prompt drove 23 calls and 107
-tool steps on its own. Antigravity is agentic: a prompt count says little about
-consumption.
+Seven prompts (`USER_INPUT` + `USER_EXPLICIT`) against 60 model calls; one
+prompt drove 23 calls and 107 tool steps on its own. Antigravity is agentic: a
+prompt count says little about consumption. Nor is every prompt typed by a
+person: every CLI start today ran in print mode (`agy -p`), and a print-mode
+start at 17:30 created a conversation whose first row is an ordinary
+`USER_EXPLICIT` input — so a prompt handed over by a script or another agent
+counts the same as one typed.
 
 ### Quota: not stored locally
 
@@ -203,16 +215,21 @@ this investigation could read. The evidence:
 - The CLI exposes it on demand: `/usage`, `/quota`, `/credits`, and in print
   mode `agy -p "/quota" --output-format json` "without starting an agent turn,
   spending quota, or leaving a conversation behind" (changelog; UTC
-  timestamps in JSON output). Each such run is still a CLI start: it writes a
-  new log file in `log/`, an `implicit/*.pb`, and refreshes `cli.log`.
+  timestamps in JSON output). Each such run is still a CLI start, and a start
+  writes inside the home: the 17:14 print-mode `/quota` run left a new
+  `log/cli-<stamp>.log`, a re-pointed `cli.log`, a new `implicit/*.pb`, and
+  fresh stamps on `cache/onboarding.json`, `conversation_summaries.db`,
+  `crashes/`, `last_check.timestamp` and `updater/` (the update check). It did
+  not touch `conversations/`, which still read 16:23 afterwards.
 - **Something on this Mac already runs print-mode `/quota` on a cadence**: the
-  logs show it at 17:14, 17:27 and 17:41 local today. It wasn't this
-  investigation (open question 1).
+  logs show it at 17:14, 17:27 and 17:41 local today, and print-mode prompt
+  runs followed at 17:30, 17:42 and 17:44. It wasn't this investigation (open
+  question 1).
 
 ### The desktop app
 
 - `~/.gemini/antigravity/` holds only `skills/` and an `installation_id`
-  (June), so the app's agent has written no conversations on this Mac.
+  (June): no conversations under it.
 - `~/Library/Application Support/Antigravity` is a VS Code-style profile
   (201 MB): `User/globalStorage/state.vscdb` (+ `.backup`), `storage.json`,
   `User/workspaceStorage/*/state.vscdb`, `Cookies`, `Local Storage/`,
@@ -274,7 +291,13 @@ uses this project; their trees don't overlap (`~/.gemini/tmp` vs
   The bar is the open part: a cell with no segments draws its mark and a dash,
   which today means "no number yet", not "no limit to read". Phase 2 checks
   this with `--snapshot` and, if it misreads, proposes a generic meterless cell
-  state (no vendor names outside the provider).
+  state (no vendor names outside the provider). **Focus is the bigger cost**:
+  `HarnessFocusRule` picks the shown harness with the most active days over 14
+  and never asks whether it has a meter. Used daily, a meterless Antigravity
+  can take focus — and the focused harness is what the bar leads with, what
+  the digest's top level projects, and what `usage-cli limits` (and so a
+  status line, `headroom`, anything reading the default) answers for, with
+  nothing in it. See decision 3.
 - **Heatmap and breakdowns**: token days from every model-call row, bucketed by
   the local calendar day of `created_at` (stored UTC, converted on read, like
   every other scanner), per-minute slots for the timeline; prompt-only faint
@@ -284,7 +307,8 @@ uses this project; their trees don't overlap (`~/.gemini/tmp` vs
 - **Detection**: watch `~/.gemini/antigravity-cli/conversations` — flat, one
   file per conversation, and its `-wal` moves during a live session (the
   FSEvents push signal). Not the whole home: a bare CLI start or a print-mode
-  `/quota` run writes `log/` and `implicit/` with no conversation. Not `brain/`:
+  `/quota` run stamps half the home with no conversation (see "Quota"), while
+  `conversations/` stayed at 16:23 through the 17:14 start. Not `brain/`:
   it fans out into step outputs, scratch and git worktrees, which the capped
   mtime walk and the disk measure would wade through.
 - **Dedup**: none needed within a file (`step_index` is unique). Across files,
@@ -324,7 +348,7 @@ be verified offline, so these are proposals, not facts:
 
 | Glyph | Reads as |
 | --- | --- |
-| `∩` | an arch, after the product's mark |
+| `∩` | an arch — meant to echo the product's mark, which could not be checked offline |
 | `▲` | up, against gravity; heavy ink |
 | `⇡` | up, light |
 
@@ -372,8 +396,13 @@ The TUI header draws the glyph too, so phase 2 checks its terminal width.
    text.
 3. **The meter.** Options:
    - **(a) No meter, activity only — recommended.** Tokens, prompts, models
-     and costs in the heatmap and breakdowns; the bar shows the mark (see the
-     open question on how a meterless cell draws).
+     and costs in the heatmap and breakdowns; the bar shows the mark. It forces
+     a second choice, because focus ignores meters (see "Meter" above):
+     **(a1) a harness with no meter is never focus-eligible unless pinned** — a
+     small vendor-neutral rule in core, so the bar, the digest's top level and
+     `usage-cli limits` keep answering for a harness that has limits; the
+     recommended pairing — or **(a2) accept it**: on days Antigravity leads,
+     the default nouns come back empty and a status line shows nothing.
    - (b) A Gemini-style local count against an assumed cap. Not recommended:
      the vendor's quota is a weighted fraction per model bucket, so any count
      against any cap is a made-up number that would disagree with the CLI's own
@@ -386,8 +415,10 @@ The TUI header draws the glyph too, so phase 2 checks its terminal width.
      --output-format json`, on a slow cadence. Closest to honest: Google's
      client, its own sign-in, a documented machine-readable output. Costs:
      network on the app's initiative (by proxy), a 229 MB launch per poll,
-     possibly a self-update, and **every run writes inside the agent home**
-     (a new log file, `implicit/`, `cli.log`) — the never-write rule broken by
+     possibly a self-update, and **every run writes inside the agent home** —
+     a new log, `cli.log`, `implicit/`, `cache/onboarding.json`,
+     `conversation_summaries.db`, `crashes/`, and the update check's
+     `last_check.timestamp` and `updater/` — the never-write rule broken by
      proxy, which the amendment would have to say outright.
    - **Call Google's endpoint directly** with the sign-in token: a new
      destination, a credential read from the Keychain (with a consent-prompt
@@ -402,8 +433,9 @@ The TUI header draws the glyph too, so phase 2 checks its terminal width.
 ## Open questions
 
 1. **What runs `agy -p "/quota"` here** about every 13 minutes (17:14, 17:27,
-   17:41 today)? Another quota reader already on this Mac would change what
-   decision 4 is worth.
+   17:41 today), with print-mode prompt runs after it (17:30, 17:42, 17:44)?
+   Another quota reader already on this Mac would change what decision 4 is
+   worth.
 2. **`jetski_state.pbtxt`** (565 B, mode 0600) was not opened: its purpose is
    unclear, and the CLI's credential fallback file may live in this tree.
    May it be read for field names only, or does it stay unread? The plan works
@@ -416,7 +448,10 @@ The TUI header draws the glyph too, so phase 2 checks its terminal width.
    then count as a prompt)? One `/swarm` run would tell.
 5. **Forks and rewinds**: confirm the fork copy-forward that the dedup rule
    assumes, and how a rewind changes the file.
-6. **Headless `agy -p` runs** with a real prompt: do they leave a transcript?
+6. **Headless `agy -p` runs**: observed once to leave a conversation and a
+   transcript like any other (17:30). Is the person, or a tool, driving them?
+   If a tool, its prompts count as prompts (see "Prompts are not model
+   calls").
 7. **Retention**: does the CLI ever prune old conversations? The heatmap's
    reach is whatever stays on disk.
 8. **Effort in the breakdown**: tally by base model (priced, one row per
@@ -431,7 +466,7 @@ The TUI header draws the glyph too, so phase 2 checks its terminal width.
 ## Evidence base, and its limits
 
 One afternoon (2026-11-21, about 14:00–15:45 UTC), one CLI build (changelog
-newest 1.5.14), eight conversations, 60 model calls, seven typed prompts, two
+newest 1.5.14), eight conversations, 60 model calls, seven prompts, two
 models. No fork, rewind, swarm, subagent, multi-day history, Claude-model call,
 quota exhaustion or desktop-app conversation was observed. Every rule above
 that depends on one of those is an open question, not a finding.
