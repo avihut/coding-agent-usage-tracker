@@ -492,6 +492,47 @@ Non-negotiable; flag rather than work around:
   are named on the wire by a flat key (the bare profile id for the bundled
   provider, provider-qualified otherwise) because several harnesses' standard
   accounts are all called `default`; that key never names a directory.
+- Antigravity CLI provider (amendment 2026-11-21, user-directed — "Since
+  Antigravity is a successor to Gemini CLI I think we can safely mark it
+  deprecated and focus on Antigravity"; the status-line route chosen over
+  every credentialed one). Zero network destinations, no credential.
+  - Reads, strictly read-only: the file NAMES in
+    `~/.gemini/antigravity-cli/conversations/` (a conversation database is
+    NEVER opened — a WAL database opened without its `-shm` creates one, a
+    write inside the agent home), and for each listed id the step log
+    `brain/<id>/.system_generated/logs/transcript.jsonl`, decoding only
+    timestamps, step types and sources, model ids and token counts. Message
+    text, thinking, tool calls and their output are never materialized.
+    `brain/` is never walked. The CLI's credential and state files
+    (`oauth_creds.json`, `google_accounts.json`, `jetski_state.pbtxt`) and
+    every file of the Antigravity app are never opened.
+  - Plan limits come ONLY from the agent's documented custom status line,
+    installed by the person by hand (the app never writes the agent's
+    `settings.json`; `usage-cli export-statusline antigravity
+    --print-config` prints the entry). The language server, the CLI's
+    OAuth credential and scripting the CLI are all ruled out — each is a
+    credential, a process or a sign-in this app does not touch, and the
+    OAuth route would impersonate the vendor's client.
+  - The status-line export (vendor-neutral, `UsageProvider.statusLineExport`):
+    `usage-cli export-statusline <provider>` reduces the payload on stdin to
+    the provider's allowlist — for Antigravity the quota buckets' remaining
+    fraction, absolute reset time and disabled flag, the plan tier and the
+    CLI version; never an email, a path, a title, a working directory or
+    any content — and writes it to ONE file,
+    `<bundle>/<provider>/default/statusline-export.json` (mode 0600, temp
+    file + rename, rewritten on a change or once a minute). Single-writer
+    carve-out: that file is the one thing under the app's scoped folders
+    NOT written by the `engine.lock` holder — the export command writes it
+    and nothing else ever does; the engine only reads it. The command
+    touches no digest, no lease and no other file, prints nothing, and
+    always exits 0.
+  - Focus (vendor-neutral): a harness whose accounts have all read their
+    usage and hold no limit is not ranked for focus unless pinned; when
+    every eligible harness is like that, the ranking runs over all of them.
+- Gemini CLI deprecated (amendment 2026-11-21, same direction): its plan
+  sign-in stopped working in mid-2026. It stays metered under its own
+  amendment above, for API-key use, and its provider declares a
+  deprecation note that Settings and `usage-cli harnesses` show beside it.
 - The token is never logged, persisted, or included in an error surface.
 - No sandbox entitlement, and no request for entitlements we don't need.
 - Don't install or register anything (login items, launch agents) without asking me

@@ -1,8 +1,26 @@
 # Meter Antigravity (Google) — plan
 
-Branch `feat/antigravity`, cut from main at 66bd426. **Phase 1 only: this is
-the read-only investigation and a proposal. Nothing is built, and nothing will
-be until the decisions at the end are made.**
+Branch `feat/antigravity`, cut from main at 66bd426. Phase 1 (below) was the
+read-only investigation and a proposal.
+
+> **Decided and built, 2026-11-21 (user-directed).** This supersedes the
+> proposal's "tokens only, no meter" for v1:
+>
+> | Topic | Decision |
+> | --- | --- |
+> | Identity | id `antigravity`, "Antigravity CLI", service "Google AI", glyph `∩`, accent violet #A142F4; registered last |
+> | Tokens | the per-conversation `transcript.jsonl`, conversations found by listing `conversations/` by name; no database is opened |
+> | Plan limits | the CLI's documented custom **status line**, installed by hand; `usage-cli export-statusline antigravity` keeps only the quota in one file in the app's own folder (spec §10 amendment 2026-11-21, `docs/PRIVACY.md`) |
+> | Meters | `gemini-5h` → Session (5h), `gemini-weekly` → Weekly, `3p-*` → scoped "… · Claude + GPT" (bar S·W·C); other buckets skipped |
+> | A window that rolled with no newer reading | a dash and no reset time, unless no conversation was written since the reset (then 0%) |
+> | Focus | a harness that read its usage and holds no limit isn't ranked for focus unless pinned (vendor-neutral) |
+> | Gemini CLI | deprecated, still metered; its provider declares the note Settings and `usage-cli harnesses` show |
+>
+> Where it landed: `docs/HARNESSES.md` (Antigravity), `docs/CLI.md`
+> (`export-statusline`), spec §10. The capture of a REAL status-line payload
+> (step V0 of the build plan) is still owed: the bucket ids and shape the
+> code expects come from the CLI's docs and changelog, not yet from a payload
+> seen on this Mac.
 
 The issue (2026-11-21): the person now works in Google's Antigravity CLI, and
 the tracker shows none of it. The one Google harness, `GeminiProvider`, reads
