@@ -44,6 +44,10 @@ Fixes
   as disabled) or fades out as a near-white, and consecutive versions of a
   model stay distinct. Each colour now meets a 3:1 contrast against the
   panel in each appearance, keeping its agent's hue.
+- Building the app (`mise run app` / `mise run bundle`) no longer fails now
+  and then with "Write permissions error" while Claude Code status lines are
+  running `usage-cli` from the bundle: the bundle is built and signed aside
+  and swapped into place whole.
 
 Features
 - Antigravity CLI is metered. It sits in the menu bar beside the other
