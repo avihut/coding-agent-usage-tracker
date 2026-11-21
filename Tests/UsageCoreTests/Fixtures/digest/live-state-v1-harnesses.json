@@ -127,6 +127,7 @@
       "accountCount" : 1,
       "activeDays" : 0,
       "agentName" : "Gemini CLI",
+      "deprecationNote" : "Deprecated — succeeded by Antigravity CLI; still metered for API-key use.",
       "glyph" : "✦",
       "id" : "gemini",
       "isLocalProvider" : true,

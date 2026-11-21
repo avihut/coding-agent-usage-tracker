@@ -712,6 +712,12 @@ private struct MarkedSlider: View {
 /// the focused one would make the card a partial truth.
 private struct HarnessPrivacyBlock: View {
     var registry: ProviderRegistry
+
+    static func tildeAbbreviated(_ path: String) -> String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
+    }
+
     let provider: any UsageProvider
     /// With one harness the rows keep their pre-0.101 titles; with several
     /// each is prefixed by its agent, or the rows would be ambiguous.
@@ -765,14 +771,26 @@ private struct HarnessPrivacyBlock: View {
                     several || accounts.count > 1 ? "\(name) credential" : "Credential",
                     chain.joined(separator: " → ") + " (read-only)")
             }
-            if let path = registry.provider(for: account)
+            // One row per kind of file the source reads (`displayPaths`) —
+            // a harness that lists conversations AND reads transcripts names
+            // both.
+            let paths = registry.provider(for: account)
                 .makeLocalActivity(cacheDirectory: StorageScope.supportDirectory(
                     bundleID: registry.bundleID, providerID: account.providerID,
-                    profileID: account.id))?.displayPath
-            {
+                    profileID: account.id))?.displayPaths ?? []
+            ForEach(Array(paths.enumerated()), id: \.offset) { _, path in
                 infoRow(
                     several || accounts.count > 1 ? "\(name) sessions" : "Transcripts",
                     "\(path) (read-only)")
+            }
+            // The status-line export is a file in THIS app's folder that the
+            // person's own status-line command writes; the engine only reads
+            // it (spec §10, the status-line export).
+            if let export = registry.provider(for: account).statusLineExport {
+                infoRow(
+                    several || accounts.count > 1 ? "\(name) plan limits" : "Plan limits",
+                    "from its status line, via `usage-cli export-statusline` → "
+                        + "\(Self.tildeAbbreviated(export.destination.path)) (only if you set it up)")
             }
         }
     }

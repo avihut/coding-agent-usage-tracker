@@ -53,6 +53,23 @@ struct MultiHarnessHostTests {
 
         var codex: CodexProvider { CodexProvider(sessionsRoot: codexSessions) }
         var gemini: GeminiProvider { GeminiProvider(tmpRoot: geminiTmp) }
+        var antigravityHome: URL { userHome.appending(path: ".gemini/antigravity-cli") }
+        var antigravityExport: URL { root.appending(path: "export/statusline-export.json") }
+        var antigravity: AntigravityProvider {
+            AntigravityProvider(home: antigravityHome, exportURL: antigravityExport)
+        }
+
+        /// An Antigravity conversation (synthetic) last written this many days
+        /// ago, with one model call in its transcript.
+        func antigravityConversation(daysAgo: Double) throws {
+            let id = UUID().uuidString.lowercased()
+            let written = Date().addingTimeInterval(-daysAgo * 86400)
+            let tree = TempTree(root: antigravityHome)
+            try tree.write(
+                "brain/\(id)/.system_generated/logs/transcript.jsonl",
+                AntigravityFixture.call(at: written, input: 10, output: 5) + "\n")
+            try tree.file("conversations/\(id).db", age: daysAgo * 86400, now: Date())
+        }
 
         /// A Claude transcript this many days old.
         func claudeSession(daysAgo: Double) throws {
@@ -232,6 +249,37 @@ struct MultiHarnessHostTests {
         #expect(host.digest?.pinnedProfile == nil)
         // A key nobody meters is refused, never quietly redirected.
         #expect(!(await host.handle(.focusProfile(id: "gemini"))).ok)
+    }
+
+    /// 2026-11-21: Antigravity before its status-line export reads tokens and
+    /// no limits — used on more days than Claude, it must still not take the
+    /// bar's lead; the moment a reading lands it competes like any harness.
+    @Test("a harness reading no limits doesn't take focus until it reads some")
+    func meterlessFocus() async throws {
+        let fixture = try Fixture()
+        defer { fixture.tearDown() }
+        try fixture.claudeSession(daysAgo: 0.2)
+        for day in 1...5 { try fixture.antigravityConversation(daysAgo: Double(day) + 0.3) }
+        let host = fixture.makeHost([fixture.claude, fixture.antigravity])
+        host.start()
+        defer { host.shutdown() }
+
+        let read = await eventually { host.engines["antigravity"]?.state.snapshot != nil }
+        #expect(read)
+        #expect(host.engines["antigravity"]?.state.snapshot?.meters.isEmpty == true)
+        #expect(host.focusedProfileID == "default")
+
+        // The person installs the export; a reading lands.
+        let export = try #require(fixture.antigravity.statusLineExport)
+        let payload = AntigravityStatusLine.payload(quota: AntigravityStatusLine.quota([
+            AntigravityStatusLine.bucket(
+                "gemini-weekly", remaining: 0.6, reset: Date().addingTimeInterval(86400)),
+        ]))
+        #expect(StatusLineExportWriter.run(export, stdin: payload) == .written)
+        #expect(await host.handle(.refreshProfile(id: "antigravity")).ok)
+        let moved = await eventually { host.focusedProfileID == "antigravity" }
+        #expect(moved)
+        #expect(host.digest?.engine.providerID == "antigravity")
     }
 
     /// The user's own rule: "I've not been using Codex for months; there's no

@@ -116,10 +116,53 @@ struct HarnessFocusTests {
     }
 
     private func harness(
-        _ id: String, days: Int, last: Date? = nil, shown: Bool = true, accounts: [FocusCandidate]
+        _ id: String, days: Int, last: Date? = nil, shown: Bool = true,
+        meters: Bool = true, accounts: [FocusCandidate]
     ) -> HarnessFocusCandidate {
         HarnessFocusCandidate(
-            id: id, shown: shown, activeDays: days, lastActivity: last, accounts: accounts)
+            id: id, shown: shown, activeDays: days, lastActivity: last, accounts: accounts,
+            reportsMeters: meters)
+    }
+
+    /// 2026-11-21: a harness that read no limits (Antigravity before its
+    /// status-line export) would make the bar lead with nothing.
+    @Test("a harness with no limits loses the ranking, but a pin still wins")
+    func meterlessLosesRanking() {
+        let claude = harness("claude", days: 3, accounts: [account("default", files: 4)])
+        let antigravity = harness(
+            "antigravity", days: 12, meters: false, accounts: [account("antigravity", files: 9)])
+        #expect(
+            HarnessFocusRule.focused([claude, antigravity], pin: nil, current: nil) == "default")
+        // Even holding focus already, a meterless harness doesn't keep it.
+        #expect(
+            HarnessFocusRule.focused([claude, antigravity], pin: nil, current: "antigravity")
+                == "default")
+        #expect(
+            HarnessFocusRule.focused([claude, antigravity], pin: "antigravity", current: nil)
+                == "antigravity")
+        // Once it reports limits it competes on days like any other.
+        let metered = harness("antigravity", days: 12, accounts: [account("antigravity")])
+        #expect(
+            HarnessFocusRule.focused([claude, metered], pin: nil, current: nil) == "antigravity")
+    }
+
+    @Test("when every harness is meterless the ranking runs over all of them")
+    func allMeterlessStillFocus() {
+        let gemini = harness("gemini", days: 1, meters: false, accounts: [account("gemini")])
+        let antigravity = harness(
+            "antigravity", days: 5, meters: false, accounts: [account("antigravity")])
+        #expect(
+            HarnessFocusRule.focused([gemini, antigravity], pin: nil, current: nil)
+                == "antigravity")
+        // One meterless harness alone is the account rule, as ever.
+        #expect(HarnessFocusRule.focused([gemini], pin: nil, current: nil) == "gemini")
+        // A hidden metered harness can't rescue the ranking: the shown
+        // meterless one holds focus rather than nobody.
+        let hiddenClaude = harness(
+            "claude", days: 9, shown: false, accounts: [account("default")])
+        #expect(
+            HarnessFocusRule.focused([hiddenClaude, antigravity], pin: nil, current: nil)
+                == "antigravity")
     }
 
     @Test("the harness used on more days wins, then its own busiest account")

@@ -90,6 +90,15 @@ public protocol UsageProvider: Sendable {
     /// generically — display assumptions like Gemini's daily cap, never
     /// secrets. Empty by default.
     var preferences: [ProviderPreference] { get }
+    /// A one-line note that this harness is on its way out and what
+    /// succeeds it — shown beside it in Settings and `usage-cli harnesses`.
+    /// Nil for every current harness.
+    var deprecationNote: String? { get }
+    /// How this provider's plan limits arrive through the agent's own
+    /// status line, when they can: a person-installed status-line command
+    /// (`usage-cli export-statusline <id>`) reduces the agent's status-line
+    /// payload to one small file the provider then reads. Nil = no export.
+    var statusLineExport: StatusLineExport? { get }
     /// The label this provider writes TODAY for a meter it once wrote under
     /// `stored` (0.101.0). Labels key the stored percent history, so a
     /// provider that renames a meter answers here and the history follows
@@ -128,6 +137,8 @@ public protocol UsageProvider: Sendable {
 
 extension UsageProvider {
     public var preferences: [ProviderPreference] { [] }
+    public var deprecationNote: String? { nil }
+    public var statusLineExport: StatusLineExport? { nil }
     public func currentMeterLabel(forStored stored: String) -> String { stored }
     /// Opt-in: a provider without a declared feed tracks no status.
     public var statusFeed: StatusFeed? { nil }
@@ -225,6 +236,10 @@ public protocol LocalActivitySource: Sendable {
     var watchDirectories: [URL] { get }
     /// Shown by the settings retention card ("~/.claude/projects").
     var displayPath: String { get }
+    /// Every path the source reads, one privacy-card row each. Defaults to
+    /// `[displayPath]`; a source reading more than one kind of file names
+    /// each.
+    var displayPaths: [String] { get }
     /// Daily aggregates plus the recent per-minute timeline, from the
     /// agent's transcripts.
     func scanTranscripts(now: Date) -> TranscriptScan
@@ -261,6 +276,7 @@ public protocol LocalActivitySource: Sendable {
 
 extension LocalActivitySource {
     public var providesSessions: Bool { false }
+    public var displayPaths: [String] { [displayPath] }
     public func sessionDetail(id: String) -> SessionDetail? { nil }
     /// The capped mtime walk over the watch directories.
     public func lastActivity(now: Date) -> Date? {

@@ -57,6 +57,9 @@ public final class MeteringHost {
     public private(set) var activeDays: [String: Set<Date>] = [:]
     public private(set) var identities: [String: AccountIdentity] = [:]
     public private(set) var dormant: Set<String> = []
+    /// Harnesses whose accounts read no limits at the last focus decision
+    /// (`MeteringHost+Focus`).
+    private(set) var meterless: Set<String> = []
     public private(set) var focusedProfileID: String?
     public private(set) var pin: String?
     /// The digest as last written.
@@ -369,9 +372,15 @@ public final class MeteringHost {
             log("stopped: \(key)")
         }
         let missing = wanted.filter { engines[$0.key] == nil }
-        for (index, profile) in missing.enumerated() {
-            let delay = staggered && missing.count > 1
-                ? Double(index) * configuration.stagger / Double(missing.count) : 0
+        // The stagger spreads launch polls of a NETWORK endpoint across the
+        // gate floor; a local provider's "poll" is a disk read with nothing
+        // to spread, and making it wait would leave focus guessing about it
+        // for minutes after an update.
+        let networked = missing.filter { !provider(for: $0).networkDestinations.isEmpty }
+        for profile in missing {
+            let index = networked.firstIndex { $0.key == profile.key }
+            let delay = staggered && networked.count > 1
+                ? Double(index ?? 0) * configuration.stagger / Double(networked.count) : 0
             startEngine(for: profile, launchDelay: delay)
         }
         for profile in enrolledProfiles {
@@ -412,6 +421,9 @@ public final class MeteringHost {
     private func sink(_ key: String, _ state: LiveState) {
         guard !isShutDown, engines[key] != nil else { return }
         sections[key] = state
+        // A harness that just read its first limits — or found it has none —
+        // changes what focus may lead with; nothing else in a publish does.
+        if meterlessHarnesses(rows: roster.rows) != meterless { recomputeFocus() }
         republish()
     }
 
@@ -454,8 +466,11 @@ public final class MeteringHost {
             }
             return HarnessFocusCandidate(
                 id: row.id, shown: row.shown, activeDays: days.count,
-                lastActivity: accounts.compactMap(\.lastActivity).max(), accounts: accounts)
+                lastActivity: accounts.compactMap(\.lastActivity).max(), accounts: accounts,
+                reportsMeters: reportsMeters(
+                    eligibleKeys: accounts.filter(\.eligible).map(\.id)))
         }
+        meterless = meterlessHarnesses(rows: roster.rows)
         let next = HarnessFocusRule.focused(candidates, pin: pin, current: focusedProfileID)
         guard next != focusedProfileID, !focusHeld || overridingHold else { return false }
         focusedProfileID = next

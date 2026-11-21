@@ -38,6 +38,12 @@ struct HarnessesCard: View {
                     Text(activity(harness))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
+                    // The provider's own phrasing — the app names no vendor.
+                    if let note = harness.deprecationNote {
+                        Text(note)
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                    }
                 }
             }
             Spacer(minLength: 8)

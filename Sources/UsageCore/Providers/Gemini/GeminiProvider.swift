@@ -64,6 +64,13 @@ public struct GeminiProvider: UsageProvider {
 
     public var pricingSelector: PricingFeedSelector { .gemini }
 
+    /// Deprecated 2026-11-21 (user-directed): Google's plan sign-in left
+    /// Gemini CLI in mid-2026 and Antigravity CLI succeeds it. Still metered
+    /// for anyone running it on an API key.
+    public var deprecationNote: String? {
+        "Deprecated — succeeded by Antigravity CLI; still metered for API-key use."
+    }
+
     public var preferences: [ProviderPreference] {
         [ProviderPreference(
             key: Self.dailyCapKey,

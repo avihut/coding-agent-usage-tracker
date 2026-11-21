@@ -49,12 +49,17 @@ public struct HarnessState: Codable, Sendable, Equatable, Identifiable {
     public let notices: NoticesCard?
     /// Its incidents within the sample retention; nil = it records none.
     public let outages: [OutageSpan]?
+    /// Set when the harness is deprecated: what to say beside it ("succeeded
+    /// by …"), phrased by its provider. Nil for every current harness —
+    /// absent from the digest, so a pre-note reader decodes it unchanged.
+    public let deprecationNote: String?
 
     public init(
         id: String, serviceName: String, agentName: String, glyph: String, shortName: String,
         accent: RGBColor, isLocalProvider: Bool, present: Bool, shown: Bool,
         recentFiles: Int?, activeDays: Int?, newestActivityAt: Date?, accountCount: Int,
-        serviceStatus: ServiceStatusCard?, notices: NoticesCard?, outages: [OutageSpan]?
+        serviceStatus: ServiceStatusCard?, notices: NoticesCard?, outages: [OutageSpan]?,
+        deprecationNote: String? = nil
     ) {
         self.id = id
         self.serviceName = serviceName
@@ -72,6 +77,7 @@ public struct HarnessState: Codable, Sendable, Equatable, Identifiable {
         self.serviceStatus = serviceStatus
         self.notices = notices
         self.outages = outages
+        self.deprecationNote = deprecationNote
     }
 }
 

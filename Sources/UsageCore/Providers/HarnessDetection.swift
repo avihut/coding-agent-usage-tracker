@@ -78,7 +78,7 @@ public enum HarnessResolution {
     /// Every provider this build ships, bundled default first — the
     /// tie-break order when detection sees an all-quiet machine.
     public static func standardProviders() -> [any UsageProvider] {
-        [ClaudeProvider(), CodexProvider(), GeminiProvider()]
+        [ClaudeProvider(), CodexProvider(), GeminiProvider(), AntigravityProvider()]
     }
 
     /// The bundled default — first of `standardProviders()`. Its accounts
