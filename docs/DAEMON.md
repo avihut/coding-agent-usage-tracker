@@ -156,12 +156,15 @@ longer decodes). `usage-cli state | jq .menuBar` etc.
 - `engine.lock` — an exclusive `flock(2)`: whoever holds it runs engine +
   publisher + socket. The kernel releases on death, so a held lease is
   always a live process and stale locks cannot exist.
-- ONE CARVE-OUT from the lease-holder-is-sole-writer rule (2026-11-21,
-  spec §10): `<bundle>/<provider>/default/statusline-export.json` is
-  written by `usage-cli export-statusline`, run by an agent's status line,
-  and by nothing else — never the lease holder, which only reads it. It
-  takes no lease and touches no other file (temp file + rename, so a
-  reader sees one whole reading or the other).
+- The QUOTA PROBE (spec §10 amendment 2026-11-21, second) runs in the
+  lease holder only: a host is given an `AgentCommandRunner` (usaged
+  always; the app when it hosts, never under `--snapshot`), and its engines
+  write the probe's state, `<bundle>/<provider>/<profile>/quota-probe.json`,
+  like every other file there. The first amendment's carve-out — a
+  status-line export written by `usage-cli` — is retired: the lease holder
+  is again the sole writer of the scoped folders. A spawned agent tool
+  gets no descriptor of the host's (`POSIX_SPAWN_CLOEXEC_DEFAULT`), so it
+  can never hold `engine.lock` past its parent.
 - `daemon.alive` — touched by usaged every 2s from first breath: how a
   lease-holding app learns a daemon wants the engine (the daemon can bind
   nothing while the app holds the lease).

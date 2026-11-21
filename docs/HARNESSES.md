@@ -113,21 +113,20 @@ and the same words appear under it in Settings → General → Harnesses.
 
 ### Antigravity CLI
 
-Since 2026-11-21 the app also meters **Antigravity CLI**, under a violet `∩`.
-Its tokens, models and activity come from its own transcripts with nothing
-to set up. Its PLAN LIMITS (Gemini session and weekly, and the separate
-Claude + GPT pool) live only on Google's servers; the CLI shows them to a
-custom status line, so to see them you make the app's export your status
-line once:
-
-```sh
-usage-cli export-statusline antigravity --print-config   # prints the entry
-```
-
-and paste what it prints into `~/.gemini/antigravity-cli/settings.json` —
-the app never writes that file. Until you do, Antigravity shows tokens
-without limits, and a harness with no limits to show never takes the bar's
-lead unless you pin it. **Gemini CLI** is labelled deprecated: Antigravity
+Since 2026-11-21 the app also meters **Antigravity CLI**, under a violet `∩`,
+with nothing to set up. Its tokens, models and activity come from its own
+transcripts. Its PLAN LIMITS live on Google's servers, so the app asks the
+CLI itself: while you use Antigravity it runs the CLI's own read-only
+limits report (`agy -p /quota`) at most every ten minutes — no agent turn,
+no quota spent — and shows every pool your plan reports: the Gemini session
+(5h) and weekly limits, the Claude + GPT pool's two, and Gemini 4 Argon's
+own weekly. The menu bar reads S · W plus the most-used of the others; the
+panel, the TUI and `usage-cli limits` list them all. If the CLI isn't
+installed, Antigravity shows tokens without limits, and a harness with no
+limits to show never takes the bar's lead unless you pin it; if it can't
+be read (not signed in, timed out), the last limits stay, greyed, with the
+reason. What that run does on your Mac is in [PRIVACY.md](PRIVACY.md).
+**Gemini CLI** is labelled deprecated: Antigravity
 succeeds it for Google's plans, and it stays metered for API-key use.
 
 
@@ -478,39 +477,74 @@ succeeds it for Google's plans, and it stays metered for API-key use.
   Claude's and Codex's (`ModelCatalog.union`); prices come from the feed's
   gemini, anthropic and openai slices, for the models the third-party pool
   runs.
-- LIMITS (`AntigravityQuota`) come from the person's status-line export,
-  `<bundle>/antigravity/default/statusline-export.json`, written only by
-  `usage-cli export-statusline antigravity` (`StatusLineExport`, core —
-  vendor-neutral: a provider declares `statusLineExport`, with its reducer,
-  its change test and the settings snippet `--print-config` prints).
-  Buckets map by id, window length from the id, never from
-  `reset_in_seconds`: `gemini-5h` → "Session (5h)" (rank 0, S),
-  `gemini-weekly` → "Weekly" (rank 1, W), `3p-5h`/`3p-weekly` → scoped
-  "Claude + GPT (5h)" / "Claude + GPT (7d)" (rank 2, C). The pool's labels
-  never repeat "Session"/"Weekly", so `usage-cli limits session|weekly`
-  still names one meter (substring selection). Labels are history keys —
-  renaming one is a data migration. `fetchedAt` is the reading's capture
-  time, so an old export reads as old. A window whose reset passed with no
-  newer reading shows a DASH and no reset, unless no conversation is KNOWN
-  to have been written since the reset (then 0% — nothing could have been
-  spent); no write time, or a cached body fetched before the reset, is a
-  dash. The reducer is lenient per field and per bucket (a surprise drops
-  only itself), bounds every number it keeps, and reads a bucket that
-  states a reset but omits its fraction and any amount as SPENT (protobuf
-  JSON drops a zero) — unverified until a real payload is captured.
-- TWO POOLS, ONE ACCOUNT (`Meter.modelScope`, core, additive in the
-  digest as `LiveMeter.modelScope`): the Gemini meters count `gemini`
-  models and the pool's count `claude` and `gpt`, in the curves, the
-  activity strip and the forecast overshoot. `PredictionEngine.lockouts`
+- LIMITS (`AntigravityQuota`, spec §10 amendment 2026-11-21, second;
+  plan and measurements in `docs/plans/antigravity-zero-setup.md`) come
+  from the CLI's documented print mode, `agy -p /quota --output-format json
+  --log-file /dev/null` with `AGY_CLI_DISABLE_AUTO_UPDATE=true` — run by
+  core's QUOTA PROBE (`AgentCommands/`, vendor-neutral): a provider declares
+  `UsageProvider.quotaCommand` (candidates, version check, argv, env,
+  reducer, privacy lines); `AgentQuotaProbe` (one per engine) runs it only
+  when the host was given a runner (`MeteringHost.Configuration
+  .agentCommandRunner` — usaged and the hosting app; never tests, snapshots,
+  clients or usage-cli), on `AgentQuotaSchedule`'s terms: a conversation
+  written since the last reading began (first reading: within 7 days), the
+  10-minute floor (`minimumFloor`, slack 30 s) from the last ATTEMPT,
+  backoff 20/40/80/120 min, single flight. `SpawnedCommandRunner` is
+  `posix_spawn` with CLOEXEC_DEFAULT (no host fd reaches the child —
+  `engine.lock` above all), its own process group (a timeout kills the
+  group), default signals, utility QoS, cwd `/`, and it returns on the
+  child's EXIT, never pipe EOF. State and reading in
+  `<bundle>/antigravity/default/quota-probe.json` (0600, the engine's own).
+  The reading reaches the provider through
+  `fetchRawUsage(accessToken:quota:)`; a failed attempt makes the service
+  return `.cached(snapshot, error)` (`agentTimedOut`,
+  `agentOutputUnreadable`, `agentCommandFailed`, or `noCredentials` for
+  not signed in) — a snapshot, so focus sees one. Binary candidates:
+  `~/.local/bin/agy`, `$HOMEBREW_PREFIX/bin/agy`; a candidate inside an
+  `.app` (the desktop editor's same-named launcher) or whose `--version`
+  isn't one bare version is never asked; no `PATH` lookup.
+  Buckets map by id (the real ids, settled 2026-11-21): `gemini-5h` →
+  "Session (5h)" (rank 0, S), `gemini-weekly` → "Weekly" (rank 1, W),
+  `3p-5h`/`3p-weekly` → scoped "Claude + GPT (5h)" / "(7d)" (rank 2, C),
+  `gemini-argon-wtu-weekly` → scoped "Argon (7d)" (rank 2, A); other ids
+  skipped. EVERY pool the reading reports is shown, used or not
+  (user-directed 2026-11-21: "I want to see them while they're
+  available") — an untouched pool reads fraction 1 with the epoch as its
+  reset: 0%, no reset. A bucket whose `window` disagrees with its id is
+  dropped. The scoped labels never repeat "Session"/"Weekly", so
+  `usage-cli limits session|weekly` names one meter. Labels are history
+  keys — renaming one is a data migration. `fetchedAt` is the run's finish.
+  A window whose reset passed with no newer reading shows a DASH and no
+  reset, unless no conversation is KNOWN to have been written since the
+  reset (then 0%). The reducer decodes only `status`, bucket ids, windows,
+  fractions and resets, lenient per bucket; a bucket with a REAL future
+  reset and no fraction reads as SPENT (never the epoch) — still unverified,
+  no spent bucket seen yet. `/quota` carries no plan tier: no plan name.
+- THREE POOLS, ONE ACCOUNT (`Meter.modelScope`, core, additive in the
+  digest as `LiveMeter.modelScope`): the Gemini meters count `gemini`, the
+  pool's `claude` and `gpt`, Argon's `argon` — in the curves, the activity
+  strip and the forecast overshoot. On Pro, Argon's quota is separate, so
+  when the reading carries an Argon bucket the Gemini meters' scope is
+  `["gemini", "!argon"]`: a needle prefixed `!` EXCLUDES (`Meter.inScope`;
+  an older reader takes it as a literal that matches nothing, i.e. counts
+  the pool whole — graceful, no new field). `PredictionEngine.lockouts`
   lets a shorter meter gate a longer one only when it covers every model
   the longer counts (unscoped, or the same scope), so a spent Claude + GPT
   session leaves the Gemini weekly's forecast running. Without a stated
   scope, `countedScope` derives one from `scopedModelName` exactly as
   before.
+- RATES LISTING (`UsageProvider.listsUnseenRate`, default true): the price
+  slices stay Gemini + Anthropic + OpenAI, so a pool model that ran is
+  priced in dollars, but Settings → API Cost's table lists Antigravity's
+  SEEN models plus Gemini's unseen rows only, never the whole Anthropic and
+  OpenAI catalogues. A model no slice prices still counts its tokens, with
+  a null cost.
 - MEASURED on the person's Mac, read-only (the opt-in
   `ANTIGRAVITY_LIVE_HOME` suite): 9 conversations, 92 calls, 17.06M tokens,
   8 prompts, matching a `jq` pass over the same files exactly; nothing
-  under `~/.gemini` changed. The export command: 0.27 s, 11 MB.
+  under `~/.gemini` changed. The quota probe's run (2026-11-21, six
+  measured runs): 2.2–2.5 s wall, 0.4–0.5 s CPU, 209 MB transient; it
+  spent nothing, and wrote only three mtime stamps in the CLI's home.
 - FOCUS AMENDMENT (vendor-neutral, `HarnessFocusRule`): a harness whose
   eligible accounts have all READ their usage and hold no limit
   (`reportsMeters == false`) isn't ranked unless pinned; when every

@@ -47,7 +47,7 @@ public struct HarnessFocusCandidate: Sendable, Equatable {
 /// a single-harness Mac's focus behaviour byte-for-byte what it was.
 ///
 /// A harness that reports NO LIMITS (2026-11-21, with Antigravity: until its
-/// status-line export is installed it meters tokens only) never wins the
+/// CLI's limits have been read it meters tokens only) never wins the
 /// ranking — focus is what the bar leads with and what `usage-cli limits`
 /// answers for, and a lead with nothing in it is no answer. A pin still
 /// wins, and when every eligible harness is meterless the ranking runs over

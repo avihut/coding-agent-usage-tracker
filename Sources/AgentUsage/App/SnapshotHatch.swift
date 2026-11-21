@@ -498,8 +498,20 @@ extension AppDelegate {
                 harness("gemini", [cell("gemini", "G", geminiSegments)]),
                 harness("antigravity", [cell("antigravity", "A", antigravitySegments)]),
             ])))
-        // A harness that reads NO limits (Antigravity before its status-line
-        // export is set up) in each form that draws numbers: what a mark with
+        // The real reading of 2026-11-21 (the quota probe): five meters read
+        // as three in the bar — S, W, and the most-used scoped one, Gemini
+        // 4 Argon's weekly (A), ahead of the untouched Claude + GPT pool.
+        everyCase.append((
+            "harnesses-antigravity-argon",
+            StatusItemRenderer.Model(groups: [
+                harness("claude", [cell("default", "A", clean)]),
+                harness("antigravity", [cell("antigravity", "A", [
+                    segment("S", 25, .normal, 0), segment("W", 23, .normal, 0),
+                    segment("A", 2, .normal, 0),
+                ], focused: true)]),
+            ])))
+        // A harness that reads NO limits (Antigravity with its CLI not
+        // installed) in each form that draws numbers: what a mark with
         // nothing to show looks like, so a regression to a blank gap shows.
         for form in [MenuBarForm.digits, .bars, .rings] {
             everyCase.append((
