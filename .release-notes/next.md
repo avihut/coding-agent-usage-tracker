@@ -30,6 +30,9 @@ Fixes
   installed app's settings.
 - A cost with nothing priced behind it reads "—" instead of "$0" in the
   Activity section's stats line, day ring and day tooltip.
+- The terminal dashboard shows a harness that has no limits to show yet
+  (Antigravity before its limits arrive) beside the focused account's, as
+  its mark and a dash, the way the menu bar does. It used to leave it out.
 
 Features
 - Antigravity CLI is metered. It sits in the menu bar beside the other

@@ -831,8 +831,15 @@ fn other_harnesses(digest: &LiveState) -> Vec<OtherHarness> {
         .filter_map(|harness| {
             let cells: Vec<(String, String)> = cells
                 .iter()
-                .filter(|cell| cell.provider_id == harness.id && !cell.segments.is_empty())
+                .filter(|cell| cell.provider_id == harness.id)
                 .map(|cell| {
+                    // A cell with no meters (a harness that reads usage but
+                    // reports no limit yet) keeps its mark with a dash, the
+                    // way the bar draws it — absent, never dropped and
+                    // never a zero.
+                    if cell.segments.is_empty() {
+                        return (cell.profile.clone(), "—".to_owned());
+                    }
                     let digits: Vec<String> = cell
                         .segments
                         .iter()
@@ -2505,6 +2512,63 @@ mod tests {
     use super::*;
     use crate::digest::StatusIncident;
     use time::macros::date;
+
+    /// The harness golden with one more shown harness whose only cell
+    /// carries no meters — a harness that reads usage but no limit yet.
+    fn digest_with_meterless_harness() -> LiveState {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../Tests/UsageCoreTests/Fixtures/digest/live-state-v1-harnesses.json");
+        let mut object: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).expect("harness golden"))
+                .expect("golden is json");
+        let harnesses = object["harnesses"].as_array_mut().expect("harnesses");
+        let mut harness = harnesses
+            .iter()
+            .find(|h| h["id"] == "codex")
+            .expect("codex harness")
+            .clone();
+        harness["id"] = "meterless".into();
+        harness["glyph"] = "∩".into();
+        harness["shown"] = true.into();
+        harnesses.push(harness);
+        let cells = object["menuBarCells"].as_array_mut().expect("cells");
+        let mut cell = cells
+            .iter()
+            .find(|c| c["providerID"] == "codex")
+            .expect("codex cell")
+            .clone();
+        cell["providerID"] = "meterless".into();
+        cell["profile"] = "meterless".into();
+        cell["segments"] = serde_json::json!([]);
+        cells.push(cell);
+        serde_json::from_value(object).expect("digest decodes")
+    }
+
+    /// The header's miniature keeps a shown harness that has no limits to
+    /// show: its mark and a dash, as the menu bar draws `A–` (user-reported
+    /// 2026-11-21: Antigravity's mark was missing beside Claude's).
+    #[test]
+    fn a_meterless_harness_keeps_its_mark() {
+        let digest = digest_with_meterless_harness();
+        let others = other_harnesses(&digest);
+        let meterless = others
+            .iter()
+            .find(|other| other.glyph == "∩")
+            .expect("the meterless harness is in the header");
+        assert_eq!(
+            meterless.cells,
+            vec![("meterless".to_owned(), "—".to_owned())]
+        );
+        // The harness with meters still reads as before, and a hidden
+        // harness (the golden's Gemini) stays absent.
+        assert!(others.iter().any(|other| {
+            other
+                .cells
+                .iter()
+                .any(|(_, digits)| digits.chars().any(|c| c.is_ascii_digit()))
+        }));
+        assert!(others.iter().all(|other| other.glyph != "✦"));
+    }
 
     fn incident(impact: &str) -> ServiceStatusCard {
         card(
