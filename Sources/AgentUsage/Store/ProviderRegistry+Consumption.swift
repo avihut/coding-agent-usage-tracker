@@ -28,15 +28,19 @@ struct ConsumptionInput: Equatable {
     let accountFaces: [String: ConsumptionAccountFace]
     /// More than one agent in scope — read per heatmap cell, so stored.
     let spansAgents: Bool
+    /// Accounts whose first scan hasn't landed (`UsageStore.activityStatus`,
+    /// 2026-11-21): in the sums as nothing, so not counted — the digest's
+    /// `scanning` member. Set after the memo, so a scan that lands with
+    /// unchanged days still updates the label.
+    var scanning: Set<String> = []
 
-    /// "2 agents", "2 of 3 agents" (one reports no tokens), "2 accounts" —
-    /// core's phrasing, the words the TUI and the CLI print too. One gap:
-    /// the panel has no "scanning" state yet, so an account whose first
-    /// scan hasn't landed counts (as nothing) here while the digest names
-    /// it `scanning` and calls the total partial (follow-up, plan
-    /// tui-unified-reading → Build notes).
+    /// "2 agents", "2 of 3 agents" (one reports no tokens or is still
+    /// scanning), "2 accounts" — core's phrasing, the words the TUI and the
+    /// CLI print too.
     var countLabel: String {
-        ConsumptionMembership.countLabel(accounts.map { ($0.agent, $0.reportsTokens) })
+        ConsumptionMembership.countLabel(accounts.map {
+            ($0.agent, $0.reportsTokens && !scanning.contains($0.account))
+        })
     }
 }
 
@@ -114,7 +118,7 @@ extension ProviderRegistry {
         let faces = stores.map { store in
             ConsumptionAccountFace(label: label(for: store.profile), monogram: monogram(for: store.profile))
         }
-        return consumptionCache.input(accounts: accounts, faces: faces) {
+        var input = consumptionCache.input(accounts: accounts, faces: faces) {
             var agents: [String: ConsumptionAgentFace] = [:]
             var catalogs: [String: ModelCatalog] = [:]
             for store in stores where agents[store.provider.id] == nil {
@@ -131,6 +135,8 @@ extension ProviderRegistry {
                 colors: Self.consumptionColors(accounts, agents: agents, catalogs: catalogs),
                 agents: agents, accountFaces: accountFaces, spansAgents: agents.count > 1)
         }
+        input.scanning = Set(stores.filter { $0.activityStatus?.isScanning == true }.map(\.profile.key))
+        return input
     }
 
     /// Composite key → color. One agent in scope keeps the colors its models

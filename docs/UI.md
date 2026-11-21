@@ -537,7 +537,10 @@ per-harness geometry of the bar is in [HARNESSES.md](HARNESSES.md).
   looked, and when every account in scope is scanning the Activity
   section's stats line (or its empty state, in place of "No local activity
   found") says "Scanning…". The caption disappears once every account in
-  scope has its own scan.
+  scope has its own scan. A merged scope's count reads "1 of 2 agents"
+  while one is still scanning (`ConsumptionInput.scanning`) — the words
+  the digest's `allAgents`, the TUI and the CLI use, closing #43's noted
+  gap.
 
 ## The demo hatch
 
