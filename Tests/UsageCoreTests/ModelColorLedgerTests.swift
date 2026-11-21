@@ -81,29 +81,34 @@ struct ModelColorLedgerTests {
     @Test("agent shades keep the agent's hue and are fixed per slot")
     func agentShadesKeepHue() {
         let accent = RGBColor(red: 0.063, green: 0.639, blue: 0.498)
-        let (hue, _, _) = ModelColorMath.hsb(from: accent)
-        for slot in 0..<ModelColorMath.agentTones.count {
-            let shade = ModelColorMath.agentShade(hueSlot: slot, shadeSlot: 0, accent: accent)
-            #expect(abs(ModelColorMath.hsb(from: shade).hue - hue) < 0.01)
-            #expect(shade == ModelColorMath.agentShade(hueSlot: slot, shadeSlot: 0, accent: accent))
+        let hue = OKLCH(accent).hue
+        for appearance in ModelColorAppearance.allCases {
+            for slot in 0..<ModelColorMath.agentTones.count {
+                let shade = ModelColorMath.agentShade(hueSlot: slot, shadeSlot: 0, accent: accent, on: appearance)
+                #expect(abs(remainder(OKLCH(shade).hue - hue, 2 * .pi)) < 0.02)
+                #expect(shade == ModelColorMath.agentShade(hueSlot: slot, shadeSlot: 0, accent: accent, on: appearance))
+            }
         }
-        // The heaviest family wears the agent's own accent.
-        let own = ModelColorMath.agentShade(hueSlot: 0, shadeSlot: 0, accent: accent)
-        #expect(abs(own.red - accent.red) + abs(own.green - accent.green) + abs(own.blue - accent.blue) < 1e-9)
+        // On dark, where Codex's accent already holds 3:1, the heaviest
+        // family wears it exactly.
+        let own = ModelColorMath.agentShade(hueSlot: 0, shadeSlot: 0, accent: accent, on: .dark)
+        #expect(OKLCH.difference(own, accent) < 1e-6)
     }
 
     @Test("families and versions of one agent wear distinct shades")
     func agentShadesDistinct() {
         let accent = RGBColor(red: 0.851, green: 0.467, blue: 0.341)
-        var seen: [RGBColor] = []
-        for hue in 0..<ModelColorMath.agentTones.count {
-            let shade = ModelColorMath.agentShade(hueSlot: hue, shadeSlot: 0, accent: accent)
-            #expect(!seen.contains(shade))
-            seen.append(shade)
+        for appearance in ModelColorAppearance.allCases {
+            var seen: [RGBColor] = []
+            for hue in 0..<ModelColorMath.agentTones.count {
+                let shade = ModelColorMath.agentShade(hueSlot: hue, shadeSlot: 0, accent: accent, on: appearance)
+                #expect(!seen.contains(shade))
+                seen.append(shade)
+            }
+            let versions = (0..<3).map {
+                ModelColorMath.agentShade(hueSlot: 2, shadeSlot: $0, accent: accent, on: appearance)
+            }
+            #expect(Set(versions.map { "\($0)" }).count == 3)
         }
-        let first = ModelColorMath.agentShade(hueSlot: 2, shadeSlot: 0, accent: accent)
-        let second = ModelColorMath.agentShade(hueSlot: 2, shadeSlot: 1, accent: accent)
-        let third = ModelColorMath.agentShade(hueSlot: 2, shadeSlot: 2, accent: accent)
-        #expect(Set([first, second, third].map { "\($0)" }).count == 3)
     }
 }

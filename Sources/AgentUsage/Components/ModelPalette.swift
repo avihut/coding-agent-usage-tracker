@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import UsageCore
 
@@ -52,9 +53,7 @@ enum ModelPalette {
         var result: [String: Color] = [:]
         for model in models {
             guard let slots = grown.slots(for: model, family: ModelFamily.familyName(model)) else { continue }
-            let rgb = ModelColorMath.agentShade(
-                hueSlot: slots.hue, shadeSlot: slots.shade, accent: style.accent)
-            result[model] = Color(red: rgb.red, green: rgb.green, blue: rgb.blue)
+            result[model] = adaptive(.agentShade, hueSlot: slots.hue, shadeSlot: slots.shade, accent: style.accent)
         }
         return result
     }
@@ -77,8 +76,47 @@ enum ModelPalette {
     /// `ModelColorMath` owns the arithmetic, so the digest's encoded colors
     /// and these SwiftUI colors come out of one derivation.
     static func color(hueSlot: Int, shadeSlot: Int, style: HarnessStyle) -> Color {
-        let rgb = ModelColorMath.rgb(
-            hueSlot: hueSlot, shadeSlot: shadeSlot, accent: style.accent)
-        return Color(red: rgb.red, green: rgb.green, blue: rgb.blue)
+        adaptive(.ledger, hueSlot: hueSlot, shadeSlot: shadeSlot, accent: style.accent)
+    }
+
+    enum Derivation: Hashable { case ledger, agentShade }
+
+    private struct Key: Hashable {
+        let derivation: Derivation
+        let hueSlot: Int
+        let shadeSlot: Int
+        let red: Double, green: Double, blue: Double
+    }
+
+    /// Derived once per slot and accent: the band search is a few thousand
+    /// conversions, and every chart body asks for its palette.
+    private static var cache: [Key: Color] = [:]
+
+    /// One `Color` holding both appearance variants — an NSColor whose
+    /// provider picks by the appearance it is drawn in, so the light panel
+    /// (and the snapshot hatch's light window) draws the light variant
+    /// through Charts, Canvas and plain shapes alike.
+    private static func adaptive(
+        _ derivation: Derivation, hueSlot: Int, shadeSlot: Int, accent: UsageCore.RGBColor
+    ) -> Color {
+        let key = Key(
+            derivation: derivation, hueSlot: hueSlot, shadeSlot: shadeSlot,
+            red: accent.red, green: accent.green, blue: accent.blue)
+        if let cached = cache[key] { return cached }
+        func variant(_ appearance: ModelColorAppearance) -> NSColor {
+            let rgb = switch derivation {
+            case .ledger:
+                ModelColorMath.rgb(hueSlot: hueSlot, shadeSlot: shadeSlot, accent: accent, on: appearance)
+            case .agentShade:
+                ModelColorMath.agentShade(hueSlot: hueSlot, shadeSlot: shadeSlot, accent: accent, on: appearance)
+            }
+            return NSColor(srgbRed: rgb.red, green: rgb.green, blue: rgb.blue, alpha: 1)
+        }
+        let (dark, light) = (variant(.dark), variant(.light))
+        let color = Color(nsColor: NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light
+        })
+        cache[key] = color
+        return color
     }
 }
