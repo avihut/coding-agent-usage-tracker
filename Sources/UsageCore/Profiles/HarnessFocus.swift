@@ -12,15 +12,22 @@ public struct HarnessFocusCandidate: Sendable, Equatable {
     public let activeDays: Int
     public let lastActivity: Date?
     public let accounts: [FocusCandidate]
+    /// False only when every eligible account has READ its usage and it
+    /// holds no limit at all — a harness with nothing to show in the bar's
+    /// lead. Unknown (not read yet, or no local data) counts as true, so a
+    /// quiet harness is never demoted on a guess.
+    public let reportsMeters: Bool
 
     public init(
-        id: String, shown: Bool, activeDays: Int, lastActivity: Date?, accounts: [FocusCandidate]
+        id: String, shown: Bool, activeDays: Int, lastActivity: Date?,
+        accounts: [FocusCandidate], reportsMeters: Bool = true
     ) {
         self.id = id
         self.shown = shown
         self.activeDays = activeDays
         self.lastActivity = lastActivity
         self.accounts = accounts
+        self.reportsMeters = reportsMeters
     }
 }
 
@@ -38,6 +45,13 @@ public struct HarnessFocusCandidate: Sendable, Equatable {
 ///
 /// One harness reduces to `FocusRule.focused` exactly — which is what keeps
 /// a single-harness Mac's focus behaviour byte-for-byte what it was.
+///
+/// A harness that reports NO LIMITS (2026-11-21, with Antigravity: until its
+/// status-line export is installed it meters tokens only) never wins the
+/// ranking — focus is what the bar leads with and what `usage-cli limits`
+/// answers for, and a lead with nothing in it is no answer. A pin still
+/// wins, and when every eligible harness is meterless the ranking runs over
+/// all of them, so something always holds focus.
 public enum HarnessFocusRule {
     public static func focused(
         _ harnesses: [HarnessFocusCandidate], pin: String?, current: String?
@@ -52,7 +66,9 @@ public enum HarnessFocusRule {
         }?.id
         let order = Dictionary(
             uniqueKeysWithValues: harnesses.enumerated().map { ($0.element.id, $0.offset) })
-        let winner = eligible.sorted { a, b in
+        let metered = eligible.filter(\.reportsMeters)
+        let ranked = metered.isEmpty ? eligible : metered
+        let winner = ranked.sorted { a, b in
             if a.activeDays != b.activeDays { return a.activeDays > b.activeDays }
             if (a.id == holder) != (b.id == holder) { return a.id == holder }
             let aWrite = a.lastActivity ?? .distantPast

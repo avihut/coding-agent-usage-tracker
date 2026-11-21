@@ -119,6 +119,10 @@ pub struct HarnessState {
     pub notices: Option<NoticesCard>,
     #[serde(default)]
     pub outages: Option<Vec<OutageSpan>>,
+    /// Set only for a deprecated harness: its provider's own note ("succeeded
+    /// by …"). Absent from every other harness's entry.
+    #[serde(default)]
+    pub deprecation_note: Option<String>,
 }
 
 /// Mirror of `ProfileState`: one profile's (account's) section. Identity
@@ -600,6 +604,11 @@ pub struct LiveMeter {
     pub resets_at: Option<OffsetDateTime>,
     pub limit_window: Option<f64>,
     pub scoped_model_name: Option<String>,
+    /// The models this meter counts, as lowercase needles — present only
+    /// when the provider stated several families or an independent pool
+    /// (2026-11-21); otherwise derive it from `scoped_model_name`.
+    #[serde(default)]
+    pub model_scope: Option<Vec<String>>,
     pub reset_caption: Option<String>,
     pub forecast: Option<MeterForecast>,
     pub series: Vec<SeriesPoint>,
@@ -1282,6 +1291,15 @@ mod wave4_tests {
                 .any(|cell| cell.provider_id != cells[0].provider_id),
             "the golden's bar spans harnesses"
         );
+        // A deprecated harness carries its provider's note; every other
+        // entry omits the key, and decodes to None.
+        assert!(
+            harnesses
+                .iter()
+                .any(|harness| harness.deprecation_note.is_some()),
+            "the golden carries a deprecated harness"
+        );
+        assert!(bundled.deprecation_note.is_none());
     }
 
     /// A pre-0.101 writer publishes none of it, and the mirrors read that as

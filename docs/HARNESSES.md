@@ -103,6 +103,28 @@ place it is kept.
 
 `usage-cli harnesses` is the scriptable view: every detected harness, what
 it has been doing lately, whether it is shown, and its own service health.
+A deprecated harness carries its provider's note in the last column (`note`),
+and the same words appear under it in Settings → General → Harnesses.
+
+### Antigravity CLI
+
+Since 2026-11-21 the app also meters **Antigravity CLI**, under a violet `∩`.
+Its tokens, models and activity come from its own transcripts with nothing
+to set up. Its PLAN LIMITS (Gemini session and weekly, and the separate
+Claude + GPT pool) live only on Google's servers; the CLI shows them to a
+custom status line, so to see them you make the app's export your status
+line once:
+
+```sh
+usage-cli export-statusline antigravity --print-config   # prints the entry
+```
+
+and paste what it prints into `~/.gemini/antigravity-cli/settings.json` —
+the app never writes that file. Until you do, Antigravity shows tokens
+without limits, and a harness with no limits to show never takes the bar's
+lead unless you pin it. **Gemini CLI** is labelled deprecated: Antigravity
+succeeds it for Google's plans, and it stays metered for API-key use.
+
 
 ## Multi-account metering (v0.96.0)
 
@@ -391,6 +413,84 @@ it has been doing lately, whether it is shown, and its own service health.
   stripped so transcript ids match). HistoryFrame default tier: ≤6h →
   .h5, ≤24h → .h24, else .d7. oauth_creds.json/google_accounts.json
   never read.
+
+## Antigravity CLI (2026-11-21)
+
+- ANTIGRAVITY PROVIDER (user-directed; plan and investigation in
+  `docs/plans/antigravity.md`, spec §10 amendment 2026-11-21):
+  `AntigravityProvider` (UsageCore/Providers/Antigravity/) is
+  local-files-only like Codex — zero network destinations, a
+  `StaticCredentialSource`, and NOTHING credentialed opened.
+- DISCOVERY BY NAME, NEVER BY OPENING: conversations are the `.db` names in
+  `~/.gemini/antigravity-cli/conversations/` (id characters allowlisted
+  before one becomes a path). A database is never opened — a WAL database
+  opened without its `-shm` creates one inside the agent home. For each id
+  the step log at `brain/<id>/.system_generated/logs/transcript.jsonl` is
+  built directly: every walker skips hidden directories, and walking
+  `brain/` would wander its worktrees (which hold decoy transcripts).
+- TOKENS (`AntigravityActivitySource`): a row is a call when it states a
+  `model` and both `input_tokens` (uncached) and `output_tokens` (thinking
+  included); `cache_read_tokens` is cache read, cache creation 0. Verified
+  call-for-call against the conversation databases during the
+  investigation. The model's effort suffix is stripped from an ALLOWLIST
+  (minimal/low/medium/high/xhigh — not `max`, a model-name word as in
+  `gpt-5.1-codex-max`), never by dropping the last word, so
+  `gemini-4-argon-trial` stays itself. Prompts = `USER_INPUT` rows whose
+  source is `USER_EXPLICIT`. A forked conversation copies its parent's
+  steps, so calls are claimed by value, in path order — the same call in
+  two files counts once (`docs/MEASUREMENT.md`). A read that fails is never
+  cached as an empty file. Display is Gemini's grammar first, then
+  Claude's and Codex's (`ModelCatalog.union`); prices come from the feed's
+  gemini, anthropic and openai slices, for the models the third-party pool
+  runs.
+- LIMITS (`AntigravityQuota`) come from the person's status-line export,
+  `<bundle>/antigravity/default/statusline-export.json`, written only by
+  `usage-cli export-statusline antigravity` (`StatusLineExport`, core —
+  vendor-neutral: a provider declares `statusLineExport`, with its reducer,
+  its change test and the settings snippet `--print-config` prints).
+  Buckets map by id, window length from the id, never from
+  `reset_in_seconds`: `gemini-5h` → "Session (5h)" (rank 0, S),
+  `gemini-weekly` → "Weekly" (rank 1, W), `3p-5h`/`3p-weekly` → scoped
+  "Claude + GPT (5h)" / "Claude + GPT (7d)" (rank 2, C). The pool's labels
+  never repeat "Session"/"Weekly", so `usage-cli limits session|weekly`
+  still names one meter (substring selection). Labels are history keys —
+  renaming one is a data migration. `fetchedAt` is the reading's capture
+  time, so an old export reads as old. A window whose reset passed with no
+  newer reading shows a DASH and no reset, unless no conversation is KNOWN
+  to have been written since the reset (then 0% — nothing could have been
+  spent); no write time, or a cached body fetched before the reset, is a
+  dash. The reducer is lenient per field and per bucket (a surprise drops
+  only itself), bounds every number it keeps, and reads a bucket that
+  states a reset but omits its fraction and any amount as SPENT (protobuf
+  JSON drops a zero) — unverified until a real payload is captured.
+- TWO POOLS, ONE ACCOUNT (`Meter.modelScope`, core, additive in the
+  digest as `LiveMeter.modelScope`): the Gemini meters count `gemini`
+  models and the pool's count `claude` and `gpt`, in the curves, the
+  activity strip and the forecast overshoot. `PredictionEngine.lockouts`
+  lets a shorter meter gate a longer one only when it covers every model
+  the longer counts (unscoped, or the same scope), so a spent Claude + GPT
+  session leaves the Gemini weekly's forecast running. Without a stated
+  scope, `countedScope` derives one from `scopedModelName` exactly as
+  before.
+- MEASURED on the person's Mac, read-only (the opt-in
+  `ANTIGRAVITY_LIVE_HOME` suite): 9 conversations, 92 calls, 17.06M tokens,
+  8 prompts, matching a `jq` pass over the same files exactly; nothing
+  under `~/.gemini` changed. The export command: 0.27 s, 11 MB.
+- FOCUS AMENDMENT (vendor-neutral, `HarnessFocusRule`): a harness whose
+  eligible accounts have all READ their usage and hold no limit
+  (`reportsMeters == false`) isn't ranked unless pinned; when every
+  eligible harness is like that the ranking runs over all of them. An
+  engine that hasn't read yet answers from its cached last fetch (so a
+  launch never leads, even briefly, with a harness that had nothing to
+  show); one with no snapshot and no cache counts as having limits —
+  never demoted on a guess. The host re-runs focus when that
+  changes (`MeteringHost+Focus`), and local providers skip the launch
+  stagger: a disk read has nothing to spread, and waiting would let a
+  not-yet-read harness lead for minutes.
+- GEMINI CLI DEPRECATED: `UsageProvider.deprecationNote` (default nil) →
+  the digest's `HarnessState.deprecationNote` (additive, omitted when nil)
+  → a caption on the Harnesses card row and `usage-cli harnesses`'s last
+  column. The words live in `GeminiProvider`; the app names no vendor.
 
 ## The registry, and what v0.101.0 retired
 

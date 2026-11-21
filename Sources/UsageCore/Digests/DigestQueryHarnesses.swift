@@ -14,7 +14,11 @@ import Foundation
 /// the table prints nothing and every scalar goes absent — never a
 /// confident "1", which would be this build's own assumption, not its word.
 extension DigestQuery {
-    static let harnessesColumns = ["id", "agent", "glyph", "accounts", "state", "activity", "health"]
+    /// `note` is the LAST column (appended 2026-11-21, so a script reading
+    /// columns by position keeps its seven): a deprecated harness's note.
+    static let harnessesColumns = [
+        "id", "agent", "glyph", "accounts", "state", "activity", "health", "note",
+    ]
 
     static func runHarnesses(
         parsed: ParsedArgs, digest: LiveState, now: Date, json: Bool, raw: Bool
@@ -80,6 +84,7 @@ extension DigestQuery {
             harnessState(harness, raw: raw),
             harnessActivity(harness, now: now, raw: raw),
             harnessHealth(harness),
+            harness.deprecationNote ?? "",
         ]
     }
 

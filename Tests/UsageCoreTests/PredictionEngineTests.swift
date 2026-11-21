@@ -547,6 +547,45 @@ struct PredictionEngineTests {
         #expect(gates == [DateInterval(start: crossing, end: sessionReset)])
     }
 
+    /// 2026-11-21: one account, two independent pools (Antigravity's Gemini
+    /// quota and its Claude + GPT quota). A spent short window of one pool
+    /// leaves the other pool's long window free to spend; an unscoped
+    /// session still gates everything, as Claude's always has.
+    @Test("a spent window of another pool gates nothing")
+    func lockoutsStayInTheirPool() {
+        let reset = now.addingTimeInterval(4 * 3600)
+        func pooled(_ label: String, _ percent: Int, _ window: TimeInterval, _ scope: [String])
+            -> Meter
+        {
+            Meter(
+                id: label, label: label, percent: percent,
+                resetsAt: window < 86400 ? reset : now.addingTimeInterval(3 * 86400),
+                level: .normal, rank: window < 86400 ? 0 : 1, limitWindow: window,
+                modelScope: scope)
+        }
+        let geminiSession = pooled("Session (5h)", 100, 5 * 3600, ["gemini"])
+        let geminiWeekly = pooled("Weekly", 30, 7 * 86400, ["gemini"])
+        let poolSession = pooled("Claude + GPT (5h)", 100, 5 * 3600, ["claude", "gpt"])
+        let poolWeekly = pooled("Claude + GPT (7d)", 30, 7 * 86400, ["claude", "gpt"])
+        let all = [geminiSession, geminiWeekly, poolSession, poolWeekly]
+        let gate = [DateInterval(start: now, end: reset)]
+        #expect(PredictionEngine.lockouts(
+            on: geminiWeekly, from: all, predictions: [:], now: now) == gate)
+        #expect(PredictionEngine.lockouts(
+            on: poolWeekly, from: all, predictions: [:], now: now) == gate)
+        #expect(PredictionEngine.lockouts(
+            on: geminiWeekly, from: [poolSession, geminiWeekly], predictions: [:], now: now)
+            .isEmpty)
+        #expect(PredictionEngine.lockouts(
+            on: poolWeekly, from: [geminiSession, poolWeekly], predictions: [:], now: now)
+            .isEmpty)
+        // An unscoped session covers every model, so it gates a pooled weekly.
+        let session = meter(
+            "Session (5h)", percent: 100, resetsAt: reset, window: 5 * 3600, rank: 0)
+        #expect(PredictionEngine.lockouts(
+            on: poolWeekly, from: [session, poolWeekly], predictions: [:], now: now) == gate)
+    }
+
     @Test("a stale, equal or unknown sibling window gates nothing")
     func lockoutsThatDoNotApply() {
         let weekly = meter(

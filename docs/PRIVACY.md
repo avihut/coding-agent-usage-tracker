@@ -16,9 +16,10 @@ In short:
 | checks `api.github.com` for this repo's newest release | nothing — an anonymous conditional GET |
 | reads local files | each agent's own transcripts and session files, plus one key of `.claude.json`; read-only |
 | writes inside an agent home | exactly one key, `cleanupPeriodDays` in that home's `settings.json`, and only when you move the transcript-retention control in Settings |
+| keeps Antigravity's plan limits | in one file in its OWN folder, written only by `usage-cli export-statusline` when you make that your Antigravity status line; limits and plan tier only |
 
-No other network destination, no analytics, no telemetry. Codex and Gemini
-CLI are metered from local files alone. The sections below are each
+No other network destination, no analytics, no telemetry. Codex, Gemini
+CLI and Antigravity CLI are metered from local files alone. The sections below are each
 decision in full, in the maintainer's voice, in the order they were made.
 
 ## Why this is OK (policy note)
@@ -153,6 +154,58 @@ every harness slices differently, so its bytes are now fetched once and
 shared rather than once per harness. The privacy card lists every metered
 harness's hosts and files, one block each — what the app reads is the union,
 so the card that names it is too.
+
+## Antigravity CLI: local transcripts and a status-line export, no new destination
+
+(2026-11-21, user-directed.) Antigravity CLI succeeds Gemini CLI for
+Google's plans, and it is metered the way Codex is: from its own files,
+with no network destination and no credential.
+
+**What it reads, read-only.** The file NAMES in
+`~/.gemini/antigravity-cli/conversations/` — never a conversation
+database's contents: opening a SQLite database that is in WAL mode creates
+files beside it, and that would be a write inside the agent home. For each
+listed conversation it reads the step log the CLI writes beside it,
+`brain/<id>/.system_generated/logs/transcript.jsonl`, and decodes only
+timestamps, step types, model ids and token counts — never message text,
+thinking, tool calls or their output. It never walks `brain/` (which holds
+worktrees), and never opens the CLI's credential or state files, or
+anything belonging to the Antigravity app.
+
+**Where the plan limits come from.** Antigravity keeps its quota on Google's
+servers; nothing on disk holds it, and the only routes to it that other
+trackers use — the language server's local port, the CLI's own OAuth
+credential, scripting the CLI's `/usage` screen — each mean a credential,
+a process or a sign-in this app does not touch. What Antigravity DOES offer
+is its documented custom status line: on every redraw it runs a command you
+choose and hands it a JSON payload that includes the quota. So the limits
+are opt-in, and you install them yourself:
+
+- `usage-cli export-statusline antigravity --print-config` prints the
+  `statusLine` entry to add to `~/.gemini/antigravity-cli/settings.json`.
+  The app NEVER writes that file — it is inside the agent home — so you
+  paste it.
+- On each redraw `usage-cli export-statusline antigravity` reads the
+  payload, keeps ONLY the quota buckets (remaining fraction, reset time,
+  disabled), the plan tier and the CLI's version, and writes them to
+  `statusline-export.json` in this app's own Application Support folder
+  (mode 0600; rewritten when a limit moves, otherwise at most once a
+  minute). The email, the working directory, paths, the conversation title
+  and everything else in the payload are dropped before anything touches
+  the disk. It prints nothing and always exits 0, so the CLI's own status
+  line is unchanged.
+- The engine reads that file like any other local trace. It is the one file
+  in the app's folders written by something other than the engine, and
+  nothing else ever writes it.
+
+Without the status line Antigravity still meters tokens, models and
+activity; its limits simply aren't shown, and a harness with no limits to
+show never takes the menu bar's lead unless you pin it.
+
+**Gemini CLI is deprecated.** Its plan sign-in stopped working in mid-2026,
+so for most people it writes nothing any more. It is still metered for
+anyone running it on an API key, and labelled as deprecated in Settings and
+`usage-cli harnesses`. Spec §10 amended 2026-11-21.
 
 ## Known risk: undocumented endpoint
 

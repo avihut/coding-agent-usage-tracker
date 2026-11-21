@@ -483,6 +483,32 @@ extension AppDelegate {
         for item in StatusItemRenderer.itemModels(for: splitHarnesses) {
             everyCase.append(("harnesses-item-\(item.profileID ?? "shared")", item.model))
         }
+        // FOUR HARNESSES (2026-11-21), appended last for the same reason:
+        // Antigravity's ∩ violet beside the other three, reading its plan
+        // limits (Gemini session · weekly · the Claude + GPT pool).
+        let antigravitySegments = [
+            segment("S", 18, .normal, 0), segment("W", 41, .normal, 0),
+            segment("C", 7, .normal, 0),
+        ]
+        everyCase.append((
+            "harnesses-four",
+            StatusItemRenderer.Model(groups: [
+                harness("claude", [cell("default", "A", clean, focused: true)]),
+                harness("codex", [cell("codex", "C", codexSegments)]),
+                harness("gemini", [cell("gemini", "G", geminiSegments)]),
+                harness("antigravity", [cell("antigravity", "A", antigravitySegments)]),
+            ])))
+        // A harness that reads NO limits (Antigravity before its status-line
+        // export is set up) in each form that draws numbers: what a mark with
+        // nothing to show looks like, so a regression to a blank gap shows.
+        for form in [MenuBarForm.digits, .bars, .rings] {
+            everyCase.append((
+                "harnesses-meterless-\(form.rawValue)",
+                StatusItemRenderer.Model(groups: [
+                    harness("claude", [cell("default", "A", clean, focused: true)]),
+                    harness("antigravity", [cell("antigravity", "A", nil, form: form)]),
+                ])))
+        }
 
         let height = NSStatusBar.system.thickness
         // Every case on both grounds (0.100.1): the dark bar's PNGs keep

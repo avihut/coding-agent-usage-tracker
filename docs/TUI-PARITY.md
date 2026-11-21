@@ -247,6 +247,12 @@ gives each stack band its own density glyph.
     - Engine: `setPin` republishes when the pin changes even if focus
       doesn't, or the digest's `pinnedProfile` (the `pinned` marker)
       lagged until the next unrelated publish.
+35. [S][✓] Deprecated-harness note (2026-11-21) — `HarnessState
+    .deprecation_note` is decoded (`#[serde(default)]`) but not drawn: the
+    TUI has no harness roster view, where the app shows it (Settings →
+    Harnesses) and `usage-cli harnesses` prints it. Draw it there if one
+    lands. The meterless focus rule needs nothing here — the TUI's pin
+    test is unchanged, and the digest's `focusedProfile` already obeys it.
 
 ### Intentionally different (do NOT "fix")
 32. Push/pop animation, pointer cursors, hover popovers — GUI idioms;

@@ -606,7 +606,7 @@ struct MeterHistoryView: View {
         // keep summing to now (a week page and a 5h page read identical).
         let all = WindowTokens.breakdown(
             timeline: timeline, from: domain.start, to: min(domain.end, Date()))
-        return scopeName.map { WindowTokens.scoped(all, name: $0) } ?? all
+        return WindowTokens.scoped(all, needles: meter.countedScope)
     }
 
     /// The grid's rows: the whole frame normally; while an active nub is
@@ -1501,9 +1501,8 @@ struct MeterHistoryView: View {
     /// the frame clips. Only computed for a first segment touching the
     /// domain's left edge.
     private func clippedSessionStart(before boundary: Date) -> Date? {
-        let needle = scopeName?.lowercased()
         let moments = timeline.compactMap { slot -> Date? in
-            if let needle, !slot.model.lowercased().contains(needle) { return nil }
+            if !meter.inScope(slot.model) { return nil }
             return slot.t
         }
         return ActivityGrace.clippedStart(
@@ -1550,10 +1549,9 @@ struct MeterHistoryView: View {
         let span = end.timeIntervalSince(start)
         guard span > 0 else { return [] }
         let bucket = max(60, span / 120)
-        let needle = scopeName?.lowercased()
         var active = Array(repeating: false, count: Int(span / bucket) + 1)
         for slot in timeline where slot.t >= start && slot.t <= end {
-            if let needle, !slot.model.lowercased().contains(needle) { continue }
+            if !meter.inScope(slot.model) { continue }
             let index = Int(slot.t.timeIntervalSince(start) / bucket)
             if active.indices.contains(index) { active[index] = true }
         }
@@ -1689,7 +1687,7 @@ struct MeterHistoryView: View {
         let now = Date()
         let windowStart = reset.addingTimeInterval(-window)
         let all = WindowTokens.breakdown(timeline: timeline, from: windowStart, to: now)
-        let scoped = scopeName.map { WindowTokens.scoped(all, name: $0) } ?? all
+        let scoped = WindowTokens.scoped(all, needles: meter.countedScope)
         let percents = WindowSamples.percents(
             samples, label: meter.label, start: windowStart, end: now, reset: reset)
         return ModelCurves.windowPercentPerToken(
@@ -1919,9 +1917,4 @@ struct MeterHistoryView: View {
         }
         return parts.joined(separator: " · ")
     }
-
-    /// A scoped meter's breakdown shows only its own model's usage, never
-    /// the whole timeline. The model name is meter data from the provider —
-    /// no label parsing.
-    private var scopeName: String? { meter.scopedModelName }
 }

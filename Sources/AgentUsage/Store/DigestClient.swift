@@ -290,7 +290,7 @@ final class DigestClient {
                 rank: mirror.rank, limitWindow: mirror.limitWindow,
                 rateWindow: mirror.rateWindowSeconds,
                 forcesWarning: mirror.forcesWarning,
-                scopedModelName: mirror.scopedModelName)
+                scopedModelName: mirror.scopedModelName, modelScope: mirror.modelScope)
         }
         var rebuilt: [String: UsagePrediction] = [:]
         var rebuiltOvershoots: [String: ForecastOvershoot] = [:]

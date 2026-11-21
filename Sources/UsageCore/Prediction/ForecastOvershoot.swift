@@ -59,7 +59,7 @@ public struct ForecastOvershoot: Codable, Sendable, Equatable {
     ///    so the priced mix is extrapolated across them — the alternative is
     ///    silence about a window that is mostly priced.
     ///
-    /// A scoped meter (`scopedModelName`) counts only its own model's
+    /// A scoped meter (`countedScope`) counts only its own models'
     /// tokens, on both sides, the way every other scoped surface does.
     public static func estimate(
         prediction: UsagePrediction, meter: Meter, samples: [UsageSample],
@@ -72,7 +72,7 @@ public struct ForecastOvershoot: Codable, Sendable, Equatable {
         let percent = projected - 100
         let start = reset.addingTimeInterval(-window)
         let all = WindowTokens.breakdown(timeline: timeline, from: start, to: now)
-        let rows = meter.scopedModelName.map { WindowTokens.scoped(all, name: $0) } ?? all
+        let rows = WindowTokens.scoped(all, needles: meter.countedScope)
         let spent = WindowTokens.total(rows).total
         let percents = WindowSamples.percents(
             samples, label: meter.label, start: start, end: now, reset: reset)

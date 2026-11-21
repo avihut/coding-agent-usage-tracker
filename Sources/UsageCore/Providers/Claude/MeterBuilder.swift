@@ -51,12 +51,23 @@ public struct Meter: Sendable, Equatable, Identifiable {
     /// For scoped limits: the model this meter covers, as the provider
     /// displays it ("Fable"). Data, so no UI ever parses it out of `label`.
     public let scopedModelName: String?
+    /// The models this meter's tokens are counted from, as lowercase
+    /// needles: a model id (or display name) containing any one of them
+    /// counts. Nil when the provider states none — `countedScope` then
+    /// derives it from `scopedModelName`, which is all a single-model scope
+    /// ever needed. Set when a meter's pool is several model families, or
+    /// when an account has several INDEPENDENT pools (2026-11-21,
+    /// Antigravity: a Gemini pool and a Claude + GPT pool), which is also
+    /// what keeps one pool's lockout off the other
+    /// (`PredictionEngine.lockouts`).
+    public let modelScope: [String]?
 
     public init(
         id: String, label: String, percent: Int?, resetsAt: Date?,
         level: DisplayLevel, rank: Int,
         limitWindow: TimeInterval? = nil, rateWindow: TimeInterval? = nil,
-        forcesWarning: Bool = false, scopedModelName: String? = nil
+        forcesWarning: Bool = false, scopedModelName: String? = nil,
+        modelScope: [String]? = nil
     ) {
         self.id = id
         self.label = label
@@ -68,6 +79,29 @@ public struct Meter: Sendable, Equatable, Identifiable {
         self.rateWindow = rateWindow ?? Self.defaultRateWindow(limitWindow: limitWindow)
         self.forcesWarning = forcesWarning
         self.scopedModelName = scopedModelName
+        self.modelScope = modelScope
+    }
+
+    /// The needles this meter counts tokens by; nil = every model.
+    public var countedScope: [String]? {
+        Meter.countedScope(modelScope: modelScope, scopedModelName: scopedModelName)
+    }
+
+    public static func countedScope(modelScope: [String]?, scopedModelName: String?) -> [String]? {
+        if let modelScope { return modelScope.map { $0.lowercased() } }
+        guard let name = scopedModelName?.lowercased(), !name.isEmpty else { return nil }
+        return [name]
+    }
+
+    /// Whether a model (by id or display name) counts toward this meter.
+    public func inScope(_ model: String) -> Bool {
+        Meter.inScope(model, needles: countedScope)
+    }
+
+    public static func inScope(_ model: String, needles: [String]?) -> Bool {
+        guard let needles, !needles.isEmpty else { return true }
+        let text = model.lowercased()
+        return needles.contains { !$0.isEmpty && text.contains($0) }
     }
 
     /// Short windows move fast and need a tight fit; long ones should
@@ -87,7 +121,8 @@ public struct Meter: Sendable, Equatable, Identifiable {
             level: MeterBuilder.level(
                 percent: percent, forcesWarning: forcesWarning, thresholds: thresholds),
             rank: rank, limitWindow: limitWindow, rateWindow: rateWindow,
-            forcesWarning: forcesWarning, scopedModelName: scopedModelName)
+            forcesWarning: forcesWarning, scopedModelName: scopedModelName,
+            modelScope: modelScope)
     }
 }
 

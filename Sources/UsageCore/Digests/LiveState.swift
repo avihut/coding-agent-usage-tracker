@@ -492,6 +492,11 @@ public struct LiveMeter: Codable, Sendable, Equatable, Identifiable {
     public let resetsAt: Date?
     public let limitWindow: TimeInterval?
     public let scopedModelName: String?
+    /// `Meter.modelScope` as the provider stated it (2026-11-21, additive):
+    /// absent unless the meter counts several model families or one of
+    /// several independent pools. A reader derives the counted scope as
+    /// `Meter.countedScope(modelScope:scopedModelName:)` does.
+    public let modelScope: [String]?
     /// "resets in 3h 20m" — refreshed on every publish.
     public let resetCaption: String?
     public let forecast: MeterForecast?
@@ -509,9 +514,11 @@ public struct LiveMeter: Codable, Sendable, Equatable, Identifiable {
         rank: Int, rateWindowSeconds: TimeInterval, forcesWarning: Bool,
         risk: RGBColor?, resetsAt: Date?, limitWindow: TimeInterval?,
         scopedModelName: String?, resetCaption: String?, forecast: MeterForecast?,
-        series: [SeriesPoint], stretches: [Stretch], modelSeries: [ModelSeries] = []
+        series: [SeriesPoint], stretches: [Stretch], modelSeries: [ModelSeries] = [],
+        modelScope: [String]? = nil
     ) {
         self.modelSeries = modelSeries
+        self.modelScope = modelScope
         self.id = id
         self.label = label
         self.tag = tag
@@ -959,7 +966,8 @@ public enum LiveStateBuilder {
             modelSeries: modelSeries(
                 in: domain, meter: meter, percents: audit.percent.map(\.percent),
                 timeline: timeline, catalog: catalog,
-                colorLedger: colorLedger, accent: accent))
+                colorLedger: colorLedger, accent: accent),
+            modelScope: meter.modelScope)
     }
 
     /// The sessions shortlist, newest first and capped — a dashboard shows
@@ -1028,8 +1036,7 @@ public enum LiveStateBuilder {
     ) -> [ModelSeries] {
         let scoped = timeline.filter { slot in
             guard domain.contains(slot.t) else { return false }
-            guard let needle = meter.scopedModelName?.lowercased() else { return true }
-            return slot.model.lowercased().contains(needle)
+            return meter.inScope(slot.model)
         }
         let models = Array(Set(scoped.map(\.model))).sorted()
         guard !models.isEmpty else { return [] }
@@ -1070,13 +1077,11 @@ public enum LiveStateBuilder {
         catalog: ModelCatalog, graceSeconds: TimeInterval, exhaustsAt: Date?,
         now: Date
     ) -> [Stretch] {
-        let needle = meter.scopedModelName?.lowercased()
         let times = Set(
             timeline
                 .filter { slot in
                     guard domain.contains(slot.t) else { return false }
-                    guard let needle else { return true }
-                    return catalog.displayName(slot.model).lowercased().contains(needle)
+                    return meter.inScope(catalog.displayName(slot.model))
                 }
                 .map(\.t)
         ).sorted()

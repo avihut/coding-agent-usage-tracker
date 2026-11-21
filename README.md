@@ -9,7 +9,8 @@
 How much of your coding agents' plan limits you have used, and when you will
 run out — in the macOS menu bar, in a terminal dashboard, and from a script.
 It meters Claude Code's session, weekly and per-model limits (the numbers in
-the Claude app's Settings → Usage), with Codex and Gemini CLI beside it.
+the Claude app's Settings → Usage), with Codex and Antigravity CLI beside it
+(Gemini CLI too, now deprecated).
 
 <p align="center">
   <picture>
@@ -59,8 +60,10 @@ Unofficial and independent — not affiliated with, endorsed by or supported by
 Anthropic, OpenAI or Google. It reads your usage with your own local Claude
 Code sign-in (access token only; never stored, never logged) from an
 undocumented endpoint that may change without notice. It talks to four hosts
-and no others, carries no analytics and no telemetry, and meters Codex and
-Gemini CLI from their local files alone. Every destination, every file read
+and no others, carries no analytics and no telemetry, and meters Codex,
+Antigravity and Gemini CLI from their local files alone (Antigravity's plan
+limits come from a status line you set up yourself —
+[how](docs/HARNESSES.md#antigravity-cli)). Every destination, every file read
 and the reasoning behind each is in [docs/PRIVACY.md](docs/PRIVACY.md); the
 app lists the same inventory live under Settings → General → About.
 

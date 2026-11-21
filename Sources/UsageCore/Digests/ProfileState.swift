@@ -227,7 +227,8 @@ public enum MeteringDigest {
                 accountCount: mine.count,
                 serviceStatus: harness.serviceStatus,
                 notices: noticesCard(harness, now: now, calendar: calendar, locale: locale),
-                outages: harness.outages)
+                outages: harness.outages,
+                deprecationNote: harness.provider.deprecationNote)
         }
 
         return LiveState(

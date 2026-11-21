@@ -300,6 +300,7 @@ mod tests {
             resets_at: reset,
             limit_window: window,
             scoped_model_name: None,
+            model_scope: None,
             reset_caption: None,
             forecast: None,
             // 06:00–16:00 every 10 minutes: the digest's real density for

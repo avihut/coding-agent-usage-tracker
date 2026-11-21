@@ -53,6 +53,23 @@ struct MultiHarnessHostTests {
 
         var codex: CodexProvider { CodexProvider(sessionsRoot: codexSessions) }
         var gemini: GeminiProvider { GeminiProvider(tmpRoot: geminiTmp) }
+        var antigravityHome: URL { userHome.appending(path: ".gemini/antigravity-cli") }
+        var antigravityExport: URL { root.appending(path: "export/statusline-export.json") }
+        var antigravity: AntigravityProvider {
+            AntigravityProvider(home: antigravityHome, exportURL: antigravityExport)
+        }
+
+        /// An Antigravity conversation (synthetic) last written this many days
+        /// ago, with one model call in its transcript.
+        func antigravityConversation(daysAgo: Double) throws {
+            let id = UUID().uuidString.lowercased()
+            let written = Date().addingTimeInterval(-daysAgo * 86400)
+            let tree = TempTree(root: antigravityHome)
+            try tree.write(
+                "brain/\(id)/.system_generated/logs/transcript.jsonl",
+                AntigravityFixture.call(at: written, input: 10, output: 5) + "\n")
+            try tree.file("conversations/\(id).db", age: daysAgo * 86400, now: Date())
+        }
 
         /// A Claude transcript this many days old.
         func claudeSession(daysAgo: Double) throws {
@@ -86,14 +103,15 @@ struct MultiHarnessHostTests {
         }
 
         func makeHost(
-            _ providers: [any UsageProvider], reprobeInterval: TimeInterval = 600
+            _ providers: [any UsageProvider], reprobeInterval: TimeInterval = 600,
+            stagger: TimeInterval = 0
         ) -> MeteringHost {
             MeteringHost(
                 providers: providers, defaults: defaults,
                 configuration: MeteringHost.Configuration(
                     bundleID: "com.test.harnesses", kind: .app, roots: roots, pollsStatus: false,
                     updateFeedURL: nil, reprobeInterval: reprobeInterval, userHome: userHome,
-                    stagger: 0, bindsSocket: false))
+                    stagger: stagger, bindsSocket: false))
         }
 
         func tearDown() {
@@ -232,6 +250,104 @@ struct MultiHarnessHostTests {
         #expect(host.digest?.pinnedProfile == nil)
         // A key nobody meters is refused, never quietly redirected.
         #expect(!(await host.handle(.focusProfile(id: "gemini"))).ok)
+    }
+
+    /// 2026-11-21: Antigravity before its status-line export reads tokens and
+    /// no limits — used on more days than Claude, it must still not take the
+    /// bar's lead; the moment a reading lands it competes like any harness.
+    @Test("a harness reading no limits doesn't take focus until it reads some")
+    func meterlessFocus() async throws {
+        let fixture = try Fixture()
+        defer { fixture.tearDown() }
+        try fixture.claudeSession(daysAgo: 0.2)
+        for day in 1...5 { try fixture.antigravityConversation(daysAgo: Double(day) + 0.3) }
+        let host = fixture.makeHost([fixture.claude, fixture.antigravity])
+        host.start()
+        defer { host.shutdown() }
+
+        let read = await eventually { host.engines["antigravity"]?.state.snapshot != nil }
+        #expect(read)
+        #expect(host.engines["antigravity"]?.state.snapshot?.meters.isEmpty == true)
+        #expect(host.focusedProfileID == "default")
+
+        // The person installs the export; a reading lands.
+        let export = try #require(fixture.antigravity.statusLineExport)
+        let payload = AntigravityStatusLine.payload(quota: AntigravityStatusLine.quota([
+            AntigravityStatusLine.bucket(
+                "gemini-weekly", remaining: 0.6, reset: Date().addingTimeInterval(86400)),
+        ]))
+        #expect(StatusLineExportWriter.run(export, stdin: payload) == .written)
+        #expect(await host.handle(.refreshProfile(id: "antigravity")).ok)
+        let moved = await eventually { host.focusedProfileID == "antigravity" }
+        #expect(moved)
+        #expect(host.digest?.engine.providerID == "antigravity")
+
+        // The export goes away: no limits again, and focus goes back.
+        try FileManager.default.removeItem(at: fixture.antigravityExport)
+        #expect(await host.handle(.refreshProfile(id: "antigravity")).ok)
+        let back = await eventually { host.focusedProfileID == "default" }
+        #expect(back)
+    }
+
+    /// The next launch (or a host taking over) must not lead with the
+    /// meterless harness even for the moment before its first read: focus
+    /// answers from the cached last fetch, synchronously, at start.
+    @Test("a launch reads meter presence from the cache, before the first read")
+    func meterlessFocusAtLaunch() async throws {
+        let fixture = try Fixture()
+        defer { fixture.tearDown() }
+        try fixture.claudeSession(daysAgo: 0.2)
+        for day in 1...5 { try fixture.antigravityConversation(daysAgo: Double(day) + 0.3) }
+        let first = fixture.makeHost([fixture.claude, fixture.antigravity])
+        first.start()
+        let cached = await eventually { first.engines["antigravity"]?.state.snapshot != nil }
+        #expect(cached)
+        first.shutdown()
+
+        let second = fixture.makeHost([fixture.claude, fixture.antigravity])
+        second.start()
+        defer { second.shutdown() }
+        #expect(second.focusedProfileID == "default")
+        #expect(second.digest?.focusedProfile == "default")
+    }
+
+    /// A harness with no local data yet publishes no snapshot at all — that
+    /// is "unknown", not "no limits", and must not cost it focus.
+    @Test("a harness with no local data stays in the focus ranking")
+    func noLocalDataStaysEligible() async throws {
+        let fixture = try Fixture()
+        defer { fixture.tearDown() }
+        try fixture.claudeSession(daysAgo: 0.2)
+        // Rollouts with no token events: Codex is present, reads nothing.
+        for day in 1...5 { try fixture.codexRollout(daysAgo: Double(day) + 0.3) }
+        let host = fixture.makeHost([fixture.claude, fixture.codex])
+        host.start()
+        defer { host.shutdown() }
+        let read = await eventually { host.engines["codex"]?.state.error != nil }
+        #expect(read)
+        #expect(host.engines["codex"]?.state.snapshot == nil)
+        #expect(host.focusedProfileID == "codex")
+    }
+
+    /// The launch stagger spreads polls of a NETWORK endpoint; a local
+    /// provider's first read must not wait behind it, or focus would guess
+    /// about it for minutes after every update.
+    @Test("local harnesses read at once, whatever the launch stagger")
+    func localSkipsStagger() async throws {
+        let fixture = try Fixture()
+        defer { fixture.tearDown() }
+        try fixture.claudeSession(daysAgo: 0.2)
+        try fixture.codexRollout(daysAgo: 0.3)
+        try fixture.antigravityConversation(daysAgo: 0.4)
+        let host = fixture.makeHost(
+            [fixture.claude, fixture.codex, fixture.antigravity], stagger: 60)
+        host.start()
+        defer { host.shutdown() }
+        // With the stagger applied to all three, the last would wait 40s.
+        let read = await eventually {
+            host.engines["antigravity"]?.state.snapshot != nil
+        }
+        #expect(read)
     }
 
     /// The user's own rule: "I've not been using Codex for months; there's no

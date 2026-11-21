@@ -78,7 +78,7 @@ struct ClaudeProviderHomeTests {
 
     @Test("providers without homes decline the capability")
     func singleHomeProviders() {
-        for provider in [CodexProvider(), GeminiProvider()] as [any UsageProvider] {
+        for provider in [CodexProvider(), GeminiProvider(), AntigravityProvider()] as [any UsageProvider] {
             #expect(!provider.supportsMultipleHomes)
             #expect(provider.homeDirectory == nil)
             #expect(provider.discoverHomes().isEmpty)
