@@ -114,6 +114,8 @@ AGENT_SHADES = {
     ("claude", "claude-sonnet-4-5"): rgb(1.000, 0.772, 0.697),
     ("codex", "gpt-5.2-codex"): rgb(0.063, 0.639, 0.498),
     ("codex", "codex-auto-review"): rgb(0.472, 0.776, 0.669),
+    ("antigravity", "gemini-4-neon"): rgb(0.654, 0.288, 0.984),
+    ("antigravity", "gemini-4-argon"): rgb(0.742, 0.524, 0.993),
 }
 HOUR_SPAN_DAYS = 8  # AllAgentsDigest.hourSpanDays
 
