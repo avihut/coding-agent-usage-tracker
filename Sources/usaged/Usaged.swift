@@ -21,6 +21,7 @@ struct Usaged {
     static let bundleID = AppIdentity.bundleID
 
     static func main() {
+        ProcessSignals.ignoreBrokenPipes()
         // Embedded at Contents/MacOS, usaged inherits AgentUsage.app's
         // bundle identity — and suiteName == your own bundle id is
         // Foundation-nonsense (returns nil). There, `.standard` IS the
