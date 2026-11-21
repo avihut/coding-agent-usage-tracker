@@ -435,15 +435,20 @@ struct HeatmapView: View {
             if period == .week, consumption == nil {
                 weeklyTrendCaption
             }
-            if let consumption {
-                ConsumptionOutlineGrid(
-                    outline: outline, input: consumption, hoveredNode: $hoveredNode,
-                    litModel: hoveredModel)
-            } else {
-                ModelBreakdownGrid(
-                    rows: summaryRows, colors: modelColors, pricing: pricing,
-                    hoveredModel: $hoveredModel)
+            Group {
+                if let consumption {
+                    ConsumptionOutlineGrid(
+                        outline: outline, input: consumption, hoveredNode: $hoveredNode,
+                        litModel: hoveredModel)
+                } else {
+                    ModelBreakdownGrid(
+                        rows: summaryRows, colors: modelColors, pricing: pricing,
+                        hoveredModel: $hoveredModel)
+                }
             }
+            // The table's text on the panel's content edges, like every
+            // other section; the rows' hover highlight bleeds into the margin.
+            .padding(.horizontal, -ModelBreakdownGrid.rowInset)
         }
     }
 
@@ -808,19 +813,22 @@ struct HeatmapView: View {
     /// outline over that one day.
     @ViewBuilder
     private func dayBreakdown(_ entry: DailyActivity, rows: [ModelTokenUsage]) -> some View {
-        if let consumption {
-            let next = Calendar.current.date(byAdding: .day, value: 1, to: entry.day)
-                ?? entry.day.addingTimeInterval(86400)
-            ConsumptionOutlineGrid(
-                outline: ConsumptionOutline.build(
-                    consumption.accounts, in: DateInterval(start: entry.day, end: next),
-                    foldFamilies: false),
-                input: consumption, hoveredNode: $hoveredNode, litModel: hoveredModel)
-        } else {
-            ModelBreakdownGrid(
-                rows: rows, colors: modelColors, pricing: pricing,
-                hoveredModel: $hoveredModel)
+        Group {
+            if let consumption {
+                let next = Calendar.current.date(byAdding: .day, value: 1, to: entry.day)
+                    ?? entry.day.addingTimeInterval(86400)
+                ConsumptionOutlineGrid(
+                    outline: ConsumptionOutline.build(
+                        consumption.accounts, in: DateInterval(start: entry.day, end: next),
+                        foldFamilies: false),
+                    input: consumption, hoveredNode: $hoveredNode, litModel: hoveredModel)
+            } else {
+                ModelBreakdownGrid(
+                    rows: rows, colors: modelColors, pricing: pricing,
+                    hoveredModel: $hoveredModel)
+            }
         }
+        .padding(.horizontal, -ModelBreakdownGrid.rowInset)
     }
 
     /// The drilled day as a 24h session-meter timeline: its 5h windows'

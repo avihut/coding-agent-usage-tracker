@@ -19,6 +19,19 @@ struct ModelBreakdownGrid: View {
 
     static let tokenColumnWidth: CGFloat = 44
     static let costColumnWidth: CGFloat = 54
+    static let columnSpacing: CGFloat = 8
+    /// The least room between a name and the first number column. Numbers
+    /// sit right-aligned in 44pt columns, so the gap the eye sees stays
+    /// ~20pt; the name gets the rest (it was 20pt here plus that).
+    static let nameGap: CGFloat = 8
+    /// Each row's inner horizontal padding — room for the hover highlight.
+    /// A host that lines the table's TEXT up with its own edges takes it
+    /// back with `.padding(.horizontal, -rowInset)`, so the highlight bleeds
+    /// into the host's margin instead of insetting the text (the panel).
+    static let rowInset: CGFloat = 4
+    /// Headline caption → column header: the Activity section's own 8pt
+    /// rhythm (2pt of the headline's padding, the grid's 2pt spacing, this).
+    static let headlineGap: CGFloat = 4
 
     var body: some View {
         let priced = rows.map { row in (row: row, rates: pricing.rates(for: row.model)) }
@@ -38,7 +51,8 @@ struct ModelBreakdownGrid: View {
                         .foregroundStyle(.tertiary)
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 2)
+                .padding(.top, 2)
+                .padding(.bottom, 2 + Self.headlineGap)
             }
             columnHeader
             ForEach(priced, id: \.row.id) { entry in
@@ -49,45 +63,56 @@ struct ModelBreakdownGrid: View {
     }
 
     private var columnHeader: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 0) {
             Text("model")
-            Spacer(minLength: 8)
-            Text("input").frame(width: Self.tokenColumnWidth, alignment: .trailing)
-            Text("cached").frame(width: Self.tokenColumnWidth, alignment: .trailing)
-            Text("output").frame(width: Self.tokenColumnWidth, alignment: .trailing)
-            Text("est. cost").frame(width: Self.costColumnWidth, alignment: .trailing)
+            Spacer(minLength: Self.nameGap)
+            HStack(spacing: Self.columnSpacing) {
+                Text("input").frame(width: Self.tokenColumnWidth, alignment: .trailing)
+                Text("cached").frame(width: Self.tokenColumnWidth, alignment: .trailing)
+                Text("output").frame(width: Self.tokenColumnWidth, alignment: .trailing)
+                Text("est. cost").frame(width: Self.costColumnWidth, alignment: .trailing)
+            }
         }
         .font(.caption2)
         .foregroundStyle(.tertiary)
-        .padding(.horizontal, 4)
+        .padding(.horizontal, Self.rowInset)
     }
 
     private func modelRow(_ row: ModelTokenUsage, rates: ModelRates?) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 0) {
             HStack(spacing: 5) {
                 RoundedRectangle(cornerRadius: 2)
                     .fill(colors[row.model] ?? Color.gray)
                     .frame(width: 7, height: 7)
-                // Names never truncate — the host surface is sized to fit.
+                // Whole wherever the host has room (popovers size to fit);
+                // in the fixed 360pt panel a long name gives way at the tail
+                // rather than push the content wider (user-reported
+                // 2026-11-21: it collapsed every section's margin).
                 Text(row.displayName)
                     .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: true, vertical: false)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help(row.displayName)
             }
-            Spacer(minLength: 8)
-            // "input" is what was processed anew; the conversation history
-            // re-read from cache on every request stands apart as "cached" —
-            // lumping them reads as absurd typed-prompt volume.
-            Text(TokenFormat.compact(row.tally.uncachedInput))
-                .frame(width: Self.tokenColumnWidth, alignment: .trailing)
-            Text(TokenFormat.compact(row.tally.cacheRead))
-                .frame(width: Self.tokenColumnWidth, alignment: .trailing)
-            Text(TokenFormat.compact(row.tally.output))
-                .frame(width: Self.tokenColumnWidth, alignment: .trailing)
-            Text(rates.map { UsageFormatting.money($0.dollars(for: row.tally)) } ?? "—")
-                .frame(width: Self.costColumnWidth, alignment: .trailing)
+            .layoutPriority(1)
+            Spacer(minLength: Self.nameGap)
+            HStack(spacing: Self.columnSpacing) {
+                // "input" is what was processed anew; the conversation
+                // history re-read from cache on every request stands apart
+                // as "cached" — lumping them reads as absurd typed-prompt
+                // volume.
+                Text(TokenFormat.compact(row.tally.uncachedInput))
+                    .frame(width: Self.tokenColumnWidth, alignment: .trailing)
+                Text(TokenFormat.compact(row.tally.cacheRead))
+                    .frame(width: Self.tokenColumnWidth, alignment: .trailing)
+                Text(TokenFormat.compact(row.tally.output))
+                    .frame(width: Self.tokenColumnWidth, alignment: .trailing)
+                Text(rates.map { UsageFormatting.money($0.dollars(for: row.tally)) } ?? "—")
+                    .frame(width: Self.costColumnWidth, alignment: .trailing)
+            }
         }
         .font(.caption2.monospacedDigit())
-        .padding(.horizontal, 4)
+        .padding(.horizontal, Self.rowInset)
         .padding(.vertical, 2)
         .background(
             // Lit while hovered — and held lit while the row's cost math is

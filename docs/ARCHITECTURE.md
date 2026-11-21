@@ -55,8 +55,9 @@ seam.
   the lease holder is the sole cache writer, spec §10.
 - COLOUR AND RISK MATH IS CORE, not app-side: `RiskRamp`
   (Formatting/RiskRamp.swift — a pinned dark-appearance yellow→red ramp;
-  panel `riskColor`, the menu bar and the digest all blend through it) and `ModelColorMath` (pure HSB, slot 0 =
-  provider accent). `ModelColorLedger` owns the ONE ledger write path
+  panel `riskColor`, the menu bar and the digest all blend through it) and `ModelColorMath` (pure OKLCH, slot 0 =
+  provider accent, one variant per appearance inside
+  `ModelColorLegibility`'s 3:1 band — CHARTS.md). `ModelColorLedger` owns the ONE ledger write path
   (`grow(_:defaults:providerID:)`); the app's `ModelPalette` only maps
   stored slots to SwiftUI `Color`s. A face that computes a colour itself
   will disagree with the other faces.

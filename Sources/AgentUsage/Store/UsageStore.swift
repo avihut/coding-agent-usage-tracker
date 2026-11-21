@@ -271,7 +271,12 @@ final class UsageStore {
         }
     }
     var isLocalProvider: Bool { providerValue.networkDestinations.isEmpty }
-    var providesSessions: Bool { localActivity?.providesSessions ?? false }
+    var providesSessions: Bool {
+        switch mode {
+        case .hosting: engine?.providesSessions ?? false
+        case .client(let client): client.providesSessions
+        }
+    }
     /// True while a daemon hosts the engine — settings can say so.
     var isDigestClient: Bool {
         if case .client = mode { return true }

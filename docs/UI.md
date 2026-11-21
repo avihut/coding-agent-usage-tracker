@@ -420,6 +420,37 @@ per-harness geometry of the bar is in [HARNESSES.md](HARNESSES.md).
   minute, so the panel adds at most one scan per in-scope account per
   minute, and only while it is being used.
 
+## The Activity tables' edges and widths
+
+- (2026-11-21, user-reported "the padding looks bad now" after #37.) Every
+  panel section shares the 14pt content edges, and so do the Activity
+  tables' TEXT: a row's 4pt inner padding (`ModelBreakdownGrid.rowInset`)
+  is the hover highlight's room, and the panel's call sites take it back
+  (`.padding(.horizontal, -rowInset)`), so the highlight bleeds into the
+  margin. The Sessions strip's cards do the same with their 6pt.
+- THE WIDTH BUDGET, at 360pt: 332pt of content; the number columns take
+  210 (3 × 44 + 54 + 3 × 8); a name keeps at least 8pt
+  (`ModelBreakdownGrid.nameGap`) before the first column — the numbers sit
+  right-aligned, so the visible gap stays ~20pt. The lead (marks + name)
+  may take 114pt.
+- NAMES NEVER WIDEN THE PANEL. A `fixedSize` name longer than its share
+  ("Codex Auto Review", 92.7pt, at the outline's first nesting level)
+  pushed the content past 360pt, and the popover centred it: every
+  section's 14pt margin fell to ~2pt (measured on the reporting Mac). A
+  name gives way at the tail (an account label in the middle) with its full
+  name as `.help`; hosts that size to fit (popovers) still show it whole.
+  The demo digest carries `codex-auto-review` so every snapshot keeps
+  checking this.
+- THE OUTLINE'S NESTING: each row is [chevron slot 8][mark][name], the
+  chevron slot reserved even where nothing folds, so marks stand in
+  columns (a prompt-only agent's glyph under the others'); a child's mark
+  sits under its parent's NAME — leading = parent's leading + parent's mark
+  + 4. `HarnessMark.side(ink:)` is the same square for every glyph, so all
+  agents' names share one x. Name room: an agent 86pt, a model under an
+  agent 75pt, under an account ~59pt.
+- The headline caption keeps the section's 8pt rhythm above the column
+  header (`ModelBreakdownGrid.headlineGap`).
+
 ## Session rename, search and sort
 
 - SESSIONS RENAME + SEARCH/SORT (2026-08-17): titles are click-to-rename
@@ -507,7 +538,10 @@ per-harness geometry of the bar is in [HARNESSES.md](HARNESSES.md).
   `menuBarElements`), so the bar in the picture is the one they chose.
   What a demo can't show follows from (1): no minute timeline, no
   per-session model split, and the forecast caption reads as a fresh
-  install's.
+  install's. The Sessions strip IS drawn (2026-11-21): a non-scanning
+  client offers sessions when the digest carried any
+  (`DigestClient.providesSessions`), so the panel's last section can be
+  checked from fixture data; a demo session opens with no detail behind it.
 - `--snapshot` gained `panel-dark.png` / `panel-light.png` and
   `menubar-preview@2x.png`. The panel could never be snapshotted before —
   ImageRenderer blanks a ScrollView and the live popover closes the moment
