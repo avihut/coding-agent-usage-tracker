@@ -155,7 +155,11 @@ succeeds it for Google's plans, and it stays metered for API-key use.
   trailing 14 days (`MTimeProbe`, `HarnessDetector.window`), newest write
   breaks ties, pin wins, switch held while the panel is open. DORMANCY
   stays last-write at 30 days — engine stopped, an `AgentActivityWatcher`
-  kept to revive it. DIGEST: still ONE file; `focusedProfile`/`profiles[]`/
+  kept to revive it. Only an extra home's `addedAt` may stand in as an
+  enrolment (`Dormancy.enrolmentStamp`): the DEFAULT record is stored the
+  first time it differs from the standard, so its stamp dates that edit
+  (2026-11-21: a menu-bar style set on a Gemini CLI quiet for 189 days held
+  its cell for another month). DIGEST: still ONE file; `focusedProfile`/`profiles[]`/
   `menuBarCells[]` are additive and the focused section is PROJECTED onto
   the top level (`LiveState.viewing(profile:)`), which is why every
   pre-0.96 consumer and every CLI noun answers per account with no per-noun

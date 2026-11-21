@@ -15,6 +15,22 @@ public enum Dormancy {
         guard let reference else { return false }
         return now.timeIntervalSince(reference) > window
     }
+
+    /// The stamp that may stand in as an ENROLMENT: only an extra home the
+    /// person added counts. The default home is found, never enrolled — its
+    /// record is stored the first time it differs from the standard (a
+    /// menu-bar style, a nickname, a toggle) and stamped with that moment, so
+    /// its stamp dates an edit, not a decision to meter it. Leaning on it let
+    /// one style change on a harness unused for half a year hold a menu-bar
+    /// cell for another 30 days (user-reported 2026-11-21: a deprecated Gemini
+    /// CLI, quiet for 189 days, still in the bar).
+    public static func enrolmentStamp(of profile: Profile) -> Date? {
+        profile.isDefault ? nil : profile.addedAt
+    }
+
+    public static func isDormant(_ profile: Profile, lastActivity: Date?, now: Date) -> Bool {
+        isDormant(lastActivity: lastActivity, addedAt: enrolmentStamp(of: profile), now: now)
+    }
 }
 
 /// What the focus rule needs to know about one profile.

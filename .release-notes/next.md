@@ -21,6 +21,11 @@ Fixes
   The first scan after updating reads the backlog once, and scanning Codex
   now takes a fraction of the memory it did (490 MB → 110 MB at peak on
   the reporting Mac).
+- A harness you haven't used in a month leaves the menu bar again even if
+  you changed its menu-bar style recently. The style change was being read
+  as a fresh sign-up, which kept, for one, a deprecated Gemini CLI unused
+  for half a year in the bar for another 30 days. It returns the moment
+  it's used again.
 
 Features
 - Antigravity CLI is metered. It sits in the menu bar beside the other
