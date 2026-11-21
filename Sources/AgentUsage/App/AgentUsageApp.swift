@@ -6,6 +6,12 @@ import UsageCore
 struct AgentUsageApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
+    init() {
+        // Before any socket, pipe or child process exists: the app may host
+        // the engine and its control socket (`ProcessSignals`).
+        ProcessSignals.ignoreBrokenPipes()
+    }
+
     var body: some Scene {
         // No windows — StatusItemController owns all UI. No Settings scene
         // either (v0.97.2, user-reported): SwiftUI bound ⌘, to it, and an
