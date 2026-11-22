@@ -1,0 +1,99 @@
+# Raw rows behind docs/plans/antigravity-probe-under-load.md (2026-11-22, UTC).
+# qos=default in any row = posix_spawnattr_set_qos_class_np(DEFAULT) -> EINVAL = NO attribute = child at priority 31.
+# Untagged rows: natural load (no busy loops). [satN] = N default-priority busy loops on 10 cores, 0.0% idle.
+2026-11-22T07:04:25Z version #1 qos=utility wall=0.38s cpu=0.13s load=291→291 term=exited(0) out=7B keys=
+2026-11-22T07:04:25Z version #2 qos=utility wall=0.14s cpu=0.12s load=291→291 term=exited(0) out=7B keys=
+2026-11-22T07:04:25Z version #1 qos=default wall=0.12s cpu=0.11s load=291→290 term=exited(0) out=7B keys=
+2026-11-22T07:04:25Z version #2 qos=default wall=0.11s cpu=0.11s load=290→290 term=exited(0) out=7B keys=
+2026-11-22T07:04:25Z version #1 qos=utility wall=0.12s cpu=0.13s load=290→290 term=exited(0) out=7B keys=
+2026-11-22T07:04:25Z version #2 qos=utility wall=0.20s cpu=0.13s load=290→290 term=exited(0) out=7B keys=
+2026-11-22T07:04:26Z version #1 qos=default wall=0.09s cpu=0.11s load=290→290 term=exited(0) out=7B keys=
+2026-11-22T07:04:26Z version #2 qos=default wall=0.11s cpu=0.11s load=290→290 term=exited(0) out=7B keys=
+2026-11-22T07:09:46Z version #1 qos=utility wall=0.55s cpu=0.22s load=763→763 term=exited(0) out=7B keys=
+2026-11-22T07:09:46Z version #2 qos=utility wall=0.16s cpu=0.11s load=763→763 term=exited(0) out=7B keys=
+2026-11-22T07:09:46Z version #1 qos=default wall=0.11s cpu=0.11s load=763→763 term=exited(0) out=7B keys=
+2026-11-22T07:09:46Z version #2 qos=default wall=0.10s cpu=0.11s load=763→763 term=exited(0) out=7B keys=
+2026-11-22T07:09:50Z version #1 qos=utility wall=3.17s cpu=0.19s load=763→763 term=exited(0) out=7B keys=
+2026-11-22T07:09:52Z version #1 qos=default wall=2.76s cpu=0.16s load=763→759 term=exited(0) out=7B keys=
+2026-11-22T07:09:55Z version #1 qos=utility wall=2.92s cpu=0.16s load=759→749 term=exited(0) out=7B keys=
+2026-11-22T07:09:58Z version #1 qos=default wall=2.72s cpu=0.16s load=749→749 term=exited(0) out=7B keys=
+2026-11-22T07:10:13Z quota #1 qos=utility wall=2.35s cpu=0.50s load=691→691 term=exited(0) out=2681B keys=command,conversation_id,duration_seconds,num_turns,response,status,usage
+2026-11-22T07:10:16Z quota #1 qos=default wall=2.42s cpu=0.43s load=691→669 term=exited(0) out=2681B keys=command,conversation_id,duration_seconds,num_turns,response,status,usage
+[sat20] 2026-11-22T07:11:53Z version #1 qos=utility wall=2.55s cpu=0.11s load=323→323 term=exited(0) out=7B keys=
+[sat20] 2026-11-22T07:11:58Z version #2 qos=utility wall=4.81s cpu=0.11s load=323→320 term=exited(0) out=7B keys=
+[sat20] 2026-11-22T07:11:59Z version #1 qos=default wall=0.14s cpu=0.11s load=320→320 term=exited(0) out=7B keys=
+[sat20] 2026-11-22T07:11:59Z version #2 qos=default wall=0.14s cpu=0.11s load=320→320 term=exited(0) out=7B keys=
+[sat20] 2026-11-22T07:12:04Z version #1 qos=utility wall=5.05s cpu=0.15s load=320→317 term=exited(0) out=7B keys=
+[sat20] 2026-11-22T07:12:06Z version #1 qos=default wall=2.74s cpu=0.17s load=317→315 term=exited(0) out=7B keys=
+[sat40] 2026-11-22T07:13:54Z version #1 qos=utility wall=10.40s cpu=0.11s load=304→310 term=exited(0) out=7B keys=
+[sat40] 2026-11-22T07:13:59Z version #2 qos=utility wall=5.18s cpu=0.09s load=310→311 term=exited(0) out=7B keys=
+[sat40] 2026-11-22T07:13:59Z version #1 qos=default wall=0.36s cpu=0.13s load=311→311 term=exited(0) out=7B keys=
+[sat40] 2026-11-22T07:14:00Z version #2 qos=default wall=0.32s cpu=0.13s load=311→311 term=exited(0) out=7B keys=
+[sat40] 2026-11-22T07:14:12Z version #1 qos=utility wall=11.81s cpu=0.14s load=311→325 term=exited(0) out=7B keys=
+[sat40] 2026-11-22T07:14:15Z version #1 qos=default wall=2.91s cpu=0.19s load=325→325 term=exited(0) out=7B keys=
+[sat40] 2026-11-22T07:14:29Z quota #1 qos=utility wall=14.31s cpu=0.31s load=325→340 term=exited(0) out=2681B keys=command,conversation_id,duration_seconds,num_turns,response,status,usage
+[sat40] 2026-11-22T07:14:32Z quota #1 qos=default wall=3.06s cpu=0.40s load=340→344 term=exited(0) out=2681B keys=command,conversation_id,duration_seconds,num_turns,response,status,usage
+[sat40] 2026-11-22T07:16:27Z version #1 qos=split wall=0.51s cpu=0.18s load=245→245 term=exited(0) out=7B keys=
+[sat40] 2026-11-22T07:16:28Z version #2 qos=split wall=0.52s cpu=0.15s load=245→245 term=exited(0) out=7B keys=
+[sat40] 2026-11-22T07:16:28Z version #3 qos=split wall=0.52s cpu=0.12s load=245→245 term=exited(0) out=7B keys=
+[sat40] 2026-11-22T07:16:29Z version #4 qos=split wall=0.42s cpu=0.12s load=245→245 term=exited(0) out=7B keys=
+[sat40] 2026-11-22T07:16:29Z version #1 qos=default wall=0.32s cpu=0.16s load=245→245 term=exited(0) out=7B keys=
+[sat40] 2026-11-22T07:16:29Z version #2 qos=default wall=0.30s cpu=0.13s load=245→245 term=exited(0) out=7B keys=
+[sat40] 2026-11-22T07:16:31Z version #1 qos=utility wall=1.71s cpu=0.10s load=245→252 term=exited(0) out=7B keys=
+[sat40] 2026-11-22T07:16:33Z version #2 qos=utility wall=2.14s cpu=0.09s load=252→252 term=exited(0) out=7B keys=
+# --- transcribed from tool output (not tee'd at the time); labels corrected ---
+# NOTE: "qos=default" in every row = posix_spawnattr_set_qos_class_np(DEFAULT) returned EINVAL,
+#       i.e. NO QoS attribute: child at priority 31 (measured with ps). "qos=utility" = priority 20.
+# natural load ~272-259, cold = fresh F_NOCACHE copy (0.0% resident before, 100% after one run)
+[natural~265 cold] 2026-11-22T07:04:40Z version qos=utility(pri20) wall=3.71s cpu=0.15s load=272→272 exited(0)
+[natural~265 cold] 2026-11-22T07:04:43Z version qos=none(pri31)    wall=3.08s cpu=0.16s load=272→269 exited(0)
+[natural~265 cold] 2026-11-22T07:04:46Z version qos=utility(pri20) wall=3.06s cpu=0.15s load=269→259 exited(0)
+[natural~265 cold] 2026-11-22T07:04:49Z version qos=none(pri31)    wall=2.88s cpu=0.15s load=259→259 exited(0)
+# darwin background policy (taskpolicy -b on the harness; child confirmed priority 4 with ps; the
+# harness printed qos=utility but the clamp wins). n=1 each; load moved 164→745 during the cold run.
+[taskpolicy -b warm] 2026-11-22T07:05:54Z version pri4 wall=0.93s cpu=0.27s load=169→169 exited(0)
+[taskpolicy -b warm] 2026-11-22T07:05:57Z version pri4 wall=2.72s cpu=0.30s load=169→164 exited(0)
+[taskpolicy -b cold] 2026-11-22T07:09:32Z version pri4 wall=214.81s cpu=0.42s load=164→745 exited(0)
+# CPU idle during [sat20]/[sat40] rows: top reported 0.0% idle before and after each batch.
+# [sat20] 07:31:30 CPU usage: 65.32% user, 34.67% sys, 0.0% idle  load { 300.29 288.49 254.24 }
+[sat20 warm] 2026-11-22T07:31:41Z version #1 qos=utility(pri20) wall=5.76s cpu=0.17s load=300→299 term=exited(0) out=7B keys=
+[sat20 warm] 2026-11-22T07:31:42Z version #1 qos=none(pri31) wall=0.13s cpu=0.11s load=299→299 term=exited(0) out=7B keys=
+[sat20 warm] 2026-11-22T07:31:46Z version #1 qos=utility(pri20) wall=3.81s cpu=0.10s load=299→302 term=exited(0) out=7B keys=
+[sat20 warm] 2026-11-22T07:31:46Z version #1 qos=none(pri31) wall=0.13s cpu=0.12s load=302→302 term=exited(0) out=7B keys=
+[sat20 warm] 2026-11-22T07:31:52Z version #1 qos=utility(pri20) wall=5.89s cpu=0.09s load=302→305 term=exited(0) out=7B keys=
+[sat20 warm] 2026-11-22T07:31:52Z version #1 qos=none(pri31) wall=0.12s cpu=0.11s load=305→305 term=exited(0) out=7B keys=
+[sat20 warm] 2026-11-22T07:31:54Z version #1 qos=utility(pri20) wall=2.18s cpu=0.09s load=305→305 term=exited(0) out=7B keys=
+[sat20 warm] 2026-11-22T07:31:54Z version #1 qos=none(pri31) wall=0.13s cpu=0.10s load=305→305 term=exited(0) out=7B keys=
+[sat20 warm] 2026-11-22T07:31:58Z version #1 qos=utility(pri20) wall=3.80s cpu=0.10s load=305→307 term=exited(0) out=7B keys=
+[sat20 warm] 2026-11-22T07:31:58Z version #1 qos=none(pri31) wall=0.18s cpu=0.12s load=307→307 term=exited(0) out=7B keys=
+# [sat20] end CPU usage: 42.24% user, 57.75% sys, 0.0% idle
+# [sat40] 07:32:14 CPU usage: 44.42% user, 55.57% sys, 0.0% idle  load { 300.63 290.33 256.68 }
+[sat40 warm] 2026-11-22T07:32:22Z version #1 qos=utility(pri20) wall=1.42s cpu=0.10s load=301→301 term=exited(0) out=7B keys=
+[sat40 warm] 2026-11-22T07:32:23Z version #1 qos=none(pri31) wall=0.38s cpu=0.14s load=301→301 term=exited(0) out=7B keys=
+[sat40 warm] 2026-11-22T07:32:26Z version #1 qos=utility(pri20) wall=3.66s cpu=0.10s load=301→303 term=exited(0) out=7B keys=
+[sat40 warm] 2026-11-22T07:32:27Z version #1 qos=none(pri31) wall=0.31s cpu=0.12s load=303→303 term=exited(0) out=7B keys=
+[sat40 warm] 2026-11-22T07:32:29Z version #1 qos=utility(pri20) wall=2.71s cpu=0.10s load=303→303 term=exited(0) out=7B keys=
+[sat40 warm] 2026-11-22T07:32:30Z version #1 qos=none(pri31) wall=0.68s cpu=0.12s load=303→303 term=exited(0) out=7B keys=
+[sat40 warm] 2026-11-22T07:32:32Z version #1 qos=utility(pri20) wall=2.18s cpu=0.09s load=303→304 term=exited(0) out=7B keys=
+[sat40 warm] 2026-11-22T07:32:33Z version #1 qos=none(pri31) wall=0.33s cpu=0.14s load=304→304 term=exited(0) out=7B keys=
+[sat40 warm] 2026-11-22T07:32:35Z version #1 qos=utility(pri20) wall=1.98s cpu=0.10s load=304→304 term=exited(0) out=7B keys=
+[sat40 warm] 2026-11-22T07:32:35Z version #1 qos=none(pri31) wall=0.27s cpu=0.12s load=304→304 term=exited(0) out=7B keys=
+[sat40 cold] 2026-11-22T07:32:43Z version #1 qos=utility(pri20) wall=8.00s cpu=0.14s load=304→309 term=exited(0) out=7B keys=
+[sat40 cold] 2026-11-22T07:32:46Z version #1 qos=none(pri31) wall=2.90s cpu=0.17s load=309→315 term=exited(0) out=7B keys=
+[sat40 cold] 2026-11-22T07:32:52Z version #1 qos=utility(pri20) wall=5.68s cpu=0.14s load=315→317 term=exited(0) out=7B keys=
+[sat40 cold] 2026-11-22T07:32:55Z version #1 qos=none(pri31) wall=2.93s cpu=0.18s load=317→317 term=exited(0) out=7B keys=
+[sat40 cold] 2026-11-22T07:33:01Z version #1 qos=utility(pri20) wall=5.75s cpu=0.13s load=317→324 term=exited(0) out=7B keys=
+[sat40 cold] 2026-11-22T07:33:03Z version #1 qos=none(pri31) wall=2.87s cpu=0.17s load=324→324 term=exited(0) out=7B keys=
+# [sat40] end CPU usage: 32.49% user, 67.50% sys, 0.0% idle
+# [sat80] 07:33:22 CPU usage: 37.48% user, 62.51% sys, 0.0% idle  load { 332.92 301.66 263.59 }
+[sat80 warm] 2026-11-22T07:33:41Z version #1 qos=utility(pri20) wall=7.45s cpu=0.10s load=333→338 term=exited(0) out=7B keys=
+[sat80 warm] 2026-11-22T07:33:42Z version #1 qos=none(pri31) wall=0.63s cpu=0.17s load=338→338 term=exited(0) out=7B keys=
+[sat80 warm] 2026-11-22T07:33:45Z version #1 qos=utility(pri20) wall=2.91s cpu=0.10s load=338→338 term=exited(0) out=7B keys=
+[sat80 warm] 2026-11-22T07:33:46Z version #1 qos=none(pri31) wall=0.77s cpu=0.17s load=338→343 term=exited(0) out=7B keys=
+[sat80 warm] 2026-11-22T07:33:53Z version #1 qos=utility(pri20) wall=7.56s cpu=0.10s load=343→347 term=exited(0) out=7B keys=
+[sat80 warm] 2026-11-22T07:33:54Z version #1 qos=none(pri31) wall=0.50s cpu=0.16s load=347→347 term=exited(0) out=7B keys=
+[sat80 warm] 2026-11-22T07:34:01Z version #1 qos=utility(pri20) wall=7.34s cpu=0.10s load=347→356 term=exited(0) out=7B keys=
+[sat80 warm] 2026-11-22T07:34:02Z version #1 qos=none(pri31) wall=0.48s cpu=0.10s load=356→356 term=exited(0) out=7B keys=
+[sat80 warm] 2026-11-22T07:34:12Z version #1 qos=utility(pri20) wall=10.35s cpu=0.11s load=356→365 term=exited(0) out=7B keys=
+[sat80 warm] 2026-11-22T07:34:13Z version #1 qos=none(pri31) wall=0.64s cpu=0.14s load=365→365 term=exited(0) out=7B keys=
+# [sat80] end CPU usage: 42.88% user, 57.11% sys, 0.0% idle
