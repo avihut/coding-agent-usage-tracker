@@ -9,6 +9,13 @@
 #
 #   scripts/release.sh [--dry-run]
 #
+# The notes are assembled by release-notes.sh: the maintainer's
+# .release-notes/next.md (the tag's title, prose written by hand) with the
+# "## Release note" of every PR merged since the last tag merged in. PRs
+# never edit next.md — every one that did conflicted with every other open
+# PR. --dry-run prints them and writes nothing, so it runs anywhere: off
+# main, and on a tree whose next.md is still being edited.
+#
 # NEVER pushes. Push and publish stay a human step, and release-check
 # (pre-push) is the backstop if this ever leaves a release half made.
 set -euo pipefail
@@ -20,10 +27,16 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
 dry_run=false
 [ "${1:-}" = "--dry-run" ] && dry_run=true
 
+scripts=$(cd "$(dirname "$0")" && pwd)
 identity=Sources/UsageCore/AppIdentity.swift
 notes=.release-notes/next.md
+# Line for line what next.md's own header says.
 template='<!-- What shipped, in prose. This becomes the annotation of the next
      release tag, which publish.sh ships as the GitHub release notes.
+     THE MAINTAINER'"'"'S FILE: pull requests never edit it. A change describes
+     itself under "## Release note" in its PR description, and
+     scripts/release.sh adds every merged PR'"'"'s entries under the headings
+     here (Fixes, Features) when it cuts the release (docs/WORKFLOW.md).
      The FIRST LINE is the tag'"'"'s subject: make it a short title, then a
      blank line. This comment is stripped. -->'
 
@@ -44,19 +57,26 @@ fi
 
 branch=$(git symbolic-ref --short -q HEAD || true)
 if [ "$branch" != "main" ]; then
-    say "'$branch' is not main — releases are cut from main"
-    exit 0
+    if ! $dry_run; then
+        say "'$branch' is not main — releases are cut from main"
+        exit 0
+    fi
+    say "previewing on '$branch' — a release is only ever cut from main"
 fi
 if [ -n "$(git status --porcelain)" ]; then
-    refuse "the worktree is not clean — refusing to build a release commit on top" \
-        "  commit or discard the changes, then: mise run release"
+    if ! $dry_run; then
+        refuse "the worktree is not clean — refusing to build a release commit on top" \
+            "  commit or discard the changes, then: mise run release"
+    fi
+    say "the worktree is not clean — previewing it as it stands (a real run refuses)"
 fi
 
 current=$(sed -n 's/.*static let version = "\(.*\)".*/\1/p' "$identity")
 [ -n "$current" ] || refuse "no version found in $identity"
 
-# The annotation IS the release notes. A fragment written on the branch beats
-# a list of subjects, and it rode the pre-merge gate like any other file.
+# The annotation IS the release notes. Prose beats a list of subjects.
+# Only the already-a-release-commit path below reads next.md alone; a new
+# release assembles it with the PRs' notes (release-notes.sh assemble).
 written_notes() { # → the fragment on stdout, or 1 when it says nothing
     [ -f "$notes" ] || return 1
     # The template's HTML comment is scaffolding, not notes. It used to ride
@@ -77,7 +97,9 @@ tag_head() { # <version> <notes file>
         say "would tag v$1 on $(git rev-parse --short HEAD)"
         return 0
     fi
-    git tag -a "v$1" -F "$2"
+    # whitespace, not git's default strip: strip deletes every line that
+    # starts with "#", and a markdown heading in next.md is one.
+    git tag -a --cleanup=whitespace "v$1" -F "$2"
     say "tagged v$1"
 }
 
@@ -108,15 +130,25 @@ fi
 # ── Decide whether this merge released anything ─────────────────────────────
 last=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || true)
 range=${last:+$last..}HEAD
+# The TYPE comes from subjects alone (on main each is a PR title or the
+# commit itself). Bodies are whole PR descriptions now, and a release-note
+# line such as "fix: the panel…" would otherwise read as a fix to release.
+# Only the BREAKING CHANGE footer is a body's to declare.
+subjects=$(git log --format='%s' "$range")
 log=$(git log --format='%s%n%b' "$range")
 
+# Here-strings, never `printf | grep -q`: grep -q exits at its first match,
+# and under pipefail the printf it hung up on (SIGPIPE, once the log
+# outgrows the pipe's buffer — squash bodies are whole PR descriptions)
+# fails the test. Since v0.103.0 the log was 114 KB, and a range full of
+# feat and fix read as "nothing releasable".
 level="none"
-if printf '%s\n' "$log" | grep -qE '^(feat|fix)(\([^)]*\))?!: ' ||
-    printf '%s\n' "$log" | grep -q '^BREAKING CHANGE'; then
+if grep -qE '^(feat|fix)(\([^)]*\))?!: ' <<<"$subjects" ||
+    grep -q '^BREAKING CHANGE' <<<"$log"; then
     level="major"
-elif printf '%s\n' "$log" | grep -qE '^feat(\([^)]*\))?: '; then
+elif grep -qE '^feat(\([^)]*\))?: ' <<<"$subjects"; then
     level="minor"
-elif printf '%s\n' "$log" | grep -qE '^fix(\([^)]*\))?: '; then
+elif grep -qE '^fix(\([^)]*\))?: ' <<<"$subjects"; then
     level="patch"
 fi
 
@@ -142,28 +174,47 @@ patch) next="$major.$minor.$((patch + 1))" ;;
 esac
 
 say "$level bump since ${last:-the first commit}: $current → $next"
-if $dry_run; then
-    say "would commit 'release: v$next' and tag it"
-    exit 0
-fi
 
-if written_notes >"$message"; then
-    say "notes from $notes"
+# next.md + every merged PR's "## Release note". A description that can't be
+# read, or whose note is malformed, refuses the release: the fix is the PR
+# description, and post-merge only warns, so the merge itself stands.
+assembled=true
+"$scripts/release-notes.sh" assemble "$range" "v$next" >"$message" || assembled=false
+if [ -s "$message" ]; then
+    say "notes from $notes and the merged PRs' descriptions"
 else
     git log --format='- %s' "$range" >"$message"
-    say "no $notes — annotating with the subjects since ${last:-the first commit}"
+    say "nothing in $notes and no PR release notes — annotating with the subjects since ${last:-the first commit}"
 fi
+
+if $dry_run; then
+    say "would commit 'release: v$next' and tag it with these notes:"
+    printf -- '------------------------------------------------------------------------\n'
+    cat "$message"
+    printf -- '------------------------------------------------------------------------\n'
+    $assembled || refuse "a real run would refuse: fix what is marked ✗ above"
+    exit 0
+fi
+$assembled || refuse "not released: fix what is marked ✗ above, then: mise run release"
 
 # One commit: the version, and the fragment spent on it.
 sed -i '' "s/static let version = \".*\"/static let version = \"$next\"/" "$identity"
+staged=("$identity")
 git add "$identity"
 if [ -f "$notes" ]; then
     printf '%s\n' "$template" >"$notes"
     git add "$notes"
+    staged+=("$notes")
 fi
-{
+if ! {
     printf 'release: v%s\n\n' "$next"
     cat "$message"
-} | git commit -q -F -
+} | git commit -q --cleanup=whitespace -F -; then
+    # A commit that didn't happen (a locked signing agent, a hook) leaves
+    # nothing half made: the tree was clean, so put back the two files this
+    # staged, and the next run starts over instead of refusing a dirty tree.
+    git restore --source=HEAD --staged --worktree -- "${staged[@]}"
+    refuse "the release commit failed — nothing was released; fix the cause, then: mise run release"
+fi
 tag_head "$next" "$message"
 say "not pushed — review it, then: git push origin main v$next && mise run publish"

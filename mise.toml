@@ -225,7 +225,7 @@ run = [
 ]
 
 [tasks.guard]
-description = "Repo-rule tripwires: tokens, signing identities, dependencies, §10 hosts, script↔task pairing, CI ↔ gate coverage (arg: --staged for the index)"
+description = "Repo-rule tripwires: tokens, signing identities, dependencies, §10 hosts, script↔task pairing, CI ↔ gate coverage, required checks ↔ workflow jobs (arg: --staged for the index)"
 run = "scripts/guard.sh"
 
 [tasks.commit-msg]
@@ -264,8 +264,12 @@ description = "post-merge tripwire: the landed tree is the tree the merge gate t
 run = "scripts/landed-check.sh"
 
 [tasks.release]
-description = "Cut the release main has earned — bump, 'release: vX.Y.Z' commit, annotated tag from .release-notes/next.md. Never pushes (--dry-run for the verdict)"
+description = "Cut the release main has earned — bump, 'release: vX.Y.Z' commit, annotated tag from .release-notes/next.md + every merged PR's '## Release note'. Never pushes (--dry-run prints the verdict and the notes, anywhere)"
 run = "scripts/release.sh"
+
+[tasks.release-notes]
+description = "The '## Release note' grammar (args: check|entries — a PR description on stdin; commit-entries — a commit message; assemble <range> <subject>) — CI's release-note check and release.sh's reader"
+run = "scripts/release-notes.sh"
 
 [tasks.release-reminder]
 description = "post-merge: list unreleased feat/fix commits on main and the release ritual's steps"

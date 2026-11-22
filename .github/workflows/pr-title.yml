@@ -1,8 +1,14 @@
-# A PR lands as ONE squash commit whose subject is the PR title, and
-# scripts/release.sh reads those subjects to choose the next version — so the
-# title is held to the same grammar the commit-msg hook holds a commit to.
-# Its own workflow so that editing a title re-runs this, not the macOS gate.
-name: PR title
+# What a PR SAYS, as opposed to what it changes (ci.yml):
+#   conventional-title — a PR lands as ONE squash commit whose subject is the
+#     PR title, and scripts/release.sh reads those subjects to choose the
+#     next version, so the title is held to the commit-msg hook's grammar.
+#   release-note — the description carries "## Release note" (entries or
+#     `none`), which release.sh collects into the release notes. Notes used
+#     to be appended to .release-notes/next.md on the branch, and every PR
+#     editing that one file conflicted with every other open PR.
+# Its own workflow so that editing a title or a description (`edited`)
+# re-runs these, not the macOS gate.
+name: PR title and release note
 
 on:
   pull_request:
@@ -45,3 +51,28 @@ jobs:
               ;;
           esac
           cog verify "$PR_TITLE"
+
+  release-note:
+    name: release-note
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The same grammar release.sh reads, in plain bash (no mise needed).
+      # The description arrives through the environment, never interpolated:
+      # it is attacker-controlled text. Dependabot's bumps are `chore`s that
+      # cut no release, and their description is Dependabot's to write; the
+      # author login is a GitHub-controlled value.
+      - name: scripts/release-notes.sh check
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          if [ "$PR_AUTHOR" = "dependabot[bot]" ]; then
+              echo "A Dependabot bump: no release note needed."
+              exit 0
+          fi
+          printf '%s' "$PR_BODY" | scripts/release-notes.sh check

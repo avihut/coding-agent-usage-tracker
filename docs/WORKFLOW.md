@@ -83,13 +83,15 @@ lists the full catalog, including the AX verification pair
   that aren't Swift source: token-shaped strings, signing identities,
   package/crate dependencies, the §10 HOST ALLOWLIST (every host `Sources`
   and `tui/src` name — a new host is a §10 amendment first, then a line
-  there), script↔mise-task pairing. The app scripts are zsh, which
+  there), script↔mise-task pairing, and every check the merge ruleset
+  record requires being a job some workflow defines (a required check
+  nothing reports blocks every PR forever). The app scripts are zsh, which
   shellcheck cannot read (SC1071): `lint-shell` gives them `zsh -n` and
   shellcheck the hook scripts, which are bash for that reason (and
   3.2-safe — macOS's own: no apostrophe inside a `${VAR:?message}`, 3.2
   reads it as an unterminated quote — `test-hooks` caught that one).
   THE HOOK SCRIPTS HAVE TESTS: `scripts/test-hooks.sh` (`mise run
-  test-hooks`, 71 checks, in pre-push and the merge gate) drives every
+  test-hooks`, 157 checks, in pre-push and the merge gate) drives every
   script through its pass AND refusal paths in a throwaway repo under
   `.build/` — a new hook script or rule lands with its cases there. MERGE
   (squash-first since 2026-09-20): `daft.merge.style = squash` — a git
@@ -160,18 +162,91 @@ lists the full catalog, including the AX verification pair
   coupled the release to the merge's INPUT, so a squash had to be named
   `release: vX.Y.Z` and the branch's tag stayed behind on a commit that
   never landed.
-  A branch instead writes `.release-notes/next.md` — prose, gated like any
-  other file, because the annotation IS the GitHub release notes and a list
-  of commit subjects is a visible downgrade. On merge, daft's post-merge
-  `release` job (`mise run release`, scripts/release.sh) reads the
-  conventional commits since the last tag (minor for `feat`, patch for
-  `fix`, nothing otherwise; pre-1.0 a `!` is a minor, never an automatic
-  1.0.0), stamps `AppIdentity.version` — the ONE version source, Info.plist
-  is stamped from it — commits `release: vX.Y.Z` with those notes, spends
-  the fragment in the same commit, and annotates the tag (the fragment's
-  FIRST LINE is the tag's subject; the template's HTML comment is stripped —
-  v0.102.0's annotation was cut with that comment as its subject and had to
-  be re-annotated by hand before the tag was pushed). It is idempotent:
+  RELEASE NOTES COME FROM PR DESCRIPTIONS (user-directed 2026-11-22). Every
+  PR used to append its note to `.release-notes/next.md`, so every merge
+  conflicted with every other open PR (#37 twice, #40, #42 three times). A
+  PR now describes its user-visible change in its DESCRIPTION, under
+  `## Release note`: one paragraph per entry, starting `Fixes:` or
+  `New:`/`Features:` (repeat the label for another entry, or put bullets —
+  `- `, `1. `, tight or loose — under a bare label), or the word `none`.
+  In the middle of a paragraph a label counts only as written, capitalised:
+  prose wrapped onto "new: …" stays prose. The note ends at the first
+  paragraph without a label, so a signature after it stays out. HTML
+  comments are not text, except inside a code span. The
+  grammar lives in ONE place, `scripts/release-notes.sh` (`mise run
+  release-notes`), read both by CI's `release-note` check (`pr-title.yml`,
+  re-run on every description edit; Dependabot's bumps exempt) and by
+  release.sh, so a description the check passes is one the release can
+  read. It is plain bash, `read` and `case` globs: the check runs on
+  Ubuntu's mawk and glibc, test-hooks only ever on a Mac. Two bash traps it
+  steps around: letter RANGES (bash 3.2 under UTF-8 reads `[A-Z]` in
+  collation order, so "n" is in it — letters are spelled out), and
+  character-at-a-time trimming (an outsider's 65 000-space line took
+  minutes — input is squeezed by `tr` first).
+  `next.md` is the MAINTAINER's file — the tag's title (its first line) and
+  any prose written by hand — and no PR edits it. Commit it on main before
+  the release is cut (no PR touches it); preview with `mise run
+  release -- --dry-run`, which writes nothing and so runs anywhere, off main
+  and with next.md still uncommitted, and prints the notes.
+  On merge, daft's post-merge `release` job (`mise run release`,
+  scripts/release.sh) reads the conventional commits since the last tag
+  (minor for `feat`, patch for `fix`, nothing otherwise; pre-1.0 a `!` is a
+  minor, never an automatic 1.0.0), stamps `AppIdentity.version` — the ONE
+  version source, Info.plist is stamped from it — assembles the notes,
+  commits `release: vX.Y.Z` with them, resets next.md to its header in the
+  same commit, and annotates the tag. THE ASSEMBLY: next.md with every
+  merged PR's entries appended under its `Fixes` / `Features` headings — its
+  own entries first, then the PRs' in merge order; a heading it lacks is
+  added, Fixes then Features; any other heading ("## Upgrading") ends the
+  section above it, so entries never land after its text — each entry a
+  `- ` bullet wrapped at 76 columns, a first word in plain lower case
+  capitalised (never a name: "macOS", "usage-cli"), otherwise verbatim.
+  Markdown headings survive into the tag: it is cut with
+  `--cleanup=whitespace`, since git's default strip deletes every line
+  that starts with `#`. The FIRST LINE is the tag's subject — unless next.md
+  starts with a section, and then it has none — and the header's HTML
+  comment is stripped (v0.102.0's
+  annotation was cut with that comment as its subject and had to be
+  re-annotated by hand before the tag was pushed). No title → the subject
+  is `vX.Y.Z`; nothing written and nothing collected → the list of
+  subjects. To title a release the hook already cut, BEFORE pushing: `git
+  tag -d vX.Y.Z && git reset --hard HEAD~1`, commit the title in next.md,
+  `mise run release` (a pushed tag never moves).
+  WHERE A NOTE IS READ: a subject ending `(#N)` is PR N, and its note is its
+  DESCRIPTION AS IT STOOD AT THE MERGE — the text CI's check passed and the
+  merger saw. That is the live description (GitHub's GraphQL API through
+  `gh`: `body`, `lastEditedAt`, `mergedAt`), unless it was edited AFTER the
+  merge: a description stays editable, and a later edit would reach the tag
+  unreviewed, so then the copy in the squash commit wins, flagged. That copy
+  (the repo's squash-merge message is "pull request body"; read 2026-11-22)
+  is NOT simply the merged text: GitHub fixes the message when the merge is
+  set up, which for auto-merge is when it is ARMED — #42's squash body is a
+  revision two edits older than the description that merged, without its
+  note. So it is the fallback, never the source: when GitHub can't be asked
+  it stands in, flagged; a squash copy that differs from the description is
+  named. A merged note is therefore reworded in the ANNOTATION, before
+  pushing: `git tag -f -a vX.Y.Z` opens it in the editor, the tag stays on
+  the release commit (release-check holds it). A local `daft merge -F` must
+  end its subject in `(#N)`, or the PR is never looked up. Every PR costs
+  one `gh` call; when gh fails, a feat/fix with no usable squash copy
+  REFUSES the release, anything else (Dependabot's chore bumps) only warns.
+  A subject ending in an ISSUE's number falls back to the commit message; a
+  commit with no PR contributes a `Release note — Fixes: …` paragraph of its
+  own message. A feat/fix PR with no section only warns (every PR before
+  2026-11-22 is one: their entries are next.md's own); a malformed note
+  REFUSES the release — fix the description (`gh pr edit N`), then `mise run
+  release`; post-merge only warns, so the merge stands. A PR that also
+  edited next.md is named, since its entry may then ship twice (outside PR
+  #22 still carries such an edit — drop it before merging).
+  `RELEASE_NOTES_PRS=<json>` stands in for gh, which is how test-hooks
+  covers all of it offline, behind a gh stub that fails. THE VERSION BUMP
+  READS SUBJECTS ONLY (on main, each is a PR title or the commit itself) —
+  bodies are whole descriptions, and a note line "fix: …" is no commit
+  type; only `BREAKING CHANGE` is a body's to declare. And through
+  here-strings: `printf … | grep -q` under pipefail fails on the SIGPIPE
+  grep -q leaves behind once the text outgrows the pipe — v0.103.0..main
+  (114 KB, found
+  2026-11-22) read as "nothing releasable". It is idempotent:
   a tip that is already `release: vX.Y.Z` only gets its missing tag, which
   is how a branch cut under the OLD ritual still lands correctly.
   IT NEVER PUSHES. Reading the release and then (1) `git push origin main
@@ -181,7 +256,10 @@ lists the full catalog, including the AX verification pair
   (pre-push) is the backstop if the hook ever leaves a release half made
   (post-merge warns, never rolls back). Tags and commits GPG-sign by config,
   so a locked agent makes the job warn rather than release; `mise run
-  release` by hand finishes it.
+  release` by hand finishes it — a failed tag through the already-a-
+  release-commit path, a failed COMMIT because release.sh puts back the two
+  files it staged (before 2026-11-22 they stayed staged, and the rerun
+  refused the dirty tree).
 
 ## Signing
 
@@ -432,11 +510,12 @@ newer version is tagged, and the way to get it is another `mise run dist`.
   origin main vX.Y.Z` keeps working. A PR LANDS by GitHub's squash button
   (the contributor gets a merged PR; a local `daft merge` would leave it
   "closed"), its TITLE is the commit subject (`pr-title.yml`'s `conventional-title`
-  check holds it to `cog verify` and refuses `release:`), then on main: `git pull`, `mise run
-  release`, push, publish. release.sh wants a CLEAN worktree and, with no
-  fragment, annotates with the merged subjects — so for prose notes, push
-  `.release-notes/next.md` onto the PR branch BEFORE merging (maintainer
-  edits are allowed on fork PRs), never as a dirty file on main.
+  check holds it to `cog verify` and refuses `release:`) and its
+  DESCRIPTION's `## Release note` its entry in the release notes (the
+  `release-note` check), then on main: `git pull`, `mise run release`,
+  push, publish. release.sh wants a CLEAN worktree: a title for the
+  release is a commit of `.release-notes/next.md` on main first (the
+  release ritual above), never a dirty file.
 - The app icon (the "cursor fuel" mark — mint prompt chevron, block cursor
   charged yellow→orange to the budget left) has NO checked-in asset:
   `scripts/icon.swift` draws it in CoreGraphics (512-pt design space mapped

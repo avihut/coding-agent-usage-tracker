@@ -1,5 +1,9 @@
 <!-- What shipped, in prose. This becomes the annotation of the next
      release tag, which publish.sh ships as the GitHub release notes.
+     THE MAINTAINER'S FILE: pull requests never edit it. A change describes
+     itself under "## Release note" in its PR description, and
+     scripts/release.sh adds every merged PR's entries under the headings
+     here (Fixes, Features) when it cuts the release (docs/WORKFLOW.md).
      The FIRST LINE is the tag's subject: make it a short title, then a
      blank line. This comment is stripped. -->
 Claude's plans by their new names
