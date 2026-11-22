@@ -21,7 +21,8 @@ public struct AgentQuotaCommand: Sendable {
     public let environment: [String: String]
     /// Past this a run — the version check too — is killed with its process
     /// group. A safety net against a hung tool, sized far above any run on
-    /// a busy Mac; hitting it is a TRANSIENT failure (retried at the floor).
+    /// a busy Mac; hitting it is a TRANSIENT failure: shown, but it neither
+    /// adds to nor clears the failure backoff (`AgentQuotaProbe.record`).
     public let timeout: TimeInterval
     /// The least time between two attempts; never below `minimumFloor`.
     public let floor: TimeInterval

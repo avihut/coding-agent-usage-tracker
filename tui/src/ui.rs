@@ -2797,7 +2797,12 @@ mod tests {
                 })
                 .unwrap_or_else(|| panic!("{code}: {text:?} not on screen"));
             assert_eq!(buffer[cell].symbol(), first.to_string());
-            assert_eq!(buffer[cell].fg, tone, "{code}");
+            // `style` drops colour under NO_COLOR; compare what it gives.
+            assert_eq!(
+                buffer[cell].fg,
+                style(tone).fg.unwrap_or(Color::Reset),
+                "{code}"
+            );
         }
     }
 

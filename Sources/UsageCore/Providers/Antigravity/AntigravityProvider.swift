@@ -76,7 +76,7 @@ public struct AntigravityProvider: UsageProvider {
     /// `--log-file /dev/null` and the documented
     /// update switch keep a run from writing a log or checking for an update
     /// (measured: what's left is three mtime stamps). 120 s is a safety net
-    /// against a hung run, not a budget: unclamped, a run took 2–3 s even
+    /// against a hung run, not a budget: unclamped, a run took about 3–3.5 s
     /// with every core saturated (docs/plans/antigravity-probe-under-load.md).
     public var quotaCommand: AgentQuotaCommand? {
         AgentQuotaCommand(

@@ -196,11 +196,14 @@ requires extra work from the user to start metering antigravity" —
   after two minutes if it hangs (with anything it started), and backing off
   to two hours when it fails — your clicking refresh skips that backoff,
   never the ten minutes. A run that merely didn't finish in time (a busy
-  Mac) isn't treated as a failure: it's tried again at the next ten-minute
-  mark, never sooner. It runs at the same priority as your agents: below
-  that, on a Mac whose every core is busy, a two-second run took longer
-  than it was given (corrected 2026-11-22; it was stopped after 30 seconds,
-  10 for the version check, and every timeout backed off). It runs only
+  Mac) is shown as "slow to answer", but it doesn't add to that backoff:
+  after such runs alone it's tried again at the next ten-minute mark,
+  never sooner (an earlier real failure's wait still stands). It runs at
+  the same priority as your agents: below that, on a Mac whose every core
+  is busy, the version check — a fraction of a second normally — took
+  longer than the 10 seconds it was given (corrected 2026-11-22; it was
+  stopped after 30 seconds, 10 for the version check, and every timeout
+  backed off). It runs only
   in the process that runs the meters (the background daemon, or the app
   when no daemon is running). A Mac that doesn't use Antigravity never runs
   it. Each run takes about two seconds and half a second of CPU — about

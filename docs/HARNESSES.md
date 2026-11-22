@@ -126,7 +126,8 @@ installed, Antigravity shows tokens without limits, and a harness with no
 limits to show never takes the bar's lead unless you pin it; if it can't
 be read (not signed in, say), the last limits stay, greyed, with the
 reason. A run that doesn't finish in time — on a busy Mac — reads "slow to
-answer — asking again soon" and is simply tried again ten minutes later.
+answer — asking again soon", and unlike a failure it doesn't push the next
+try further out.
 What that run does on your Mac is in [PRIVACY.md](PRIVACY.md).
 **Gemini CLI** is labelled deprecated: Antigravity
 succeeds it for Google's plans, and it stays metered for API-key use.
@@ -524,9 +525,10 @@ succeeds it for Google's plans, and it stays metered for API-key use.
   REAL failures (a manual refresh skips it, never the floor), single
   flight. A TIMEOUT is transient (2026-11-22): shown, the attempt stamped,
   but `consecutiveFailures` left exactly as it was, so a run of timeouts
-  retries at the floor (`AgentQuotaProbe.record`); every run — the version
-  check too — gets the command's own 120 s, a safety net against a hung
-  CLI, not a latency budget (`docs/plans/antigravity-probe-under-load.md`); the state file is
+  retries at the floor while an earlier real failure's backoff still
+  stands (`AgentQuotaProbe.record`); every run — the version check too —
+  gets the command's own 120 s, a safety net against a hung CLI, not a
+  latency budget (`docs/plans/antigravity-probe-under-load.md`); the state file is
   stamped before the first spawn and re-read before every decision, and a
   shut-down engine's probe (`retire()`) neither runs nor writes again. `SpawnedCommandRunner` is
   `posix_spawn` with CLOEXEC_DEFAULT (no host fd reaches the child —
@@ -547,8 +549,8 @@ succeeds it for Google's plans, and it stays metered for API-key use.
   candidate inside an `.app` (the desktop editor's same-named launcher) or
   whose `--version` doesn't end on a version line is never asked; no
   `PATH` lookup. A version check settles per file identity, except one
-  that times out: an attempt (the floor, a shown failure, no backoff),
-  retried.
+  that times out: an attempt (the floor, a shown failure, nothing added
+  to the backoff), retried.
   REFUSAL: a run that reads as an agent turn (`num_turns`, tokens, or a
   `conversation_id`) — or a success with no command result that can't say
   no turn ran — is `notALimitsCommand`: that binary is never asked again

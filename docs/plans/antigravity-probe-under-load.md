@@ -18,8 +18,8 @@ Antigravity is in use):
 | Term | Was | Becomes | Why (measured below) |
 | --- | --- | --- | --- |
 | the child's priority | "utility QoS" | no QoS clamp: the child runs at the default priority (31), like anything the person starts | utility (priority 20) took `--version` to 10.4 s and `/quota` to 14.3 s on saturated cores; unclamped, under 0.8 s and 3.1 s |
-| the kill | "at 30 s" (`--version`: 10 s) | 120 s for both runs | a safety net against a hung child, not a latency budget: ~40× the worst unclamped run |
-| a timeout | backs off like every failure (20 → 120 min) | retries at the 10-minute floor; only real failures back off | a busy Mac is transient; the backoff was meant for "signed out", "unreadable" |
+| the kill | "at 30 s" (`--version`: 10 s) | 120 s for both runs | a safety net against a hung child, not a latency budget: ~35× the worst single unclamped run measured, ~11× the slowest whole after-fix attempt (two runs, load ~970) |
+| a timeout | backs off like every failure (20 → 120 min) | neither adds to nor clears the backoff: timeouts alone retry at the 10-minute floor; real failures still double | a busy Mac is transient; the backoff was meant for "signed out", "unreadable" |
 
 ## What was measured (2026-11-22, 07:03–07:35 UTC, this Mac: 10 cores)
 
@@ -104,8 +104,11 @@ utility child crosses the 10 s version kill at 40–80 busy loops (10.40,
 2. **Timeouts: 120 s, one safety net for both runs.** `AgentQuotaProbe
    .versionTimeout` (10 s) goes; the version check uses the command's own
    `timeout`, which the provider sets to 120 (was 30). Worst unclamped run
-   measured: 3.06 s (`/quota`, 40 loops), 2.93 s (cold `--version`) — ~40×
-   headroom; ~8× even over the worst utility run. Not sized for a
+   measured before the build: 3.06 s (`/quota`, 40 loops), 2.93 s (cold
+   `--version`) — ~40× headroom; ~8× even over the worst utility run.
+   (After the build, the end-to-end `/quota` attempt took 3.49 s and the
+   slowest whole after-fix attempt — a cold version check plus a second
+   run, 80 loops, during a load spike to ~970 — 10.94 s: still ~11×.) Not sized for a
    background-clamped host (215 s cold): no host may be one (#42; CLAUDE.md
    never-again).
 3. **A timeout is transient.** Either stage timing out records

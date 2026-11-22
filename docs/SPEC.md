@@ -548,11 +548,15 @@ Non-negotiable; flag rather than work around:
       leaves in that group killed when it exits), backing off to 2 hours
       after failures — a manual refresh skips the backoff, never the
       floor. A TIMEOUT is not such a failure: it is shown and counts as the
-      attempt, and the next one waits the floor alone. (Corrected
-      2026-11-22, measured: the kill was 30 s, and 10 s for the version
-      check, and a timeout backed off like a refusal; on a saturated Mac
-      that kept the limits from ever arriving. The floor is unchanged.) A
-      Mac that doesn't use Antigravity runs nothing.
+      attempt, but neither adds to nor clears the backoff — after timeouts
+      alone the next attempt waits only the floor; a real failure's backoff
+      still stands. (Corrected 2026-11-22, measured: the kill was 30 s, and
+      10 s for the version check, and every timeout backed off like a
+      refusal; the limits had not arrived when this was reported — most
+      likely under the pre-#42 Background host, whose priority 4 every child
+      inherits — and with every core busy today's host also crossed the
+      10 s kill. The floor is unchanged.) A Mac that doesn't use
+      Antigravity runs nothing.
     - What the VENDOR'S process writes inside its own home, measured (the
       superset of every run): mtime stamps on `cache/onboarding.json`,
       `conversation_summaries.db` and `crashes/` (and so on the folders

@@ -316,11 +316,28 @@ about 20 coding agents at once, load averages of 200–380 on 10 cores.
   `EngineWork.startup` (user-initiated) — bounded, once per start, and
   the step a person is waiting on. At load 294 it took 0.72 s there
   against 52.7 s at utility, in two agents started side by side.
+
+  MEASURED AFTER (same method, the 0.10x binary beside this one, load
+  median 398 plus a busy loop per core, 7 minutes):
+
+  | build · ProcessType | → `main()` | first publish (cached meters) | activity on screen | full Claude scan | max heartbeat gap | socket answers |
+  |---|---|---|---|---|---|---|
+  | 0.10x · Background | not in 7 min | none | none | none | — | 0 of 417 |
+  | this · Background | not in 7 min | none | none | none | — | 0 of 417 |
+  | this · Interactive | 0.7 s | 1.1 s | 1.9 s (cached pass at user-initiated, load 294) | 97 s | 2 s | 415 of 417, max 0.12 s |
+
+  The code alone does nothing for a job launchd won't run: a Background
+  job didn't reach `main()` at all. The full scan still takes a minute and
+  a half at that load — it re-validates 3,832 sessions at utility, beneath
+  the agents, by design — but nothing waits for it any more.
 - A CHILD THE HOST SPAWNS (2026-11-22; plan and raw rows in
   `docs/plans/antigravity-probe-under-load.md`). The quota probe's `agy`
-  never read on the person's Mac: its `--version` ran into the 10 s kill.
-  Two clamps, both measured with the child's priority read by `ps`. (1) A host under the darwin background
-  policy — the pre-#42 Background daemon — hands it to every child,
+  had not read when the person reported it: its `--version` had run into
+  the 10 s kill — most likely under the pre-#42 Background host (clamp 1
+  below) — and with every core busy today's host crossed it too (clamp 2).
+  Two clamps, both measured with the child's priority read by `ps`. (1) A
+  host under the darwin background policy — the pre-#42 Background daemon
+  — hands it to every child,
   whatever the spawn asks: priority 4, a cold start of the 229 MB binary
   214.8 s. (2) The runner's own utility clamp (priority 20) under CPU
   saturation — default-priority busy loops on all 10 cores, 0% idle:
@@ -337,22 +354,9 @@ about 20 coding agents at once, load averages of 200–380 on 10 cores.
   same CPU either way (0.1–0.5 s a run) — the difference is waiting. So the
   child runs UNCLAMPED (`EngineWork.agentCommandQoS`; that call accepts only
   utility and background, so it's simply not made, and SwiftLint holds
-  that), every run gets a 120 s safety net, and a timeout retries at the
-  probe's 10-minute floor instead of backing off (HARNESSES.md).
-
-  MEASURED AFTER (same method, the 0.10x binary beside this one, load
-  median 398 plus a busy loop per core, 7 minutes):
-
-  | build · ProcessType | → `main()` | first publish (cached meters) | activity on screen | full Claude scan | max heartbeat gap | socket answers |
-  |---|---|---|---|---|---|---|
-  | 0.10x · Background | not in 7 min | none | none | none | — | 0 of 417 |
-  | this · Background | not in 7 min | none | none | none | — | 0 of 417 |
-  | this · Interactive | 0.7 s | 1.1 s | 1.9 s (cached pass at user-initiated, load 294) | 97 s | 2 s | 415 of 417, max 0.12 s |
-
-  The code alone does nothing for a job launchd won't run: a Background
-  job didn't reach `main()` at all. The full scan still takes a minute and
-  a half at that load — it re-validates 3,832 sessions at utility, beneath
-  the agents, by design — but nothing waits for it any more.
+  that), every run gets a 120 s safety net, and a timeout adds nothing to
+  the failure backoff — timeouts alone retry at the probe's 10-minute floor
+  (HARNESSES.md).
 - PLIST MIGRATION. `kickstart -k` does NOT pick up an edited
   `ProcessType` (checked on a throwaway label: still priority 4 after the
   edit; 31 after bootout + bootstrap), so an existing install is RELOADED.

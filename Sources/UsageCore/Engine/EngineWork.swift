@@ -25,7 +25,7 @@ public enum EngineWork {
     /// parse). Once per engine start, and short; the full re-validation that
     /// follows it is `heavy`.
     public static let startup: TaskPriority = .userInitiated
-    /// An agent's own tool the host spawns (the quota probe's `agy`) runs
+    /// An agent's own tool the host spawns (the quota probe's child) runs
     /// UNCLAMPED: no QoS attribute, so default priority (31), like the
     /// agents and anything the person starts — and this is the thread that
     /// watches it. Measured 2026-11-22 with every core saturated: a
