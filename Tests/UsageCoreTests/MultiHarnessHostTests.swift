@@ -333,6 +333,59 @@ struct MultiHarnessHostTests {
         #expect(await runner.quotaRuns.count == 1)
     }
 
+    /// 2026-11-22: the probe's kill is now a 120 s safety net, and the
+    /// engine awaits the run inside its refresh — so a slow run must leave
+    /// what is already known on screen the whole time, never a blank or a
+    /// loading shell.
+    @Test("a slow probe run leaves the last limits on screen while it runs")
+    func slowProbeKeepsWhatIsKnown() async throws {
+        let fixture = try Fixture()
+        defer { fixture.tearDown() }
+        try fixture.antigravityConversation(daysAgo: 0.1)
+        try FileManager.default.createDirectory(
+            at: fixture.agyBinary.deletingLastPathComponent(), withIntermediateDirectories: true)
+        FileManager.default.createFile(
+            atPath: fixture.agyBinary.path, contents: Data("#!/bin/sh\n".utf8),
+            attributes: [.posixPermissions: 0o755])
+        let reset = AntigravityFixture.stamp(Date().addingTimeInterval(86400))
+        let output = AntigravityQuotaFixture.output([
+            AntigravityQuotaFixture.bucket("gemini-weekly", window: "weekly", remaining: 0.6, reset: reset),
+        ])
+        let first = fixture.makeHost([fixture.antigravity], runner: FakeAgentRunner(quota: .exited(stdout: output)))
+        first.start()
+        let read = await eventually { first.engines["antigravity"]?.state.snapshot?.meters.count == 1 }
+        #expect(read)
+        first.shutdown()
+
+        // The next launch, with the probe due again (an attempt an hour ago,
+        // a conversation written since) and a CLI that takes its time.
+        let stateURL = StorageScope.supportDirectory(
+            bundleID: "com.test.harnesses", providerID: "antigravity", profileID: "default",
+            roots: fixture.roots).appending(path: AgentQuotaProbe.stateFileName)
+        var state = try #require(AgentQuotaProbeState.load(from: stateURL))
+        state.lastAttemptAt = Date().addingTimeInterval(-3600)
+        state.save(to: stateURL)
+        try fixture.antigravityConversation(daysAgo: 0)
+        let slow = FakeAgentRunner(quota: .exited(stdout: output))
+        await slow.set(delay: .seconds(2))
+        let second = fixture.makeHost([fixture.antigravity], runner: slow)
+        second.start()
+        defer { second.shutdown() }
+        let deadline = Date().addingTimeInterval(4)
+        while await slow.quotaRuns.isEmpty, Date() < deadline {
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        #expect(await slow.quotaRuns.count == 1)
+        let engine = try #require(second.engines["antigravity"])
+        #expect(engine.isRefreshing)
+        #expect(engine.state.snapshot?.meters.count == 1)
+        #expect(second.digest?.meters.count == 1)
+        let landed = await eventually(6) { !engine.isRefreshing }
+        #expect(landed)
+        #expect(engine.state.error == nil)
+        #expect(engine.state.snapshot?.meters.count == 1)
+    }
+
     /// The next launch (or a host taking over) must not lead with the
     /// meterless harness even for the moment before its first read: focus
     /// answers from the cached last fetch, synchronously, at start.
