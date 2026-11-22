@@ -36,7 +36,7 @@ math changes.
 
 `--old-codex` publishes Codex on an OLD limits reading (`ReadingAge`): the
 reported shape — Pro Lite, weekly 75%, read three and a half days ago, the
-5 h session rolled since — with `asOf` set, no forecast, its cell stale.
+5 h session rolled since — with `asOf` set (its cell too), no forecast.
 `--focus-codex` focuses Codex instead of Claude Code. Both opt-in and drawn
 last, so every other output keeps its bytes.
 
@@ -553,7 +553,11 @@ def make_old_codex(now, rng, state, codex):
         "planSubscriptionType": "prolite"})
     for cell in state["menuBarCells"]:
         if cell["profile"] == codex["id"]:
-            cell.update({"segments": menu_bar, "stale": True})
+            # `stale` keeps its meaning (cache-served or errored); the cell
+            # says its age beside it, as the composer writes it.
+            cell.update({"segments": menu_bar, "stale": False,
+                         "asOf": codex["engine"]["asOf"],
+                         "asOfCaption": codex["engine"]["asOfCaption"]})
             cell.pop("worstSeverity", None)
 
 
