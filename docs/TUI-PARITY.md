@@ -288,9 +288,11 @@ gives each stack band its own density glyph.
     meter row, but the column is fixed-width and a per-row suffix clipped
     (deliberate). The Stale branch prints the caption too when present,
     instead of a bare clock that read a three-day-old cache as today.
-    `--status` builds its blocks from cells: an OLD cell's digits are
-    unpainted and marker-free (a level from days ago is no alarm), and its
-    block ends in the caption, looked up in the cell's own section. No
+    `--status` builds its blocks from cells: an OLD cell (`as_of`) has
+    unpainted, marker-free digits (a level from days ago is no alarm) and
+    its own caption right after its last digit, so a block of several
+    accounts says whose stamp it is. A backoff or a busy host over an old
+    reading still greys the limits, and the strip still says its age. No
     forecast is drawn because the digest carries none.
 
 35. [S][✓] Busy ≠ offline, scanning ≠ zero (2026-11-21, with the app's

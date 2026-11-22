@@ -128,13 +128,18 @@ Contents, by section:
   the rule at publish, whatever the engine still holds. Absent = current,
   or a writer that predates it. Independent of `stale` (cache-served or
   errored), which keeps its meaning and every exit code built on it.
-  `menuBarCells[].stale` WIDENS to cache-served, errored OR old: the bar's
-  "not current" bit, so an older face greys an old cell too. A reader sees
-  the flip at the next publish (every poll; at most the decayed cadence's
-  1 h, 2 h at the slowest pace) — no timer republishes at the horizon; the
-  app's own faces apply the rule at read time. Third golden:
-  `live-state-v1-old-reading.json` (Claude fresh, Codex old), decoded by
-  Swift and Rust.
+  `menuBarCells[]` carry the same pair, ADDITIVE, beside a `stale` that
+  keeps its meaning (review, 2026-11-22: widening `stale` would have
+  changed what an existing field says to every reader that knew it); a
+  face draws the stale treatment for either, and an old cell may still
+  count down to a SPENT window's reset. The COMPOSER re-phrases every
+  caption at the file's own `now` (`EngineStatus.rephrasingAsOf`), so a
+  same-day "as of 17:00" can't outlive midnight by more than one host
+  publish. A reader sees `asOf` itself appear at the engine's next publish
+  (every poll; at most the decayed cadence's 1 h, 2 h at the slowest pace)
+  — no timer republishes at the horizon; the app's own faces apply the
+  rule at read time. Third golden: `live-state-v1-old-reading.json`
+  (Claude fresh, Codex old), decoded by Swift and Rust.
 - `models[]` — today's models, heaviest first: id, display name, ledger
   color (ModelColorMath — same math as the app's palette), tally, cost
   (null = unpriced).

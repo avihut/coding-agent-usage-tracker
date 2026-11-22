@@ -23,8 +23,15 @@ per-harness geometry of the bar is in [HARNESSES.md](HARNESSES.md).
   critical). Stale stays grey and ornament-free — and since 2026-11-22
   "stale" covers an OLD reading too (`ReadingAge`, MEASUREMENT.md →
   Predictions): `state.isStale || state.asOf(at:) != nil` in the
-  one-account path, the widened `MenuBarCell.stale` in the cells path; an
-  all-old harness greys its mark as an all-stale one does. The panel says
+  one-account path; in the cells path the cell's own `asOf` OR this face's
+  store (`readingAsOf`, so the bar never trails the panel by an engine's
+  idle hour), and an old cell sheds what only a forecast says
+  (`MenuBarSegment.withoutForecast` — a client can be reading an older
+  daemon). An all-old harness greys its mark as an all-stale one does.
+  `StatusItemRenderer.Cell.old` keeps one thing alive on an old cell: a
+  SPENT window's countdown to its reset (core's `menuBarCountdowns(…,
+  cached:old:)`) — a locked-out account writes no new reading, so its
+  reading ages through the very lockout it is counting down. The panel says
   "as of Wed 20:13" in the status row (orange "cached …" still wins), on
   every meter row and strip row, beside the popover's meter name and after
   the plan ("Pro Lite plan · as of …", via `UsageStore.planLabel`); the

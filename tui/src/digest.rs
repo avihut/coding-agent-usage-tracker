@@ -258,12 +258,17 @@ pub struct MenuBarCell {
     pub accent: Option<Rgb>,
     pub monogram: String,
     pub segments: Vec<SegmentStatus>,
-    /// Not current: cache-served, errored, or (since 2026-11-22) an OLD
-    /// reading — the bar's grey, ornament-free treatment for all three.
+    /// Cache-served or errored — the section's `engine.stale`.
     pub stale: bool,
     #[serde(default)]
     pub worst_severity: Option<f64>,
     pub indicator: bool,
+    /// The section's `engine.as_of` / `as_of_caption` (2026-11-22,
+    /// additive): present only while its limits reading is OLD.
+    #[serde(with = "time::serde::rfc3339::option", default)]
+    pub as_of: Option<OffsetDateTime>,
+    #[serde(default)]
+    pub as_of_caption: Option<String>,
 }
 
 /// Mirror of `OutageSpan`: one incident as a span. `end` is `None` while
@@ -1554,11 +1559,26 @@ mod wave4_tests {
         assert!(!engine.stale);
         let meters = codex.meters.as_ref().expect("meters");
         assert!(meters.iter().all(|meter| meter.forecast.is_none()));
+        // The cell carries the reading's age beside `stale`, which keeps its
+        // meaning (cache-served or errored).
         let cells = state.menu_bar_cells.as_ref().expect("cells");
-        let stale: Vec<_> = cells
+        let read: Vec<_> = cells
             .iter()
-            .map(|cell| (cell.profile.as_str(), cell.stale))
+            .map(|cell| {
+                (
+                    cell.profile.as_str(),
+                    cell.stale,
+                    cell.as_of_caption.as_deref(),
+                )
+            })
             .collect();
-        assert_eq!(stale, vec![("default", false), ("codex", true)]);
+        assert_eq!(
+            read,
+            vec![
+                ("default", false, None),
+                ("codex", false, Some("as of Wed 20:13"))
+            ]
+        );
+        assert_eq!(cells[1].as_of, engine.as_of);
     }
 }

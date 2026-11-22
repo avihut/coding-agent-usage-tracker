@@ -251,13 +251,17 @@ Mac its view IS that account's, so 28 applies there too.
   " stale") and its `--json` gains `asOf`, `accounts`' human `updated`
   column reads it in place of "N ago". Fields: `status as-of`, `limit <sel>
   as-of` (a date; empty/null while current; `--relative` prints the
-  caption). Spend, cost and activity lines never carry it — that data is
-  the fresh scan. NO EXIT CODE MOVES: `stale`, `status --check`,
-  `--max-age` and `--max-data-age` all keep their meaning. ONE BEHAVIOUR
-  CHANGE to know: an old reading has no forecast, and `headroom --forecast`
-  passes a meter with none, so a call that refused (25) on an old reading's
-  red forecast now answers 0 — pass `--max-data-age` (21 for it, as it
-  always was) when the numbers must be fresh.
+  caption). `spend` carries it too — the spend line rides the limits fetch
+  (`snapshot.spendLine`). Cost and activity lines never do: that data is
+  the transcript scan. NO EXIT CODE CHANGES MEANING: `stale`, `status
+  --check`, `--max-age` and `--max-data-age` all keep theirs. HEADROOM
+  STAYS FAIL-CLOSED (review, 2026-11-22): an old reading carries no
+  forecast, and a meter with no forecast passes the `--forecast` gate — so
+  `headroom --forecast` over an OLD reading answers `stale` (21, reason
+  "the reading is as of …, too old to forecast from") instead of judging
+  meters; the call that used to refuse (25) on the old reading's red
+  forecast still refuses. Without `--forecast` only the cap is judged, as
+  ever — pass `--max-data-age` when the numbers themselves must be fresh.
 
 ## session lookups ask the engine (issue #24)
 

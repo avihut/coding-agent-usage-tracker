@@ -23,7 +23,35 @@ public struct MenuBarCountdown: Sendable, Equatable {
     }
 }
 
+extension MenuBarSegment {
+    /// The same segment without what only a FORECAST says — risk and the
+    /// crossing — which an OLD reading (`ReadingAge`) has none of. The
+    /// reset stays: a spent window still counts down to it.
+    public var withoutForecast: MenuBarSegment {
+        MenuBarSegment(tag: tag, percent: percent, level: level, resetsAt: resetsAt)
+    }
+}
+
 extension UsageFormatting {
+    /// What one CELL may count down to (2026-11-22): everything while its
+    /// reading is current; nothing while it is cache-served or errored
+    /// (`cached` — stale never alarms); and for an OLD reading
+    /// (`ReadingAge`) only a SPENT window's reset — measured, not forecast,
+    /// and the one thing a locked-out account waits on (no new reading
+    /// arrives while it is locked out, so the reading ages through the
+    /// whole lockout). The forecast is shed BEFORE `.earliest` picks, so a
+    /// crossing a stale digest still carried can't crowd the reset out.
+    public static func menuBarCountdowns(
+        _ segments: [MenuBarSegment], scope: RunsOutScope, now: Date,
+        cached: Bool, old: Bool,
+        timeZone: TimeZone = .current, locale: Locale = .current
+    ) -> [MenuBarCountdown] {
+        guard !cached else { return [] }
+        return menuBarCountdowns(
+            old ? segments.map(\.withoutForecast) : segments, scope: scope, now: now,
+            timeZone: timeZone, locale: locale)
+    }
+
     /// The countdowns a scope yields from the bar's segments, in meter
     /// order — EMPTY whenever no limit is forecast to run out before it
     /// resets and none is spent, which is the element's whole contract:

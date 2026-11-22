@@ -157,6 +157,8 @@
         "green" : 0.639,
         "red" : 0.063
       },
+      "asOf" : "2026-11-18T20:13:00Z",
+      "asOfCaption" : "as of Wed 20:13",
       "glyph" : "⬡",
       "indicator" : false,
       "monogram" : "C",
@@ -175,7 +177,7 @@
           "tag" : "W"
         }
       ],
-      "stale" : true
+      "stale" : false
     }
   ],
   "meters" : [

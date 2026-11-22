@@ -310,3 +310,12 @@ note in the PR description (`## Release note`), never `.release-notes/next.md`
   Assumed 2's fallback (day-only) wasn't needed.
 - Demo digest: `--old-codex` and `--focus-codex`, both opt-in; every other
   output is byte-identical to main's script (checked with `cmp`).
+- REVIEW ROUND (xhigh, 2026-11-22) changed two Assumed decisions:
+  - Assumed 3 → `MenuBarCell.stale` is NOT widened; cells carry additive
+    `asOf`/`asOfCaption` (the digest is additive-only, and an old cell must
+    keep a spent window's countdown, which a merged flag couldn't allow).
+  - Assumed 5 → `headroom --forecast` over an old reading answers `stale`
+    (21) instead of passing: fail-closed, as headroom is everywhere else.
+  - Also: the bar's cells path consults the face's own store; the composer
+    re-phrases captions at its own `now`; `spend` carries the as-of (it
+    rides the limits fetch); Settings → Usage says why there's no forecast.

@@ -201,12 +201,16 @@ struct LiveStateReadingAgeTests {
         #expect(recent.meters.contains { $0.forecast != nil })
     }
 
-    @Test("an old account's cell takes the bar's stale treatment")
-    func oldCellIsStale() throws {
+    /// The cell carries the reading's age BESIDE `stale`, which keeps its
+    /// meaning (cache-served or errored) for every reader that knew it.
+    @Test("an old account's cell says so, and stale keeps its meaning")
+    func oldCell() throws {
         let state = buildFixture()
         let cells = try #require(state.menuBarCells)
         #expect(cells.map(\.profile) == ["default", "codex"])
-        #expect(cells.map(\.stale) == [false, true])
+        #expect(cells.map(\.stale) == [false, false])
+        #expect(cells.map(\.asOf) == [nil, codexReadAt])
+        #expect(cells.map(\.asOfCaption) == [nil, "as of Wed 20:13"])
         let codex = try #require(state.profiles?.first { $0.id == "codex" })
         #expect(codex.engine?.asOf == codexReadAt)
         // The focused (fresh) account is what the top level projects.
@@ -240,5 +244,57 @@ struct LiveStateReadingAgeTests {
         }
         let data = try Data(contentsOf: fixtureURL)
         #expect(try LiveState.decoder().decode(LiveState.self, from: data) == state)
+    }
+
+    /// The engine phrased its caption when it published; the composer
+    /// re-phrases it at the FILE's now, so a same-day "as of 02:15" can't
+    /// outlive midnight past the next host publish.
+    @Test("the composer re-phrases an old section's caption at its own now")
+    func rephrasedAtCompose() throws {
+        let readAt = date("2026-11-22T02:15:00Z")
+        let engineState = section(
+            provider: CodexProvider(),
+            state: .live(Snapshot(meters: codexMeters, fetchedAt: readAt)), predictions: [:])
+        #expect(engineState.engine.asOfCaption == "as of 02:15")
+        let later = date("2026-11-23T00:30:00Z")
+        let composed = MeteringDigest.compose(
+            harnesses: [
+                HarnessSection(
+                    provider: CodexProvider(), recentFiles: 1, activeDays: 1,
+                    serviceStatus: nil, notices: [], outages: nil),
+            ],
+            sections: [
+                ProfileSection(
+                    profile: Profile(
+                        id: "default", providerID: "codex", home: nil, order: 0,
+                        addedAt: date("2026-09-01T09:00:00Z")),
+                    label: "Codex", monogram: "C", dormant: false,
+                    lastActivityAt: readAt, homeDisplayPath: nil, state: engineState),
+            ],
+            focused: "codex", pinned: nil, host: "daemon", pid: 909, appVersion: "0.104.0",
+            systemAccent: nil, activeInterval: 300, appUpdate: nil, nextReprobeAt: nil,
+            now: later, calendar: utc, locale: posix)
+        #expect(composed.engine.asOfCaption == "as of Sun 02:15")
+        #expect(composed.profiles?.first?.engine?.asOfCaption == "as of Sun 02:15")
+        #expect(composed.menuBarCells?.first?.asOfCaption == "as of Sun 02:15")
+        #expect(composed.engine.asOf == readAt)
+    }
+
+    /// The spend line rides the limits fetch, so it is as old as the meters.
+    @Test("an old reading's spend line says as of")
+    func spendAsOf() throws {
+        let fetched = now.addingTimeInterval(-6 * 3600)
+        let state = section(
+            provider: ClaudeProvider(),
+            state: .live(Snapshot(
+                meters: claudeMeters,
+                spendLine: SpendLine(usedMinor: 1200, limitMinor: 5000, currency: "USD", exponent: 2),
+                fetchedAt: fetched)),
+            predictions: [:])
+        let raw = try LiveState.encoder().encode(state)
+        let out = DigestQuery.run(
+            arguments: ["spend"], digest: state, rawDigest: raw, environment: [:], now: now)
+        #expect(out.exitCode == 0)
+        #expect(out.stdout.hasSuffix(" · as of 03:00"))
     }
 }

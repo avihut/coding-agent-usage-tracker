@@ -55,7 +55,7 @@ pub fn render(digest_path: &Path) -> String {
             out.push_str(&block.short_name);
             out.push(' ');
         }
-        for (index, (segment, old)) in block.segments.iter().enumerate() {
+        for (index, (segment, old, caption)) in block.segments.iter().enumerate() {
             if index > 0 {
                 out.push('·');
             }
@@ -82,13 +82,15 @@ pub fn render(digest_path: &Path) -> String {
                 out.push_str(&text);
                 out.push_str(marker(segment.severity, &segment.level));
             }
-        }
-        if let Some(caption) = &block.as_of {
-            out.push_str(&if color {
-                format!(" #[dim]{caption}#[default]")
-            } else {
-                format!(" {caption}")
-            });
+            // An old account's stamp right after its own last digit, so
+            // with several accounts in a block it names whose it is.
+            if let Some(caption) = caption {
+                out.push_str(&if color {
+                    format!(" #[dim]{caption}#[default]")
+                } else {
+                    format!(" {caption}")
+                });
+            }
         }
     }
     if state.engine.stale {
@@ -119,10 +121,9 @@ struct Block {
     glyph: String,
     short_name: String,
     accent: Rgb,
-    /// Each segment, and whether its account's reading is OLD.
-    segments: Vec<(crate::digest::SegmentStatus, bool)>,
-    /// The writer's "as of …" when an account in the block reads old.
-    as_of: Option<String>,
+    /// Each segment; whether its account's reading is OLD; and, on that
+    /// account's LAST segment only, the writer's "as of …".
+    segments: Vec<(crate::digest::SegmentStatus, bool, Option<String>)>,
 }
 
 /// The shown harnesses and their cells. A writer before harnesses (or one
@@ -130,27 +131,16 @@ struct Block {
 /// a one-harness line is unchanged.
 fn blocks(state: &LiveState) -> Vec<Block> {
     let single = || {
-        let old = state.engine.as_of.is_some();
         vec![Block {
             glyph: state.engine.glyph.clone(),
             short_name: state.engine.service_name.clone(),
             accent: state.engine.accent,
-            segments: state.menu_bar.iter().cloned().map(|s| (s, old)).collect(),
-            as_of: state.engine.as_of_caption.clone(),
+            segments: tagged(
+                &state.menu_bar,
+                state.engine.as_of.is_some(),
+                state.engine.as_of_caption.as_ref(),
+            ),
         }]
-    };
-    // A cell's own section says whether its reading is old, and in what
-    // words; the cell itself carries only the widened `stale`.
-    let caption = |profile: &str| -> Option<String> {
-        state
-            .profiles
-            .as_ref()?
-            .iter()
-            .find(|section| section.id == profile)?
-            .engine
-            .as_ref()?
-            .as_of_caption
-            .clone()
     };
     let (Some(harnesses), Some(cells)) = (state.harnesses.as_ref(), state.menu_bar_cells.as_ref())
     else {
@@ -158,19 +148,17 @@ fn blocks(state: &LiveState) -> Vec<Block> {
     };
     let mut blocks: Vec<Block> = Vec::new();
     for harness in harnesses.iter().filter(|harness| harness.shown) {
-        let mine: Vec<_> = cells
+        let segments: Vec<_> = cells
             .iter()
             .filter(|cell| cell.provider_id == harness.id)
+            .flat_map(|cell| {
+                tagged(
+                    &cell.segments,
+                    cell.as_of.is_some(),
+                    cell.as_of_caption.as_ref(),
+                )
+            })
             .collect();
-        let mut as_of = None;
-        let mut segments = Vec::new();
-        for cell in mine {
-            let old = caption(&cell.profile);
-            for segment in &cell.segments {
-                segments.push((segment.clone(), old.is_some()));
-            }
-            as_of = as_of.or(old);
-        }
         if segments.is_empty() {
             continue;
         }
@@ -179,13 +167,34 @@ fn blocks(state: &LiveState) -> Vec<Block> {
             short_name: harness.short_name.clone(),
             accent: harness.accent,
             segments,
-            as_of,
         });
     }
     if blocks.is_empty() {
         return single();
     }
     blocks
+}
+
+/// One account's segments, marked old or not, its caption riding on the
+/// last one.
+fn tagged(
+    segments: &[crate::digest::SegmentStatus],
+    old: bool,
+    caption: Option<&String>,
+) -> Vec<(crate::digest::SegmentStatus, bool, Option<String>)> {
+    let last = segments.len().saturating_sub(1);
+    segments
+        .iter()
+        .enumerate()
+        .map(|(index, segment)| {
+            let caption = if old && index == last {
+                caption.cloned()
+            } else {
+                None
+            };
+            (segment.clone(), old, caption)
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -250,12 +259,29 @@ mod tests {
         let state = LiveState::parse(&std::fs::read(&path).expect("golden")).expect("decodes");
         let blocks = blocks(&state);
         assert_eq!(blocks.len(), 2);
-        assert_eq!(blocks[0].as_of, None);
-        assert!(blocks[0].segments.iter().all(|(_, old)| !old));
-        assert_eq!(blocks[1].as_of.as_deref(), Some("as of Wed 20:13"));
-        assert!(blocks[1].segments.iter().all(|(_, old)| *old));
+        assert!(
+            blocks[0]
+                .segments
+                .iter()
+                .all(|(_, old, caption)| !old && caption.is_none())
+        );
+        assert!(blocks[1].segments.iter().all(|(_, old, _)| *old));
+        // The caption rides on the account's last segment only.
+        let captions: Vec<_> = blocks[1]
+            .segments
+            .iter()
+            .map(|(_, _, caption)| caption.as_deref())
+            .collect();
+        assert_eq!(captions, vec![None, Some("as of Wed 20:13")]);
+        // Split on whichever lead the terminal's look draws for Codex: its
+        // mark in colour, its name under NO_COLOR.
         let line = render(&path);
-        let codex = line.split("⬡").nth(1).expect("the Codex block");
+        let lead = if look().no_color {
+            blocks[1].short_name.clone()
+        } else {
+            blocks[1].glyph.clone()
+        };
+        let codex = line.split(lead.as_str()).nth(1).expect("the Codex block");
         assert!(codex.contains("as of Wed 20:13"), "{line}");
         assert!(!codex.contains("#[fg=#ff"), "{line}");
         assert!(!line.contains("stale"), "{line}");

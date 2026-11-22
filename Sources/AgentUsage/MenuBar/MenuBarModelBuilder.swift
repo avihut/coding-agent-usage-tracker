@@ -97,12 +97,13 @@ enum MenuBarModelBuilder {
                     ?? (harness == nil ? store.notices?.indicator ?? false : false),
                 cells: mine.map { cell in
                     let style = styles[cell.profile] ?? StatusItemRenderer.CellStyle()
+                    let reading = reading(of: cell, registry: registry)
                     return StatusItemRenderer.Cell(
                         profileID: cell.profile, monogram: cell.monogram,
-                        segments: cell.segments.isEmpty
-                            ? nil : cell.segments.map(MenuBarSegment.init),
-                        stale: cell.stale, focused: cell.profile == registry.focusedID,
-                        form: style.form, ownItem: style.ownItem, elements: style.elements)
+                        segments: reading.segments, stale: reading.stale,
+                        focused: cell.profile == registry.focusedID,
+                        form: style.form, ownItem: style.ownItem, elements: style.elements,
+                        old: reading.old)
                 }))
         }
         guard !groups.isEmpty else {
@@ -166,10 +167,10 @@ enum MenuBarModelBuilder {
         let monogram = registry.barProfiles.count > 1
             ? profile.map { registry.monogram(for: $0) } ?? "" : ""
         if let cell = registry.menuBarCells.first(where: { $0.profile == id }) {
+            let reading = reading(of: cell, registry: registry)
             return StatusItemRenderer.Cell(
-                profileID: id, monogram: monogram,
-                segments: cell.segments.isEmpty ? nil : cell.segments.map(MenuBarSegment.init),
-                stale: cell.stale, focused: false)
+                profileID: id, monogram: monogram, segments: reading.segments,
+                stale: reading.stale, focused: false, old: reading.old)
         }
         let store = registry.store(for: id) ?? registry.focusedStore
         let segments = store.state.snapshot.map {
@@ -177,6 +178,24 @@ enum MenuBarModelBuilder {
         }
         return StatusItemRenderer.Cell(
             profileID: id, monogram: monogram, segments: segments,
-            stale: store.state.snapshot == nil || store.readsStale(), focused: false)
+            stale: store.state.snapshot == nil || store.readsStale(), focused: false,
+            old: store.readingAsOf() != nil && !store.state.isStale)
+    }
+
+    /// A published cell as the bar draws it. OLD (`ReadingAge`) when the
+    /// writer says so OR when this face's own store does at this moment —
+    /// the writer judged at its last publish, which can be an idle hour
+    /// ago, and the panel beside the bar applies the rule at read time.
+    /// An old cell sheds what only a forecast says (a client can be reading
+    /// an older daemon's digest, which still carries one).
+    private static func reading(
+        of cell: MenuBarCell, registry: ProviderRegistry
+    ) -> (segments: [MenuBarSegment]?, stale: Bool, old: Bool) {
+        let old = cell.asOf != nil || registry.store(for: cell.profile)?.readingAsOf() != nil
+        let segments = cell.segments.map(MenuBarSegment.init)
+        return (
+            segments.isEmpty ? nil : old ? segments.map(\.withoutForecast) : segments,
+            cell.stale || old,
+            old && !cell.stale)
     }
 }

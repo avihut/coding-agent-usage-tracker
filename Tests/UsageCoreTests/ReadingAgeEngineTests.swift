@@ -55,7 +55,23 @@ struct ReadingAgeEngineTests {
         try JSONEncoder().encode(samples).write(to: support.appending(path: "history.json"))
     }
 
-    private func engine(readingAge: TimeInterval) throws -> (UsageEngine, Box<LiveState?>, URL) {
+    /// The engine, what it publishes, its temp root (removed with its
+    /// defaults suite by `teardown`), and the sessions tree it reads.
+    private struct Rig {
+        let engine: UsageEngine
+        let published: Box<LiveState?>
+        let root: URL
+        let sessions: URL
+        let suite: String
+
+        @MainActor func teardown() {
+            engine.shutdown()
+            UserDefaults().removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: root)
+        }
+    }
+
+    private func engine(readingAge: TimeInterval) throws -> Rig {
         let root = FileManager.default.temporaryDirectory
             .appending(path: "reading-age-engine-\(UUID().uuidString)")
         let roots = StorageScope.Roots(
@@ -65,7 +81,8 @@ struct ReadingAgeEngineTests {
         try history(in: StorageScope.supportDirectory(
             bundleID: "com.test.age", providerID: "codex", profileID: "default", roots: roots))
         let provider = CodexProvider(sessionsRoot: sessions)
-        let defaults = UserDefaults(suiteName: "reading-age-\(UUID().uuidString)")!
+        let suite = "reading-age-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
         let published = Box<LiveState?>(nil)
         let engine = UsageEngine(
             provider: provider, profileID: "default",
@@ -73,41 +90,74 @@ struct ReadingAgeEngineTests {
                 provider: provider, bundleID: "com.test.age", roots: roots, pollsStatus: false),
             defaults: defaults, bundleID: "com.test.age", roots: roots, host: .daemon,
             publish: { published.value = $0 })
-        return (engine, published, root)
+        return Rig(engine: engine, published: published, root: root, sessions: sessions, suite: suite)
     }
 
     @Test("a fresh reading is forecast")
     func fresh() async throws {
-        let (engine, published, root) = try engine(readingAge: 60)
-        defer {
-            engine.shutdown()
-            try? FileManager.default.removeItem(at: root)
-        }
-        #expect(await eventually { !engine.predictions.isEmpty })
-        #expect(engine.predictions["Weekly"]?.exhaustsAt != nil)
-        #expect(await eventually { published.value?.meters.contains { $0.forecast != nil } == true })
-        #expect(published.value?.engine.asOf == nil)
+        let rig = try engine(readingAge: 60)
+        defer { rig.teardown() }
+        #expect(await eventually { !rig.engine.predictions.isEmpty })
+        #expect(rig.engine.predictions["Weekly"]?.exhaustsAt != nil)
+        #expect(await eventually { rig.published.value?.meters.contains { $0.forecast != nil } == true })
+        #expect(rig.published.value?.engine.asOf == nil)
     }
 
     @Test("an old reading is shown as of its stamp and forecast nothing")
     func old() async throws {
-        let (engine, published, root) = try engine(readingAge: 3 * 86400)
-        defer {
-            engine.shutdown()
-            try? FileManager.default.removeItem(at: root)
-        }
-        #expect(await eventually { published.value?.engine.asOf != nil })
-        let digest = try #require(published.value)
+        let rig = try engine(readingAge: 3 * 86400)
+        defer { rig.teardown() }
+        #expect(await eventually { rig.published.value?.engine.asOf != nil })
+        let digest = try #require(rig.published.value)
         #expect(digest.engine.asOfCaption?.hasPrefix("as of ") == true)
         #expect(digest.engine.planLabel == "Pro Lite plan")
         // The session window reset since the reading: rolled, 0%.
         #expect(digest.meters.first { $0.rank == 0 }?.percent == 0)
         #expect(digest.meters.first { $0.rank == 1 }?.percent == 75)
-        // Give a forecast pass every chance to land, then: nothing.
-        try await Task.sleep(for: .milliseconds(300))
-        #expect(engine.predictions.isEmpty)
-        #expect(engine.forecastOvershoots.isEmpty)
-        #expect(published.value?.meters.allSatisfy { $0.forecast == nil } == true)
-        #expect(engine.state.asOf(at: Date()) != nil)
+        // Every forecast pass this start owed has LANDED (`startupSettled`
+        // counts them) — and landed nothing.
+        #expect(await eventually { rig.engine.startupSettled })
+        #expect(rig.engine.predictions.isEmpty)
+        #expect(rig.engine.forecastOvershoots.isEmpty)
+        #expect(rig.published.value?.meters.allSatisfy { $0.forecast == nil } == true)
+        #expect(rig.engine.state.asOf(at: Date()) != nil)
+    }
+
+    /// A cache served past its horizon: the engine recomputes only on
+    /// `.live`, so the forecast it held would ride on the cached reading
+    /// forever (Claude offline is the case; Codex losing its rollout is the
+    /// same path, and needs no network to drive).
+    @Test("a cached reading past the horizon drops the forecast the engine held")
+    func cachedAndOld() async throws {
+        let rig = try engine(readingAge: 3 * 86400)
+        defer { rig.teardown() }
+        #expect(await eventually { rig.engine.startupSettled })
+        // A forecast the engine holds from before — as a live pass leaves it.
+        let now = Date()
+        let weekly = Meter(
+            id: "1-weekly", label: "Weekly", percent: 75,
+            resetsAt: now.addingTimeInterval(47 * 3600), level: .normal, rank: 1,
+            limitWindow: 7 * 86400)
+        let samples = (0...8).map { step in
+            UsageSample(t: now.addingTimeInterval(Double(step - 8) * 1800), percents: ["Weekly": 59 + step * 2])
+        }
+        let held = PredictionEngine.predictAll(
+            meters: [weekly], samples: samples, profiles: [:], previous: [:], now: now)
+        #expect(!held.isEmpty)
+        rig.engine.landPredictions(
+            generation: rig.engine.beginPredictionPass(), profiles: [:], predictions: held,
+            overshoots: [:])
+        #expect(!rig.engine.predictions.isEmpty)
+        // The rollout goes; the next read fails and serves the cache — the
+        // same three-day-old reading, now `.cached`.
+        try FileManager.default.removeItem(at: rig.sessions)
+        rig.engine.refresh(.manual)
+        #expect(await eventually {
+            if case .cached = rig.engine.state { return true }
+            return false
+        })
+        #expect(await eventually { rig.engine.predictions.isEmpty })
+        #expect(rig.engine.forecastOvershoots.isEmpty)
+        #expect(rig.published.value?.meters.allSatisfy { $0.forecast == nil } == true)
     }
 }

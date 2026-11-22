@@ -86,6 +86,12 @@ struct UsageSettingsPane: View {
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }
+            } else if let asOf = store.asOfCaption() {
+                // An OLD reading (`ReadingAge`) is never forecast — however
+                // much history the meter has, the reason is the reading.
+                Text("No forecast — the reading is \(asOf), too old to project from.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             } else {
                 Text("No forecast yet — the rate needs a few minutes of samples.")
                     .font(.caption)

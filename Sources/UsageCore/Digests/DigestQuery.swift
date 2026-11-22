@@ -490,9 +490,10 @@ public enum DigestQuery {
         digest.engine.stale ? "\(line) · stale" : line
     }
 
-    /// The limits nouns' headline (`status`, `limit <sel>`) says "as of …"
-    /// while the reading is OLD (`EngineStatus.asOf`) — the writer's own
-    /// words. Never on spend/cost/activity lines: those are the fresh scan.
+    /// The limits fetch's headlines (`status`, `limit <sel>`, `spend` — the
+    /// spend line rides that fetch) say "as of …" while the reading is OLD
+    /// (`EngineStatus.asOf`) — the writer's own words. Never on cost or
+    /// activity lines: those are the transcript scan, current on its own.
     static func withAsOfSuffix(_ line: String, digest: LiveState) -> String {
         digest.engine.asOfCaption.map { "\(line) · \($0)" } ?? line
     }

@@ -167,3 +167,66 @@ struct ReadingAgeForecastTests {
             readingAt: snapshot.fetchedAt, now: now).isEmpty)
     }
 }
+
+/// What an old cell keeps: a SPENT window's countdown to its reset — the
+/// one thing a locked-out account waits on, while its reading ages through
+/// the lockout — and nothing a forecast says.
+@Suite("Reading age — countdowns and words")
+struct ReadingAgeCountdownTests {
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
+
+    /// A session forecast to cross in 40 min, a weekly spent until Sat.
+    private var segments: [MenuBarSegment] {
+        [
+            MenuBarSegment(
+                tag: "S", percent: 80, level: .warning, severity: 1,
+                exhaustsAt: now.addingTimeInterval(40 * 60), resetsAt: now.addingTimeInterval(3 * 3600)),
+            MenuBarSegment(
+                tag: "W", percent: 100, level: .critical, severity: 1,
+                exhaustsAt: now.addingTimeInterval(-3600), resetsAt: now.addingTimeInterval(2 * 86400)),
+        ]
+    }
+
+    private func tags(_ cached: Bool, _ old: Bool, _ scope: RunsOutScope) -> [String] {
+        UsageFormatting.menuBarCountdowns(
+            segments, scope: scope, now: now, cached: cached, old: old,
+            timeZone: TimeZone(identifier: "UTC")!, locale: Locale(identifier: "en_US_POSIX"))
+            .map { "\($0.tag)\($0.spent ? "↺" : "")" }
+    }
+
+    @Test("current counts everything; cached nothing; old only the spent reset")
+    func rule() {
+        #expect(tags(false, false, .each) == ["S", "W↺"])
+        #expect(tags(true, false, .each) == [])
+        #expect(tags(false, true, .each) == ["W↺"])
+        // Cached AND old: cache-served never alarms, whatever its age.
+        #expect(tags(true, true, .each) == [])
+    }
+
+    /// `.earliest` picks AFTER the forecast is shed: the session's crossing
+    /// (40 min) would otherwise crowd out the weekly's reset (2 days).
+    @Test("an old cell's earliest countdown is the spent reset, never a crossing")
+    func earliest() {
+        #expect(tags(false, false, .earliest) == ["S"])
+        #expect(tags(false, true, .earliest) == ["W↺"])
+    }
+
+    @Test("the account state line says as of for an old reading, Updated otherwise")
+    func stateLine() {
+        let utc = TimeZone(identifier: "UTC")!
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = utc
+        let fetched = now.addingTimeInterval(-3 * 86400)
+        let posix = Locale(identifier: "en_US_POSIX")
+        let old = UsageFormatting.profileStateLine(
+            lastWrite: fetched, fetchedAt: fetched, old: true, now: now,
+            calendar: calendar, timeZone: utc, locale: posix)
+        let current = UsageFormatting.profileStateLine(
+            lastWrite: fetched, fetchedAt: fetched, now: now,
+            calendar: calendar, timeZone: utc, locale: posix)
+        #expect(old.hasSuffix(" · as of " + UsageFormatting.updatedStamp(
+            fetched, now: now, calendar: calendar, timeZone: utc, locale: posix)))
+        #expect(current.contains(" · Updated "))
+        #expect(!current.contains("as of"))
+    }
+}

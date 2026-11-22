@@ -25,7 +25,11 @@ import Foundation
 /// left. The cap is that fit plus the slowest poll spacing a HEALTHY engine
 /// produces (`AdaptiveCadence.ceiling`, 1 h, plus slack) — and stays above
 /// the slowest chosen pace and the backoff ceiling (2 h each, pinned by a
-/// test), so a slow-paced account never reads old between two good polls.
+/// test), as does every window the shipped providers report (5 h and
+/// longer), so a slow-paced account never reads old between two good polls.
+/// A window SHORTER than the poll spacing would: such a reading really has
+/// outlived its window between polls, and saying so is the rule, not a
+/// flicker to floor away.
 /// It errs short on purpose: a false "old" costs a grey cell on an agent
 /// untouched for hours; a false "current" is the report above.
 ///

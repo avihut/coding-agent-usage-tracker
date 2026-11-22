@@ -399,7 +399,9 @@ extension DigestQuery {
                 line += " of \(UsageFormatting.money(Double(limitMinor) / scale))"
             }
             line += " \(spend.currency)"
-            return ok(withStaleSuffix(line, digest: digest))
+            // The spend line rides the limits fetch (`snapshot.spendLine`),
+            // so an OLD reading's spend is as old as its meters.
+            return ok(withStaleSuffix(withAsOfSuffix(line, digest: digest), digest: digest))
         }
         return resolve(field, asJSON: json)
     }

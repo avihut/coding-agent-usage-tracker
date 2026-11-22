@@ -1289,10 +1289,12 @@ fn meters<'a>(digest: &'a LiveState, freshness: Freshness, rect: Rect) -> Paragr
         ]),
         None => section_title("LIMITS"),
     }];
+    // An old reading greys whatever else is going on — a backoff or a
+    // busy host over it leaves its numbers no more current.
     let grey = matches!(
         freshness,
         Freshness::Stale | Freshness::Old | Freshness::EngineOffline
-    );
+    ) || digest.engine.as_of.is_some();
     let rows = (rect.height.max(1) - 1) as usize;
     let spend = digest.engine.spend.as_ref();
     let visible = &digest.meters[..digest
@@ -2354,7 +2356,7 @@ fn render_strip(
     let grey = !matches!(
         freshness,
         Freshness::Live | Freshness::Backoff | Freshness::Busy
-    );
+    ) || digest.engine.as_of.is_some();
     let mut spans = vec![Span::styled(
         format!("{} ", digest.engine.glyph),
         style(if grey { DIM } else { accent }),
@@ -2407,8 +2409,16 @@ fn render_strip(
         if let Some(caption) = &digest.engine.as_of_caption {
             spans.push(Span::styled(format!("  {caption}"), style(DIM)));
         }
-    } else if grey {
+    } else if grey && digest.engine.as_of.is_none() {
         spans.push(Span::styled("  stale".to_owned(), style(DIM)));
+    }
+    // Under a busy host, a backoff or a cached reading, an OLD reading's
+    // age is still the strip's to say.
+    if freshness != Freshness::Old
+        && freshness != Freshness::EngineOffline
+        && let Some(caption) = &digest.engine.as_of_caption
+    {
+        spans.push(Span::styled(format!("  {caption}"), style(DIM)));
     }
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
@@ -3411,7 +3421,9 @@ mod tests {
         let mut app = app_on(old_reading_golden(true));
         let lines = screen_at(&mut app, 140, 40, now);
         let text = lines.join("\n");
-        assert!(text.contains("Pro Lite plan · as of Wed 20:13"), "{text}");
+        // The separator is the look's own (" · ", or ASCII's).
+        let plan = format!("Pro Lite plan{}as of Wed 20:13", glyphs().sep);
+        assert!(text.contains(&plan), "{text}");
         let status = lines
             .iter()
             .find(|line| line.contains("next in"))
@@ -3422,7 +3434,8 @@ mod tests {
             .iter()
             .find(|line| line.contains("LIMITS"))
             .expect("the limits title");
-        assert!(title.contains("LIMITS · as of Wed 20:13"), "{title}");
+        let limits = format!("LIMITS{}as of Wed 20:13", glyphs().sep);
+        assert!(title.contains(&limits), "{title}");
         assert!(!text.contains("runs out"), "{text}");
 
         let mut fresh = app_on(old_reading_golden(false));

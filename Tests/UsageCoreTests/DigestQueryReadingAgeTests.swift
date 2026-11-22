@@ -102,4 +102,25 @@ struct DigestQueryReadingAgeTests {
         let claude = out.stdout.split(separator: "\n").first { $0.hasPrefix("default") }
         #expect(claude?.contains("ago") == true)
     }
+
+    /// `--forecast` can't be answered from a reading too old to forecast
+    /// from: it refuses as stale (21) rather than passing a meter for
+    /// having no forecast. Without `--forecast` the cap alone is judged.
+    @Test("headroom stays fail-closed on an old reading")
+    func headroom() throws {
+        let gated = run(["headroom", "--cap", "90", "--forecast", "red", "--account", "codex"])
+        #expect(gated.exitCode == 21)
+        #expect(gated.stdout.contains("stale"))
+        #expect(gated.stdout.contains("as of Wed 20:13"))
+        let json = run(["headroom", "--cap", "90", "--forecast", "red", "--account", "codex", "--json"])
+        #expect(json.exitCode == 21)
+        let object = try #require(
+            try JSONSerialization.jsonObject(with: Data(json.stdout.utf8)) as? [String: Any])
+        #expect(object["verdict"] as? String == "stale")
+        // The cap alone: judged as ever — 75% under 90.
+        #expect(run(["headroom", "--cap", "90", "--account", "codex"]).exitCode == 0)
+        #expect(run(["headroom", "--cap", "70", "--account", "codex"]).exitCode == 24)
+        // A fresh reading's forecast gate is untouched.
+        #expect(run(["headroom", "--cap", "99", "--forecast", "red"]).exitCode != 21)
+    }
 }
