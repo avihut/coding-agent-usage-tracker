@@ -121,22 +121,33 @@ if ci_text=$(show "$ci" 2>/dev/null); then
 fi
 
 # 7. Every status check the merge ruleset requires is a job some workflow
-#    defines (its `name:`, or its id). A required check that nothing reports
-#    leaves every pull request "Expected — waiting" forever: renaming
-#    `release-note` or `conventional-title` would do exactly that.
+#    defines, under the name GitHub reports it by: the job's `name:`, or its
+#    id when it has none. A required check that nothing reports leaves every
+#    pull request "Expected — waiting" forever: renaming `release-note` or
+#    `conventional-title` would do exactly that.
 ruleset=.github/rulesets/main-merge-requirements.json
 if rules=$(show "$ruleset" 2>/dev/null); then
-    workflows=""
+    reported=""
     while IFS= read -r workflow; do
-        workflows+=$(show "$workflow")$'\n'
+        # A workflow deleted but not yet staged reports nothing.
+        text=$(show "$workflow" 2>/dev/null) || continue
+        reported+=$(awk '
+            function flush() { if (id != "") print (name != "" ? name : id); id = ""; name = "" }
+            /^jobs:/ { j = 1; next }
+            j && /^[^ #]/ { flush(); j = 0 }
+            j && /^  [A-Za-z0-9_-]+:[ \t]*$/ { flush(); id = $1; sub(/:$/, "", id); next }
+            j && id != "" && name == "" && /^    name:/ {
+                name = $0; sub(/^    name:[ \t]*/, "", name); gsub(/^["\047]|["\047][ \t]*$/, "", name)
+            }
+            END { flush() }' <<<"$text")$'\n'
     done < <(git ls-files -- '.github/workflows/*.yml' '.github/workflows/*.yaml')
-    contexts=$(grep -oE '"context": *"[^"]+"' <<<"$rules" | sed -E 's/.*"([^"]+)"$/\1/' || true)
-    for context in $contexts; do
-        if ! grep -qxE "  $context:[[:space:]]*|    name: \"?$context\"?[[:space:]]*" <<<"$workflows"; then
-            fail "$ruleset requires the check '$context', and no workflow job is named that" \
+    while IFS= read -r context; do
+        [ -n "$context" ] || continue
+        if ! grep -qxF "$context" <<<"$reported"; then
+            fail "$ruleset requires the check '$context', and no workflow job reports under that name" \
                 "a required check nothing reports blocks every pull request; rename both, or neither"
         fi
-    done
+    done < <(grep -oE '"context": *"[^"]+"' <<<"$rules" | sed -E 's/.*"([^"]+)"$/\1/')
 fi
 
 if [ "$failures" -gt 0 ]; then

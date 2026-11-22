@@ -23,7 +23,7 @@ mkdir -p "$tmp/bin"
 cat >"$tmp/bin/gh" <<'STUB'
 #!/bin/sh
 for arg in "$@"; do
-    if [ "$arg" = 24 ]; then
+    if [ "$arg" = 24 ] || [ "$arg" = n=24 ]; then
         echo "GraphQL: Could not resolve to a PullRequest with the number of 24. (repository.pullRequest)" >&2
         exit 1
     fi
@@ -113,6 +113,21 @@ passes test "$(entries_of "$message" commit-entries)" = "fixes${T}the em dash. w
 features${T}the double hyphen."
 passes test "$(printf '%s' "$message" | LC_ALL=C "$notes_sh" commit-entries | head -n 1)" = "fixes${T}the em dash. wrapped"
 passes test "$(printf '%s' $'## Release note\n\nFixes: caf\xc3\xa9 \xe2\x80\x94 ok\n' | LC_ALL=C "$notes_sh" entries)" = "fixes${T}café — ok"
+# Loose lists (blank lines between bullets) and numbered ones; `<!--` in a
+# code span is text; a label in mid-paragraph must be written as one, so
+# wrapped prose that starts "new:" stays prose; bold around the whole entry.
+body=$'## Release note\n\nFeatures:\n\n- b1\n\n- b2\n\n1. n1\n2) n2\n\nsignature\n\n## Release note\n\n**Fixes: bold.**\n'
+passes test "$(entries_of "$body")" = "features${T}b1
+features${T}b2
+features${T}n1
+features${T}n2"
+passes test "$(entries_of $'## Release note\n\n**Fixes: bold.**\n')" = "fixes${T}bold."
+body=$'## Release note\n\nFixes: the `<!--` parser stays\nwhole; it explains what is\nnew: a dot.\n'
+passes test "$(entries_of "$body")" = "fixes${T}the \`<!--\` parser stays whole; it explains what is new: a dot."
+passes test "$(printf '%s' "$body" | LC_ALL=C "$notes_sh" entries)" = "fixes${T}the \`<!--\` parser stays whole; it explains what is new: a dot."
+# Whitespace runs an outsider can write cost nothing (bash trims them a
+# character at a time: 65 000 spaces took minutes).
+passes test "$(entries_of $'## Release note\n\nFixes: x\n'"$(printf '%*s' 65000 '')"$'y\t\t\ty\n')" = "fixes${T}x y y"
 fails "$notes_sh" no-such-mode
 
 # ── a fixture shaped like this repository ───────────────────────────────────
@@ -191,17 +206,26 @@ fails "$scripts/guard.sh"
 fails "$scripts/guard.sh" --staged
 git reset -q --hard "$base"
 
-# Every check the merge ruleset requires is a job a workflow defines.
+# Every check the merge ruleset requires is a job a workflow defines, by the
+# name GitHub reports: its `name:` when it has one, else its id.
 mkdir -p .github/rulesets
-printf '{"rules": [{"parameters": {"required_status_checks": [{ "context": "ci-gate" }]}}]}\n' \
-    >.github/rulesets/main-merge-requirements.json
-git add -A
+printf 'jobs:\n  title-id:\n    name: title-check\n    steps:\n      - name: not-a-job\n' \
+    >.github/workflows/pr.yml
+requires() { # <context>… → the fixture's ruleset record
+    local list="" context
+    for context in "$@"; do list+="${list:+, }{ \"context\": \"$context\" }"; done
+    printf '{"rules": [{"parameters": {"required_status_checks": [%s]}}]}\n' "$list" \
+        >.github/rulesets/main-merge-requirements.json
+    git add -A
+}
+requires ci-gate title-check
+passes "$scripts/guard.sh"
 passes "$scripts/guard.sh" --staged
-printf '{"rules": [{"parameters": {"required_status_checks": [{ "context": "ghost" }]}}]}\n' \
-    >.github/rulesets/main-merge-requirements.json
-git add -A
-fails "$scripts/guard.sh"
-fails "$scripts/guard.sh" --staged
+for context in ghost title-id not-a-job; do
+    requires ci-gate "$context"
+    fails "$scripts/guard.sh"
+    fails "$scripts/guard.sh" --staged
+done
 git reset -q --hard "$base"
 git clean -qfd
 
@@ -332,10 +356,10 @@ passes test "$(cat .release-notes/next.md)" = "$(sed -n '1,/-->/p' "$root/.relea
 
 # ── release.sh + release-notes.sh assemble: notes from PR descriptions ──────
 # The maintainer's title, prose and a legacy entry in next.md (committed on
-# main: PRs never edit it), then what landed: squash commits "(#N)" whose
-# bodies are their descriptions, as GitHub writes them; one whose body is a
-# hand-written message, so its note is read from the (fixture) description;
-# a direct commit with its own paragraph; and an issue's number in a subject.
+# main: PRs never edit it), then what landed. A PR's note is its description
+# AS IT STOOD AT THE MERGE: the live one (the fixture stands in for GitHub),
+# unless edited after the merge — then the copy in its squash commit, whose
+# body GitHub fills with the description when the merge message is fixed.
 cat >>.release-notes/next.md <<'NOTES'
 Title by hand
 
@@ -346,12 +370,25 @@ Fixes
 NOTES
 git add -A
 git commit -qm 'docs(release): the next release, titled'
-squash() { # <subject> <body>
+squash() { # <subject> <body> — a commit, its body as given
     git commit -q --allow-empty -F - <<<"$1"$'\n\n'"$2"
+}
+prs="$tmp/prs.json"
+: >"$tmp/prs.jsonl"
+pr() { # <number> <description now> [lastEditedAt mergedAt] — GitHub's side
+    jq -n --argjson n "$1" --arg b "$2" --arg e "${3:-}" --arg m "${4:-}" \
+        '{number: $n, body: $b}
+         + (if $e == "" then {} else {lastEditedAt: $e} end)
+         + (if $m == "" then {} else {mergedAt: $m} end)' >>"$tmp/prs.jsonl"
+    jq -s . "$tmp/prs.jsonl" >"$prs"
+}
+merged() { # <number> <subject> <description> — squashed by GitHub, unedited since
+    squash "$2" "$3"
+    pr "$1" "$3"
 }
 # Over the pipe's 64 KB: the bump test once read a SIGPIPE as "no feat".
 filler=$(printf 'A long description line, as whole PR bodies are. %.0s' $(seq 1 2500))
-squash 'fix(panel): margins hold (#11)' "## What and why
+merged 11 'fix(panel): margins hold (#11)' "## What and why
 
 $filler
 
@@ -362,21 +399,24 @@ Fixes: the panel keeps its margins with every agent's models in the Activity tab
 Generated with a tool"
 # shellcheck disable=SC2016 # literal on purpose: it must reach the tag unexpanded
 hostile='New: a `feature` with 50% \ $(touch pwned) *globs* and "quotes"'
-squash 'feat(cli): a hostile feature (#12)' "## Release note
+merged 12 'feat(cli): a hostile feature (#12)' "## Release note
 
 $hostile"
-squash 'chore(ci): bump a dependency (#13)' 'Bumps x from 1 to 2.'
-squash 'fix(tui): a fix with no note (#14)' '## What and why
-
-Forgot the note.'
-squash 'fix(core): nothing user-visible (#15)' $'## Release note\n\nnone'
+merged 13 'chore(ci): bump a dependency (#13)' 'Bumps x from 1 to 2.'
+merged 14 'fix(tui): a fix with no note (#14)' $'## What and why\n\nForgot the note.'
+merged 15 'fix(core): nothing user-visible (#15)' $'## Release note\n\nnone'
+# A hand-written merge message: the note is only in the description.
 squash 'fix(app): merged with a hand-written message (#16)' 'A message, not the description.'
+pr 16 $'## Release note\n\nFixes: read from the description.'
+# Auto-merge fixed the squash message when it was armed; the description was
+# reworded after that, before the merge: the description wins (#42's case).
+squash 'fix(menu): reworded after auto-merge was armed (#18)' $'## Release note\n\nFixes: the wording as armed.'
+pr 18 $'## Release note\n\nFixes: the wording as merged.' 2026-11-21T23:28:14Z 2026-11-21T23:50:58Z
+# Edited AFTER the merge: nobody reviewed that, so the squash copy wins.
+squash 'fix(sync): edited after its merge (#19)' $'## Release note\n\nFixes: as reviewed and merged.'
+pr 19 $'## Release note\n\nFixes: an edit nobody reviewed.' 2026-11-22T09:00:00Z 2026-11-21T23:50:58Z
 squash 'fix(daemon): a direct commit' $'Why.\n\nRelease note \xe2\x80\x94 Fixes: a direct fix, from its commit message.\n\nCo-Authored-By: someone'
 squash 'fix(cli): closes an issue (#24)' $'Release note: Fixes: a fix whose subject ends in an issue.'
-prs="$tmp/prs.json"
-jq -n '[{number: 13, body: "Bumps x from 1 to 2."},
-    {number: 14, body: "## What and why\n\nForgot the note."},
-    {number: 16, body: "## Release note\n\nFixes: read live, from the description."}]' >"$prs"
 
 expected="$tmp/expected-notes.txt"
 cat >"$expected" <<'NOTES'
@@ -389,7 +429,9 @@ Fixes
 - The panel keeps its margins with every agent's models in the Activity
   table; long model names shorten with an ellipsis instead of pushing the
   content wider.
-- Read live, from the description.
+- Read from the description.
+- The wording as merged.
+- As reviewed and merged.
 - A direct fix, from its commit message.
 - A fix whose subject ends in an issue.
 
@@ -400,11 +442,12 @@ dry_notes() { sed -n '/^-----/,/^-----/p' "$1" | sed '1d;$d'; }
 
 passes env RELEASE_NOTES_PRS="$prs" "$scripts/release.sh" --dry-run
 cp "$out" "$tmp/dry-run.log"
-passes grep -q '0.3.0 → 0.4.0' "$tmp/dry-run.log" # a feat, through a 128 KB log
+passes grep -q '0.3.0 → 0.4.0' "$tmp/dry-run.log" # a feat, past a 128 KB log
 passes diff "$expected" <(dry_notes "$tmp/dry-run.log")
 passes grep -q '#14 has no "## Release note"' "$tmp/dry-run.log" # a fix without one warns
-passes sh -c "! grep -q -e '#13' -e '#15' '$tmp/dry-run.log'"   # a chore and a none don't
-passes grep -q '#16: read LIVE' "$tmp/dry-run.log"
+passes sh -c "! grep -q -e '#13' -e '#15' -e '#16' -e '#11' '$tmp/dry-run.log'" # these don't
+passes grep -q '#18: its squash commit holds an older note' "$tmp/dry-run.log"
+passes grep -q "#19's description was edited AFTER its merge" "$tmp/dry-run.log"
 passes grep -q 'ends in (#24), which is not a pull request' "$tmp/dry-run.log"
 passes test ! -e pwned
 # A preview while next.md is still being edited, uncommitted, and off main.
@@ -420,15 +463,17 @@ cp "$out" "$tmp/step.log"
 passes grep -q "previewing on 'preview'" "$tmp/step.log"
 git checkout -q main
 git branch -q -D preview
-# Without the fixture, #16's description goes to gh: the stub's dead network
-# refuses the release, and a malformed live note does too. Neither writes.
+# GitHub out of reach (the stub's dead network): a squash copy stands in,
+# flagged; a fix whose note is ONLY in its description refuses the release;
+# a chore only warns. A malformed note refuses too. Nothing is written.
 tip=$(git rev-parse HEAD)
 fails "$scripts/release.sh" --dry-run
 cp "$out" "$tmp/step.log"
+passes grep -q '#11: its description could not be read .* using the copy in its squash commit' "$tmp/step.log"
 passes grep -q '✗ #16 .*its description could not be read' "$tmp/step.log"
-passes grep -q 'release: #13 .*could not be read — nothing from it' "$tmp/step.log" # a chore only warns
+passes grep -q 'release: #13 .*could not be read — nothing from it' "$tmp/step.log"
 fails "$scripts/release.sh"
-jq -n '[{number: 16, body: "## Release note\n\nJust prose, no label."}]' >"$tmp/bad.json"
+jq '(.[] | select(.number == 16) | .body) = "## Release note\n\nJust prose, no label."' "$prs" >"$tmp/bad.json"
 fails env RELEASE_NOTES_PRS="$tmp/bad.json" "$scripts/release.sh"
 cp "$out" "$tmp/step.log"
 passes grep -q '#16: the "## Release note" section has no label' "$tmp/step.log"
@@ -448,20 +493,71 @@ passes test "$(git log -1 --format=%s)" = 'release: v0.4.0'
 passes test "$(git tag -l --format='%(contents:subject)%0a%0a%(contents:body)' v0.4.0)" = "$(cat "$expected")"
 passes test "$(git log -1 --format=%b)" = "$(cat "$expected")"
 passes test "$(cat .release-notes/next.md)" = "$(sed -n '1,/-->/p' "$root/.release-notes/next.md")"
-# Nothing in next.md, a PR note: titled with the version. Its squash body
-# is shaped as GitHub writes one: wrapped at 72, signature, trailer block.
-squash 'fix(panel): one more (#17)' $'## What and why\n\nWhy.\n\n## Release note\n\nFixes: one more, its description wrapped as a squash commit\nwraps it.\n\nGenerated with a tool\n\n---------\n\nCo-authored-by: someone <someone@example.invalid>'
-passes "$scripts/release.sh"
-passes test "$(git tag -l --format='%(contents)' v0.4.1)" = $'v0.4.1\n\nFixes\n- One more, its description wrapped as a squash commit wraps it.'
-# A note is frozen as merged, so rewording one is the maintainer's edit of
-# the annotation, before pushing (docs/WORKFLOW.md): `git tag -f -a` opens
-# it in the editor. The pre-push check still holds the tag whole.
+# A release-note line is not a commit type: a chore whose note says "fix:"
+# cuts nothing (the bump reads subjects).
+merged 20 'chore(docs): a note in lower case (#20)' $'## Release note\n\nfix: lower case, and still no release.'
+passes env RELEASE_NOTES_PRS="$prs" "$scripts/release.sh"
+passes test "$(git log -1 --format=%s)" = 'chore(docs): a note in lower case (#20)'
+# A PR that ALSO edited next.md: its entry may land twice, and says so.
+printf -- '- Its entry, in next.md too.\n' >>.release-notes/next.md
+git add -A
+git commit -q -F - <<<$'fix(menubar): wrote next.md as well (#21)\n\n## Release note\n\nFixes: its entry.'
+pr 21 $'## Release note\n\nFixes: its entry.'
+passes env RELEASE_NOTES_PRS="$prs" "$scripts/release.sh" --dry-run
+cp "$out" "$tmp/step.log"
+passes grep -q '#21 also edited .release-notes/next.md' "$tmp/step.log"
+git reset -q --hard HEAD~1
+# Nothing in next.md, a PR note: titled with the version. Its body is shaped
+# as squash merges on main carry one: wrapped, signature, trailer block.
+merged 17 'fix(panel): one more (#17)' $'## What and why\n\nWhy.\n\n## Release note\n\nFixes: one more, its description wrapped as a squash commit\nwraps it.\n\nGenerated with a tool\n\n---------\n\nCo-authored-by: someone <someone@example.invalid>'
+passes env RELEASE_NOTES_PRS="$prs" "$scripts/release.sh"
+passes test "$(git tag -l --format='%(contents)' v0.4.1)" = $'v0.4.1\n\nFixes\n- Lower case, and still no release.\n- One more, its description wrapped as a squash commit wraps it.'
+# A merged note is the text as merged (a later edit of the description is
+# ignored), so rewording one is the maintainer's edit of the annotation,
+# before pushing (docs/WORKFLOW.md): `git tag -f -a` opens it in the editor.
+# The pre-push check still holds the tag whole.
 printf 'v0.4.1\n\nFixes\n- One more, reworded.\n' >"$tmp/reworded.txt"
 git tag -f -a v0.4.1 -F "$tmp/reworded.txt" >/dev/null
 passes test "$(git tag -l --format='%(contents:body)' v0.4.1 | tail -n 2 | head -n 1)" = '- One more, reworded.'
 passes with_stdin "refs/heads/main $(git rev-parse HEAD) refs/heads/main $(git rev-parse "v0.4.0^{commit}")
 refs/tags/v0.4.1 $(git rev-parse v0.4.1) refs/tags/v0.4.1 $zero
 " "$scripts/release-check.sh"
+
+# next.md's own shape: markdown headings reach the tag (git tag's default
+# cleanup deletes every "#" line), a heading that is no section ends the one
+# above it, and a next.md that starts with a section has no title.
+merged 31 'fix(panel): keeps a name (#31)' $'## Release note\n\nFixes: macOS keeps its case.'
+printf 'Fixes\n- A fix by hand.\n' >>.release-notes/next.md
+passes env RELEASE_NOTES_PRS="$prs" "$scripts/release.sh" --dry-run
+passes test "$(dry_notes "$out")" = $'v0.4.2\n\nFixes\n- A fix by hand.\n- macOS keeps its case.'
+git checkout -q -- .release-notes/next.md
+printf '# A title with a hash\n\n## Fixes\n- A fix by hand.\n\n## Upgrading\n\nPull and rebuild.\n' >>.release-notes/next.md
+git add -A
+git commit -qm 'docs(release): a titled release, in markdown'
+cat >"$expected" <<'NOTES'
+# A title with a hash
+
+## Fixes
+- A fix by hand.
+- macOS keeps its case.
+
+## Upgrading
+
+Pull and rebuild.
+NOTES
+# A commit that fails (here a hook; a locked signing agent alike) leaves the
+# tree as it was, so the next run starts over rather than refusing it.
+mkdir -p "$tmp/failing-hooks"
+printf '#!/bin/sh\nexit 1\n' >"$tmp/failing-hooks/commit-msg"
+chmod +x "$tmp/failing-hooks/commit-msg"
+tip=$(git rev-parse HEAD)
+fails env RELEASE_NOTES_PRS="$prs" GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath \
+    GIT_CONFIG_VALUE_0="$tmp/failing-hooks" "$scripts/release.sh"
+passes test "$(git rev-parse HEAD)" = "$tip"
+passes test -z "$(git status --porcelain)"
+passes env RELEASE_NOTES_PRS="$prs" "$scripts/release.sh"
+passes test "$(git tag -l --format='%(contents:subject)%0a%0a%(contents:body)' v0.4.2)" = "$(cat "$expected")"
+passes test "$(git log -1 --format=%b)" = "$(cat "$expected")"
 
 # ── digest-baseline.sh ──────────────────────────────────────────────────────
 passes "$scripts/digest-baseline.sh" main

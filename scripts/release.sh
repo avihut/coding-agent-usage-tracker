@@ -97,7 +97,9 @@ tag_head() { # <version> <notes file>
         say "would tag v$1 on $(git rev-parse --short HEAD)"
         return 0
     fi
-    git tag -a "v$1" -F "$2"
+    # whitespace, not git's default strip: strip deletes every line that
+    # starts with "#", and a markdown heading in next.md is one.
+    git tag -a --cleanup=whitespace "v$1" -F "$2"
     say "tagged v$1"
 }
 
@@ -128,6 +130,11 @@ fi
 # ── Decide whether this merge released anything ─────────────────────────────
 last=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || true)
 range=${last:+$last..}HEAD
+# The TYPE comes from subjects alone (on main each is a PR title or the
+# commit itself). Bodies are whole PR descriptions now, and a release-note
+# line such as "fix: the panel…" would otherwise read as a fix to release.
+# Only the BREAKING CHANGE footer is a body's to declare.
+subjects=$(git log --format='%s' "$range")
 log=$(git log --format='%s%n%b' "$range")
 
 # Here-strings, never `printf | grep -q`: grep -q exits at its first match,
@@ -136,12 +143,12 @@ log=$(git log --format='%s%n%b' "$range")
 # fails the test. Since v0.103.0 the log was 114 KB, and a range full of
 # feat and fix read as "nothing releasable".
 level="none"
-if grep -qE '^(feat|fix)(\([^)]*\))?!: ' <<<"$log" ||
+if grep -qE '^(feat|fix)(\([^)]*\))?!: ' <<<"$subjects" ||
     grep -q '^BREAKING CHANGE' <<<"$log"; then
     level="major"
-elif grep -qE '^feat(\([^)]*\))?: ' <<<"$log"; then
+elif grep -qE '^feat(\([^)]*\))?: ' <<<"$subjects"; then
     level="minor"
-elif grep -qE '^fix(\([^)]*\))?: ' <<<"$log"; then
+elif grep -qE '^fix(\([^)]*\))?: ' <<<"$subjects"; then
     level="patch"
 fi
 
@@ -192,14 +199,22 @@ $assembled || refuse "not released: fix what is marked ✗ above, then: mise run
 
 # One commit: the version, and the fragment spent on it.
 sed -i '' "s/static let version = \".*\"/static let version = \"$next\"/" "$identity"
+staged=("$identity")
 git add "$identity"
 if [ -f "$notes" ]; then
     printf '%s\n' "$template" >"$notes"
     git add "$notes"
+    staged+=("$notes")
 fi
-{
+if ! {
     printf 'release: v%s\n\n' "$next"
     cat "$message"
-} | git commit -q -F -
+} | git commit -q --cleanup=whitespace -F -; then
+    # A commit that didn't happen (a locked signing agent, a hook) leaves
+    # nothing half made: the tree was clean, so put back the two files this
+    # staged, and the next run starts over instead of refusing a dirty tree.
+    git restore --source=HEAD --staged --worktree -- "${staged[@]}"
+    refuse "the release commit failed — nothing was released; fix the cause, then: mise run release"
+fi
 tag_head "$next" "$message"
 say "not pushed — review it, then: git push origin main v$next && mise run publish"

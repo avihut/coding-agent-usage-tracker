@@ -16,7 +16,15 @@ gh api -X POST repos/{owner}/{repo}/rulesets --input .github/rulesets/main-integ
   `ci-gate`, `conventional-title` and `release-note` checks (pinned to GitHub
   Actions as their source) green, signed commits. `release-note`
   (`pr-title.yml`, 2026-11-22) holds the description to a `## Release note`
-  section, which `scripts/release.sh` collects into the release notes. The branch need NOT be up to date
+  section, which `scripts/release.sh` collects into the release notes.
+  APPLY THAT ONE ONLY AFTER the PR adding the `release-note` job has merged:
+  before, no PR's merge ref has the job, so every PR — Dependabot's too —
+  would wait forever on a check nothing reports. Re-read the live ruleset
+  first (`gh api repos/{owner}/{repo}/rulesets/<id>`) and diff it against
+  this file, so a `PUT` changes only what you mean it to (the live one
+  carried `require_extra_approval_for_unattributed_changes` and
+  `required_reviewers`, now in the record too). An open PR gets the new
+  check on its next push or description edit, an outside one included. The branch need NOT be up to date
   with main (user-directed 2026-10-05): rebasing every open PR after each
   merge cost a CI round apiece. What that gives up — two PRs green apart and
   broken together — CI catches on the squash's own push to main.

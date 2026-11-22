@@ -133,4 +133,4 @@ jobs:
             exit 0
           fi
           gh pr merge --auto --squash "$PR_URL"
-          echo "auto-merge enabled (squash); GitHub merges when ci-gate is green"
+          echo "auto-merge enabled (squash); GitHub merges when the required checks are green"

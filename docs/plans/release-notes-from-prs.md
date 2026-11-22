@@ -305,3 +305,35 @@ build runs long.
   (`git tag -f -a vX.Y.Z` opens it pre-filled); tested with release-check.
 - A live-read failure refuses only for feat/fix subjects; anything else
   (Dependabot's chores) warns, so an offline release isn't blocked by them.
+
+## Review round (2026-11-22, two Opus reviewers)
+
+- **The squash copy is NOT the merged text** (CI/docs reviewer, verified on
+  #42): GitHub fixes the squash message when the merge is set up — for
+  auto-merge, when it is ARMED. #42's squash body is the 22:27 revision; the
+  note was added at 23:28 and it merged at 23:50. Reading the squash copy
+  first would ship a stale-but-valid note CI never saw. So the note is now
+  the description AS IT STOOD AT THE MERGE: live (GraphQL `body`,
+  `lastEditedAt`, `mergedAt` through `gh api graphql`), unless edited after
+  the merge — then the squash copy, flagged. The squash copy also stands in
+  (flagged) when GitHub can't be asked. One gh call per PR again.
+- The bump reads SUBJECTS only (a note line "fix: …" in a docs PR cut a
+  patch); `BREAKING CHANGE` still from bodies.
+- Parser: loose and numbered lists; `<!--` inside a code span is text; a
+  mid-paragraph label counts only capitalised; `**Fixes: x.**`; input
+  squeezed with `tr` (a 65 000-space line took minutes in bash's trims);
+  letter sets spelled out (bash 3.2 + UTF-8 reads `[A-Z]` by collation).
+- Assembly: a next.md that starts with a section has no title; any other
+  heading ends the section above it; `#` lines survive into the tag
+  (`git tag --cleanup=whitespace` — the default strip deleted them); a
+  first word is capitalised only when plainly lower case ("macOS" stays).
+- release.sh puts back what it staged when the release commit fails, so the
+  rerun the docs promise works.
+- A PR whose commit also edited next.md is named (outside #22 does: its
+  entry would ship twice).
+- Guard rule 7 matches the name GitHub reports (`name:`, else the id),
+  reads contexts line by line, and skips an unstaged deletion.
+- The ruleset record gains the two fields the live ruleset carries
+  (`require_extra_approval_for_unattributed_changes`, `required_reviewers`),
+  so a PUT changes only the new check; README: apply after this merges.
+- #42's live note has SIX entries (not four).
