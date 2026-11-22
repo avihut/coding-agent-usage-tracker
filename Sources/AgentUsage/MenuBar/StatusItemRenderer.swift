@@ -52,6 +52,12 @@ enum StatusItemRenderer {
         /// plus whatever was dragged in beside them. The standard list is
         /// the meters alone — the pre-0.98 cell exactly.
         var elements: [MenuBarElement] = MenuBarLayout.standard
+        /// Greyed by its reading's AGE alone (`ReadingAge`, 2026-11-22) —
+        /// not cache-served, not errored. `stale` (how the cell DRAWS) is set
+        /// too; this only lets a spent window keep counting down to its
+        /// reset, the one thing a locked-out account waits on. No forecast
+        /// countdown survives it.
+        var old = false
     }
 
     /// How one account draws: its form, its elements, and whether it takes

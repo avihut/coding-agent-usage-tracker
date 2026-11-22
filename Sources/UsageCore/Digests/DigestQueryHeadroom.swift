@@ -42,6 +42,11 @@ extension DigestQuery {
         /// `clockTolerance`: the clock was set back since, so no age can be
         /// read off it.
         case measuredAhead(TimeInterval)
+        /// `--forecast` over an OLD reading (`EngineStatus.asOf`, 2026-11-22):
+        /// the writer makes no forecast from it, and "no forecast" passes the
+        /// gate — so without this a gate that refused the old reading's red
+        /// forecast would let it through. Fail closed: the caption says when.
+        case oldReading(String)
     }
 
     /// How far ahead of `now` a measurement stamp may sit and still read as
@@ -210,6 +215,14 @@ extension DigestQuery {
         case .failure(let refusal): return refusal
         case .success(let reason?): return output(answer(.stale, staleness: reason))
         case .success(nil): break
+        }
+        // A forecast gate can't be answered from a reading too old to be
+        // forecast from (`ReadingAge`): refuse it as stale, the verdict a
+        // caller already handles, rather than pass it for having no
+        // forecast. Without `--forecast` the cap alone is judged, as ever.
+        if forecastPasses != nil, let engine, engine.asOf != nil {
+            return output(answer(
+                .stale, staleness: .oldReading(engine.asOfCaption ?? "as of an old reading")))
         }
 
         let meters = metered ? digest.meters.map { rolled($0, now: now) } : []
@@ -395,6 +408,8 @@ extension DigestQuery {
             "no measurement time to judge its age by"
         case .measuredAhead(let lead)?:
             "measured \(UsageFormatting.duration(lead)) ahead of this clock, so its age can't be judged"
+        case .oldReading(let caption)?:
+            "the reading is \(caption), too old to forecast from, and --forecast needs one"
         case nil:
             "older than allowed"
         }

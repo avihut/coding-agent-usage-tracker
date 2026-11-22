@@ -116,13 +116,14 @@ extension StatusItemRenderer {
             accent: UsageCore.RGBColor = HarnessStyle.bundled.accent,
             incident: ServiceStatusCard.Indicator? = nil, indicator: Bool = false,
             form: MenuBarForm = .standard, expandsFocus: Bool = true,
-            elements: [MenuBarElement] = MenuBarLayout.standard, now: Date = Model.minute(Date())
+            elements: [MenuBarElement] = MenuBarLayout.standard, now: Date = Model.minute(Date()),
+            old: Bool = false
         ) {
             self.init(
                 glyph: glyph, accent: accent, incident: incident, indicator: indicator,
                 cells: [Cell(
                     profileID: Profile.defaultID, monogram: "", segments: segments, stale: stale,
-                    focused: true, form: form, elements: elements)],
+                    focused: true, form: form, elements: elements, old: old)],
                 expandsFocus: expandsFocus, now: now)
         }
 
@@ -162,10 +163,13 @@ extension StatusItemRenderer {
                 indicator: indicator, form: form, expandsFocus: expandsFocus,
                 elements: elements, now: now)
         }
+        // An OLD reading (`ReadingAge`) draws the stale treatment too, and
+        // keeps only a spent window's countdown.
+        let old = state.asOf(at: now) != nil
         return Model(
             segments: UsageFormatting.menuBarSegments(
                 from: snapshot.meters, predictions: predictions),
-            stale: state.isStale,
+            stale: state.isStale || old,
             glyph: glyph,
             accent: accent,
             incident: alarming,
@@ -173,7 +177,8 @@ extension StatusItemRenderer {
             form: form,
             expandsFocus: expandsFocus,
             elements: elements,
-            now: now
+            now: now,
+            old: old && !state.isStale
         )
     }
 
@@ -192,11 +197,14 @@ extension StatusItemRenderer {
             indicator: notices?.indicator ?? false,
             cells: cells.map { cell in
                 let style = styles[cell.profile] ?? CellStyle()
+                let old = cell.asOf != nil
+                let segments = cell.segments.map(MenuBarSegment.init)
                 return Cell(
                     profileID: cell.profile, monogram: cell.monogram,
-                    segments: cell.segments.isEmpty ? nil : cell.segments.map(MenuBarSegment.init),
-                    stale: cell.stale, focused: cell.profile == focusedID,
-                    form: style.form, ownItem: style.ownItem, elements: style.elements)
+                    segments: segments.isEmpty ? nil : old ? segments.map(\.withoutForecast) : segments,
+                    stale: cell.stale || old, focused: cell.profile == focusedID,
+                    form: style.form, ownItem: style.ownItem, elements: style.elements,
+                    old: old && !cell.stale)
             },
             expandsFocus: expandsFocus, now: now)
     }

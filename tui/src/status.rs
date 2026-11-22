@@ -55,7 +55,7 @@ pub fn render(digest_path: &Path) -> String {
             out.push_str(&block.short_name);
             out.push(' ');
         }
-        for (index, segment) in block.segments.iter().enumerate() {
+        for (index, (segment, old, caption)) in block.segments.iter().enumerate() {
             if index > 0 {
                 out.push('·');
             }
@@ -64,7 +64,11 @@ pub fn render(digest_path: &Path) -> String {
                 .percent
                 .map(|p| p.to_string())
                 .unwrap_or_else(|| "—".into());
-            if color {
+            if *old {
+                // An OLD reading's digits, the bar's stale way: no colour,
+                // no marker — a level from days ago is no alarm now.
+                out.push_str(&text);
+            } else if color {
                 let paint = segment.risk.map(hex).or(match segment.level.as_str() {
                     "warning" => Some("#ff9f0a".into()),
                     "critical" => Some("#ff453a".into()),
@@ -77,6 +81,15 @@ pub fn render(digest_path: &Path) -> String {
             } else {
                 out.push_str(&text);
                 out.push_str(marker(segment.severity, &segment.level));
+            }
+            // An old account's stamp right after its own last digit, so
+            // with several accounts in a block it names whose it is.
+            if let Some(caption) = caption {
+                out.push_str(&if color {
+                    format!(" #[dim]{caption}#[default]")
+                } else {
+                    format!(" {caption}")
+                });
             }
         }
     }
@@ -108,7 +121,9 @@ struct Block {
     glyph: String,
     short_name: String,
     accent: Rgb,
-    segments: Vec<crate::digest::SegmentStatus>,
+    /// Each segment; whether its account's reading is OLD; and, on that
+    /// account's LAST segment only, the writer's "as of …".
+    segments: Vec<(crate::digest::SegmentStatus, bool, Option<String>)>,
 }
 
 /// The shown harnesses and their cells. A writer before harnesses (or one
@@ -120,7 +135,11 @@ fn blocks(state: &LiveState) -> Vec<Block> {
             glyph: state.engine.glyph.clone(),
             short_name: state.engine.service_name.clone(),
             accent: state.engine.accent,
-            segments: state.menu_bar.clone(),
+            segments: tagged(
+                &state.menu_bar,
+                state.engine.as_of.is_some(),
+                state.engine.as_of_caption.as_ref(),
+            ),
         }]
     };
     let (Some(harnesses), Some(cells)) = (state.harnesses.as_ref(), state.menu_bar_cells.as_ref())
@@ -132,7 +151,13 @@ fn blocks(state: &LiveState) -> Vec<Block> {
         let segments: Vec<_> = cells
             .iter()
             .filter(|cell| cell.provider_id == harness.id)
-            .flat_map(|cell| cell.segments.clone())
+            .flat_map(|cell| {
+                tagged(
+                    &cell.segments,
+                    cell.as_of.is_some(),
+                    cell.as_of_caption.as_ref(),
+                )
+            })
             .collect();
         if segments.is_empty() {
             continue;
@@ -148,6 +173,28 @@ fn blocks(state: &LiveState) -> Vec<Block> {
         return single();
     }
     blocks
+}
+
+/// One account's segments, marked old or not, its caption riding on the
+/// last one.
+fn tagged(
+    segments: &[crate::digest::SegmentStatus],
+    old: bool,
+    caption: Option<&String>,
+) -> Vec<(crate::digest::SegmentStatus, bool, Option<String>)> {
+    let last = segments.len().saturating_sub(1);
+    segments
+        .iter()
+        .enumerate()
+        .map(|(index, segment)| {
+            let caption = if old && index == last {
+                caption.cloned()
+            } else {
+                None
+            };
+            (segment.clone(), old, caption)
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -201,5 +248,42 @@ mod tests {
         assert_eq!(marker(None, "warning"), "!");
         assert_eq!(marker(Some(0.1), "normal"), "");
         assert_eq!(marker(None, "normal"), "");
+    }
+
+    /// An OLD account's block: unpainted digits, no markers, the writer's
+    /// "as of …" after it — and the fresh block beside it untouched.
+    #[test]
+    fn an_old_block_reads_as_of() {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../Tests/UsageCoreTests/Fixtures/digest/live-state-v1-old-reading.json");
+        let state = LiveState::parse(&std::fs::read(&path).expect("golden")).expect("decodes");
+        let blocks = blocks(&state);
+        assert_eq!(blocks.len(), 2);
+        assert!(
+            blocks[0]
+                .segments
+                .iter()
+                .all(|(_, old, caption)| !old && caption.is_none())
+        );
+        assert!(blocks[1].segments.iter().all(|(_, old, _)| *old));
+        // The caption rides on the account's last segment only.
+        let captions: Vec<_> = blocks[1]
+            .segments
+            .iter()
+            .map(|(_, _, caption)| caption.as_deref())
+            .collect();
+        assert_eq!(captions, vec![None, Some("as of Wed 20:13")]);
+        // Split on whichever lead the terminal's look draws for Codex: its
+        // mark in colour, its name under NO_COLOR.
+        let line = render(&path);
+        let lead = if look().no_color {
+            blocks[1].short_name.clone()
+        } else {
+            blocks[1].glyph.clone()
+        };
+        let codex = line.split(lead.as_str()).nth(1).expect("the Codex block");
+        assert!(codex.contains("as of Wed 20:13"), "{line}");
+        assert!(!codex.contains("#[fg=#ff"), "{line}");
+        assert!(!line.contains("stale"), "{line}");
     }
 }

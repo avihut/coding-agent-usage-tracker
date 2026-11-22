@@ -188,6 +188,17 @@ public struct EngineStatus: Codable, Sendable, Equatable {
     public let backoffUntil: Date?
     /// True when what's rendered isn't fresh (cache-served or errored).
     public let stale: Bool
+    /// Present only while the limits reading is OLD — older than its age
+    /// horizon (`ReadingAge`, 2026-11-22, additive) — and equal to
+    /// `fetchedAt`: the stamp faces print as "as of …". While it is set no
+    /// meter carries a forecast or a risk colour. Nil while the reading is
+    /// current, when there is none, and from writers that predate the field
+    /// (read as current). Independent of `stale`, which keeps its meaning.
+    public let asOf: Date?
+    /// "as of Wed 20:13" — `asOf` pre-phrased by core with the day-aware
+    /// stamp, so every face prints the app's words. Present exactly when
+    /// `asOf` is.
+    public let asOfCaption: String?
     /// Local-files provider: no network, no budget gauge; a manual refresh
     /// is a disk rescan.
     public let isLocalProvider: Bool
@@ -218,7 +229,7 @@ public struct EngineStatus: Codable, Sendable, Equatable {
         activeIntervalSeconds: TimeInterval, paceMultiplier: Int,
         apiBudgetUsed: Int?, apiBudgetCeiling: Int?, apiBudgetFraction: Double?,
         gateFloorSeconds: TimeInterval, error: ErrorStatus?, spend: SpendStatus?,
-        forecastProfile: ForecastProfile? = nil
+        forecastProfile: ForecastProfile? = nil, asOf: Date? = nil, asOfCaption: String? = nil
     ) {
         self.providerID = providerID
         self.serviceName = serviceName
@@ -238,6 +249,8 @@ public struct EngineStatus: Codable, Sendable, Equatable {
         self.nextPollAt = nextPollAt
         self.backoffUntil = backoffUntil
         self.stale = stale
+        self.asOf = asOf
+        self.asOfCaption = asOfCaption
         self.isLocalProvider = isLocalProvider
         self.activeIntervalSeconds = activeIntervalSeconds
         self.paceMultiplier = paceMultiplier
@@ -770,6 +783,13 @@ public enum LiveStateBuilder {
         let snapshot = state.snapshot
         let accent = RGBColor(provider.accent)
         let catalog = provider.modelCatalog
+        // An OLD reading (`ReadingAge`) carries no forecast, whatever the
+        // engine still holds: the rule is applied at the moment of
+        // publishing, so no path (a scan landing, a threshold edit) can put
+        // a forecast past the horizon into the digest.
+        let asOf = state.asOf(at: now)
+        let predictions = asOf == nil ? predictions : [:]
+        let overshoots = asOf == nil ? overshoots : [:]
         // The digest carries ONE color per model: the dark-appearance
         // variant, pinned like `RiskRamp` — terminals draw on dark, and the
         // app never draws a digest color (it asks `ModelPalette`, which
@@ -834,7 +854,11 @@ public enum LiveStateBuilder {
                     usedMinor: $0.usedMinor, limitMinor: $0.limitMinor,
                     currency: $0.currency, exponent: $0.exponent)
             },
-            forecastProfile: .from(weeklyProfile))
+            forecastProfile: .from(weeklyProfile),
+            asOf: asOf,
+            asOfCaption: asOf.map {
+                UsageFormatting.asOfText($0, now: now, calendar: calendar, locale: locale)
+            })
 
         let meters = (snapshot?.meters ?? []).map { meter in
             liveMeter(

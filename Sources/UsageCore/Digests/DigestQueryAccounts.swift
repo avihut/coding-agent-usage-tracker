@@ -64,7 +64,8 @@ extension DigestQuery {
     }
 
     /// `updated` is the section's own fetch stamp — relative in the human
-    /// register, ISO (or `--unix`) in raw; `limits` the bar's segments that
+    /// register (the writer's "as of …" while the reading is OLD), ISO (or
+    /// `--unix`) in raw; `limits` the bar's segments that
     /// carry a percent ("S 53% W 80%", raw "S=53 W=80").
     private static func accountRow(_ profile: ProfileState, now: Date, raw: Bool, unix: Bool) -> [String] {
         var updated = ""
@@ -72,7 +73,8 @@ extension DigestQuery {
             if raw {
                 updated = unix ? String(Int(fetchedAt.timeIntervalSince1970)) : DigestQueryFormat.iso(fetchedAt)
             } else {
-                updated = UsageFormatting.duration(max(0, now.timeIntervalSince(fetchedAt))) + " ago"
+                updated = profile.engine?.asOfCaption
+                    ?? UsageFormatting.duration(max(0, now.timeIntervalSince(fetchedAt))) + " ago"
             }
         }
         let limits = (profile.menuBar ?? []).compactMap { segment in

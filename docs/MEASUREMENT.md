@@ -322,3 +322,33 @@ a face is in [ARCHITECTURE.md](ARCHITECTURE.md).
   (only while finishing within limits; a standard mark it would eclipse
   is dropped, `axisLabelClearance` 12 domain units ≈ one label height);
   percent-mode Y labels carry a % sign.
+- NO FORECAST FROM AN OLD READING (2026-11-22, user-reported: a Codex
+  reading three days old forecast "runs out in 23h 19m · ≈64% over" for an
+  account that had since changed plan — [HARNESSES.md](HARNESSES.md) →
+  Codex). `ReadingAge` (core, Api/) judges the AGE of a snapshot, by its
+  `fetchedAt`: horizon = min(the shortest `limitWindow` the reading carries,
+  `ReadingAge.cap` = 6 h), OLD strictly past it (a `fetchedAt` in the future
+  — the clock set back — is never called old). WHY: (1) a reading older
+  than its shortest window has outlived the window it measured; (2) the
+  weekly forecast's measured half, the recent-rate fit, reaches back 4 h
+  (`rateWindow`) — past it the forecast is the learned rhythm projected
+  from a point the account has left; 6 h is that fit plus the slowest poll
+  spacing of a HEALTHY engine (the 1 h decayed-cadence ceiling, plus slack),
+  and the cap — like every window the shipped providers report, 5 h and
+  up — is pinned above the 2 h slowest pace and backoff ceiling, so a
+  slow-paced account never reads old between two good polls (a window
+  shorter than the poll spacing would, honestly: it has outlived its
+  window by the next poll). It errs short
+  on purpose: a false "old" is a grey cell on an agent idle for hours; a
+  false "current" is the report. `predictAll(…, readingAt:)` returns `[:]`
+  for an old reading (nil = no age known = the forecast as before); the
+  engine passes `snapshot.fetchedAt` and clears what a `.cached` state
+  past the horizon still held (it only recomputes on `.live`); the digest
+  builder re-applies the rule at every publish and `UsageStore` at every
+  read, so no face — nor a client reading an older daemon — prints one.
+  Samples keep being appended at poll time (a known gap: the popover's line
+  runs flat across the reading's age). The spent countdown (`S↺`) is a
+  measurement and stays on an old cell (`UsageFormatting
+  .menuBarCountdowns(…, cached:old:)` — a locked-out account writes no new
+  reading, so its reading ages through the very lockout it counts down);
+  a cache-served or errored cell still counts down nothing.

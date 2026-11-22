@@ -473,6 +473,11 @@ public final class UsageEngine {
                         now: Date(), into: &$0, profileID: profileID)
                 }
                 recomputePredictions(for: snapshot)
+            } else if newState.asOf(at: Date()) != nil {
+                // A cache served past its age horizon (offline, backing
+                // off): the last live pass's forecast would otherwise ride
+                // on it forever — it is only ever recomputed on `.live`.
+                clearForecasts()
             }
             noteMetersSettled(source: Self.traceSource(newState))
             // The heartbeat: every completed cycle rewrites the digest, so
@@ -761,6 +766,7 @@ public final class UsageEngine {
         let samples = self.samples
         let previous = self.predictions
         let meters = snapshot.meters
+        let readingAt = snapshot.fetchedAt
         // Read off the main actor's state here — the detached body cannot.
         let timeline = self.tokenTimeline
         let pricing = self.pricing
@@ -775,9 +781,10 @@ public final class UsageEngine {
             // One pass, narrowest limit window first: a meter's forecast
             // reads its shorter-window siblings, so a spent 5h session
             // stops the weeklies climbing until it resets.
+            // An OLD reading (`ReadingAge`) forecasts nothing at all.
             let fresh = PredictionEngine.predictAll(
                 meters: meters, samples: samples, profiles: profiles,
-                previous: previous, now: now)
+                previous: previous, readingAt: readingAt, now: now)
             // What covering each forecast crossing would cost, priced on
             // the window's own tokens — nothing to state for a meter whose
             // forecast lands inside its limit.
@@ -818,6 +825,18 @@ public final class UsageEngine {
         StartupTrace.shared.mark("forecast \(traceName)")
         publishState()
         return true
+    }
+
+    /// Drops every forecast this engine holds — what an old reading
+    /// (`ReadingAge`) leaves: nothing to project from. Profiles stay; they
+    /// are the history's, not the reading's.
+    /// A pass still in flight is superseded too, so nothing it computed
+    /// can land afterwards.
+    func clearForecasts() {
+        predictionGeneration += 1
+        guard !predictions.isEmpty || !forecastOvershoots.isEmpty else { return }
+        predictions = [:]
+        forecastOvershoots = [:]
     }
 
     /// The overall weekly meter's rhythm — the activity chart's typical-week

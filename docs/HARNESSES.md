@@ -423,6 +423,34 @@ succeeds it for Google's plans, and it stays metered for API-key use.
   sessions, 7.62 B → 10.95 B tokens; every one of the 737 sessions the old
   scanner saw is identical in the new scan, and the token difference is
   exactly the 791 compressed-only sessions'.
+- AN OLD READING READS AS OLD (2026-11-22, user-reported: "My Codex
+  account is over and was reduced back to the free plan. Why is it still
+  showing the old limit and marking it as Pro Lite?"). Codex records
+  `rate_limits` (and `plan_type`) only in `token_count` events — when the
+  model REPLIES — so the newest reading is as old as the last reply: on the
+  reporting Mac Nov 18 20:13 (Pro Lite, weekly 75%), while a session opened
+  Nov 21 without a reply wrote none. Every poll still handed the engine
+  `.live(snapshot)`, so that reading drew white digits, named the plan as
+  current and was FORECAST from ("runs out in 23h 19m · ≈64% over" — the
+  learned rhythm projected from a three-day-old point). There is no other
+  honest source: the plan also sits in `~/.codex/auth.json`'s token, a
+  credential file, never read (§10). The fix is a READING-AGE rule in core,
+  beside — not instead of — the aging rule above: `ReadingAge` (Api/),
+  horizon = min(the shortest limit window the reading carries, 6 h); older
+  than that, a reading is OLD — no forecast (`PredictionEngine.predictAll
+  (…, readingAt:)`), "as of <day-aware stamp>" on the meter rows, the
+  status row, the strip, the popover and the plan ("Pro Lite plan · as of
+  Wed 20:13"), and the bar's stale treatment. The window still ROLLS on its
+  own reset (old + rolled = 0%, no reset, and the "as of"). Why those
+  numbers, and the digest's `engine.asOf`/`asOfCaption`, are in
+  MEASUREMENT.md (Predictions) and DAEMON.md. It needs no provider seam: it
+  reads `Snapshot.fetchedAt`, which is the event's time here, the probe
+  run's finish for Antigravity (a reading its probe isn't asked for, or
+  can't refresh, ages the same way), and the cached fetch for a Claude
+  cache served offline. Gemini's count is re-taken every poll, so it never
+  ages. CONSEQUENCE, accepted: a local harness unused for six hours reads
+  grey "as of …" until its next reply (Codex) or probe (Antigravity) —
+  every morning, for an agent used the day before.
 
 ## Gemini (v0.28.0)
 

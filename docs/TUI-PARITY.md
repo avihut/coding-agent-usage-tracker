@@ -279,6 +279,21 @@ gives each stack band its own density glyph.
     yet); and an account mid-first-scan reads `scanning` here but counts
     (as nothing) in the app's panel, which has no scanning state yet
     (follow-up).
+37. [S][✓][+d] Old readings (2026-11-22, the app's `ReadingAge`): the
+    digest's `engine.asOf` + `asOfCaption` (DAEMON.md). `Freshness::Old`
+    (after offline, backoff and stale — a cached reading's own "as of"
+    says more) greys the limits like Stale; the header status reads
+    "○ as of Wed 20:13 · next in …", the plan "Pro Lite plan · as of …",
+    and LIMITS carries the caption on its TITLE — the app puts it on every
+    meter row, but the column is fixed-width and a per-row suffix clipped
+    (deliberate). The Stale branch prints the caption too when present,
+    instead of a bare clock that read a three-day-old cache as today.
+    `--status` builds its blocks from cells: an OLD cell (`as_of`) has
+    unpainted, marker-free digits (a level from days ago is no alarm) and
+    its own caption right after its last digit, so a block of several
+    accounts says whose stamp it is. A backoff or a busy host over an old
+    reading still greys the limits, and the strip still says its age. No
+    forecast is drawn because the digest carries none.
 
 35. [S][✓] Busy ≠ offline, scanning ≠ zero (2026-11-21, with the app's
     panel): `Freshness::Busy` past the cutoff with the lease held — header

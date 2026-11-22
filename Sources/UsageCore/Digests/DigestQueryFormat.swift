@@ -202,8 +202,14 @@ enum DigestQueryFormat {
     }
 
     static func staleMarker(colorOn: Bool, tmux: Bool) -> String {
-        guard colorOn else { return " stale" }
-        return tmux ? " #[dim]stale#[default]" : " \u{1B}[2mstale\u{1B}[0m"
+        dimMarker("stale", colorOn: colorOn, tmux: tmux)
+    }
+
+    /// " <word>", dimmed in colour registers — the status line's quiet
+    /// suffixes (" stale", " as of Wed 20:13").
+    static func dimMarker(_ text: String, colorOn: Bool, tmux: Bool) -> String {
+        guard colorOn else { return " \(text)" }
+        return tmux ? " #[dim]\(text)#[default]" : " \u{1B}[2m\(text)\u{1B}[0m"
     }
 
     private static func bytes(_ color: RGBColor) -> (Int, Int, Int) {
@@ -364,9 +370,12 @@ extension DigestQuery {
                 let glyph: String?
                 let segments: [SegmentStatus]
                 let stale: Bool
+                /// Present only while the reading is OLD (2026-11-22, additive).
+                let asOf: Date?
             }
             let payload = PromptJSON(
-                glyph: noGlyph ? nil : digest.engine.glyph, segments: segments, stale: digest.engine.stale)
+                glyph: noGlyph ? nil : digest.engine.glyph, segments: segments, stale: digest.engine.stale,
+                asOf: digest.engine.asOf)
             return ok(DigestQueryFormat.jsonValue(payload))
         }
 
@@ -383,6 +392,9 @@ extension DigestQuery {
         }.joined(separator: " ")
         if digest.engine.stale {
             out += DigestQueryFormat.staleMarker(colorOn: colorOn, tmux: tmux)
+        }
+        if let caption = digest.engine.asOfCaption {
+            out += DigestQueryFormat.dimMarker(caption, colorOn: colorOn, tmux: tmux)
         }
         return QueryOutput(stdout: out, exitCode: exitOK)
     }

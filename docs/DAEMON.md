@@ -120,6 +120,26 @@ Contents, by section:
   flagged).
 - `menuBar[]` — the S/W/scoped triple with resolved colors; doubles as
   `usage-tui --status` input.
+- `engine.asOf` / `engine.asOfCaption` (2026-11-22, additive) — present
+  only while the limits reading is OLD (`ReadingAge`, MEASUREMENT.md →
+  Predictions): `asOf` equals `fetchedAt`, the caption is core's "as of
+  Wed 20:13" (day-aware). While set, no meter carries a forecast or a
+  risk colour and no `menuBar[]` segment a severity — the builder applies
+  the rule at publish, whatever the engine still holds. Absent = current,
+  or a writer that predates it. Independent of `stale` (cache-served or
+  errored), which keeps its meaning and every exit code built on it.
+  `menuBarCells[]` carry the same pair, ADDITIVE, beside a `stale` that
+  keeps its meaning (review, 2026-11-22: widening `stale` would have
+  changed what an existing field says to every reader that knew it); a
+  face draws the stale treatment for either, and an old cell may still
+  count down to a SPENT window's reset. The COMPOSER re-phrases every
+  caption at the file's own `now` (`EngineStatus.rephrasingAsOf`), so a
+  same-day "as of 17:00" can't outlive midnight by more than one host
+  publish. A reader sees `asOf` itself appear at the engine's next publish
+  (every poll; at most the decayed cadence's 1 h, 2 h at the slowest pace)
+  — no timer republishes at the horizon; the app's own faces apply the
+  rule at read time. Third golden: `live-state-v1-old-reading.json`
+  (Claude fresh, Codex old), decoded by Swift and Rust.
 - `models[]` — today's models, heaviest first: id, display name, ledger
   color (ModelColorMath — same math as the app's palette), tally, cost
   (null = unpriced).

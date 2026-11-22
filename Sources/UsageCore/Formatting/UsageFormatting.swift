@@ -313,6 +313,22 @@ public enum UsageFormatting {
         return formatter.string(from: date)
     }
 
+    /// "as of Wed 20:13" — an OLD reading's stamp (`ReadingAge`), in the
+    /// day-aware grammar above. Phrased once, here: the digest carries it
+    /// (`EngineStatus.asOfCaption`) so the terminal faces say the app's words.
+    public static func asOfText(
+        _ date: Date, now: Date, calendar: Calendar = .current, locale: Locale = .current
+    ) -> String {
+        "as of " + updatedStamp(
+            date, now: now, calendar: calendar, timeZone: calendar.timeZone, locale: locale)
+    }
+
+    /// A plan named as last known: "Pro Lite plan · as of Wed 20:13" while
+    /// the reading it came from is old, the label alone otherwise.
+    public static func planLabel(_ label: String, asOfCaption: String?) -> String {
+        asOfCaption.map { "\(label) · \($0)" } ?? label
+    }
+
     public static func clockTime(_ date: Date, timeZone: TimeZone = .current) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")

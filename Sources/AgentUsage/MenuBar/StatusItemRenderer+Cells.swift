@@ -191,8 +191,7 @@ extension StatusItemRenderer {
     /// stale cell says nothing either (stale never alarms). The preview's
     /// ghost stands in for the nothing.
     static func runsOutRuns(_ cell: Cell, scope: RunsOutScope, now: Date, ghosts: Bool) -> [Run] {
-        let countdowns = cell.stale
-            ? [] : UsageFormatting.menuBarCountdowns(cell.segments ?? [], scope: scope, now: now)
+        let countdowns = countdowns(cell, scope: scope, now: now)
         guard !countdowns.isEmpty else { return ghosts ? [.ghost("runs out")] : [] }
         var runs: [Run] = []
         for (index, countdown) in countdowns.enumerated() {
@@ -212,9 +211,18 @@ extension StatusItemRenderer {
     /// once a minute.
     static func hasCountdown(_ model: Model) -> Bool {
         model.cells.contains { cell in
-            guard !cell.stale, let scope = MenuBarLayout.runsOutScope(in: cell.elements) else { return false }
-            return !UsageFormatting.menuBarCountdowns(cell.segments ?? [], scope: scope, now: model.now).isEmpty
+            guard let scope = MenuBarLayout.runsOutScope(in: cell.elements) else { return false }
+            return !countdowns(cell, scope: scope, now: model.now).isEmpty
         }
+    }
+
+    /// What a cell may count down to — core's rule (`menuBarCountdowns(…,
+    /// cached:old:)`): a cell drawn stale for any reason but its reading's
+    /// age alone is cache-served or errored.
+    static func countdowns(_ cell: Cell, scope: RunsOutScope, now: Date) -> [MenuBarCountdown] {
+        UsageFormatting.menuBarCountdowns(
+            cell.segments ?? [], scope: scope, now: now,
+            cached: cell.stale && !cell.old, old: cell.old)
     }
 
     /// One cell alone, no glyph — the Settings thumbnails: an account's

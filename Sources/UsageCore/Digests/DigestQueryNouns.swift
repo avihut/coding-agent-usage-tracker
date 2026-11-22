@@ -58,7 +58,8 @@ extension DigestQuery {
                 parts.append("next poll in \(UsageFormatting.duration(nextPollAt.timeIntervalSince(now)))")
             }
             if let error = engine.error { parts.append("ERROR: \(error.text)") }
-            return ok(withStaleSuffix(parts.joined(separator: " · "), digest: digest))
+            return ok(withStaleSuffix(
+                withAsOfSuffix(parts.joined(separator: " · "), digest: digest), digest: digest))
         }
         guard parsed.positionals.count == 1 else { return badQuery("too many arguments") }
         return resolve(field, asJSON: json)
@@ -101,6 +102,11 @@ extension DigestQuery {
         case "backoff": return DigestQueryFormat.dateField(engine.backoffUntil, json: json, unix: unix, relative: false)
         case "gate-floor": return DigestQueryFormat.secondsField(engine.gateFloorSeconds, json: json, relative: relative)
         case "stale": return DigestQueryFormat.boolField(engine.stale, json: json)
+        case "as-of":
+            // Present only while the limits reading is OLD; `--relative`
+            // prints the writer's own "as of …".
+            return DigestQueryFormat.dateField(
+                engine.asOf, json: json, unix: unix, relative: relative, caption: engine.asOfCaption)
         case "local": return DigestQueryFormat.boolField(engine.isLocalProvider, json: json)
         case "pace": return DigestQueryFormat.secondsField(engine.activeIntervalSeconds, json: json, relative: relative)
         case "pace.multiplier": return DigestQueryFormat.intField(engine.paceMultiplier, json: json)
@@ -134,7 +140,7 @@ extension DigestQuery {
             let header = parsed.flags["header"] != nil ? meterColumns : nil
             return ok(DigestQueryFormat.tsv(rows, header: header))
         }
-        let rows = digest.meters.map(meterSummaryRow)
+        let rows = digest.meters.map { meterSummaryRow($0, asOfCaption: digest.engine.asOfCaption) }
         return ok(DigestQueryFormat.table(rows))
     }
 
@@ -164,7 +170,7 @@ extension DigestQuery {
         case .found(let meter):
             func resolve(_ name: String, asJSON: Bool) -> QueryOutput {
                 meterField(
-                    name, meter: meter, now: now, json: asJSON,
+                    name, meter: meter, engine: digest.engine, now: now, json: asJSON,
                     unix: parsed.flags["unix"] != nil, relative: parsed.flags["relative"] != nil,
                     header: parsed.flags["header"] != nil)
             }
@@ -180,7 +186,8 @@ extension DigestQuery {
                     return ok(DigestQueryFormat.tsv(
                         [row], header: parsed.flags["header"] != nil ? meterColumns : nil))
                 }
-                return ok(withStaleSuffix(meterSummaryLine(meter), digest: digest))
+                return ok(withStaleSuffix(
+                    withAsOfSuffix(meterSummaryLine(meter), digest: digest), digest: digest))
             }
             return resolve(field, asJSON: json)
         }
@@ -193,18 +200,29 @@ extension DigestQuery {
         return parts.joined(separator: " · ")
     }
 
-    private static func meterSummaryRow(_ meter: LiveMeter) -> [String] {
+    /// A list row's caption carries the reading's "as of …" while it is
+    /// OLD — every row is that reading, so every row says so.
+    private static func meterSummaryRow(_ meter: LiveMeter, asOfCaption: String?) -> [String] {
         var caption = meter.resetCaption ?? ""
         if let forecastCaption = meter.forecast?.caption {
             caption = caption.isEmpty ? forecastCaption : "\(caption) · \(forecastCaption)"
+        }
+        if let asOfCaption {
+            caption = caption.isEmpty ? asOfCaption : "\(caption) · \(asOfCaption)"
         }
         return [meter.tag, meter.label, DigestQueryFormat.humanPercent(meter.percent), caption]
     }
 
     private static func meterField(
-        _ field: String, meter: LiveMeter, now: Date, json: Bool, unix: Bool, relative: Bool, header: Bool
+        _ field: String, meter: LiveMeter, engine: EngineStatus, now: Date, json: Bool, unix: Bool,
+        relative: Bool, header: Bool
     ) -> QueryOutput {
         switch field {
+        case "as-of":
+            // The reading's, not the meter's: every meter of an OLD reading
+            // is as old as it.
+            return DigestQueryFormat.dateField(
+                engine.asOf, json: json, unix: unix, relative: relative, caption: engine.asOfCaption)
         case "percent": return DigestQueryFormat.intField(meter.percent, json: json)
         case "left": return DigestQueryFormat.intField(meter.percent.map { 100 - $0 }, json: json)
         case "label": return DigestQueryFormat.textField(meter.label, json: json)
@@ -381,7 +399,9 @@ extension DigestQuery {
                 line += " of \(UsageFormatting.money(Double(limitMinor) / scale))"
             }
             line += " \(spend.currency)"
-            return ok(withStaleSuffix(line, digest: digest))
+            // The spend line rides the limits fetch (`snapshot.spendLine`),
+            // so an OLD reading's spend is as old as its meters.
+            return ok(withStaleSuffix(withAsOfSuffix(line, digest: digest), digest: digest))
         }
         return resolve(field, asJSON: json)
     }

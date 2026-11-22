@@ -147,6 +147,10 @@ struct MeterHistoryView: View {
     }
 
     let accountTitle: AccountTitle?
+    /// "as of Wed 20:13" while the reading is OLD (`ReadingAge`): beside the
+    /// meter's name, since nothing on the card is current — and no forecast
+    /// is drawn (the owner hands none). Nil while current.
+    let asOfCaption: String?
 
     init(
         meter: Meter, samples: [UsageSample], timeline: [TokenSlot],
@@ -156,11 +160,13 @@ struct MeterHistoryView: View {
         agentName: String, providerID: String,
         style: HarnessStyle = .bundled,
         accountTitle: AccountTitle? = nil,
+        asOfCaption: String? = nil,
         highlightReset: Date? = nil,
         outages: [OutageSpan] = [],
         onOpenOutage: ((OutageSpan) -> Void)? = nil
     ) {
         self.accountTitle = accountTitle
+        self.asOfCaption = asOfCaption
         self.highlightReset = highlightReset
         self.outages = outages
         self.onOpenOutage = onOpenOutage
@@ -664,6 +670,12 @@ struct MeterHistoryView: View {
             }
             HStack(alignment: .firstTextBaseline) {
                 Text(meter.label).font(.caption.bold())
+                if let asOfCaption {
+                    Text(asOfCaption)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
                 Spacer()
                 // The History span picks its trailing frame from a compact
                 // dropdown beside the span picker; the Current span's frame

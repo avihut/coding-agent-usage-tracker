@@ -29,8 +29,10 @@ extension UsageFormatting {
     /// the last session write (Active within the hour, Quiet inside the
     /// dormancy window, Dormant beyond, "No sessions yet" without one), the
     /// write's age, and the meters' freshness when known.
+    /// An OLD reading (`old`, `ReadingAge`) reads "as of 15:02", never
+    /// "Updated": the meters are the last thing known.
     public static func profileStateLine(
-        lastWrite: Date?, fetchedAt: Date?, now: Date,
+        lastWrite: Date?, fetchedAt: Date?, old: Bool = false, now: Date,
         calendar: Calendar = .current, timeZone: TimeZone = .current, locale: Locale = .current
     ) -> String {
         var parts: [String] = []
@@ -48,7 +50,7 @@ extension UsageFormatting {
             parts.append("No sessions yet")
         }
         if let fetchedAt {
-            parts.append("Updated " + updatedStamp(
+            parts.append((old ? "as of " : "Updated ") + updatedStamp(
                 fetchedAt, now: now, calendar: calendar, timeZone: timeZone, locale: locale))
         }
         return parts.joined(separator: " · ")

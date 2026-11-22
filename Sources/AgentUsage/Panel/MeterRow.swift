@@ -4,6 +4,9 @@ import UsageCore
 struct MeterRow: View {
     let meter: Meter
     let stale: Bool
+    /// "as of Wed 20:13" while the reading is OLD (`ReadingAge`): the row
+    /// says what it shows is the last thing known. Nil while current.
+    var asOfCaption: String?
     let prediction: UsagePrediction?
     /// How far past the limit this window is forecast to land, and what
     /// covering it would cost at list prices — appended to the caption's
@@ -108,6 +111,9 @@ struct MeterRow: View {
             parts.append(
                 Text(UsageFormatting.resetText(resetsAt, now: Date()))
                     .foregroundStyle(.secondary))
+        }
+        if let asOfCaption {
+            parts.append(Text(asOfCaption).foregroundStyle(.secondary))
         }
         if let prediction,
            let caption = UsageFormatting.forecastCaption(

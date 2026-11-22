@@ -93,16 +93,25 @@ public struct MenuBarCell: Codable, Sendable, Equatable, Identifiable {
     /// The S/W/scoped triple; empty when the profile's engine has not
     /// published yet.
     public let segments: [SegmentStatus]
+    /// Cache-served or errored — the section's `engine.stale`.
     public let stale: Bool
     public let worstSeverity: Double?
     public let indicator: Bool
+    /// The section's `engine.asOf` / `asOfCaption` (2026-11-22, additive):
+    /// present only while its limits reading is OLD (`ReadingAge`). A face
+    /// draws the bar's stale treatment for an old cell as for a stale one,
+    /// but an old cell may still count down to a SPENT window's reset —
+    /// a measurement, not a forecast. Kept apart from `stale` so that field
+    /// keeps its meaning for every reader that knew it.
+    public let asOf: Date?
+    public let asOfCaption: String?
 
     public var id: String { profile }
 
     public init(
         profile: String, providerID: String, glyph: String, monogram: String,
         segments: [SegmentStatus], stale: Bool, worstSeverity: Double?, indicator: Bool,
-        accent: RGBColor? = nil
+        accent: RGBColor? = nil, asOf: Date? = nil, asOfCaption: String? = nil
     ) {
         self.profile = profile
         self.providerID = providerID
@@ -113,6 +122,8 @@ public struct MenuBarCell: Codable, Sendable, Equatable, Identifiable {
         self.stale = stale
         self.worstSeverity = worstSeverity
         self.indicator = indicator
+        self.asOf = asOf
+        self.asOfCaption = asOfCaption
     }
 }
 
@@ -192,7 +203,13 @@ public enum MeteringDigest {
             paceMultiplier: 1, nextPollAt: nil, backoffUntil: nil, apiBudget: nil,
             systemAccent: systemAccent, now: now, calendar: calendar, locale: locale)
         let earliestPoll = sections.compactMap { $0.state?.engine.nextPollAt }.min()
-        let engine = base.engine.replacing(generatedAt: now, nextPollAt: earliestPoll ?? nextReprobeAt)
+        // Every OLD section's caption is re-phrased here, at the file's own
+        // `now` — see `rephrasingAsOf`.
+        func phrased(_ engine: EngineStatus) -> EngineStatus {
+            engine.rephrasingAsOf(now: now, calendar: calendar, locale: locale)
+        }
+        let engine = phrased(base.engine)
+            .replacing(generatedAt: now, nextPollAt: earliestPoll ?? nextReprobeAt)
 
         let profiles = sections.map { section in
             // A section whose first scan hasn't landed knows nothing about
@@ -204,7 +221,7 @@ public enum MeteringDigest {
                 monogram: section.monogram, enabled: section.profile.enabled,
                 isFocused: section.profile.key == focusedID, dormant: section.dormant,
                 lastActivityAt: section.lastActivityAt, homeDisplayPath: section.homeDisplayPath,
-                engine: section.state?.engine, meters: section.state?.meters,
+                engine: section.state.map { phrased($0.engine) }, meters: section.state?.meters,
                 menuBar: section.state?.menuBar,
                 models: scanning ? nil : section.state?.models,
                 activity: scanning ? nil : section.state?.activity,
@@ -221,13 +238,15 @@ public enum MeteringDigest {
                 .filter { $0.showsCell && $0.profile.providerID == harness.provider.id }
                 .map { section in
                     let segments = section.state?.menuBar ?? []
+                    let sectionEngine = section.state.map { phrased($0.engine) }
                     return MenuBarCell(
                         profile: section.profile.key, providerID: section.profile.providerID,
                         glyph: harness.provider.menuBarGlyph, monogram: section.monogram,
-                        segments: segments, stale: section.state?.engine.stale ?? true,
+                        segments: segments, stale: sectionEngine?.stale ?? true,
                         worstSeverity: segments.compactMap(\.severity).max(),
                         indicator: resets.contains { $0.profileIDOrDefault == section.profile.id },
-                        accent: RGBColor(harness.provider.accent))
+                        accent: RGBColor(harness.provider.accent),
+                        asOf: sectionEngine?.asOf, asOfCaption: sectionEngine?.asOfCaption)
                 }
         }
         let states = harnesses.map { harness in
@@ -429,6 +448,21 @@ extension LiveState {
 extension EngineStatus {
     /// The same status with the host's heartbeat and scheduling stamped in.
     func replacing(generatedAt: Date, nextPollAt: Date?) -> EngineStatus {
+        replacing(generatedAt: generatedAt, nextPollAt: nextPollAt, asOfCaption: asOfCaption)
+    }
+
+    /// An OLD reading's caption re-phrased at the composer's `now`: the
+    /// engine phrased it when it last published, and a same-day stamp ("as
+    /// of 17:00") would read as today's once midnight passes before its next
+    /// publish. Every face of the file prints this caption verbatim.
+    func rephrasingAsOf(now: Date, calendar: Calendar, locale: Locale) -> EngineStatus {
+        guard let asOf else { return self }
+        return replacing(
+            generatedAt: generatedAt, nextPollAt: nextPollAt,
+            asOfCaption: UsageFormatting.asOfText(asOf, now: now, calendar: calendar, locale: locale))
+    }
+
+    private func replacing(generatedAt: Date, nextPollAt: Date?, asOfCaption: String?) -> EngineStatus {
         EngineStatus(
             providerID: providerID, serviceName: serviceName, agentName: agentName,
             glyph: glyph, accent: accent, systemAccent: systemAccent, planLabel: planLabel,
@@ -440,7 +474,8 @@ extension EngineStatus {
             activeIntervalSeconds: activeIntervalSeconds, paceMultiplier: paceMultiplier,
             apiBudgetUsed: apiBudgetUsed, apiBudgetCeiling: apiBudgetCeiling,
             apiBudgetFraction: apiBudgetFraction, gateFloorSeconds: gateFloorSeconds,
-            error: error, spend: spend, forecastProfile: forecastProfile)
+            error: error, spend: spend, forecastProfile: forecastProfile,
+            asOf: asOf, asOfCaption: asOfCaption)
     }
 
     /// An engine that is not running, described with the writer's own

@@ -34,7 +34,13 @@ are core `ModelColorMath.agentShade` outputs for the demo's ledgers (each
 agent's families seeded heaviest first) and must be recomputed if that
 math changes.
 
-usage: demo-digest.py [--several] [--scanning] [--with-antigravity] <out.json>
+`--old-codex` publishes Codex on an OLD limits reading (`ReadingAge`): the
+reported shape — Pro Lite, weekly 75%, read three and a half days ago, the
+5 h session rolled since — with `asOf` set (its cell too), no forecast.
+`--focus-codex` focuses Codex instead of Claude Code. Both opt-in and drawn
+last, so every other output keeps its bytes.
+
+usage: demo-digest.py [--several] [--scanning] [--with-antigravity] [--old-codex] [--focus-codex] <out.json>
 """
 
 import copy
@@ -508,7 +514,70 @@ def add_antigravity(now, rng, state, sections, cells):
     state["menuBarCells"].append(cell)
 
 
-def build(now, several=False, with_antigravity=False, scanning=False):
+def as_of_caption(moment, now):
+    """Core's `UsageFormatting.asOfText`: the day-aware stamp, local time."""
+    local, today = moment.astimezone(), now.astimezone()
+    if local.date() == today.date():
+        text = local.strftime("%H:%M")
+    elif (now - moment) < timedelta(days=7):
+        text = local.strftime("%a %H:%M")
+    else:
+        text = f"{local.strftime('%b')} {local.day} {local.strftime('%H:%M')}"
+    return f"as of {text}"
+
+
+def make_old_codex(now, rng, state, codex):
+    """Codex on the reporter's reading: old, so no forecast and a stale cell."""
+    read_at = now - timedelta(days=3, hours=12, minutes=47)
+    weekly = meter(read_at, rng, CODEX_MODELS, ident="1-weekly", label="Weekly", tag="W",
+                   rank=1, window=timedelta(days=7), elapsed=timedelta(days=1, hours=20),
+                   percent=75, projected=100, verdict="red", severity=1, step_minutes=120)
+    hours = (datetime.fromisoformat(weekly["resetsAt"].replace("Z", "+00:00")) - now) \
+        .total_seconds() / 3600
+    weekly["resetCaption"] = f"resets in {int(hours // 24)}d {int(hours % 24)}h"
+    session = {"id": "0-session", "label": "Session (5h)", "tag": "S", "rank": 0,
+               "level": "normal", "percent": 0, "limitWindow": 5 * 3600,
+               "rateWindowSeconds": 2700, "forcesWarning": False, "series": [],
+               "stretches": [], "modelSeries": []}
+    meters = [session, weekly]
+    for built in meters:
+        built.pop("forecast", None)
+        built.pop("risk", None)
+    menu_bar = [{key: m[key] for key in ("tag", "percent", "level", "resetsAt") if key in m}
+                for m in meters]
+    codex.update({"meters": meters, "menuBar": menu_bar})
+    codex["engine"].update({
+        "fetchedAt": stamp(read_at), "asOf": stamp(read_at),
+        "asOfCaption": as_of_caption(read_at, now),
+        "planLabel": "Pro Lite plan", "planDisplayName": "Pro Lite",
+        "planSubscriptionType": "prolite"})
+    for cell in state["menuBarCells"]:
+        if cell["profile"] == codex["id"]:
+            # `stale` keeps its meaning (cache-served or errored); the cell
+            # says its age beside it, as the composer writes it.
+            cell.update({"segments": menu_bar, "stale": False,
+                         "asOf": codex["engine"]["asOf"],
+                         "asOfCaption": codex["engine"]["asOfCaption"]})
+            cell.pop("worstSeverity", None)
+
+
+def focus(state, section):
+    """The top level answers for the focused account."""
+    for other in state["profiles"]:
+        other["isFocused"] = other["id"] == section["id"]
+    # A scanning section leaves activity, models and sessions absent, and
+    # the top level follows it.
+    for key in ("activity", "engine", "menuBar", "meters", "models", "sessions",
+                "activityStatus"):
+        if key in section:
+            state[key] = copy.deepcopy(section[key])
+        else:
+            state.pop(key, None)
+    state["focusedProfile"] = section["id"]
+
+
+def build(now, several=False, with_antigravity=False, scanning=False,
+          old_codex=False, focus_codex=False):
     rng = random.Random(5)
     state = json.loads(GOLDEN.read_text())
     sections = {section["id"]: section for section in state["profiles"]}
@@ -588,6 +657,10 @@ def build(now, several=False, with_antigravity=False, scanning=False):
         codex["activityStatus"] = {"state": "scanning"}
         for key in ("activity", "models", "sessions"):
             codex.pop(key, None)
+    if old_codex:
+        make_old_codex(now, rng, state, codex)
+    if focus_codex:
+        focus(state, codex)
     section = all_agents(state, now, scanning=("codex",) if scanning else ())
     if section is None:
         state.pop("allAgents", None)
@@ -597,14 +670,15 @@ def build(now, several=False, with_antigravity=False, scanning=False):
 
 
 def main():
-    flags = ("--several", "--with-antigravity", "--scanning")
+    flags = ("--several", "--with-antigravity", "--scanning", "--old-codex", "--focus-codex")
     args = sys.argv[1:]
     paths = [a for a in args if a not in flags]
     if len(paths) != 1 or paths[0].startswith("-"):
         sys.exit(__doc__.strip().splitlines()[-1])
     now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
     digest = build(now, several="--several" in args,
-                   with_antigravity="--with-antigravity" in args, scanning="--scanning" in args)
+                   with_antigravity="--with-antigravity" in args, scanning="--scanning" in args,
+                   old_codex="--old-codex" in args, focus_codex="--focus-codex" in args)
     Path(paths[0]).write_text(json.dumps(digest, indent=1, sort_keys=True) + "\n")
 
 

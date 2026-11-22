@@ -222,6 +222,7 @@ struct UsagePanelView: View {
                 // the panel's wrapper, outside the section whose card it is.
                 style: owner.style,
                 accountTitle: accountTitle(for: owner),
+                asOfCaption: owner.asOfCaption(),
                 highlightReset: litReset?.meter == selection.key ? litReset?.at : nil,
                 outages: owner.outages,
                 onOpenOutage: openOutage)
@@ -554,7 +555,9 @@ struct UsagePanelView: View {
     /// instead of color. Providers without an upgrade page get the caption,
     /// no link. Font and tier vary with the row's D9 shape.
     @ViewBuilder private func planLabel(font: Font, style: some ShapeStyle) -> some View {
-        if let plan = store.state.snapshot?.plan?.displayLabel {
+        // "Pro Lite plan · as of Wed 20:13" while the reading is old: the
+        // plan is last known, never current.
+        if let plan = store.planLabel() {
             if let upgrade = store.provider.links.planUpgrade {
                 Button {
                     NSWorkspace.shared.open(upgrade)
@@ -634,7 +637,8 @@ struct UsagePanelView: View {
             ForEach(snapshot.meters) { meter in
                 MeterRow(
                     meter: meter,
-                    stale: owner.state.isStale,
+                    stale: owner.readsStale(),
+                    asOfCaption: owner.asOfCaption(),
                     prediction: owner.predictions[meter.label],
                     overshoot: owner.forecastOvershoots[meter.label],
                     key: meterKey(meter.id, profileID: profileID),
@@ -1051,9 +1055,11 @@ struct UsagePanelView: View {
         // a days-old stamp.
         let stamp = UsageFormatting.updatedStamp(fetchedAt, now: now)
         // The stale badge lives here now that there's no header for it.
-        return store.state.isStale
-            ? Text("cached \(stamp)").foregroundStyle(.orange)
-            : Text("Updated \(stamp)")
+        if store.state.isStale { return Text("cached \(stamp)").foregroundStyle(.orange) }
+        // An OLD reading (`ReadingAge`) is never "Updated": it is the last
+        // thing known, as of when it was read.
+        if let caption = store.asOfCaption(at: now) { return Text(caption) }
+        return Text("Updated \(stamp)")
     }
 
     /// The operational tick-tock — countdown, idle multiplier, budget
