@@ -119,18 +119,42 @@ final class UsageStore {
     }
     private var fakeOutages: [OutageSpan]?
     var predictions: [String: UsagePrediction] {
+        // No forecast from an OLD reading (`ReadingAge`), whoever computed
+        // it — a client can be reading an older daemon's digest that still
+        // carries one.
+        guard !readingIsOld else { return [:] }
         switch mode {
-        case .hosting: engine?.predictions ?? [:]
-        case .client(let client): client.predictions
+        case .hosting: return engine?.predictions ?? [:]
+        case .client(let client): return client.predictions
         }
+    }
+    /// The reading's stamp while it is OLD (`ReadingAge`) — every face's
+    /// "as of …" — and nil while it is current.
+    func readingAsOf(at now: Date = Date()) -> Date? { state.asOf(at: now) }
+    private var readingIsOld: Bool { readingAsOf() != nil }
+    /// "as of Wed 20:13" while the reading is old.
+    func asOfCaption(at now: Date = Date()) -> String? {
+        readingAsOf(at: now).map { UsageFormatting.asOfText($0, now: now) }
+    }
+    /// The plan as last known — "Pro Lite plan · as of Wed 20:13" while the
+    /// reading it came from is old.
+    func planLabel(at now: Date = Date()) -> String? {
+        state.snapshot?.plan?.displayLabel.map {
+            UsageFormatting.planLabel($0, asOfCaption: asOfCaption(at: now))
+        }
+    }
+    /// Not current: cache-served, errored, or old — the stale look.
+    func readsStale(at now: Date = Date()) -> Bool {
+        state.isStale || readingAsOf(at: now) != nil
     }
     /// What covering each forecast crossing would cost, by meter label —
     /// the dollars behind "runs out Mon 20:00 · ~$38 extra". No entry
     /// means the meter's forecast stays inside its limit.
     var forecastOvershoots: [String: ForecastOvershoot] {
+        guard !readingIsOld else { return [:] }
         switch mode {
-        case .hosting: engine?.forecastOvershoots ?? [:]
-        case .client(let client): client.forecastOvershoots
+        case .hosting: return engine?.forecastOvershoots ?? [:]
+        case .client(let client): return client.forecastOvershoots
         }
     }
     var profiles: [String: WeeklyProfile] {

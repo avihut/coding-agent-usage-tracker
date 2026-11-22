@@ -177,6 +177,6 @@ enum MenuBarModelBuilder {
         }
         return StatusItemRenderer.Cell(
             profileID: id, monogram: monogram, segments: segments,
-            stale: store.state.snapshot == nil || store.state.isStale, focused: false)
+            stale: store.state.snapshot == nil || store.readsStale(), focused: false)
     }
 }

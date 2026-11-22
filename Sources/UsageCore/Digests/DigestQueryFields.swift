@@ -29,7 +29,7 @@ extension DigestQuery {
         "status": scalars([
             "provider", "service", "agent", "glyph", "plan", "plan.type", "plan.tier", "host", "pid", "version",
             "schema", "sessions-cap", "generated", "fetched", "age", "next-poll", "backoff", "gate-floor",
-            "stale", "local", "pace", "pace.multiplier", "error", "error.code", "error.hint", "error.http",
+            "stale", "as-of", "local", "pace", "pace.multiplier", "error", "error.code", "error.hint", "error.http",
             "accent", "system-accent", "forecast.ready", "forecast.remaining", "forecast.caption", "timezone",
             "account",
         ]),
@@ -38,7 +38,7 @@ extension DigestQuery {
             .merging(tables(["items"])) { lhs, _ in lhs },
         "limit": scalars([
             "percent", "left", "label", "tag", "level", "rank", "severity", "risk", "resets-at", "resets-in",
-            "caption", "window", "rate-window", "forces-warning", "scoped-model", "exhausted",
+            "as-of", "caption", "window", "rate-window", "forces-warning", "scoped-model", "exhausted",
             "forecast.severity", "forecast.projected", "forecast.projected-raw", "forecast.overshoot",
             "forecast.overshoot-tokens", "forecast.overshoot-cost", "forecast.exhausts-at",
             "forecast.exhausts-in",

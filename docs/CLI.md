@@ -243,6 +243,22 @@ Mac its view IS that account's, so 28 applies there too.
   spend prompt get — the nouns whose answer IS the measurement); anywhere
   else it is an unknown flag (19), never accepted and inert.
 
+- OLD READINGS (2026-11-22, `ReadingAge`): while the selected section's
+  reading is old the writer publishes `engine.asOf`/`asOfCaption`, and the
+  CLI prints the writer's words, never re-deriving them: `status` and
+  `limit <sel>` lines end " · as of Wed 20:13" (before any " · stale"),
+  each `limits` row's caption carries it, `prompt` appends it dimmed (like
+  " stale") and its `--json` gains `asOf`, `accounts`' human `updated`
+  column reads it in place of "N ago". Fields: `status as-of`, `limit <sel>
+  as-of` (a date; empty/null while current; `--relative` prints the
+  caption). Spend, cost and activity lines never carry it — that data is
+  the fresh scan. NO EXIT CODE MOVES: `stale`, `status --check`,
+  `--max-age` and `--max-data-age` all keep their meaning. ONE BEHAVIOUR
+  CHANGE to know: an old reading has no forecast, and `headroom --forecast`
+  passes a meter with none, so a call that refused (25) on an old reading's
+  red forecast now answers 0 — pass `--max-data-age` (21 for it, as it
+  always was) when the numbers must be fresh.
+
 ## session lookups ask the engine (issue #24)
 
 - SESSION LOOKUPS ASK THE ENGINE (2026-10-23, issue #24; SUPERSEDES the

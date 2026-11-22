@@ -199,7 +199,8 @@ extension AppDelegate {
                 pricing: store.pricing, prediction: store.predictions[meter.label],
                 overshoot: store.forecastOvershoots[meter.label],
                 outcomes: store.windowOutcomes, agentName: store.provider.agentName,
-                providerID: store.provider.id, style: store.style, highlightReset: reset,
+                providerID: store.provider.id, style: store.style,
+                asOfCaption: store.asOfCaption(), highlightReset: reset,
                 outages: store.outages)
             write(ImageRenderer(content: card), "meter.png")
         }
@@ -216,7 +217,8 @@ extension AppDelegate {
                 pricing: other.pricing, prediction: other.predictions[meter.label],
                 overshoot: other.forecastOvershoots[meter.label],
                 outcomes: other.windowOutcomes, agentName: other.provider.agentName,
-                providerID: other.profile.scopeKey, style: other.style, outages: other.outages)
+                providerID: other.profile.scopeKey, style: other.style,
+                asOfCaption: other.asOfCaption(), outages: other.outages)
             write(ImageRenderer(content: card), "meter-\(profile.key).png")
         }
         // The menu bar's hover card while an incident is open: the session
@@ -232,7 +234,8 @@ extension AppDelegate {
                 pricing: store.pricing, prediction: store.predictions[meter.label],
                 overshoot: store.forecastOvershoots[meter.label],
                 outcomes: store.windowOutcomes, agentName: store.provider.agentName,
-                providerID: store.profile.scopeKey, style: store.style, outages: store.outages)
+                providerID: store.profile.scopeKey, style: store.style,
+                asOfCaption: store.asOfCaption(), outages: store.outages)
             write(ImageRenderer(content: HoverPopoverContent(card: incident, history: card)), "hover.png")
         }
         // The weekly meter's week-span audit chart — the other face of the

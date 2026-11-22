@@ -1,0 +1,483 @@
+{
+  "activity" : {
+    "days" : [
+
+    ],
+    "hourDays" : [
+
+    ],
+    "modelDays" : [
+
+    ],
+    "timeZone" : "GMT",
+    "todayHours" : [
+
+    ],
+    "todayPrompts" : 0,
+    "todayTokens" : 0
+  },
+  "allAgents" : {
+    "countLabel" : "0 of 2 agents",
+    "members" : [
+      {
+        "profile" : "default",
+        "providerID" : "claude",
+        "state" : "scanning"
+      },
+      {
+        "profile" : "codex",
+        "providerID" : "codex",
+        "state" : "scanning"
+      }
+    ],
+    "partial" : true
+  },
+  "engine" : {
+    "accent" : {
+      "blue" : 0.341,
+      "green" : 0.467,
+      "red" : 0.851
+    },
+    "activeIntervalSeconds" : 300,
+    "agentName" : "Claude Code",
+    "appVersion" : "0.104.0",
+    "fetchedAt" : "2026-11-22T08:58:00Z",
+    "forecastProfile" : {
+      "caption" : "Personalized forecast activates in 14 days — learning your weekly rhythm.",
+      "historySpanSeconds" : 0,
+      "isReady" : false,
+      "remainingSeconds" : 1209600
+    },
+    "gateFloorSeconds" : 180,
+    "generatedAt" : "2026-11-22T09:00:00Z",
+    "glyph" : "✳︎",
+    "host" : "daemon",
+    "isLocalProvider" : false,
+    "nextPollAt" : "2026-11-22T09:03:00Z",
+    "paceMultiplier" : 1,
+    "pid" : 909,
+    "providerID" : "claude",
+    "serviceName" : "Claude",
+    "stale" : false
+  },
+  "focusedProfile" : "default",
+  "harnesses" : [
+    {
+      "accent" : {
+        "blue" : 0.341,
+        "green" : 0.467,
+        "red" : 0.851
+      },
+      "accountCount" : 1,
+      "activeDays" : 9,
+      "agentName" : "Claude Code",
+      "glyph" : "✳︎",
+      "id" : "claude",
+      "isLocalProvider" : false,
+      "newestActivityAt" : "2026-11-22T08:40:00Z",
+      "notices" : {
+        "indicator" : false,
+        "items" : [
+
+        ],
+        "pendingCount" : 0
+      },
+      "outages" : [
+
+      ],
+      "present" : true,
+      "recentFiles" : 412,
+      "serviceName" : "Claude",
+      "shortName" : "Claude",
+      "shown" : true
+    },
+    {
+      "accent" : {
+        "blue" : 0.498,
+        "green" : 0.639,
+        "red" : 0.063
+      },
+      "accountCount" : 1,
+      "activeDays" : 4,
+      "agentName" : "Codex",
+      "glyph" : "⬡",
+      "id" : "codex",
+      "isLocalProvider" : true,
+      "newestActivityAt" : "2026-11-21T20:10:00Z",
+      "notices" : {
+        "indicator" : false,
+        "items" : [
+
+        ],
+        "pendingCount" : 0
+      },
+      "present" : true,
+      "recentFiles" : 22,
+      "serviceName" : "ChatGPT",
+      "shortName" : "Codex",
+      "shown" : true
+    }
+  ],
+  "menuBar" : [
+    {
+      "level" : "normal",
+      "percent" : 62,
+      "resetsAt" : "2026-11-22T11:00:00Z",
+      "severity" : 0,
+      "tag" : "S"
+    }
+  ],
+  "menuBarCells" : [
+    {
+      "accent" : {
+        "blue" : 0.341,
+        "green" : 0.467,
+        "red" : 0.851
+      },
+      "glyph" : "✳︎",
+      "indicator" : false,
+      "monogram" : "W",
+      "profile" : "default",
+      "providerID" : "claude",
+      "segments" : [
+        {
+          "level" : "normal",
+          "percent" : 62,
+          "resetsAt" : "2026-11-22T11:00:00Z",
+          "severity" : 0,
+          "tag" : "S"
+        }
+      ],
+      "stale" : false,
+      "worstSeverity" : 0
+    },
+    {
+      "accent" : {
+        "blue" : 0.498,
+        "green" : 0.639,
+        "red" : 0.063
+      },
+      "glyph" : "⬡",
+      "indicator" : false,
+      "monogram" : "C",
+      "profile" : "codex",
+      "providerID" : "codex",
+      "segments" : [
+        {
+          "level" : "normal",
+          "percent" : 0,
+          "tag" : "S"
+        },
+        {
+          "level" : "normal",
+          "percent" : 75,
+          "resetsAt" : "2026-11-25T02:27:00Z",
+          "tag" : "W"
+        }
+      ],
+      "stale" : true
+    }
+  ],
+  "meters" : [
+    {
+      "forcesWarning" : false,
+      "forecast" : {
+        "basis" : "recentOnly",
+        "curve" : [
+          {
+            "percent" : 62,
+            "t" : "2026-11-22T09:00:00Z"
+          },
+          {
+            "percent" : 70,
+            "t" : "2026-11-22T11:00:00Z"
+          }
+        ],
+        "projectedAtReset" : 70,
+        "projectedUnclamped" : 70,
+        "ratePerHour" : 4,
+        "rawVerdict" : "green",
+        "severity" : 0,
+        "verdict" : "green"
+      },
+      "id" : "five_hour",
+      "label" : "Session (5h)",
+      "level" : "normal",
+      "limitWindow" : 18000,
+      "modelSeries" : [
+
+      ],
+      "percent" : 62,
+      "rank" : 0,
+      "rateWindowSeconds" : 2700,
+      "resetCaption" : "resets in 2h",
+      "resetsAt" : "2026-11-22T11:00:00Z",
+      "series" : [
+
+      ],
+      "stretches" : [
+
+      ],
+      "tag" : "S"
+    }
+  ],
+  "models" : [
+
+  ],
+  "notices" : {
+    "indicator" : false,
+    "items" : [
+
+    ],
+    "pendingCount" : 0
+  },
+  "outages" : [
+
+  ],
+  "profiles" : [
+    {
+      "accountID" : "default",
+      "activity" : {
+        "days" : [
+
+        ],
+        "hourDays" : [
+
+        ],
+        "modelDays" : [
+
+        ],
+        "timeZone" : "GMT",
+        "todayHours" : [
+
+        ],
+        "todayPrompts" : 0,
+        "todayTokens" : 0
+      },
+      "dormant" : false,
+      "enabled" : true,
+      "engine" : {
+        "accent" : {
+          "blue" : 0.341,
+          "green" : 0.467,
+          "red" : 0.851
+        },
+        "activeIntervalSeconds" : 300,
+        "agentName" : "Claude Code",
+        "appVersion" : "0.104.0",
+        "fetchedAt" : "2026-11-22T08:58:00Z",
+        "forecastProfile" : {
+          "caption" : "Personalized forecast activates in 14 days — learning your weekly rhythm.",
+          "historySpanSeconds" : 0,
+          "isReady" : false,
+          "remainingSeconds" : 1209600
+        },
+        "gateFloorSeconds" : 180,
+        "generatedAt" : "2026-11-22T09:00:00Z",
+        "glyph" : "✳︎",
+        "host" : "daemon",
+        "isLocalProvider" : false,
+        "nextPollAt" : "2026-11-22T09:03:00Z",
+        "paceMultiplier" : 1,
+        "pid" : 909,
+        "providerID" : "claude",
+        "serviceName" : "Claude",
+        "stale" : false
+      },
+      "homeDisplayPath" : "~\/.claude",
+      "id" : "default",
+      "isFocused" : true,
+      "label" : "work@example.com",
+      "lastActivityAt" : "2026-11-22T08:40:00Z",
+      "menuBar" : [
+        {
+          "level" : "normal",
+          "percent" : 62,
+          "resetsAt" : "2026-11-22T11:00:00Z",
+          "severity" : 0,
+          "tag" : "S"
+        }
+      ],
+      "meters" : [
+        {
+          "forcesWarning" : false,
+          "forecast" : {
+            "basis" : "recentOnly",
+            "curve" : [
+              {
+                "percent" : 62,
+                "t" : "2026-11-22T09:00:00Z"
+              },
+              {
+                "percent" : 70,
+                "t" : "2026-11-22T11:00:00Z"
+              }
+            ],
+            "projectedAtReset" : 70,
+            "projectedUnclamped" : 70,
+            "ratePerHour" : 4,
+            "rawVerdict" : "green",
+            "severity" : 0,
+            "verdict" : "green"
+          },
+          "id" : "five_hour",
+          "label" : "Session (5h)",
+          "level" : "normal",
+          "limitWindow" : 18000,
+          "modelSeries" : [
+
+          ],
+          "percent" : 62,
+          "rank" : 0,
+          "rateWindowSeconds" : 2700,
+          "resetCaption" : "resets in 2h",
+          "resetsAt" : "2026-11-22T11:00:00Z",
+          "series" : [
+
+          ],
+          "stretches" : [
+
+          ],
+          "tag" : "S"
+        }
+      ],
+      "models" : [
+
+      ],
+      "monogram" : "W",
+      "providerID" : "claude",
+      "sessions" : [
+
+      ]
+    },
+    {
+      "accountID" : "default",
+      "activity" : {
+        "days" : [
+
+        ],
+        "hourDays" : [
+
+        ],
+        "modelDays" : [
+
+        ],
+        "timeZone" : "GMT",
+        "todayHours" : [
+
+        ],
+        "todayPrompts" : 0,
+        "todayTokens" : 0
+      },
+      "dormant" : false,
+      "enabled" : true,
+      "engine" : {
+        "accent" : {
+          "blue" : 0.498,
+          "green" : 0.639,
+          "red" : 0.063
+        },
+        "activeIntervalSeconds" : 300,
+        "agentName" : "Codex",
+        "appVersion" : "0.104.0",
+        "asOf" : "2026-11-18T20:13:00Z",
+        "asOfCaption" : "as of Wed 20:13",
+        "fetchedAt" : "2026-11-18T20:13:00Z",
+        "forecastProfile" : {
+          "caption" : "Personalized forecast activates in 14 days — learning your weekly rhythm.",
+          "historySpanSeconds" : 0,
+          "isReady" : false,
+          "remainingSeconds" : 1209600
+        },
+        "gateFloorSeconds" : 180,
+        "generatedAt" : "2026-11-22T09:00:00Z",
+        "glyph" : "⬡",
+        "host" : "daemon",
+        "isLocalProvider" : true,
+        "nextPollAt" : "2026-11-22T09:03:00Z",
+        "paceMultiplier" : 1,
+        "pid" : 909,
+        "planDisplayName" : "Pro Lite",
+        "planLabel" : "Pro Lite plan",
+        "planSubscriptionType" : "prolite",
+        "providerID" : "codex",
+        "serviceName" : "ChatGPT",
+        "stale" : false
+      },
+      "id" : "codex",
+      "isFocused" : false,
+      "label" : "Codex",
+      "lastActivityAt" : "2026-11-21T20:10:00Z",
+      "menuBar" : [
+        {
+          "level" : "normal",
+          "percent" : 0,
+          "tag" : "S"
+        },
+        {
+          "level" : "normal",
+          "percent" : 75,
+          "resetsAt" : "2026-11-25T02:27:00Z",
+          "tag" : "W"
+        }
+      ],
+      "meters" : [
+        {
+          "forcesWarning" : false,
+          "id" : "0-session",
+          "label" : "Session (5h)",
+          "level" : "normal",
+          "limitWindow" : 18000,
+          "modelSeries" : [
+
+          ],
+          "percent" : 0,
+          "rank" : 0,
+          "rateWindowSeconds" : 2700,
+          "series" : [
+
+          ],
+          "stretches" : [
+
+          ],
+          "tag" : "S"
+        },
+        {
+          "forcesWarning" : false,
+          "id" : "1-weekly",
+          "label" : "Weekly",
+          "level" : "normal",
+          "limitWindow" : 604800,
+          "modelSeries" : [
+
+          ],
+          "percent" : 75,
+          "rank" : 1,
+          "rateWindowSeconds" : 14400,
+          "resetCaption" : "resets Wed 02:27",
+          "resetsAt" : "2026-11-25T02:27:00Z",
+          "series" : [
+
+          ],
+          "stretches" : [
+
+          ],
+          "tag" : "W"
+        }
+      ],
+      "models" : [
+
+      ],
+      "monogram" : "C",
+      "providerID" : "codex",
+      "sessions" : [
+
+      ]
+    }
+  ],
+  "schemaVersion" : 1,
+  "sessions" : [
+
+  ],
+  "sessionsCap" : 8
+}

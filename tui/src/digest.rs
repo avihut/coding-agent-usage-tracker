@@ -258,6 +258,8 @@ pub struct MenuBarCell {
     pub accent: Option<Rgb>,
     pub monogram: String,
     pub segments: Vec<SegmentStatus>,
+    /// Not current: cache-served, errored, or (since 2026-11-22) an OLD
+    /// reading — the bar's grey, ornament-free treatment for all three.
     pub stale: bool,
     #[serde(default)]
     pub worst_severity: Option<f64>,
@@ -606,6 +608,16 @@ pub struct EngineStatus {
     #[serde(with = "time::serde::rfc3339::option", default)]
     pub backoff_until: Option<OffsetDateTime>,
     pub stale: bool,
+    /// Present only while the limits reading is OLD — past the writer's age
+    /// horizon (2026-11-22, additive) — and equal to `fetched_at`. While it
+    /// is set no meter carries a forecast. Absent from older writers, read
+    /// as current. Independent of `stale`.
+    #[serde(with = "time::serde::rfc3339::option", default)]
+    pub as_of: Option<OffsetDateTime>,
+    /// "as of Wed 20:13" — pre-phrased by the writer; printed, never
+    /// re-derived. Present exactly when `as_of` is.
+    #[serde(default)]
+    pub as_of_caption: Option<String>,
     pub is_local_provider: bool,
     pub active_interval_seconds: f64,
     pub pace_multiplier: i32,
@@ -1518,5 +1530,35 @@ mod wave4_tests {
         assert!(gemini.activity.is_none() && gemini.models.is_none() && gemini.sessions.is_none());
         // The base golden carries it on its top level too.
         assert!(named_golden("live-state-v1.json").activity_status.is_some());
+    }
+
+    /// The third golden (2026-11-22): an OLD Codex reading beside a fresh
+    /// Claude one. Both new fields decode; the fresh section has neither.
+    #[test]
+    fn old_reading_golden_decodes() {
+        let state = named_golden("live-state-v1-old-reading.json");
+        assert!(state.engine.as_of.is_none());
+        assert!(state.engine.as_of_caption.is_none());
+        let codex = state
+            .profiles
+            .as_ref()
+            .expect("profiles")
+            .iter()
+            .find(|section| section.id == "codex")
+            .expect("the Codex section");
+        let engine = codex.engine.as_ref().expect("its engine");
+        assert_eq!(engine.as_of, engine.fetched_at);
+        assert!(engine.as_of.is_some());
+        assert_eq!(engine.as_of_caption.as_deref(), Some("as of Wed 20:13"));
+        assert_eq!(engine.plan_label.as_deref(), Some("Pro Lite plan"));
+        assert!(!engine.stale);
+        let meters = codex.meters.as_ref().expect("meters");
+        assert!(meters.iter().all(|meter| meter.forecast.is_none()));
+        let cells = state.menu_bar_cells.as_ref().expect("cells");
+        let stale: Vec<_> = cells
+            .iter()
+            .map(|cell| (cell.profile.as_str(), cell.stale))
+            .collect();
+        assert_eq!(stale, vec![("default", false), ("codex", true)]);
     }
 }

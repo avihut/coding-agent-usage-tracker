@@ -337,11 +337,21 @@ public enum PredictionEngine {
     /// each meter can be told what its shorter siblings have already locked
     /// out (nil windows last, in their original order — they neither issue
     /// nor receive lockouts). Keyed by label, like the engine's own map.
+    ///
+    /// `readingAt` is when the meters were read (`Snapshot.fetchedAt`): a
+    /// reading past its age horizon (`ReadingAge`) forecasts NOTHING — the
+    /// percent it would project from is no longer known to be the account's
+    /// (2026-11-22: a three-day-old Codex reading forecast "runs out in
+    /// 23h 19m" for an account that had changed plan). Nil — no age known —
+    /// is the forecast as it always was.
     public static func predictAll(
         meters: [Meter], samples: [UsageSample],
         profiles: [String: WeeklyProfile], previous: [String: UsagePrediction],
-        now: Date
+        readingAt: Date? = nil, now: Date
     ) -> [String: UsagePrediction] {
+        if let readingAt, ReadingAge.isOld(fetchedAt: readingAt, meters: meters, now: now) {
+            return [:]
+        }
         let ordered = meters.enumerated().sorted { lhs, rhs in
             switch (lhs.element.limitWindow, rhs.element.limitWindow) {
             case let (left?, right?):

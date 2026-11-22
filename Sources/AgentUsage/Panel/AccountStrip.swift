@@ -242,7 +242,7 @@ struct AccountStripRow: View {
             }
             Spacer(minLength: 6)
             MiniMeterBars(
-                segments: segments, stale: store?.state.isStale ?? true)
+                segments: segments, stale: store?.readsStale() ?? true)
         }
         .padding(.vertical, 4)
         .padding(.horizontal, 6)
@@ -272,8 +272,12 @@ struct AccountStripRow: View {
         guard let store else { return nil }
         if store.isDormant { return "Dormant" }
         guard let meters = store.state.snapshot?.meters else { return "No data yet" }
-        return UsageFormatting.accountStripCaption(
+        let caption = UsageFormatting.accountStripCaption(
             meters: meters, predictions: store.predictions, now: now)
+        // An OLD reading leads with its stamp: the row's numbers are the
+        // last thing known, not the account now.
+        guard let asOf = store.asOfCaption(at: now) else { return caption }
+        return caption.map { "\(asOf) · \($0)" } ?? asOf
     }
 
     private var segments: [MenuBarSegment] {

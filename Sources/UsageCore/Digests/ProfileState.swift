@@ -93,6 +93,9 @@ public struct MenuBarCell: Codable, Sendable, Equatable, Identifiable {
     /// The S/W/scoped triple; empty when the profile's engine has not
     /// published yet.
     public let segments: [SegmentStatus]
+    /// The digits aren't current: cache-served, errored, or (since
+    /// 2026-11-22) an OLD reading (`EngineStatus.asOf`) — the bar's stale
+    /// treatment, grey and ornament-free, for all three.
     public let stale: Bool
     public let worstSeverity: Double?
     public let indicator: Bool
@@ -224,7 +227,11 @@ public enum MeteringDigest {
                     return MenuBarCell(
                         profile: section.profile.key, providerID: section.profile.providerID,
                         glyph: harness.provider.menuBarGlyph, monogram: section.monogram,
-                        segments: segments, stale: section.state?.engine.stale ?? true,
+                        // Old (`engine.asOf`) is as not-current as cache-
+                        // served: the bar's stale treatment covers both.
+                        segments: segments,
+                        stale: (section.state?.engine.stale ?? true)
+                            || section.state?.engine.asOf != nil,
                         worstSeverity: segments.compactMap(\.severity).max(),
                         indicator: resets.contains { $0.profileIDOrDefault == section.profile.id },
                         accent: RGBColor(harness.provider.accent))
@@ -440,7 +447,8 @@ extension EngineStatus {
             activeIntervalSeconds: activeIntervalSeconds, paceMultiplier: paceMultiplier,
             apiBudgetUsed: apiBudgetUsed, apiBudgetCeiling: apiBudgetCeiling,
             apiBudgetFraction: apiBudgetFraction, gateFloorSeconds: gateFloorSeconds,
-            error: error, spend: spend, forecastProfile: forecastProfile)
+            error: error, spend: spend, forecastProfile: forecastProfile,
+            asOf: asOf, asOfCaption: asOfCaption)
     }
 
     /// An engine that is not running, described with the writer's own

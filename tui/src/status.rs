@@ -55,7 +55,7 @@ pub fn render(digest_path: &Path) -> String {
             out.push_str(&block.short_name);
             out.push(' ');
         }
-        for (index, segment) in block.segments.iter().enumerate() {
+        for (index, (segment, old)) in block.segments.iter().enumerate() {
             if index > 0 {
                 out.push('·');
             }
@@ -64,7 +64,11 @@ pub fn render(digest_path: &Path) -> String {
                 .percent
                 .map(|p| p.to_string())
                 .unwrap_or_else(|| "—".into());
-            if color {
+            if *old {
+                // An OLD reading's digits, the bar's stale way: no colour,
+                // no marker — a level from days ago is no alarm now.
+                out.push_str(&text);
+            } else if color {
                 let paint = segment.risk.map(hex).or(match segment.level.as_str() {
                     "warning" => Some("#ff9f0a".into()),
                     "critical" => Some("#ff453a".into()),
@@ -78,6 +82,13 @@ pub fn render(digest_path: &Path) -> String {
                 out.push_str(&text);
                 out.push_str(marker(segment.severity, &segment.level));
             }
+        }
+        if let Some(caption) = &block.as_of {
+            out.push_str(&if color {
+                format!(" #[dim]{caption}#[default]")
+            } else {
+                format!(" {caption}")
+            });
         }
     }
     if state.engine.stale {
@@ -108,7 +119,10 @@ struct Block {
     glyph: String,
     short_name: String,
     accent: Rgb,
-    segments: Vec<crate::digest::SegmentStatus>,
+    /// Each segment, and whether its account's reading is OLD.
+    segments: Vec<(crate::digest::SegmentStatus, bool)>,
+    /// The writer's "as of …" when an account in the block reads old.
+    as_of: Option<String>,
 }
 
 /// The shown harnesses and their cells. A writer before harnesses (or one
@@ -116,12 +130,27 @@ struct Block {
 /// a one-harness line is unchanged.
 fn blocks(state: &LiveState) -> Vec<Block> {
     let single = || {
+        let old = state.engine.as_of.is_some();
         vec![Block {
             glyph: state.engine.glyph.clone(),
             short_name: state.engine.service_name.clone(),
             accent: state.engine.accent,
-            segments: state.menu_bar.clone(),
+            segments: state.menu_bar.iter().cloned().map(|s| (s, old)).collect(),
+            as_of: state.engine.as_of_caption.clone(),
         }]
+    };
+    // A cell's own section says whether its reading is old, and in what
+    // words; the cell itself carries only the widened `stale`.
+    let caption = |profile: &str| -> Option<String> {
+        state
+            .profiles
+            .as_ref()?
+            .iter()
+            .find(|section| section.id == profile)?
+            .engine
+            .as_ref()?
+            .as_of_caption
+            .clone()
     };
     let (Some(harnesses), Some(cells)) = (state.harnesses.as_ref(), state.menu_bar_cells.as_ref())
     else {
@@ -129,11 +158,19 @@ fn blocks(state: &LiveState) -> Vec<Block> {
     };
     let mut blocks: Vec<Block> = Vec::new();
     for harness in harnesses.iter().filter(|harness| harness.shown) {
-        let segments: Vec<_> = cells
+        let mine: Vec<_> = cells
             .iter()
             .filter(|cell| cell.provider_id == harness.id)
-            .flat_map(|cell| cell.segments.clone())
             .collect();
+        let mut as_of = None;
+        let mut segments = Vec::new();
+        for cell in mine {
+            let old = caption(&cell.profile);
+            for segment in &cell.segments {
+                segments.push((segment.clone(), old.is_some()));
+            }
+            as_of = as_of.or(old);
+        }
         if segments.is_empty() {
             continue;
         }
@@ -142,6 +179,7 @@ fn blocks(state: &LiveState) -> Vec<Block> {
             short_name: harness.short_name.clone(),
             accent: harness.accent,
             segments,
+            as_of,
         });
     }
     if blocks.is_empty() {
@@ -201,5 +239,25 @@ mod tests {
         assert_eq!(marker(None, "warning"), "!");
         assert_eq!(marker(Some(0.1), "normal"), "");
         assert_eq!(marker(None, "normal"), "");
+    }
+
+    /// An OLD account's block: unpainted digits, no markers, the writer's
+    /// "as of …" after it — and the fresh block beside it untouched.
+    #[test]
+    fn an_old_block_reads_as_of() {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../Tests/UsageCoreTests/Fixtures/digest/live-state-v1-old-reading.json");
+        let state = LiveState::parse(&std::fs::read(&path).expect("golden")).expect("decodes");
+        let blocks = blocks(&state);
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0].as_of, None);
+        assert!(blocks[0].segments.iter().all(|(_, old)| !old));
+        assert_eq!(blocks[1].as_of.as_deref(), Some("as of Wed 20:13"));
+        assert!(blocks[1].segments.iter().all(|(_, old)| *old));
+        let line = render(&path);
+        let codex = line.split("⬡").nth(1).expect("the Codex block");
+        assert!(codex.contains("as of Wed 20:13"), "{line}");
+        assert!(!codex.contains("#[fg=#ff"), "{line}");
+        assert!(!line.contains("stale"), "{line}");
     }
 }

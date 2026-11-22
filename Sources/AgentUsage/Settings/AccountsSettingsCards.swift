@@ -222,7 +222,8 @@ private struct AccountRow: View {
         guard let store else { return "Not metered" }
         return UsageFormatting.profileStateLine(
             lastWrite: store.lastActivityAt,
-            fetchedAt: store.state.snapshot?.fetchedAt, now: Date())
+            fetchedAt: store.state.snapshot?.fetchedAt,
+            old: store.readingAsOf() != nil, now: Date())
     }
 }
 

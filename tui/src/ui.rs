@@ -189,6 +189,16 @@ pub fn money(dollars: f64) -> String {
     }
 }
 
+/// The writer's "as of Wed 20:13"; the compact register drops the words
+/// and keeps the stamp, as it does for "updated".
+fn as_of_text(caption: &str, compact: bool) -> String {
+    if compact {
+        caption.strip_prefix("as of ").unwrap_or(caption).to_owned()
+    } else {
+        caption.to_owned()
+    }
+}
+
 fn clock(at: OffsetDateTime, offset: UtcOffset) -> String {
     let local = at.to_offset(offset);
     format!("{:02}:{:02}", local.hour(), local.minute())
@@ -1031,6 +1041,11 @@ fn header<'a>(
         Style::new().add_modifier(Modifier::BOLD),
     ));
     if let Some(plan) = &engine.plan_label {
+        // An old reading's plan is the last one known, never current.
+        let plan = match &engine.as_of_caption {
+            Some(caption) => format!("{plan}{}{caption}", glyphs().sep),
+            None => plan.clone(),
+        };
         identity.push(Span::styled(format!("  {plan}"), style(DIM)));
     }
     // The strip's pin, in words: focus stays here whatever activity says
@@ -1113,9 +1128,34 @@ fn header<'a>(
                     ));
                 }
             }
+            Freshness::Old => {
+                // The writer's own words, day-aware: a bare clock would
+                // read a three-day-old reading as today's.
+                status.push(Span::styled(glyphs().hollow, style(DIM)));
+                if let Some(caption) = &engine.as_of_caption {
+                    status.push(Span::styled(as_of_text(caption, compact), style(DIM)));
+                }
+                if let Some(next) = engine.next_poll_at {
+                    let count = countdown(next, now);
+                    status.push(Span::styled(
+                        format!(
+                            "{}{}",
+                            glyphs().sep,
+                            if compact {
+                                format!("next {count}")
+                            } else {
+                                format!("next in {count}")
+                            }
+                        ),
+                        style(DIM),
+                    ));
+                }
+            }
             Freshness::Stale => {
                 status.push(Span::styled(glyphs().hollow, style(DIM)));
-                if let Some(fetched) = engine.fetched_at {
+                if let Some(caption) = &engine.as_of_caption {
+                    status.push(Span::styled(as_of_text(caption, compact), style(DIM)));
+                } else if let Some(fetched) = engine.fetched_at {
                     let stamp = clock(fetched, app.local_offset);
                     status.push(Span::styled(
                         if compact {
@@ -1240,8 +1280,19 @@ fn header<'a>(
 }
 
 fn meters<'a>(digest: &'a LiveState, freshness: Freshness, rect: Rect) -> Paragraph<'a> {
-    let mut lines = vec![section_title("LIMITS")];
-    let grey = freshness == Freshness::Stale || freshness == Freshness::EngineOffline;
+    // An OLD reading says so once, on the section's title: the column is
+    // fixed-width, so a per-row suffix (the app's meter rows) would clip.
+    let mut lines = vec![match &digest.engine.as_of_caption {
+        Some(caption) => Line::from(vec![
+            Span::styled("LIMITS".to_owned(), style(DIM).add_modifier(Modifier::BOLD)),
+            Span::styled(format!("{}{caption}", glyphs().sep), style(DIM)),
+        ]),
+        None => section_title("LIMITS"),
+    }];
+    let grey = matches!(
+        freshness,
+        Freshness::Stale | Freshness::Old | Freshness::EngineOffline
+    );
     let rows = (rect.height.max(1) - 1) as usize;
     let spend = digest.engine.spend.as_ref();
     let visible = &digest.meters[..digest
@@ -2352,6 +2403,10 @@ fn render_strip(
                 style(WARNING),
             ));
         }
+    } else if freshness == Freshness::Old {
+        if let Some(caption) = &digest.engine.as_of_caption {
+            spans.push(Span::styled(format!("  {caption}"), style(DIM)));
+        }
     } else if grey {
         spans.push(Span::styled("  stale".to_owned(), style(DIM)));
     }
@@ -3310,5 +3365,81 @@ mod tests {
         let paged = heat_grid(&days, 4, 1, date!(2026 - 08 - 16));
         assert_eq!(paged.weeks.last().unwrap()[0], Some(date!(2026 - 07 - 13)));
         assert!(paged.has_newer);
+    }
+
+    /// The old-reading golden (2026-11-22): Claude focused and fresh, Codex
+    /// on a reading from Wed 20:13. `codex` projects Codex's section onto
+    /// the top level, the way a view of that account reads.
+    fn old_reading_golden(codex: bool) -> serde_json::Value {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../Tests/UsageCoreTests/Fixtures/digest/live-state-v1-old-reading.json");
+        let mut object: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).expect("old-reading golden"))
+                .expect("json");
+        if codex {
+            let section = object["profiles"]
+                .as_array()
+                .expect("profiles")
+                .iter()
+                .find(|section| section["id"] == "codex")
+                .expect("the Codex section")
+                .clone();
+            for key in ["engine", "meters", "menuBar"] {
+                object[key] = section[key].clone();
+            }
+        }
+        object
+    }
+
+    fn screen_at(app: &mut App, width: u16, height: u16, now: OffsetDateTime) -> Vec<String> {
+        let backend = ratatui::backend::TestBackend::new(width, height);
+        let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+        terminal
+            .draw(|frame| render(frame, app, now))
+            .expect("draw");
+        let buffer = terminal.backend().buffer().clone();
+        (0..height)
+            .map(|y| (0..width).map(|x| buffer[(x, y)].symbol()).collect())
+            .collect()
+    }
+
+    /// An OLD reading reads as of its stamp — header, plan, every limit —
+    /// and forecasts nothing; a fresh one says none of it.
+    #[test]
+    fn an_old_reading_reads_as_of_its_stamp() {
+        let now = time::macros::datetime!(2026-11-22 09:01 UTC);
+        let mut app = app_on(old_reading_golden(true));
+        let lines = screen_at(&mut app, 140, 40, now);
+        let text = lines.join("\n");
+        assert!(text.contains("Pro Lite plan · as of Wed 20:13"), "{text}");
+        let status = lines
+            .iter()
+            .find(|line| line.contains("next in"))
+            .expect("the status line");
+        assert!(status.contains("as of Wed 20:13"), "{status}");
+        assert!(!status.contains("updated"), "{status}");
+        let title = lines
+            .iter()
+            .find(|line| line.contains("LIMITS"))
+            .expect("the limits title");
+        assert!(title.contains("LIMITS · as of Wed 20:13"), "{title}");
+        assert!(!text.contains("runs out"), "{text}");
+
+        let mut fresh = app_on(old_reading_golden(false));
+        let text = screen_at(&mut fresh, 140, 40, now).join("\n");
+        assert!(!text.contains("as of"), "{text}");
+        assert!(text.contains("updated"), "{text}");
+    }
+
+    /// Below the floor, the one-line strip says it too.
+    #[test]
+    fn the_strip_says_as_of() {
+        let now = time::macros::datetime!(2026-11-22 09:01 UTC);
+        let mut app = app_on(old_reading_golden(true));
+        let lines = screen_at(&mut app, 70, 3, now);
+        assert!(
+            lines.iter().any(|line| line.contains("as of Wed 20:13")),
+            "{lines:?}"
+        );
     }
 }

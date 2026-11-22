@@ -376,6 +376,9 @@ pub enum Freshness {
     Live,
     /// The engine runs but serves cached/errored state.
     Stale,
+    /// The engine is live, but its limits reading is OLD (`as_of`): shown as
+    /// of its stamp, greyed, never forecast.
+    Old,
     /// A 429 backoff is in force until the carried instant.
     Backoff,
     /// The digest is past the heartbeat cutoff (or not written yet), but a
@@ -823,6 +826,9 @@ impl App {
         }
         if digest.engine.stale {
             return Freshness::Stale;
+        }
+        if digest.engine.as_of.is_some() {
+            return Freshness::Old;
         }
         Freshness::Live
     }
@@ -1335,5 +1341,29 @@ mod tests {
         assert!(!lease_held(&path), "a shared prober is not a holder");
         drop(prober);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// An OLD reading is its own freshness: the engine is live, the numbers
+    /// aren't current. Cache-served still wins (it says more).
+    #[test]
+    fn an_old_reading_is_its_own_freshness() {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../Tests/UsageCoreTests/Fixtures/digest/live-state-v1-old-reading.json");
+        let digest = LiveState::parse(&std::fs::read(&path).expect("golden")).expect("decodes");
+        let now = datetime!(2026-11-22 09:01 UTC);
+        let codex = digest
+            .profiles
+            .as_ref()
+            .expect("profiles")
+            .iter()
+            .find(|section| section.id == "codex")
+            .and_then(|section| section.engine.clone())
+            .expect("the Codex engine");
+        let mut old = digest.clone();
+        old.engine = codex.clone();
+        assert_eq!(app_with(old.clone()).freshness(now), Freshness::Old);
+        old.engine.stale = true;
+        assert_eq!(app_with(old).freshness(now), Freshness::Stale);
+        assert_eq!(app_with(digest).freshness(now), Freshness::Live);
     }
 }

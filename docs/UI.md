@@ -20,7 +20,17 @@ per-harness geometry of the bar is in [HARNESSES.md](HARNESSES.md).
   solid geometry instead: a ramp-colored dot ahead of a watched number
   (severity 0→0.75), escalating to a filled red capsule carrying the
   segment's tag + digits in bold white at severity ≥ 0.75 (or discrete
-  critical). Stale stays grey and ornament-free. THE INK FOLLOWS THE
+  critical). Stale stays grey and ornament-free — and since 2026-11-22
+  "stale" covers an OLD reading too (`ReadingAge`, MEASUREMENT.md →
+  Predictions): `state.isStale || state.asOf(at:) != nil` in the
+  one-account path, the widened `MenuBarCell.stale` in the cells path; an
+  all-old harness greys its mark as an all-stale one does. The panel says
+  "as of Wed 20:13" in the status row (orange "cached …" still wins), on
+  every meter row and strip row, beside the popover's meter name and after
+  the plan ("Pro Lite plan · as of …", via `UsageStore.planLabel`); the
+  Settings → Accounts state line reads "as of" for "Updated". Every face
+  reads forecasts through `UsageStore.predictions`, which is empty while
+  the reading is old. THE INK FOLLOWS THE
   GROUND (v0.100.1, user-reported: white digits over a bright wallpaper
   were unreadable): the bar is transparent and the system inks its own
   items from the WALLPAPER — not the app's appearance, not Dark Mode

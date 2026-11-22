@@ -136,6 +136,7 @@ extension StatusItemController {
             // to be handed to it, and it is the HOVERED account's.
             style: store.style,
             accountTitle: accountTitle(for: store),
+            asOfCaption: store.asOfCaption(),
             outages: store.outages,
             onOpenOutage: { [weak self] span in
                 guard let self,

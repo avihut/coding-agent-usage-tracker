@@ -165,7 +165,8 @@ extension StatusItemRenderer {
         return Model(
             segments: UsageFormatting.menuBarSegments(
                 from: snapshot.meters, predictions: predictions),
-            stale: state.isStale,
+            // An OLD reading (`ReadingAge`) draws the stale treatment too.
+            stale: state.isStale || state.asOf(at: now) != nil,
             glyph: glyph,
             accent: accent,
             incident: alarming,
