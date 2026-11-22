@@ -75,7 +75,9 @@ public struct AntigravityProvider: UsageProvider {
     /// The CLI's own print mode, exactly as the §10 amendment states it.
     /// `--log-file /dev/null` and the documented
     /// update switch keep a run from writing a log or checking for an update
-    /// (measured: what's left is three mtime stamps).
+    /// (measured: what's left is three mtime stamps). 120 s is a safety net
+    /// against a hung run, not a budget: unclamped, a run took 2–3 s even
+    /// with every core saturated (docs/plans/antigravity-probe-under-load.md).
     public var quotaCommand: AgentQuotaCommand? {
         AgentQuotaCommand(
             executableCandidates: agyCandidates,
@@ -83,7 +85,7 @@ public struct AntigravityProvider: UsageProvider {
             acceptsVersion: { AntigravityQuota.acceptsVersion($0) },
             arguments: ["-p", "/quota", "--output-format", "json", "--log-file", "/dev/null"],
             environment: ["AGY_CLI_DISABLE_AUTO_UPDATE": "true"],
-            timeout: 30,
+            timeout: 120,
             floor: 600,
             reduce: { status, stdout, stderr, now in
                 AntigravityQuota.reduce(exitStatus: status, stdout: stdout, stderr: stderr, now: now)

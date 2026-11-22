@@ -10,9 +10,12 @@ import Foundation
 ///   control socket.
 /// - Its own process group, so a timeout reaches whatever it started.
 /// - Default signal dispositions and an empty mask (a host that ignores
-///   SIGPIPE mustn't hand that on), and utility QoS: below the person's
-///   work, but not so low a 2 s run on a loaded Mac blows past its timeout
-///   (background QoS starved usaged for 254 s, 2026-11-21).
+///   SIGPIPE mustn't hand that on), and NO QoS clamp: the child runs at
+///   default priority, like the agents (`EngineWork.agentCommandQoS` —
+///   a utility clamp pushed a 0.1 s run past 10 s on a saturated Mac,
+///   2026-11-22). A host under the darwin background policy hands that on
+///   regardless (priority 4: 215 s for a cold start), which is one more
+///   reason no host may run Background (docs/DAEMON.md "Under load").
 /// - The run is over when the CHILD EXITS, never at pipe EOF: a grandchild
 ///   holding stdout open gets a short drain. Then, on EVERY path, whatever
 ///   is left in the group is killed: the exit is observed without reaping
@@ -29,7 +32,7 @@ public struct SpawnedCommandRunner: AgentCommandRunner {
 
     public func run(_ invocation: AgentCommandInvocation) async -> AgentCommandResult {
         await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .utility).async {
+            DispatchQueue.global(qos: EngineWork.agentCommandQoS.qosClass).async {
                 continuation.resume(returning: Self.runBlocking(invocation))
             }
         }
@@ -79,7 +82,7 @@ public struct SpawnedCommandRunner: AgentCommandRunner {
         var noSignal = sigset_t()
         sigemptyset(&noSignal)
         posix_spawnattr_setsigmask(&attributes, &noSignal)
-        posix_spawnattr_set_qos_class_np(&attributes, QOS_CLASS_UTILITY)
+        // No QoS attribute, on purpose (`EngineWork.agentCommandQoS`).
 
         let path = invocation.executable.path
         let argv: [UnsafeMutablePointer<CChar>?] =

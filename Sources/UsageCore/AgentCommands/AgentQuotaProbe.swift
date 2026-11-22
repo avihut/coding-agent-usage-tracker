@@ -22,8 +22,6 @@ public actor AgentQuotaProbe {
     }
 
     public static let stateFileName = "quota-probe.json"
-    /// The version check is a start-up of the same tool; it gets less time.
-    static let versionTimeout: TimeInterval = 10
 
     private let command: AgentQuotaCommand
     private let runner: any AgentCommandRunner
@@ -130,9 +128,9 @@ public actor AgentQuotaProbe {
         case .unsettled(let failure):
             // A candidate whose version run didn't finish: that run was a
             // spawn like any other, so it counts as the attempt — the
-            // floor and the backoff hold, and the failure is shown.
-            state.lastFailure = failure
-            state.consecutiveFailures += 1
+            // floor holds and the failure is shown. A timeout is
+            // transient (`record`): it doesn't back off.
+            record(failure)
             save()
             return
         }
@@ -159,14 +157,26 @@ public actor AgentQuotaProbe {
             state.lastFailure = nil
             state.consecutiveFailures = 0
         case .failure(let failure):
-            state.lastFailure = failure
-            state.consecutiveFailures += 1
+            record(failure)
             if failure == .notALimitsCommand,
                let index = state.binaries.firstIndex(where: { $0.sameFile(as: identity) }) {
                 state.binaries[index].refusedQuota = true
             }
         }
         save()
+    }
+
+    /// A failure is shown either way; only a REAL one backs off. A timeout
+    /// says the Mac was busy (or the tool hung), not that anything is wrong
+    /// with the sign-in or the output, so it leaves the count exactly as it
+    /// was — neither escalating nor forgiving a real failure's backoff — and
+    /// the next attempt waits only the floor (2026-11-22: on a saturated
+    /// Mac a run of timeouts used to push the next try out to two hours).
+    /// The count stays in the state file unchanged in meaning for every
+    /// other failure, so builds of either age read each other's files.
+    private func record(_ failure: AgentQuotaFailure) {
+        state.lastFailure = failure
+        if failure != .timedOut { state.consecutiveFailures += 1 }
     }
 
     private enum Resolution {
@@ -186,7 +196,9 @@ public actor AgentQuotaProbe {
     /// wrong program), whose version output the provider accepts. A
     /// verdict is remembered per file identity: a version run that
     /// finished — or couldn't start — settles it; only a timeout is
-    /// retried.
+    /// retried. It gets the command's own timeout: the kill is a safety
+    /// net against a hung child, not a latency budget, and a cold first
+    /// launch of a fresh 229 MB binary on a saturated Mac takes seconds.
     private func resolveExecutable(startedAt: Date) async -> Resolution {
         var unsettled: AgentQuotaFailure?
         var refused = false
@@ -200,7 +212,7 @@ public actor AgentQuotaProbe {
             stamp(startedAt)
             let result = await runner.run(AgentCommandInvocation(
                 executable: candidate, arguments: command.versionArguments,
-                environment: environment, timeout: Self.versionTimeout))
+                environment: environment, timeout: command.timeout))
             if case .timedOut = result.termination {
                 unsettled = unsettled ?? .timedOut
                 continue
@@ -283,6 +295,8 @@ struct AgentQuotaProbeState: Codable, Equatable {
     var binaries: [Binary] = []
     var lastAttemptAt: Date?
     var lastFailure: AgentQuotaFailure?
+    /// Consecutive failures that BACK OFF — a timeout isn't one
+    /// (`AgentQuotaProbe.record`); a success resets it.
     var consecutiveFailures = 0
     var reading: AgentQuotaReading?
 

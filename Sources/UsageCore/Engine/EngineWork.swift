@@ -25,4 +25,15 @@ public enum EngineWork {
     /// parse). Once per engine start, and short; the full re-validation that
     /// follows it is `heavy`.
     public static let startup: TaskPriority = .userInitiated
+    /// An agent's own tool the host spawns (the quota probe's `agy`) runs
+    /// UNCLAMPED: no QoS attribute, so default priority (31), like the
+    /// agents and anything the person starts — and this is the thread that
+    /// watches it. Measured 2026-11-22 with every core saturated: a
+    /// utility-clamped child (priority 20) took `--version` to 10.4 s and
+    /// `/quota` to 14.3 s; unclamped, under 0.8 s and 3.1 s, for the same
+    /// 0.1–0.5 s of CPU, at most every 10 minutes
+    /// (docs/plans/antigravity-probe-under-load.md). The only clamps
+    /// `posix_spawnattr_set_qos_class_np` takes are utility and background,
+    /// so SwiftLint forbids the call.
+    public static let agentCommandQoS: DispatchQoS = .default
 }

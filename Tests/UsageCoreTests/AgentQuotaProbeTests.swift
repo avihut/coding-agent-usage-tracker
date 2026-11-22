@@ -255,7 +255,11 @@ struct AgentQuotaProbeTests {
             "PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "AGY_CLI_DISABLE_AUTO_UPDATE": "true",
         ])
         #expect(run.workingDirectory == "/")
-        #expect(run.timeout == 30)
+        // A safety net against a hung run, not a budget — the version
+        // check gets the same one (2026-11-22: 10 s was crossed by a
+        // 0.1 s-of-CPU run on a saturated Mac).
+        #expect(run.timeout == 120)
+        #expect(await runner.invocations.map(\.timeout) == [120, 120])
     }
 
     @Test("the floor and the activity gate hold, across a restart too")
@@ -315,30 +319,125 @@ struct AgentQuotaProbeTests {
         #expect(statuses.allSatisfy { $0.reading?.buckets.count == 5 })
     }
 
-    @Test("failures are kept, back off, and clear on the next success")
+    @Test("real failures are kept, back off, and clear on the next success")
     func failures() async throws {
         let fixture = try ProbeFixture()
         defer { fixture.tearDown() }
-        let runner = FakeAgentRunner(quota: AgentCommandResult(
-            termination: .timedOut, stdout: Data(), stderr: Data(), duration: 30))
+        let runner = FakeAgentRunner(
+            quota: .exited(1, stdout: Data(), stderr: "You are not logged into Antigravity."))
         let clock = TestClock(start)
         let write = TestClock(start)
         let probe = try fixture.probe(runner: runner, clock: clock, lastWrite: write)
-        #expect(await probe.refreshIfDue().failure == .timedOut)
-        // The 10-minute floor isn't enough after a failure: 20 minutes.
+        #expect(await probe.refreshIfDue().failure == .notSignedIn)
+        // The 10-minute floor isn't enough after a real failure: 20 minutes.
         clock.advance(700)
         _ = await probe.refreshIfDue()
         #expect(await runner.quotaRuns.count == 1)
         clock.advance(600)
-        await runner.set(quota: .exited(1, stdout: Data(), stderr: "You are not logged into Antigravity."))
-        #expect(await probe.refreshIfDue().failure == .notSignedIn)
+        await runner.set(quota: .exited(stdout: Data("not json".utf8)))
+        #expect(await probe.refreshIfDue().failure == .unreadable)
         #expect(await runner.quotaRuns.count == 2)
-        clock.advance(2400)
+        // Two in a row: 40 minutes.
+        clock.advance(1800)
+        _ = await probe.refreshIfDue()
+        #expect(await runner.quotaRuns.count == 2)
+        clock.advance(600)
         await runner.set(quota: .exited(stdout: try AntigravityQuotaFixture.real()))
         let recovered = await probe.refreshIfDue()
         #expect(recovered.failure == nil)
         #expect(recovered.reading != nil)
         #expect(await runner.quotaRuns.count == 3)
+        #expect(AgentQuotaProbeState.load(from: fixture.state)?.consecutiveFailures == 0)
+    }
+
+    @Test("a timeout is transient: shown, retried at the floor, never escalating")
+    func timeoutRetriesAtFloor() async throws {
+        let fixture = try ProbeFixture()
+        defer { fixture.tearDown() }
+        let runner = FakeAgentRunner(quota: AgentCommandResult(
+            termination: .timedOut, stdout: Data(), stderr: Data(), duration: 120))
+        let clock = TestClock(start)
+        let write = TestClock(start)
+        let probe = try fixture.probe(runner: runner, clock: clock, lastWrite: write)
+        for attempt in 1...4 {
+            #expect(await probe.refreshIfDue().failure == .timedOut)
+            #expect(await runner.quotaRuns.count == attempt)
+            #expect(AgentQuotaProbeState.load(from: fixture.state)?.consecutiveFailures == 0)
+            // Inside the floor: nothing, timeouts or not.
+            clock.advance(540)
+            write.set(clock.now)
+            _ = await probe.refreshIfDue()
+            #expect(await runner.quotaRuns.count == attempt)
+            // At the floor: the next try — never the doubled wait.
+            clock.advance(60)
+        }
+        // A timeout then a success: the reading lands and the failure clears.
+        await runner.set(quota: .exited(stdout: try AntigravityQuotaFixture.real()))
+        let status = await probe.refreshIfDue()
+        #expect(status.failure == nil)
+        #expect(status.reading?.buckets.count == 5)
+    }
+
+    @Test("a timeout between real failures neither escalates nor forgives their backoff")
+    func timeoutBetweenFailures() async throws {
+        let fixture = try ProbeFixture()
+        defer { fixture.tearDown() }
+        let runner = FakeAgentRunner(
+            quota: .exited(1, stdout: Data(), stderr: "You are not logged into Antigravity."))
+        let clock = TestClock(start)
+        let write = TestClock(start)
+        let probe = try fixture.probe(runner: runner, clock: clock, lastWrite: write)
+        #expect(await probe.refreshIfDue().failure == .notSignedIn)
+        // One real failure: the next try is due at 20 minutes.
+        clock.advance(1200)
+        await runner.set(quota: AgentCommandResult(
+            termination: .timedOut, stdout: Data(), stderr: Data(), duration: 120))
+        #expect(await probe.refreshIfDue().failure == .timedOut)
+        #expect(AgentQuotaProbeState.load(from: fixture.state)?.consecutiveFailures == 1)
+        // Still one real failure's wait (20 min), not the floor and not 40.
+        clock.advance(900)
+        _ = await probe.refreshIfDue()
+        #expect(await runner.quotaRuns.count == 2)
+        clock.advance(300)
+        await runner.set(
+            quota: .exited(1, stdout: Data(), stderr: "You are not logged into Antigravity."))
+        #expect(await probe.refreshIfDue().failure == .notSignedIn)
+        #expect(await runner.quotaRuns.count == 3)
+        // The second REAL failure doubles from where real failures left it.
+        #expect(AgentQuotaProbeState.load(from: fixture.state)?.consecutiveFailures == 2)
+        clock.advance(2100)
+        _ = await probe.refreshIfDue()
+        #expect(await runner.quotaRuns.count == 3)
+        clock.advance(300)
+        _ = await probe.refreshIfDue()
+        #expect(await runner.quotaRuns.count == 4)
+    }
+
+    @Test("two hours of polls on a Mac where every run times out: never inside the floor")
+    func floorUnderTimeouts() async throws {
+        let fixture = try ProbeFixture()
+        defer { fixture.tearDown() }
+        let runner = FakeAgentRunner(quota: AgentCommandResult(
+            termination: .timedOut, stdout: Data(), stderr: Data(), duration: 120))
+        let clock = TestClock(start)
+        let write = TestClock(start)
+        let starts = Mutex<[Date]>([])
+        await runner.set { invocation in
+            if invocation.arguments != ["--version"] { starts.withLock { $0.append(clock.now) } }
+        }
+        let probe = try fixture.probe(runner: runner, clock: clock, lastWrite: write)
+        // A poll every minute, the agent writing all along, and the person
+        // clicking refresh every third minute.
+        for minute in 0..<120 {
+            write.set(clock.now)
+            _ = await probe.refreshIfDue(manual: minute % 3 == 0)
+            clock.advance(60)
+        }
+        let attempts = starts.withLock { $0 }
+        #expect(attempts.count == 12)
+        for (earlier, later) in zip(attempts, attempts.dropFirst()) {
+            #expect(later.timeIntervalSince(earlier) >= AgentQuotaCommand.minimumFloor)
+        }
     }
 
     @Test("each failure kind reads as text, never as a network error")
@@ -351,8 +450,10 @@ struct AgentQuotaProbeTests {
             #expect(!error.shortText(agent: agent).isEmpty)
             #expect(error.hint(agent: agent)?.isEmpty == false)
         }
+        // Waiting and retrying — a busy Mac — never a broken harness.
         #expect(UsageError(quotaFailure: .timedOut).shortText(agent: agent)
-            == "Antigravity CLI didn't answer — limits not refreshed")
+            == "Antigravity CLI was slow to answer — asking again soon")
+        #expect(UsageError(quotaFailure: .timedOut).hint(agent: agent)?.contains("busy Mac") == true)
     }
 
     @Test("no CLI installed: a quiet absence — no run, no error, no attempt")
@@ -502,34 +603,57 @@ struct AgentQuotaProbeTests {
         #expect(!FileManager.default.fileExists(atPath: fixture.state.path))
     }
 
-    @Test("a version run that doesn't finish is an attempt: the floor holds, and it shows")
+    @Test("a version run that doesn't finish is an attempt: the floor holds, it shows, it's retried at the floor")
     func unsettledVersion() async throws {
         let fixture = try ProbeFixture()
         defer { fixture.tearDown() }
         let runner = try realRunner()
         await runner.set(version: AgentCommandResult(
-            termination: .timedOut, stdout: Data(), stderr: Data(), duration: 10))
+            termination: .timedOut, stdout: Data(), stderr: Data(), duration: 120))
         let clock = TestClock(start)
         let write = TestClock(start)
         let probe = try fixture.probe(runner: runner, clock: clock, lastWrite: write)
         #expect(await probe.refreshIfDue().failure == .timedOut)
         #expect(await runner.versionRuns == 1)
         #expect(await runner.quotaRuns.isEmpty)
-        // Every poll inside the floor and the backoff: no new spawn.
-        for _ in 0..<5 {
+        // The verdict isn't remembered — a busy Mac says nothing about the file.
+        #expect(AgentQuotaProbeState.load(from: fixture.state)?.binaries.isEmpty == true)
+        // Every poll inside the floor: no new spawn.
+        for _ in 0..<9 {
             clock.advance(60)
             write.set(clock.now)
             _ = await probe.refreshIfDue()
         }
         #expect(await runner.versionRuns == 1)
-        // Past the first backoff step, the check runs again, and a good
-        // answer clears the failure.
+        // At the floor (not a doubled backoff), the check runs again, and a
+        // good answer clears the failure and reads the limits.
         await runner.set(version: .exited(stdout: Data("1.5.14\n".utf8)))
-        clock.advance(20 * 60)
+        clock.advance(60)
         write.set(clock.now)
         let status = await probe.refreshIfDue()
         #expect(await runner.versionRuns == 2)
         #expect(status.failure == nil && status.reading != nil)
+    }
+
+    @Test("a slow version run and a slow /quota run both finish: the kill is only a safety net")
+    func slowRunsFinish() async throws {
+        let fixture = try ProbeFixture()
+        defer { fixture.tearDown() }
+        let runner = try realRunner()
+        // What a saturated Mac measured for a utility-clamped child, as the
+        // runner reports it: well past the old 10 s and toward the old 30 s.
+        await runner.set(version: AgentCommandResult(
+            termination: .exited(0), stdout: Data("1.5.14\n".utf8), stderr: Data(), duration: 11.8))
+        await runner.set(quota: AgentCommandResult(
+            termination: .exited(0), stdout: try AntigravityQuotaFixture.real(), stderr: Data(),
+            duration: 14.3))
+        let probe = try fixture.probe(runner: runner, clock: TestClock(start), lastWrite: TestClock(start))
+        let status = await probe.refreshIfDue()
+        #expect(status.failure == nil)
+        #expect(status.reading?.buckets.count == 5)
+        let timeouts = await runner.invocations.map(\.timeout)
+        #expect(timeouts.allSatisfy { $0 == 120 })
+        #expect(timeouts.count == 2)
     }
 
     @Test("a same-named program that isn't the CLI is never asked for quota")

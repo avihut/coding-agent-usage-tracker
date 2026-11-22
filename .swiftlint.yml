@@ -74,3 +74,10 @@ custom_rules:
     excluded_match_kinds: [comment, doccomment]
     message: "Background priority is 4: under a normal 20-agent load the daemon got no CPU for minutes while holding the lease (2026-11-21). The launch agent runs Interactive; engine work takes its QoS from EngineWork (docs/DAEMON.md, Under load)."
     severity: error
+  clamped_agent_command:
+    name: "Clamped agent command"
+    included: "Sources/.*\\.swift"
+    regex: '\bposix_spawnattr_set_qos_class_np\b'
+    excluded_match_kinds: [comment, doccomment]
+    message: "Its only clamps are utility and background, and both starve a spawned agent tool on a saturated Mac: the quota probe's agy went from 0.1 s to over 10 s (2026-11-22). A spawned child runs unclamped (EngineWork.agentCommandQoS, docs/DAEMON.md Under load)."
+    severity: error
