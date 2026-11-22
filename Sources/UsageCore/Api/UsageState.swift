@@ -15,6 +15,8 @@ public enum UsageError: Error, Sendable, Equatable {
     case noLocalData
     /// The agent's own tool, asked for the plan's limits, didn't answer in
     /// time (the quota probe, spec §10 amendment 2026-11-21, second).
+    /// TRANSIENT — almost always a busy Mac — so it reads as waiting and
+    /// retrying, never as a broken harness, and it doesn't back off.
     case agentTimedOut
     /// It answered with something that isn't a limits report.
     case agentOutputUnreadable
@@ -34,11 +36,17 @@ public enum UsageError: Error, Sendable, Equatable {
         case .network: "Network unavailable"
         case .schema: "Unexpected API response"
         case .noLocalData: "No local \(agent) sessions found yet"
-        case .agentTimedOut: "\(agent) didn't answer — limits not refreshed"
+        case .agentTimedOut: "\(agent) was slow to answer — asking again soon"
         case .agentOutputUnreadable: "\(agent)'s limits report wasn't readable"
         case .agentCommandFailed: "\(agent) couldn't report its limits"
         }
     }
+
+    /// A failure that is only a wait — the faces say it's being retried,
+    /// never "error": the agent's tool timing out on a busy Mac
+    /// (2026-11-22). Its code stays `agentTimedOut`, so an older face
+    /// still reads it as itself.
+    public var isRetrying: Bool { self == .agentTimedOut }
 
     public func hint(agent: String) -> String? {
         switch self {
@@ -48,7 +56,10 @@ public enum UsageError: Error, Sendable, Equatable {
         case .rateLimited: "The API asked for a pause. Checks back off and resume on their own."
         case .schema: "The undocumented API may have changed shape."
         case .noLocalData: "Run \(agent) once on this Mac — usage is read from its session files."
-        case .agentTimedOut, .agentCommandFailed:
+        case .agentTimedOut:
+            "Likely a busy Mac. \(agent) is asked again on its next check while you use it; "
+                + "limits already read stay shown."
+        case .agentCommandFailed:
             "\(agent) is asked again later, while you use it; limits already read stay shown."
         case .agentOutputUnreadable:
             "A \(agent) update may have changed what it prints; limits already read stay shown."

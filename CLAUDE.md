@@ -198,7 +198,10 @@ may not realise you are standing. The doc named beside each says why.
   run engine work at background QoS: both are priority 4, and under a
   normal 20-agent load the daemon got no CPU for minutes while holding the
   lease. Interactive process, utility-QoS heavy work (`EngineWork`);
-  swiftlint holds it. (`docs/DAEMON.md` "Under load")
+  swiftlint holds it. And never clamp a CHILD the host spawns (an agent's
+  CLI): utility took a 0.1 s run past 10 s with every core busy, and a
+  Background host hands its priority 4 to every child.
+  (`docs/DAEMON.md` "Under load")
 - Never poll faster than 180s (`TriggerGate.floor`) — the endpoint
   rate-limits sustained sub-3-minute polling, and adaptive cadence may
   only ever slow polling down. (`docs/ARCHITECTURE.md`)
@@ -207,7 +210,7 @@ may not realise you are standing. The doc named beside each says why.
 
 Rules a grep can hold are mechanized rather than remembered:
 `.swiftlint.yml` `custom_rules` (headless core, native `SecItem`, key
-strategies, `chartScrollableAxes`, background engine priority) and `scripts/guard.sh` (token-shaped
+strategies, `chartScrollableAxes`, background engine priority, a clamped spawned child) and `scripts/guard.sh` (token-shaped
 strings, signing identities, dependencies, the §10 host allowlist,
 script↔task pairing, CI covering every half of the gate, every required
 check being a workflow job). Adding a rule

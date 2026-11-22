@@ -212,6 +212,10 @@ gives each stack band its own density glyph.
     retry countdown; TUI has only the state dot).
 28. [S][✓] Render the digest's typed error text (ErrorStatus code +
     message) as readable header copy, like the app's error states.
+    `agentTimedOut` (a busy Mac's quota-probe timeout, 2026-11-22) is a
+    wait, not a fault, on every face: dim in the TUI (warning colour for
+    the rest), grey in the panel even without a snapshot, and `RETRYING:`
+    rather than `ERROR:` in `usage-cli status` (`UsageError.isRetrying`).
 29. [S][✓] Render SpendStatus (extra-usage spend line) — digest
     carries it, TUI ignores it.
 30. [S][✓] Color the header's `API n/Nh` from `apiBudgetFraction`

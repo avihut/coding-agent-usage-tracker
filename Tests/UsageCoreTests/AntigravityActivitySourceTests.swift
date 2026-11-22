@@ -93,6 +93,19 @@ struct AntigravityFixture {
         AntigravityProvider(home: home, userHome: root, agyCandidates: [])
     }
 
+    /// Yesterday at 12:00 local: what the suite calls "now". Every row is
+    /// stamped relative to it, and the totals are read per LOCAL DAY, so a
+    /// wall-clock "now" made each test fail whenever its rows straddled a
+    /// midnight — `forkDedup` (`t0 = now − 1 h`, its fork's extra call at
+    /// `t0 + 60 s`) in the minute before 01:00, recorded 2026-11-22 00:59
+    /// as `messages → 1`, `tokens → 550`. At noon every offset the suite
+    /// uses (± 11 h) lands on one day, whatever the clock says; yesterday
+    /// keeps it in the past.
+    static func midday(calendar: Calendar = .current, now: Date = Date()) -> Date {
+        let yesterday = calendar.date(byAdding: .day, value: -1, to: now) ?? now
+        return calendar.date(bySettingHour: 12, minute: 0, second: 0, of: yesterday) ?? yesterday
+    }
+
     /// Every file under the home with its mtime — what "nothing was written
     /// there" is checked against.
     func homeSnapshot() -> [String: Date] {
@@ -109,7 +122,7 @@ struct AntigravityFixture {
 
 @Suite("Antigravity activity")
 struct AntigravityActivitySourceTests {
-    private let now = Date()
+    private let now = AntigravityFixture.midday()
 
     @Test("calls become tokens per model and minute; only typed prompts count")
     func tokenMapping() throws {
@@ -241,6 +254,28 @@ struct AntigravityActivitySourceTests {
         let after = source.scanTranscripts(now: now)
         #expect(after.daily.first?.prompts == 1)
         #expect(after.daily.first?.tokens == (gone == original ? 560 : 550))
+    }
+
+    @Test("a fork whose rows straddle midnight: each call on its own local day, the whole counted once")
+    func forkAcrossMidnight() throws {
+        let fixture = try AntigravityFixture()
+        defer { fixture.tearDown() }
+        // The layout `forkDedup` failed on: shared rows 30 s before local
+        // midnight, the fork's own call 30 s after it.
+        let midnight = Calendar.current.startOfDay(for: now)
+        let t0 = midnight.addingTimeInterval(-30)
+        let shared = [
+            AntigravityFixture.prompt(at: t0),
+            AntigravityFixture.call(at: t0, input: 500, output: 50),
+        ]
+        try fixture.conversation(rows: shared)
+        try fixture.conversation(
+            rows: shared + [AntigravityFixture.call(at: t0.addingTimeInterval(60), input: 7, output: 3)])
+        let daily = fixture.source().scanTranscripts(now: now).daily
+        #expect(daily.map(\.day) == [Calendar.current.startOfDay(for: t0), midnight])
+        #expect(daily.map(\.messages) == [1, 1])
+        #expect(daily.map(\.tokens) == [550, 10])
+        #expect(daily.map(\.prompts) == [1, 0])
     }
 
     @Test("prompts in the same second are distinct unless their files are forks")

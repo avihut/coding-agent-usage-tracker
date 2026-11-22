@@ -330,6 +330,33 @@ about 20 coding agents at once, load averages of 200–380 on 10 cores.
   job didn't reach `main()` at all. The full scan still takes a minute and
   a half at that load — it re-validates 3,832 sessions at utility, beneath
   the agents, by design — but nothing waits for it any more.
+- A CHILD THE HOST SPAWNS (2026-11-22; plan and raw rows in
+  `docs/plans/antigravity-probe-under-load.md`). The quota probe's `agy`
+  had not read when the person reported it: its `--version` had run into
+  the 10 s kill — most likely under the pre-#42 Background host (clamp 1
+  below) — and with every core busy today's host crossed it too (clamp 2).
+  Two clamps, both measured with the child's priority read by `ps`. (1) A
+  host under the darwin background policy — the pre-#42 Background daemon
+  — hands it to every child,
+  whatever the spawn asks: priority 4, a cold start of the 229 MB binary
+  214.8 s. (2) The runner's own utility clamp (priority 20) under CPU
+  saturation — default-priority busy loops on all 10 cores, 0% idle:
+
+  | busy loops | run | utility (20) | unclamped (31) |
+  |---|---|---|---|
+  | 20 | `--version` warm | 2.2–5.9 s | 0.12–0.18 s |
+  | 40 | `--version` warm / cold | 1.4–10.4 s / 5.7–11.8 s | 0.27–0.68 s / 2.9 s |
+  | 40 | `/quota` | 14.3 s | 3.1 s |
+  | 80 | `--version` warm | 2.9–10.4 s | 0.48–0.77 s |
+
+  Load AVERAGE didn't tell them apart (at a natural 290–763, full of
+  priority-4 simulator threads, both ran ~0.1 s warm): saturation did. The
+  same CPU either way (0.1–0.5 s a run) — the difference is waiting. So the
+  child runs UNCLAMPED (`EngineWork.agentCommandQoS`; that call accepts only
+  utility and background, so it's simply not made, and SwiftLint holds
+  that), every run gets a 120 s safety net, and a timeout adds nothing to
+  the failure backoff — timeouts alone retry at the probe's 10-minute floor
+  (HARNESSES.md).
 - PLIST MIGRATION. `kickstart -k` does NOT pick up an edited
   `ProcessType` (checked on a throwaway label: still priority 4 after the
   edit; 31 after bootout + bootstrap), so an existing install is RELOADED.

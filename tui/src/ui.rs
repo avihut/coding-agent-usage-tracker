@@ -1175,10 +1175,16 @@ fn header<'a>(
                     if let Some(hint) = &error.hint {
                         copy.push_str(&format!(" — {hint}"));
                     }
-                    status.push(Span::styled(
-                        format!("{}{copy}", glyphs().sep),
-                        style(WARNING),
-                    ));
+                    // A timeout of the agent's own tool is a wait, not a
+                    // fault (a busy Mac; retried on its own): dim, like
+                    // the rest of the freshness line, never the warning
+                    // colour (`UsageError.isRetrying`).
+                    let tone = if error.code == "agentTimedOut" {
+                        DIM
+                    } else {
+                        WARNING
+                    };
+                    status.push(Span::styled(format!("{}{copy}", glyphs().sep), style(tone)));
                 }
             }
             Freshness::Backoff => {
@@ -2759,6 +2765,45 @@ mod tests {
         (0..height)
             .map(|y| (0..width).map(|x| buffer[(x, y)].symbol()).collect())
             .collect()
+    }
+
+    /// 2026-11-22: an agent's tool timing out on a busy Mac is a wait —
+    /// dim, like the rest of the freshness line — while every other error
+    /// keeps the warning colour.
+    #[test]
+    fn a_probe_timeout_reads_as_a_wait_not_a_warning() {
+        for (code, text, tone) in [
+            ("agentTimedOut", "Antigravity CLI was slow to answer", DIM),
+            ("signInExpired", "Sign-in expired", WARNING),
+        ] {
+            let mut object = harness_golden();
+            object["engine"]["stale"] = true.into();
+            object["engine"]["error"] = serde_json::json!({ "text": text, "code": code });
+            let mut app = app_on(object);
+            let backend = ratatui::backend::TestBackend::new(160, 40);
+            let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+            terminal
+                .draw(|frame| render(frame, &mut app, golden_now()))
+                .expect("draw");
+            let buffer = terminal.backend().buffer().clone();
+            let first = text.chars().next().expect("text");
+            let cell = (0..40u16)
+                .find_map(|y| {
+                    let row: String = (0..160u16).map(|x| buffer[(x, y)].symbol()).collect();
+                    row.find(text).map(|byte| {
+                        let x = row[..byte].chars().count() as u16;
+                        (x, y)
+                    })
+                })
+                .unwrap_or_else(|| panic!("{code}: {text:?} not on screen"));
+            assert_eq!(buffer[cell].symbol(), first.to_string());
+            // `style` drops colour under NO_COLOR; compare what it gives.
+            assert_eq!(
+                buffer[cell].fg,
+                style(tone).fg.unwrap_or(Color::Reset),
+                "{code}"
+            );
+        }
     }
 
     /// The keyboard cursor holds a ROW, not a position: a scan that lands

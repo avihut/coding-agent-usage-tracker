@@ -19,6 +19,10 @@ public struct AgentQuotaCommand: Sendable {
     public let arguments: [String]
     /// Added to the minimal environment the child gets (`baseEnvironment`).
     public let environment: [String: String]
+    /// Past this a run — the version check too — is killed with its process
+    /// group. A safety net against a hung tool, sized far above any run on
+    /// a busy Mac; hitting it is a TRANSIENT failure: shown, but it neither
+    /// adds to nor clears the failure backoff (`AgentQuotaProbe.record`).
     public let timeout: TimeInterval
     /// The least time between two attempts; never below `minimumFloor`.
     public let floor: TimeInterval
@@ -141,7 +145,8 @@ public enum AgentQuotaSchedule {
     /// floor is a promise ("at most every 10 minutes"), not a target.
     public static let slack: TimeInterval = 30
 
-    /// The floor, doubled per consecutive failure, capped.
+    /// The floor, doubled per consecutive failure (a timeout doesn't count
+    /// as one), capped.
     public static func interval(consecutiveFailures: Int, floor: TimeInterval) -> TimeInterval {
         guard consecutiveFailures > 0 else { return floor }
         let doubled = floor * pow(2, Double(min(consecutiveFailures, 16)))

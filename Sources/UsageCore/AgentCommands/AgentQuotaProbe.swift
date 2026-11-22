@@ -12,7 +12,8 @@ import Synchronization
 /// gets its outcome. Every attempt is persisted before its first spawn,
 /// and the state is re-read from disk before every decision, so a restart
 /// or a handover can't beat the floor. A retired probe (its engine shut
-/// down, the lease about to go) writes nothing more.
+/// down, the lease about to go) spawns nothing more, keeps nothing of a
+/// run still in flight, and writes nothing more.
 public actor AgentQuotaProbe {
     /// What the engine renders: the newest reading, and the failure of the
     /// LAST attempt when it failed (by construction newer than the reading).
@@ -22,8 +23,6 @@ public actor AgentQuotaProbe {
     }
 
     public static let stateFileName = "quota-probe.json"
-    /// The version check is a start-up of the same tool; it gets less time.
-    static let versionTimeout: TimeInterval = 10
 
     private let command: AgentQuotaCommand
     private let runner: any AgentCommandRunner
@@ -93,8 +92,10 @@ public actor AgentQuotaProbe {
         return status
     }
 
+    private var isRetired: Bool { retired.withLock { $0 } }
+
     private func save() {
-        guard !retired.withLock({ $0 }) else { return }
+        guard !isRetired else { return }
         state.save(to: stateURL)
     }
 
@@ -127,19 +128,32 @@ public actor AgentQuotaProbe {
             // isn't asked again until the file changes. The failure that
             // said so stays shown.
             return
+        case .retired:
+            return
         case .unsettled(let failure):
             // A candidate whose version run didn't finish: that run was a
             // spawn like any other, so it counts as the attempt — the
-            // floor and the backoff hold, and the failure is shown.
-            state.lastFailure = failure
-            state.consecutiveFailures += 1
+            // floor holds and the failure is shown. A timeout is
+            // transient (`record`): it doesn't back off.
+            record(failure)
             save()
             return
         }
-        stamp(startedAt)
+        // Retired while a version check ran (the engine shut down, the
+        // lease about to go): nothing more is spawned under the next host.
+        guard !isRetired else { return }
+        // Stamped again right before the limits run: a slow version check
+        // (up to the 120 s safety net) must not let two limits runs land
+        // closer than the floor — the floor is promised per RUN, not only
+        // per attempt.
+        let spawnedAt = max(startedAt, clock())
+        stamp(spawnedAt)
         let result = await runner.run(AgentCommandInvocation(
             executable: executable, arguments: command.arguments,
             environment: environment, timeout: command.timeout))
+        // A probe retired mid-run keeps nothing of the run, in memory or
+        // on disk: the engine it served is gone.
+        guard !isRetired else { return }
         let finishedAt = clock()
         let outcome: AgentQuotaOutcome
         switch result.termination {
@@ -155,18 +169,30 @@ public actor AgentQuotaProbe {
         switch outcome {
         case .buckets(let buckets):
             state.reading = AgentQuotaReading(
-                startedAt: startedAt, capturedAt: finishedAt, buckets: buckets)
+                startedAt: spawnedAt, capturedAt: finishedAt, buckets: buckets)
             state.lastFailure = nil
             state.consecutiveFailures = 0
         case .failure(let failure):
-            state.lastFailure = failure
-            state.consecutiveFailures += 1
+            record(failure)
             if failure == .notALimitsCommand,
                let index = state.binaries.firstIndex(where: { $0.sameFile(as: identity) }) {
                 state.binaries[index].refusedQuota = true
             }
         }
         save()
+    }
+
+    /// A failure is shown either way; only a REAL one backs off. A timeout
+    /// says the Mac was busy (or the tool hung), not that anything is wrong
+    /// with the sign-in or the output, so it leaves the count exactly as it
+    /// was — neither escalating nor forgiving a real failure's backoff — and
+    /// the next attempt waits only the floor (2026-11-22: on a saturated
+    /// Mac a run of timeouts used to push the next try out to two hours).
+    /// The count stays in the state file unchanged in meaning for every
+    /// other failure, so builds of either age read each other's files.
+    private func record(_ failure: AgentQuotaFailure) {
+        state.lastFailure = failure
+        if failure != .timedOut { state.consecutiveFailures += 1 }
     }
 
     private enum Resolution {
@@ -179,6 +205,8 @@ public actor AgentQuotaProbe {
         /// None found, and a version run timed out: retried at the next
         /// due attempt, not held against the file.
         case unsettled(AgentQuotaFailure)
+        /// The probe was retired before the next spawn: nothing more runs.
+        case retired
     }
 
     /// The first candidate that is really the tool: a regular executable
@@ -186,7 +214,9 @@ public actor AgentQuotaProbe {
     /// wrong program), whose version output the provider accepts. A
     /// verdict is remembered per file identity: a version run that
     /// finished — or couldn't start — settles it; only a timeout is
-    /// retried.
+    /// retried. It gets the command's own timeout: the kill is a safety
+    /// net against a hung child, not a latency budget, and a cold first
+    /// launch of a fresh 229 MB binary on a saturated Mac takes seconds.
     private func resolveExecutable(startedAt: Date) async -> Resolution {
         var unsettled: AgentQuotaFailure?
         var refused = false
@@ -197,10 +227,12 @@ public actor AgentQuotaProbe {
                 refused = refused || (known.accepted && known.refusedQuota)
                 continue
             }
+            guard !isRetired else { return .retired }
             stamp(startedAt)
             let result = await runner.run(AgentCommandInvocation(
                 executable: candidate, arguments: command.versionArguments,
-                environment: environment, timeout: Self.versionTimeout))
+                environment: environment, timeout: command.timeout))
+            guard !isRetired else { return .retired }
             if case .timedOut = result.termination {
                 unsettled = unsettled ?? .timedOut
                 continue
@@ -283,20 +315,37 @@ struct AgentQuotaProbeState: Codable, Equatable {
     var binaries: [Binary] = []
     var lastAttemptAt: Date?
     var lastFailure: AgentQuotaFailure?
+    /// Consecutive failures that BACK OFF — a timeout isn't one
+    /// (`AgentQuotaProbe.record`); a success resets it.
     var consecutiveFailures = 0
     var reading: AgentQuotaReading?
+    /// Written `true` by every build that doesn't count a timeout as a
+    /// failure (2026-11-22). Optional and additive, so `version` stays 1 and
+    /// either build reads the other's file (a `load` that failed would lose
+    /// `lastAttemptAt` and so the floor). A file without it was last written
+    /// by an older build, whose count may be inflated by timeouts.
+    var timeoutsTransient: Bool?
 
     enum CodingKeys: String, CodingKey {
         case version, binaries, lastAttemptAt, lastFailure, consecutiveFailures, reading
+        case timeoutsTransient
     }
 
     static func load(from url: URL) -> Self? {
         guard let data = try? Data(contentsOf: url) else { return nil }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        guard let state = try? decoder.decode(Self.self, from: data),
+        guard var state = try? decoder.decode(Self.self, from: data),
               state.version == currentVersion
         else { return nil }
+        // An older build counted every timeout as a failure, so on a busy
+        // Mac its backoff grew to two hours. When it last failed by timing
+        // out, its count is mostly timeouts: forgiven (a real failure just
+        // before them is forgiven too — the next real one counts again).
+        // The floor still holds: `lastAttemptAt` is kept.
+        if state.timeoutsTransient != true, state.lastFailure == .timedOut {
+            state.consecutiveFailures = 0
+        }
         return state
     }
 
@@ -306,7 +355,9 @@ struct AgentQuotaProbeState: Codable, Equatable {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.sortedKeys]
-        guard let data = try? encoder.encode(self) else { return }
+        var current = self
+        current.timeoutsTransient = true
+        guard let data = try? encoder.encode(current) else { return }
         let manager = FileManager.default
         let folder = url.deletingLastPathComponent()
         guard (try? manager.createDirectory(at: folder, withIntermediateDirectories: true)) != nil

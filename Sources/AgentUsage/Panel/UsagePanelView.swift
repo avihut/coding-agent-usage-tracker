@@ -486,7 +486,10 @@ struct UsagePanelView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(error.shortText(agent: store.provider.agentName))
                     .font(.caption)
-                    .foregroundStyle(store.state.snapshot == nil ? AnyShapeStyle(.red) : AnyShapeStyle(.secondary))
+                    // A wait (`isRetrying`: a busy Mac's probe timeout) is
+                    // never red, snapshot or not.
+                    .foregroundStyle(store.state.snapshot == nil && !error.isRetrying
+                        ? AnyShapeStyle(.red) : AnyShapeStyle(.secondary))
                 if let hint = error.hint(agent: store.provider.agentName) {
                     Text(hint).font(.caption2).foregroundStyle(.secondary)
                 }
@@ -1055,7 +1058,11 @@ struct UsagePanelView: View {
         // a days-old stamp.
         let stamp = UsageFormatting.updatedStamp(fetchedAt, now: now)
         // The stale badge lives here now that there's no header for it.
-        if store.state.isStale { return Text("cached \(stamp)").foregroundStyle(.orange) }
+        // A retrying wait keeps the reading's own stamp: those numbers
+        // are as new as they were, nothing was served from a cache.
+        if store.state.isStale, store.state.error?.isRetrying != true {
+            return Text("cached \(stamp)").foregroundStyle(.orange)
+        }
         // An OLD reading (`ReadingAge`) is never "Updated": it is the last
         // thing known, as of when it was read.
         if let caption = store.asOfCaption(at: now) { return Text(caption) }

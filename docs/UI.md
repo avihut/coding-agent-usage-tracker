@@ -32,7 +32,10 @@ per-harness geometry of the bar is in [HARNESSES.md](HARNESSES.md).
   SPENT window's countdown to its reset (core's `menuBarCountdowns(…,
   cached:old:)`) — a locked-out account writes no new reading, so its
   reading ages through the very lockout it is counting down. The panel says
-  "as of Wed 20:13" in the status row (orange "cached …" still wins), on
+  "as of Wed 20:13" in the status row (orange "cached …" still wins —
+  except over a retrying wait, `UsageError.isRetrying`, a busy Mac's quota
+  probe timing out: nothing was served from a cache, so the reading keeps
+  its own stamp, and its error text is grey even with no snapshot), on
   every meter row and strip row, beside the popover's meter name and after
   the plan ("Pro Lite plan · as of …", via `UsageStore.planLabel`); the
   Settings → Accounts state line reads "as of" for "Updated". Every face

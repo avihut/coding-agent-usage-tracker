@@ -193,12 +193,21 @@ requires extra work from the user to start metering antigravity" —
   it changes — at most one turn per update, never one per run.
 - **How often.** At most once every ten minutes, only when Antigravity has
   written a conversation since the last reading, one at a time, stopped
-  after 30 seconds (with anything it started), and backing off to two hours
-  when it fails — your clicking refresh skips that backoff, never the ten
-  minutes. It runs only
+  after two minutes if it hangs (with anything it started), and backing off
+  to two hours when it fails — your clicking refresh skips that backoff,
+  never the ten minutes. A run that merely didn't finish in time (a busy
+  Mac) is shown as "slow to answer", but it doesn't add to that backoff:
+  after such runs alone it's tried again at the next ten-minute mark,
+  never sooner (an earlier real failure's wait still stands). It runs at
+  the same priority as your agents: below that, on a Mac whose every core
+  is busy, the version check — a fraction of a second normally — took
+  longer than the 10 seconds it was given (corrected 2026-11-22; it was
+  stopped after 30 seconds, 10 for the version check, and every timeout
+  backed off). It runs only
   in the process that runs the meters (the background daemon, or the app
   when no daemon is running). A Mac that doesn't use Antigravity never runs
-  it. Each run takes about two seconds and half a second of CPU.
+  it. Each run takes about two seconds and half a second of CPU — about
+  three seconds with every core busy.
 - **What it costs your plan.** Nothing: measured readings were identical
   before and after, and the run reports zero turns and zero tokens.
 - **The network.** The CLI, not this app, contacts Google's Cloud Code

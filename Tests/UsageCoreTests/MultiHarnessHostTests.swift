@@ -333,6 +333,94 @@ struct MultiHarnessHostTests {
         #expect(await runner.quotaRuns.count == 1)
     }
 
+    /// A host whose Antigravity reading is cached, with the probe due again
+    /// (an attempt an hour ago, a conversation written since) and a CLI
+    /// whose limits run waits until the test releases it.
+    private func primedForSlowProbe(
+        _ fixture: Fixture
+    ) async throws -> (host: MeteringHost, runner: FakeAgentRunner, release: AsyncStream<Void>.Continuation,
+                       support: URL) {
+        try fixture.antigravityConversation(daysAgo: 0.1)
+        try FileManager.default.createDirectory(
+            at: fixture.agyBinary.deletingLastPathComponent(), withIntermediateDirectories: true)
+        FileManager.default.createFile(
+            atPath: fixture.agyBinary.path, contents: Data("#!/bin/sh\n".utf8),
+            attributes: [.posixPermissions: 0o755])
+        let reset = AntigravityFixture.stamp(Date().addingTimeInterval(86400))
+        let output = AntigravityQuotaFixture.output([
+            AntigravityQuotaFixture.bucket("gemini-weekly", window: "weekly", remaining: 0.6, reset: reset),
+        ])
+        let first = fixture.makeHost([fixture.antigravity], runner: FakeAgentRunner(quota: .exited(stdout: output)))
+        first.start()
+        let read = await eventually { first.engines["antigravity"]?.state.snapshot?.meters.count == 1 }
+        #expect(read)
+        first.shutdown()
+
+        let support = StorageScope.supportDirectory(
+            bundleID: "com.test.harnesses", providerID: "antigravity", profileID: "default",
+            roots: fixture.roots)
+        let stateURL = support.appending(path: AgentQuotaProbe.stateFileName)
+        var state = try #require(AgentQuotaProbeState.load(from: stateURL))
+        state.lastAttemptAt = Date().addingTimeInterval(-3600)
+        state.save(to: stateURL)
+        try fixture.antigravityConversation(daysAgo: 0)
+        let slow = FakeAgentRunner(quota: .exited(stdout: output))
+        let (released, release) = AsyncStream.makeStream(of: Void.self)
+        await slow.set(hold: { for await _ in released { return } })
+        let second = fixture.makeHost([fixture.antigravity], runner: slow)
+        second.start()
+        let deadline = Date().addingTimeInterval(4)
+        while await slow.quotaRuns.isEmpty, Date() < deadline {
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        #expect(await slow.quotaRuns.count == 1)
+        return (second, slow, release, support)
+    }
+
+    /// 2026-11-22: the probe's kill is now a 120 s safety net, and the
+    /// engine awaits the run inside its refresh — so a slow run must leave
+    /// what is already known on screen the whole time, never a blank or a
+    /// loading shell.
+    @Test("a slow probe run leaves the last limits on screen while it runs")
+    func slowProbeKeepsWhatIsKnown() async throws {
+        let fixture = try Fixture()
+        defer { fixture.tearDown() }
+        let (host, _, release, _) = try await primedForSlowProbe(fixture)
+        defer { host.shutdown() }
+        let engine = try #require(host.engines["antigravity"])
+        #expect(engine.isRefreshing)
+        #expect(engine.state.snapshot?.meters.count == 1)
+        #expect(host.digest?.meters.count == 1)
+        release.yield()
+        release.finish()
+        let landed = await eventually { !engine.isRefreshing }
+        #expect(landed)
+        #expect(engine.state.error == nil)
+        #expect(engine.state.snapshot?.meters.count == 1)
+    }
+
+    /// A run still in flight when its host shuts down (the lease about to
+    /// go — the app yielding to the daemon) must land nowhere: not in the
+    /// probe's state, not in the engine's history, under the next holder.
+    @Test("a probe run that outlives its engine's shutdown writes nothing")
+    func shutdownMidProbeWritesNothing() async throws {
+        let fixture = try Fixture()
+        defer { fixture.tearDown() }
+        let (host, _, release, support) = try await primedForSlowProbe(fixture)
+        let engine = try #require(host.engines["antigravity"])
+        let history = support.appending(path: "history.json")
+        let state = support.appending(path: AgentQuotaProbe.stateFileName)
+        let historyBefore = try? Data(contentsOf: history)
+        let stateBefore = try Data(contentsOf: state)
+        host.shutdown()
+        release.yield()
+        release.finish()
+        let settled = await eventually { !engine.isRefreshing }
+        #expect(settled)
+        #expect((try? Data(contentsOf: history)) == historyBefore)
+        #expect(try Data(contentsOf: state) == stateBefore)
+    }
+
     /// The next launch (or a host taking over) must not lead with the
     /// meterless harness even for the moment before its first read: focus
     /// answers from the cached last fetch, synchronously, at start.
