@@ -243,6 +243,12 @@ Mac its view IS that account's, so 28 applies there too.
   spend prompt get — the nouns whose answer IS the measurement); anywhere
   else it is an unknown flag (19), never accepted and inert.
 
+- A WAIT IS NOT AN ERROR (2026-11-22): `status`'s human line labels the
+  engine's error `ERROR: <text>`, except one that is only a wait
+  (`UsageError.isRetrying` — today `agentTimedOut`, an agent's own tool
+  slow on a busy Mac, retried on its own), which reads `RETRYING: <text>`.
+  The `error`, `error.code` and `error.hint` fields and every exit code
+  are unchanged.
 - OLD READINGS (2026-11-22, `ReadingAge`): while the selected section's
   reading is old the writer publishes `engine.asOf`/`asOfCaption`, and the
   CLI prints the writer's words, never re-deriving them: `status` and

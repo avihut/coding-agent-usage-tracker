@@ -57,7 +57,11 @@ extension DigestQuery {
             if let nextPollAt = engine.nextPollAt, nextPollAt > now {
                 parts.append("next poll in \(UsageFormatting.duration(nextPollAt.timeIntervalSince(now)))")
             }
-            if let error = engine.error { parts.append("ERROR: \(error.text)") }
+            if let error = engine.error {
+                let retrying = LiveStateBuilder.usageError(
+                    code: error.code, httpStatus: error.httpStatus).isRetrying
+                parts.append("\(retrying ? "RETRYING" : "ERROR"): \(error.text)")
+            }
             return ok(withStaleSuffix(
                 withAsOfSuffix(parts.joined(separator: " · "), digest: digest), digest: digest))
         }

@@ -42,6 +42,12 @@ public enum UsageError: Error, Sendable, Equatable {
         }
     }
 
+    /// A failure that is only a wait — the faces say it's being retried,
+    /// never "error": the agent's tool timing out on a busy Mac
+    /// (2026-11-22). Its code stays `agentTimedOut`, so an older face
+    /// still reads it as itself.
+    public var isRetrying: Bool { self == .agentTimedOut }
+
     public func hint(agent: String) -> String? {
         switch self {
         case .noCredentials: "Sign in to \(agent), then refresh."

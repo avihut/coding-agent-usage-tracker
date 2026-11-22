@@ -124,8 +124,10 @@ own weekly. The menu bar reads S · W plus the most-used of the others; the
 panel, the TUI and `usage-cli limits` list them all. If the CLI isn't
 installed, Antigravity shows tokens without limits, and a harness with no
 limits to show never takes the bar's lead unless you pin it; if it can't
-be read (not signed in, timed out), the last limits stay, greyed, with the
-reason. What that run does on your Mac is in [PRIVACY.md](PRIVACY.md).
+be read (not signed in, say), the last limits stay, greyed, with the
+reason. A run that doesn't finish in time — on a busy Mac — reads "slow to
+answer — asking again soon" and is simply tried again ten minutes later.
+What that run does on your Mac is in [PRIVACY.md](PRIVACY.md).
 **Gemini CLI** is labelled deprecated: Antigravity
 succeeds it for Google's plans, and it stays metered for API-key use.
 
@@ -518,16 +520,23 @@ succeeds it for Google's plans, and it stays metered for API-key use.
   `AgentQuotaSchedule`'s terms: a conversation
   written since the last reading began (first reading: within 7 days), the
   10-minute floor from the last ATTEMPT (`minimumFloor`, hard: the 30 s
-  slack only rounds the backoff steps), backoff 20/40/80/120 min (a manual
-  refresh skips it, never the floor), single flight; the state file is
+  slack only rounds the backoff steps), backoff 20/40/80/120 min after
+  REAL failures (a manual refresh skips it, never the floor), single
+  flight. A TIMEOUT is transient (2026-11-22): shown, the attempt stamped,
+  but `consecutiveFailures` left exactly as it was, so a run of timeouts
+  retries at the floor (`AgentQuotaProbe.record`); every run — the version
+  check too — gets the command's own 120 s, a safety net against a hung
+  CLI, not a latency budget (`docs/plans/antigravity-probe-under-load.md`); the state file is
   stamped before the first spawn and re-read before every decision, and a
   shut-down engine's probe (`retire()`) neither runs nor writes again. `SpawnedCommandRunner` is
   `posix_spawn` with CLOEXEC_DEFAULT (no host fd reaches the child —
   `engine.lock` above all), its own process group (a timeout kills the
   group, and whatever is left in it is killed when the child exits — seen
   with `WNOWAIT`, so the group id can't be reused first), default signals,
-  utility QoS, cwd `/`, and it returns on the child's EXIT, never pipe
-  EOF. State and reading in
+  NO QoS clamp (`EngineWork.agentCommandQoS`: default priority, like the
+  agents — a utility clamp took a 0.1 s-of-CPU `--version` past 10 s with
+  every core busy; SwiftLint forbids `posix_spawnattr_set_qos_class_np`),
+  cwd `/`, and it returns on the child's EXIT, never pipe EOF. State and reading in
   `<bundle>/antigravity/default/quota-probe.json` (0600, the engine's own).
   The reading reaches the provider through
   `fetchRawUsage(accessToken:quota:)`; a failed attempt makes the service
@@ -538,7 +547,8 @@ succeeds it for Google's plans, and it stays metered for API-key use.
   candidate inside an `.app` (the desktop editor's same-named launcher) or
   whose `--version` doesn't end on a version line is never asked; no
   `PATH` lookup. A version check settles per file identity, except one
-  that times out: an attempt (floor, backoff, a shown failure), retried.
+  that times out: an attempt (the floor, a shown failure, no backoff),
+  retried.
   REFUSAL: a run that reads as an agent turn (`num_turns`, tokens, or a
   `conversation_id`) — or a success with no command result that can't say
   no turn ran — is `notALimitsCommand`: that binary is never asked again
@@ -592,6 +602,10 @@ succeeds it for Google's plans, and it stays metered for API-key use.
   under `~/.gemini` changed. The quota probe's run (2026-11-21, six
   measured runs): 2.2–2.5 s wall, 0.4–0.5 s CPU, 209 MB transient; it
   spent nothing, and wrote only three mtime stamps in the CLI's home.
+  UNDER LOAD (2026-11-22, the same plan): with default-priority busy loops
+  on every core, a utility-clamped run took `--version` 1.4–10.4 s and
+  `/quota` 14.3 s; unclamped, 0.1–0.8 s and 3.1 s (a cold first launch of
+  a freshly updated binary: 2.9 s, which reads the whole 229 MB file once).
 - FOCUS AMENDMENT (vendor-neutral, `HarnessFocusRule`): a harness whose
   eligible accounts have all READ their usage and hold no limit
   (`reportsMeters == false`) isn't ranked unless pinned; when every

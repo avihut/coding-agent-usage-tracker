@@ -97,3 +97,59 @@
 [sat80 warm] 2026-11-22T07:34:12Z version #1 qos=utility(pri20) wall=10.35s cpu=0.11s load=356→365 term=exited(0) out=7B keys=
 [sat80 warm] 2026-11-22T07:34:13Z version #1 qos=none(pri31) wall=0.64s cpu=0.14s load=365→365 term=exited(0) out=7B keys=
 # [sat80] end CPU usage: 42.88% user, 57.11% sys, 0.0% idle
+
+# --- before/after load reproduction (2026-11-22, ending before 07:59Z): the REAL AgentQuotaProbe + SpawnedCommandRunner + agy,
+# isolated state, its 'quota' step swapped for --version (no /quota spent). before = main 203bd8f (10 s version kill, utility,
+# timeouts back off); after = this branch. cold = a fresh F_NOCACHE copy as the only candidate. The two builds of this
+# branch overlapped the first sat80 rows (both sides alike); the 'load=1' row is a getloadavg glitch.
+# sat40 CPU usage: 51.21% user, 48.78% sys, 0.0% idle
+probe-load before sat40 warm wall=4.78s failure=none reading=yes backoffCount=0 load=211
+probe-load after sat40 warm wall=0.78s failure=none reading=yes backoffCount=0 load=223
+probe-load before sat40 cold wall=17.19s failure=timedOut reading=no backoffCount=1 load=270
+probe-load after sat40 cold wall=4.07s failure=none reading=yes backoffCount=0 load=286
+probe-load before sat40 warm wall=6.84s failure=none reading=yes backoffCount=0 load=306
+probe-load after sat40 warm wall=0.68s failure=none reading=yes backoffCount=0 load=306
+probe-load before sat40 cold wall=11.90s failure=none reading=yes backoffCount=0 load=330
+probe-load after sat40 cold wall=3.40s failure=none reading=yes backoffCount=0 load=343
+probe-load before sat40 warm wall=10.15s failure=none reading=yes backoffCount=0 load=356
+probe-load after sat40 warm wall=0.67s failure=none reading=yes backoffCount=0 load=360
+probe-load before sat40 cold wall=14.72s failure=none reading=yes backoffCount=0 load=372
+probe-load after sat40 cold wall=3.41s failure=none reading=yes backoffCount=0 load=374
+probe-load before sat40 warm wall=8.84s failure=none reading=yes backoffCount=0 load=386
+probe-load after sat40 warm wall=0.83s failure=none reading=yes backoffCount=0 load=386
+probe-load before sat40 cold wall=15.70s failure=none reading=yes backoffCount=0 load=398
+probe-load after sat40 cold wall=3.24s failure=none reading=yes backoffCount=0 load=406
+probe-load before sat40 warm wall=4.65s failure=none reading=yes backoffCount=0 load=410
+probe-load after sat40 warm wall=0.73s failure=none reading=yes backoffCount=0 load=411
+probe-load before sat40 cold wall=10.94s failure=none reading=yes backoffCount=0 load=419
+probe-load after sat40 cold wall=3.39s failure=none reading=yes backoffCount=0 load=417
+# sat40 end CPU usage: 68.21% user, 31.78% sys, 0.0% idle
+# sat80 CPU usage: 62.10% user, 37.89% sys, 0.0% idle
+probe-load before sat80 warm wall=16.14s failure=none reading=yes backoffCount=0 load=402
+probe-load after sat80 warm wall=1.40s failure=none reading=yes backoffCount=0 load=415
+probe-load before sat80 cold wall=15.03s failure=timedOut reading=no backoffCount=1 load=446
+probe-load after sat80 cold wall=4.65s failure=none reading=yes backoffCount=0 load=451
+probe-load before sat80 warm wall=10.80s failure=timedOut reading=no backoffCount=1 load=458
+probe-load after sat80 warm wall=1.50s failure=none reading=yes backoffCount=0 load=458
+probe-load before sat80 cold wall=10.30s failure=timedOut reading=no backoffCount=1 load=459
+probe-load after sat80 cold wall=4.25s failure=none reading=yes backoffCount=0 load=457
+probe-load before sat80 warm wall=11.48s failure=timedOut reading=no backoffCount=1 load=459
+probe-load after sat80 warm wall=1.63s failure=none reading=yes backoffCount=0 load=456
+probe-load before sat80 cold wall=10.41s failure=timedOut reading=no backoffCount=1 load=455
+probe-load after sat80 cold wall=4.05s failure=none reading=yes backoffCount=0 load=458
+probe-load before sat80 warm wall=14.29s failure=none reading=yes backoffCount=0 load=482
+probe-load after sat80 warm wall=4.82s failure=none reading=yes backoffCount=0 load=532
+probe-load before sat80 cold wall=10.17s failure=timedOut reading=no backoffCount=1 load=791
+probe-load after sat80 cold wall=10.94s failure=none reading=yes backoffCount=0 load=972
+probe-load before sat80 warm wall=3.64s failure=none reading=yes backoffCount=0 load=997
+probe-load after sat80 warm wall=0.46s failure=none reading=yes backoffCount=0 load=997
+probe-load before sat80 cold wall=9.05s failure=none reading=yes backoffCount=0 load=1
+probe-load after sat80 cold wall=5.70s failure=none reading=yes backoffCount=0 load=174
+# sat80 end CPU usage: 67.31% user, 31.63% sys, 1.4% idle
+
+# --- the ONE real /quota after the fix (the 5th /quota run in all): this branch's opt-in ANTIGRAVITY_LIVE_QUOTA=1 test,
+# the real probe + runner + agy at its real path, isolated state, under 40 busy loops
+# e2e 07:59:38Z CPU usage: 73.66% user, 26.33% sys, 0.0% idle  load { 769.22 716.48 471.25 }
+live-quota run: 3.49 s, failure: none
+live-quota bucket ids: ["gemini-weekly", "gemini-5h", "3p-weekly", "3p-5h", "gemini-argon-wtu-weekly"]
+􁁛  Test "the real CLI's /quota, reduced to meters" passed after 3.515 seconds.

@@ -1277,6 +1277,24 @@ extension DigestQueryTests {
         #expect(run(["status", "error.http"], digest: state).stdout == "")
     }
 
+    /// 2026-11-22: an agent's tool timing out on a busy Mac is a wait, not
+    /// a fault — the human line says it's retrying; the field and the code
+    /// keep their meaning, and the exit stays 0.
+    @Test func agentTimeoutReadsAsRetrying() {
+        let engine = DigestQueryTests.minimalEngine(
+            error: ErrorStatus(
+                text: "Antigravity CLI was slow to answer — asking again soon", hint: nil,
+                code: "agentTimedOut", httpStatus: nil))
+        let state = DigestQueryTests.minimalState(engine: engine)
+        let out = run(["status"], digest: state)
+        #expect(out.stdout.hasSuffix("RETRYING: Antigravity CLI was slow to answer — asking again soon"))
+        #expect(!out.stdout.contains("ERROR"))
+        #expect(out.exitCode == 0)
+        #expect(run(["status", "error.code"], digest: state).stdout == "agentTimedOut")
+        #expect(UsageError.agentTimedOut.isRetrying)
+        #expect(!UsageError.agentCommandFailed.isRetrying && !UsageError.network.isRetrying)
+    }
+
     @Test func httpErrorCarriesItsStatusCode() {
         let engine = DigestQueryTests.minimalEngine(
             error: ErrorStatus(text: "Usage endpoint returned HTTP 500", hint: nil, code: "http", httpStatus: 500))

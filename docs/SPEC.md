@@ -527,8 +527,10 @@ Non-negotiable; flag rather than work around:
     `<agy> -p /quota --output-format json --log-file /dev/null`, with the
     environment `HOME USER LOGNAME TMPDIR`, `PATH=/usr/bin:/bin:/usr/sbin:/sbin`
     and the documented `AGY_CLI_DISABLE_AUTO_UPDATE=true`, cwd `/`, stdin
-    `/dev/null`, no inherited descriptors, utility QoS, its own process
-    group. `<agy>` is the first of `~/.local/bin/agy`,
+    `/dev/null`, no inherited descriptors, no QoS clamp (the default
+    priority, like the agents — corrected 2026-11-22 from "utility QoS",
+    which starved a 0.1 s-of-CPU run past its kill with every core busy;
+    `docs/plans/antigravity-probe-under-load.md`), its own process group. `<agy>` is the first of `~/.local/bin/agy`,
     `/opt/homebrew/bin/agy`, `/usr/local/bin/agy` that resolves outside any
     `.app` bundle and whose `--version` ends on a version line (checked
     once per file identity; only a check that times out is retried, and it
@@ -542,10 +544,15 @@ Non-negotiable; flag rather than work around:
       a restart, a handover or a manual refresh can't beat it), only when a
       conversation was written since the last reading began (the first
       reading: within the last 7 days), one at a time, killed with its
-      process group at 30 s (and whatever it leaves in that group killed
-      when it exits), backing off to 2 hours after failures — a manual
-      refresh skips the backoff, never the floor. A Mac that doesn't use
-      Antigravity runs nothing.
+      process group at 120 s — the version check too (and whatever it
+      leaves in that group killed when it exits), backing off to 2 hours
+      after failures — a manual refresh skips the backoff, never the
+      floor. A TIMEOUT is not such a failure: it is shown and counts as the
+      attempt, and the next one waits the floor alone. (Corrected
+      2026-11-22, measured: the kill was 30 s, and 10 s for the version
+      check, and a timeout backed off like a refusal; on a saturated Mac
+      that kept the limits from ever arriving. The floor is unchanged.) A
+      Mac that doesn't use Antigravity runs nothing.
     - What the VENDOR'S process writes inside its own home, measured (the
       superset of every run): mtime stamps on `cache/onboarding.json`,
       `conversation_summaries.db` and `crashes/` (and so on the folders
