@@ -1284,10 +1284,12 @@ extension DigestQueryTests {
         let engine = DigestQueryTests.minimalEngine(
             error: ErrorStatus(
                 text: "Antigravity CLI was slow to answer — asking again soon", hint: nil,
-                code: "agentTimedOut", httpStatus: nil))
+                code: "agentTimedOut", httpStatus: nil),
+            // As the engine publishes it: an errored state is always stale.
+            stale: true)
         let state = DigestQueryTests.minimalState(engine: engine)
         let out = run(["status"], digest: state)
-        #expect(out.stdout.hasSuffix("RETRYING: Antigravity CLI was slow to answer — asking again soon"))
+        #expect(out.stdout.contains("RETRYING: Antigravity CLI was slow to answer — asking again soon"))
         #expect(!out.stdout.contains("ERROR"))
         #expect(out.exitCode == 0)
         #expect(run(["status", "error.code"], digest: state).stdout == "agentTimedOut")

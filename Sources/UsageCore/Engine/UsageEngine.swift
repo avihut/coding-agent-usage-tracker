@@ -439,6 +439,14 @@ public final class UsageEngine {
             // rendered and forecast.
             let reported = await service.refresh(
                 thresholds: currentThresholds(), manual: reason == .manual)
+            // Shut down while it ran (a quota probe can take up to its 120 s
+            // safety net, twice): the lease is gone or going, so nothing
+            // lands — no history, ledger or notice written under the next
+            // holder.
+            guard !isShutDown else {
+                isRefreshing = false
+                return
+            }
             let newState = Self.carryingResets(reported, samples: samples, now: Date())
             state = newState
             isRefreshing = false

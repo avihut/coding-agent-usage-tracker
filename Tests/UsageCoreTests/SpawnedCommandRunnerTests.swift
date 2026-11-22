@@ -64,18 +64,27 @@ struct SpawnedCommandRunnerTests {
 
     /// 2026-11-22: a utility clamp (priority 20) starved the quota probe's
     /// CLI past its timeout on a saturated Mac. The child runs unclamped —
-    /// the default priority, 31. A test process that is itself under the
-    /// darwin background policy hands that on (priority 4) whatever the
-    /// runner does, so the check stands down there rather than lie.
-    @Test("the child runs at the default priority, never a utility or background clamp")
+    /// at whatever priority any child of this process gets. Judged against
+    /// a baseline child spawned without the runner, because a clamp on the
+    /// test process itself (`taskpolicy -c utility`, `-b`) reaches every
+    /// child whatever the runner does.
+    @Test("the child runs as any child of the host would — never below it")
     func unclamped() async throws {
-        errno = 0
-        let hostInBackground = getpriority(PRIO_DARWIN_PROCESS, 0) == 1
-        let result = await sh("/bin/ps -o pri= -p $$")
-        let priority = try #require(Int(text(result.stdout).trimmingCharacters(in: .whitespacesAndNewlines)))
-        if !hostInBackground {
-            #expect(priority > 20)
-        }
+        let script = "/bin/ps -o pri= -p $$"
+        let baseline = Process()
+        baseline.executableURL = URL(fileURLWithPath: "/bin/sh")
+        baseline.arguments = ["-c", script]
+        let pipe = Pipe()
+        baseline.standardOutput = pipe
+        try baseline.run()
+        baseline.waitUntilExit()
+        let host = try #require(Int(text(pipe.fileHandleForReading.readDataToEndOfFile())
+            .trimmingCharacters(in: .whitespacesAndNewlines)))
+        let result = await sh(script)
+        let child = try #require(Int(text(result.stdout).trimmingCharacters(in: .whitespacesAndNewlines)))
+        #expect(child >= host)
+        // An unclamped host's children run above utility's 20.
+        if host > 20 { #expect(child > 20) }
     }
 
     @Test("a timeout terminates the whole process group, and reaps it")

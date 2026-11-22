@@ -11,6 +11,9 @@ actor FakeAgentRunner: AgentCommandRunner {
         termination: .exited(0), stdout: Data("1.5.14\n".utf8), stderr: Data(), duration: 0.01)
     var quota: AgentCommandResult
     var delay: Duration = .zero
+    /// Awaited by every limits run before it answers — a test holds a run
+    /// in flight for exactly as long as it needs, no wall clock involved.
+    var hold: (@Sendable () async -> Void)?
     private(set) var invocations: [AgentCommandInvocation] = []
     /// Called as each run starts — what the world looked like at the spawn.
     var onRun: (@Sendable (AgentCommandInvocation) -> Void)?
@@ -22,6 +25,7 @@ actor FakeAgentRunner: AgentCommandRunner {
         onRun?(invocation)
         if invocation.arguments == ["--version"] { return version }
         if delay > .zero { try? await Task.sleep(for: delay) }
+        if let hold { await hold() }
         return quota
     }
 
@@ -30,6 +34,7 @@ actor FakeAgentRunner: AgentCommandRunner {
     func set(quota: AgentCommandResult) { self.quota = quota }
     func set(version: AgentCommandResult) { self.version = version }
     func set(delay: Duration) { self.delay = delay }
+    func set(hold: @escaping @Sendable () async -> Void) { self.hold = hold }
     func set(onRun: @escaping @Sendable (AgentCommandInvocation) -> Void) { self.onRun = onRun }
 }
 
@@ -654,6 +659,120 @@ struct AgentQuotaProbeTests {
         let timeouts = await runner.invocations.map(\.timeout)
         #expect(timeouts.allSatisfy { $0 == 120 })
         #expect(timeouts.count == 2)
+    }
+
+    /// 2026-11-22: builds before this one counted every timeout as a
+    /// failure, so a busy Mac's state file can carry a two-hour backoff of
+    /// timeouts. Read by this build, that count is forgiven once — the floor
+    /// still holds — and every save marks the file as counted this way.
+    @Test("an older build's timeout-inflated backoff is forgiven on upgrade, never the floor")
+    func upgradeForgivesTimeouts() async throws {
+        let fixture = try ProbeFixture()
+        defer { fixture.tearDown() }
+        func seed(failures: Int, lastFailure: AgentQuotaFailure, ago: TimeInterval, marked: Bool) throws {
+            var old = AgentQuotaProbeState()
+            old.lastAttemptAt = start.addingTimeInterval(-ago)
+            old.consecutiveFailures = failures
+            old.lastFailure = lastFailure
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            var object = try #require(JSONSerialization.jsonObject(
+                with: encoder.encode(old)) as? [String: Any])
+            if marked { object["timeoutsTransient"] = true } else { object.removeValue(forKey: "timeoutsTransient") }
+            try FileManager.default.createDirectory(
+                at: fixture.state.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try JSONSerialization.data(withJSONObject: object).write(to: fixture.state)
+        }
+        // An older build's file: four "failures", all timeouts.
+        try seed(failures: 4, lastFailure: .timedOut, ago: 300, marked: false)
+        #expect(AgentQuotaProbeState.load(from: fixture.state)?.consecutiveFailures == 0)
+        let runner = try realRunner()
+        let clock = TestClock(start)
+        let write = TestClock(start)
+        let probe = try fixture.probe(runner: runner, clock: clock, lastWrite: write)
+        // Inside the floor: still nothing.
+        _ = await probe.refreshIfDue()
+        #expect(await runner.invocations.isEmpty)
+        // At the floor — not two hours later — it runs, and the save marks the file.
+        clock.advance(300)
+        #expect(await probe.refreshIfDue().reading != nil)
+        let text = try String(contentsOf: fixture.state, encoding: .utf8)
+        #expect(text.contains("\"timeoutsTransient\":true"))
+
+        // This build's own count after real failures is kept, timeout last or not.
+        try seed(failures: 2, lastFailure: .timedOut, ago: 700, marked: true)
+        #expect(AgentQuotaProbeState.load(from: fixture.state)?.consecutiveFailures == 2)
+        // An older build's real failure is kept too.
+        try seed(failures: 3, lastFailure: .notSignedIn, ago: 700, marked: false)
+        #expect(AgentQuotaProbeState.load(from: fixture.state)?.consecutiveFailures == 3)
+    }
+
+    @Test("retired during the version check: no limits run, nothing written after")
+    func retiredDuringVersion() async throws {
+        let fixture = try ProbeFixture()
+        defer { fixture.tearDown() }
+        let runner = try realRunner()
+        let probe = try fixture.probe(runner: runner, clock: TestClock(start), lastWrite: TestClock(start))
+        await runner.set { invocation in
+            if invocation.arguments == ["--version"] { probe.retire() }
+        }
+        let status = await probe.refreshIfDue()
+        #expect(await runner.versionRuns == 1)
+        #expect(await runner.quotaRuns.isEmpty)
+        #expect(status.reading == nil && status.failure == nil)
+        // The attempt was stamped before the spawn; the verdict after it wasn't.
+        let state = try #require(AgentQuotaProbeState.load(from: fixture.state))
+        #expect(state.lastAttemptAt == start)
+        #expect(state.binaries.isEmpty)
+    }
+
+    @Test("retired during the limits run: its result is dropped, in memory and on disk")
+    func retiredDuringQuota() async throws {
+        let fixture = try ProbeFixture()
+        defer { fixture.tearDown() }
+        let runner = try realRunner()
+        let probe = try fixture.probe(runner: runner, clock: TestClock(start), lastWrite: TestClock(start))
+        await runner.set { invocation in
+            if invocation.arguments != ["--version"] { probe.retire() }
+        }
+        let status = await probe.refreshIfDue()
+        #expect(await runner.quotaRuns.count == 1)
+        #expect(status.reading == nil)
+        #expect(AgentQuotaProbeState.load(from: fixture.state)?.reading == nil)
+    }
+
+    @Test("a slow version check can't bring two limits runs closer than the floor")
+    func floorPerLimitsRun() async throws {
+        let fixture = try ProbeFixture()
+        defer { fixture.tearDown() }
+        let runner = try realRunner()
+        let clock = TestClock(start)
+        let write = TestClock(start)
+        let quotaStarts = Mutex<[Date]>([])
+        // The version check takes 100 s (a cold start on a saturated Mac).
+        await runner.set { invocation in
+            if invocation.arguments == ["--version"] {
+                clock.advance(100)
+            } else {
+                quotaStarts.withLock { $0.append(clock.now) }
+            }
+        }
+        let probe = try fixture.probe(runner: runner, clock: clock, lastWrite: write)
+        let first = await probe.refreshIfDue()
+        #expect(first.reading?.startedAt == start.addingTimeInterval(100))
+        #expect(AgentQuotaProbeState.load(from: fixture.state)?.lastAttemptAt
+            == start.addingTimeInterval(100))
+        // 600 s after the attempt began, but only 550 after the limits run: not yet.
+        clock.set(start.addingTimeInterval(650))
+        write.set(clock.now)
+        _ = await probe.refreshIfDue()
+        #expect(quotaStarts.withLock { $0.count } == 1)
+        clock.set(start.addingTimeInterval(700))
+        write.set(clock.now)
+        _ = await probe.refreshIfDue()
+        let starts = quotaStarts.withLock { $0 }
+        #expect(starts.count == 2)
+        #expect(starts[1].timeIntervalSince(starts[0]) >= AgentQuotaCommand.minimumFloor)
     }
 
     @Test("a same-named program that isn't the CLI is never asked for quota")

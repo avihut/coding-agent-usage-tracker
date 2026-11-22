@@ -528,7 +528,13 @@ succeeds it for Google's plans, and it stays metered for API-key use.
   retries at the floor while an earlier real failure's backoff still
   stands (`AgentQuotaProbe.record`); every run — the version check too —
   gets the command's own 120 s, a safety net against a hung CLI, not a
-  latency budget (`docs/plans/antigravity-probe-under-load.md`); the state file is
+  latency budget (`docs/plans/antigravity-probe-under-load.md`). A file
+  last written by an older build (no `timeoutsTransient: true`, an optional
+  additive key every save now writes) whose last failure was a timeout has
+  its count forgiven once on load — those builds counted timeouts — and
+  keeps `lastAttemptAt`, so the floor holds. The attempt is re-stamped
+  right before the limits run itself, so a slow version check can't bring
+  two `/quota` runs closer than the floor; the state file is
   stamped before the first spawn and re-read before every decision, and a
   shut-down engine's probe (`retire()`) neither runs nor writes again. `SpawnedCommandRunner` is
   `posix_spawn` with CLOEXEC_DEFAULT (no host fd reaches the child —

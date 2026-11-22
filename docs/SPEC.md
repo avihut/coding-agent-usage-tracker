@@ -540,8 +540,10 @@ Non-negotiable; flag rather than work around:
     tokens or a conversation reported) or carry no command result, that
     binary is never asked again until the file changes.
     - How often: at most once per 10 minutes (persisted from the last
-      ATTEMPT before its first spawn, and re-read before every decision, so
-      a restart, a handover or a manual refresh can't beat it), only when a
+      ATTEMPT before its first spawn — and again right before the limits
+      run, so two `/quota` runs are never closer even after a slow version
+      check — and re-read before every decision, so a restart, a handover
+      or a manual refresh can't beat it), only when a
       conversation was written since the last reading began (the first
       reading: within the last 7 days), one at a time, killed with its
       process group at 120 s — the version check too (and whatever it

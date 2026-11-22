@@ -116,10 +116,19 @@ utility child crosses the 10 s version kill at 40–80 busy loops (10.40,
    holds), but leaves `consecutiveFailures` exactly as it was — neither
    escalates nor resets. So a run of timeouts retries at the floor (10
    min); a real failure (not signed in, unreadable, failed, not a limits
-   command) keeps doubling; a success clears both. No state-file schema
-   change: no version bump, no new failure case, no new field (app and
-   daemon of different builds share `quota-probe.json`, and a `load` that
-   returns nil would lose `lastAttemptAt` and break the floor).
+   command) keeps doubling; a success clears both. No version bump and no
+   new failure case (app and daemon of different builds share
+   `quota-probe.json`, and a `load` that returns nil would lose
+   `lastAttemptAt` and break the floor). AS BUILT, after review: one
+   OPTIONAL additive key, `timeoutsTransient` (written `true` on every
+   save), so a file an older build left — whose count is inflated by
+   timeouts — is recognised: when its last failure was a timeout, the count
+   is forgiven once on load, `lastAttemptAt` kept. Also after review: the
+   attempt is re-stamped right before the limits run, so a slow version
+   check can't bring two `/quota` runs within the floor; and a probe
+   retired mid-attempt spawns nothing more and keeps nothing of a run in
+   flight, while a refresh that lands after its engine shut down writes no
+   history (`UsageEngine.refresh`).
 4. **The version check stays**, at the shared 120 s. It is remembered per
    file identity once it finishes, so it costs one run per CLI update; it
    simply never finished. Considered and rejected: a code-signature
@@ -143,7 +152,9 @@ utility child crosses the 10 s version kill at 40–80 busy loops (10.40,
    the reading's stamp instead of an orange "cached".
 6. **The refresh hold, accepted.** `UsageEngine.refresh` awaits the probe
    with `isRefreshing` set, so a hung child now holds that one engine for up
-   to 2 × 120 s (was 10 + 30): a manual refresh meanwhile is dropped, the
+   to (unverified candidates + 1) × 120 s — 2 × 120 s in the usual case of
+   one installed CLI (was 10 + 30), at most 4 × 120 s with all three
+   candidate paths new and hanging, still inside the floor: a manual refresh meanwhile is dropped, the
    cached snapshot stays on screen (cached-first, #42), and a first-ever
    start with no cache reads "loading" until it ends. Typical unclamped
    runs are 0.3–3 s, so only a hung CLI pays it. Decoupling the probe from
@@ -223,9 +234,12 @@ utility child crosses the 10 s version kill at 40–80 busy loops (10.40,
 - 120 s for both runs (the lead guessed ~2 min; the numbers support it).
 - Unclamped (default priority) rather than utility; nothing above default.
 - A timeout leaves `consecutiveFailures` as it was (doesn't reset a real
-  failure's backoff either). A state file left by an older build with
-  timeouts counted keeps that backoff until its next success — no
-  migration.
+  failure's backoff either). A state file left by an older build whose
+  last failure was a timeout has its count forgiven once (review finding;
+  it may forgive a real failure that came just before the timeouts).
+- A CLI that hangs every time is now asked every 10 minutes while
+  Antigravity is in use (each run killed at 120 s), where the old backoff
+  stretched that to two hours: the brief's trade-off, not capped.
 - The refresh hold (decision 6) is accepted, not decoupled.
 - `--version` stays the proof of identity.
 
