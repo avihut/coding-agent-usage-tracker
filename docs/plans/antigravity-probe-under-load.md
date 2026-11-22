@@ -132,7 +132,12 @@ utility child crosses the 10 s version kill at 40–80 busy loops (10.40,
    reads an unknown code as "Network unavailable"). Checked from demo
    digests in two states — no reading yet, and an old reading — through
    `--snapshot --demo-digest`, `usage-tui --status`, `usage-cli … --digest`;
-   absent stays absent (no meter, never 0%).
+   absent stays absent (no meter, never 0%). AS BUILT: one core predicate,
+   `UsageError.isRetrying` (only `agentTimedOut`), also softens the tone —
+   `usage-cli status` says `RETRYING:` instead of `ERROR:`, the TUI's
+   freshness line prints it dim instead of the warning colour, and the
+   panel's error text stays grey with no snapshot and its status row keeps
+   the reading's stamp instead of an orange "cached".
 6. **The refresh hold, accepted.** `UsageEngine.refresh` awaits the probe
    with `isRefreshing` set, so a hung child now holds that one engine for up
    to 2 × 120 s (was 10 + 30): a manual refresh meanwhile is dropped, the
@@ -232,3 +237,31 @@ utility child crosses the 10 s version kill at 40–80 busy loops (10.40,
   Pre-existing; harmless for a CLI that exits in seconds.
 
 Raw rows: [`antigravity-probe-under-load/measurements.log`](antigravity-probe-under-load/measurements.log).
+
+## Results (build, 2026-11-22)
+
+- LOAD REPRODUCTION (the real `AgentQuotaProbe` + `SpawnedCommandRunner` +
+  `agy`, isolated state, "quota" step = `--version`; 5 runs a cell):
+
+  | busy loops | before (main 203bd8f) | after (this branch) |
+  | --- | --- | --- |
+  | 40, warm | 4.65–10.15 s, 0/5 timed out | 0.67–0.83 s, 0/5 |
+  | 40, cold | 10.94–17.19 s, **1/5 timed out** (backoff → 1) | 3.24–4.07 s, 0/5 |
+  | 80, warm | 3.64–16.14 s, **2/5 timed out** | 0.46–4.82 s, 0/5 |
+  | 80, cold | 9.05–15.03 s, **4/5 timed out** | 4.05–10.94 s, 0/5 |
+
+  Before: 7 of 20 attempts died at the 10 s version kill, each one pushing
+  the next try to 20 minutes and beyond. After: 0 of 20. (The 10.94 s
+  after-row ran while load spiked to ~970.)
+- END TO END: the one real `/quota` after the fix (5 in all), through the
+  opt-in `ANTIGRAVITY_LIVE_QUOTA=1` test under 40 busy loops at load 769:
+  3.49 s, all five buckets.
+- FACES, from two demo digests (a timeout with no reading yet; with a
+  reading 9 h old): the panel (unbundled debug binary, `--demo-digest
+  --snapshot`; no bundle was assembled, so Spotlight had nothing new to hand
+  a live `ensure`), the TUI's own renderer, and `usage-cli status|limits
+  --digest` (exit 0; `RETRYING: …`; no meter rows when nothing was read).
+- FLAKE: the unfixed suite with `now` at 00:59:30 local failed exactly as
+  recorded (`messages → 1`, `tokens → 550`); fixed, 50/50 alone.
+- RED-THEN-GREEN: the new probe tests against the old escalation: 19 issues;
+  the priority test against the old utility clamp: priority 20, red.
